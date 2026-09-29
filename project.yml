@@ -1,0 +1,66 @@
+name: Suwop
+options:
+  minimumXcodeGenVersion: 2.38.0
+  createIntermediateGroups: true
+settings:
+  base:
+    SWIFT_VERSION: '5.0'
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  SuwopCore:
+    path: .
+targets:
+  SuwopiOS:
+    type: application
+    platform: iOS
+    deploymentTarget: '17.0'
+    sources: [App]
+    dependencies:
+      - package: SuwopCore
+        product: SuwopCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.ios
+        TARGETED_DEVICE_FAMILY: '1,2'
+        MARKETING_VERSION: '0.1.0'
+        CURRENT_PROJECT_VERSION: '1'
+    info:
+      path: Generated/iOS-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop
+        UILaunchScreen: {}
+        UIApplicationSupportsIndirectInputEvents: true
+        NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
+        NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
+        NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
+  SuwopmacOS:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources: [App]
+    dependencies:
+      - package: SuwopCore
+        product: SuwopCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.mac
+        MARKETING_VERSION: '0.1.0'
+        CURRENT_PROJECT_VERSION: '1'
+        CODE_SIGN_ENTITLEMENTS: Config/Suwop.entitlements
+    info:
+      path: Generated/macOS-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop
+        LSApplicationCategoryType: public.app-category.photography
+        NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
+        NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
+        NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
+schemes:
+  SuwopiOS:
+    build:
+      targets:
+        SuwopiOS: all
+  SuwopmacOS:
+    build:
+      targets:
+        SuwopmacOS: all
