@@ -7,6 +7,7 @@ let package = Package(
     products: [.library(name: "SuwopCore", targets: ["SuwopCore"])],
     targets: [
         .target(name: "SuwopCore"),
-        .testTarget(name: "SuwopCoreTests", dependencies: ["SuwopCore"])
+        .testTarget(name: "SuwopCoreTests", dependencies: ["SuwopCore"]),
+        .testTarget(name: "SuwopIntegrationTests", dependencies: ["SuwopCore"])
     ]
 )
