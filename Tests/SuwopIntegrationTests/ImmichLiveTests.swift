@@ -49,15 +49,24 @@ final class ImmichLiveTests: XCTestCase {
         XCTAssertEqual(SHA1Value.normalize(fetched.checksum), pngSHA1)
         XCTAssertEqual(fetched.originalFileName, "pixel.png")
 
-        let assets = try await client.listAssets(identity: identity)
-        XCTAssertTrue(assets.contains(where: { $0.id == id }))
+        try await waitForSearch(client, identity: identity, id: id, present: true)
 
         let downloaded = workspace.appendingPathComponent("downloaded.png")
         try await client.downloadOriginal(id, to: downloaded)
         XCTAssertEqual(try Data(contentsOf: downloaded), bytes)
 
         try await client.trash([id])
-        let afterTrash = try await client.listAssets(identity: identity)
-        XCTAssertFalse(afterTrash.contains(where: { $0.id == id }))
+        try await waitForSearch(client, identity: identity, id: id, present: false)
+    }
+
+    private func waitForSearch(_ client: ImmichClient, identity: ImmichIdentity, id: String, present: Bool) async throws {
+        var last = false
+        for _ in 0..<60 {
+            let assets = try await client.listAssets(identity: identity)
+            last = assets.contains(where: { $0.id == id })
+            if last == present { return }
+            try await Task.sleep(nanoseconds: 500_000_000)
+        }
+        XCTFail("Immich search did not become \(present ? "present" : "absent") for asset \(id); last state: \(last)")
     }
 }
