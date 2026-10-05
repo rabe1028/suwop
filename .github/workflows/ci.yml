@@ -1,0 +1,57 @@
+name: Test and build
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    container: swift:6.2
+    steps:
+      - uses: actions/checkout@v4
+      - run: swift test
+      - run: swift test -c release
+
+  immich-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: '6.2'
+      - name: Run Suwop against Immich v3.2.4 in Docker
+        env:
+          IMMICH_VERSION: v3.2.4
+        run: bash ./scripts/immich-integration-test.sh
+
+  apple:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate project
+        run: xcodegen generate
+      - name: Test shared core on macOS
+        run: swift test
+      - name: Build iOS simulator app
+        run: >-
+          xcodebuild -project Suwop.xcodeproj -scheme SuwopiOS
+          -destination 'generic/platform=iOS Simulator'
+          -derivedDataPath DerivedData/iOS
+          CODE_SIGNING_ALLOWED=NO build
+      - name: Build macOS app
+        run: >-
+          xcodebuild -project Suwop.xcodeproj -scheme SuwopmacOS
+          -destination 'generic/platform=macOS'
+          -derivedDataPath DerivedData/macOS
+          CODE_SIGNING_ALLOWED=NO build
