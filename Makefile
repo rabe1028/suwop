@@ -15,7 +15,7 @@ immich-down:
 	$(IMMICH_COMPOSE) down -v --remove-orphans
 
 integration-test:
-	./scripts/immich-integration-test.sh
+	bash ./scripts/immich-integration-test.sh
 
 xcodegen:
 	xcodegen generate
