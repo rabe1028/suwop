@@ -33,6 +33,8 @@ targets:
         NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
         NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
   SuwopmacOS:
     type: application
     platform: macOS
@@ -55,6 +57,8 @@ targets:
         NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
         NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
 schemes:
   SuwopiOS:
     build:
