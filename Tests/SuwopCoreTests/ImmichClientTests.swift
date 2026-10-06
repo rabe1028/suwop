@@ -21,6 +21,9 @@ private actor FixtureHTTP: HTTPTransport {
     func enqueue(_ object: [String: Any], status: Int = 200) throws {
         queue.append((try JSONSerialization.data(withJSONObject: object), status))
     }
+    func enqueueArray(_ object: [[String: Any]], status: Int = 200) throws {
+        queue.append((try JSONSerialization.data(withJSONObject: object), status))
+    }
     func data(for request: URLRequest) async throws -> (Data, HTTPURLResponse) {
         requests.append(request)
         guard !queue.isEmpty else { throw SuwopError("fixture exhausted") }
@@ -118,6 +121,47 @@ final class ImmichClientTests: XCTestCase {
         let record = try JSONDecoder().decode(ImmichAsset.self, from: JSONSerialization.data(withJSONObject: fixture)).record(scope: "s")
         XCTAssertFalse(record.inventoryComplete); XCTAssertEqual(record.resources.count, 2)
     }
+    func testTransferRecordFailsClosedForUnknownSidecarState() throws {
+        let asset = try JSONDecoder().decode(ImmichAsset.self, from: JSONSerialization.data(withJSONObject: jsonAsset()))
+        XCTAssertTrue(asset.transferRecord(scope: "s", assetFiles: []).deletionBlockers.isEmpty)
+
+        let unknown = asset.transferRecord(scope: "s", assetFiles: nil)
+        XCTAssertTrue(unknown.deletionBlockers.contains(where: { $0.contains("sidecar") }))
+
+        let sidecar = ImmichAssetFile(
+            id: "44444444-4444-4444-8444-444444444444",
+            type: "sidecar",
+            path: "/data/upload/photo.xmp",
+            updatedAt: "2026-09-01T10:00:00Z",
+            isEdited: false
+        )
+        let protected = asset.transferRecord(scope: "s", assetFiles: [sidecar])
+        XCTAssertTrue(protected.deletionBlockers.contains(where: { $0.contains("sidecar") }))
+        XCTAssertEqual(protected.resources.last?.role, .auxiliary)
+        XCTAssertEqual(protected.resources.last?.name, "photo.xmp")
+    }
+    func testAssetFilesUsesAssetIDFilter() async throws {
+        let http = FixtureHTTP()
+        try await http.enqueueArray([[
+            "id": "44444444-4444-4444-8444-444444444444",
+            "type": "sidecar",
+            "path": "/data/upload/photo.xmp",
+            "updatedAt": "2026-09-01T10:00:00Z",
+            "isEdited": false
+        ]])
+        let client = try ImmichClient(endpoint: ImmichEndpoint("https://photos.example"), apiKey: "key", transport: http)
+        let files = try await client.assetFiles(firstID)
+        XCTAssertEqual(files.map(\.type), ["sidecar"])
+        let request = try XCTUnwrap(await http.requests.first)
+        XCTAssertEqual(request.url?.path, "/api/asset-files")
+        let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
+        XCTAssertEqual(query?.first(where: { $0.name == "assetId" })?.value, firstID)
+    }
+    func testAssetFileSupportStartsAtImmich32() {
+        XCTAssertFalse(ImmichVersion(major: 2, minor: 6, patch: 0).supportsAssetFiles)
+        XCTAssertFalse(ImmichVersion(major: 3, minor: 1, patch: 9).supportsAssetFiles)
+        XCTAssertTrue(ImmichVersion(major: 3, minor: 2, patch: 0).supportsAssetFiles)
+    }
     func testTrashNeverUsesPermanentDelete() async throws {
         let http = FixtureHTTP(); try await http.enqueue([:], status: 204)
         let client = try ImmichClient(endpoint: ImmichEndpoint("https://photos.example"), apiKey: "key", transport: http)
@@ -138,15 +182,24 @@ final class ImmichClientTests: XCTestCase {
         do { _ = try await client.asset("../users"); XCTFail("path injection") } catch {}
         let count = await http.requests.count; XCTAssertEqual(count, 0)
     }
-    func testMultipartPreservesBinaryAndSanitizesFilename() throws {
+    func testMultipartPreservesBinarySidecarAndSanitizesFilename() throws {
         let file = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let bytes = Data([0, 1, 2, 255, 13, 10, 99]); try bytes.write(to: file)
-        defer { try? FileManager.default.removeItem(at: file) }
-        let body = try MultipartFile.make(fields: ["isFavorite": "false"], file: file, filename: "a\"\r\nInjected.jpg", boundary: "boundary")
+        let sidecar = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let bytes = Data([0, 1, 2, 255, 13, 10, 99])
+        let sidecarBytes = Data("<x:xmpmeta />".utf8)
+        try bytes.write(to: file); try sidecarBytes.write(to: sidecar)
+        defer { try? FileManager.default.removeItem(at: file); try? FileManager.default.removeItem(at: sidecar) }
+        let body = try MultipartFile.make(
+            fields: ["isFavorite": "false"], file: file, filename: "a\"\r\nInjected.jpg",
+            boundary: "boundary", sidecarFile: sidecar, sidecarFilename: "photo.xmp"
+        )
         defer { try? FileManager.default.removeItem(at: body) }
         let data = try Data(contentsOf: body)
+        let text = String(decoding: data, as: UTF8.self)
         XCTAssertNotNil(data.range(of: bytes))
-        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("filename=\"a___Injected.jpg\""))
+        XCTAssertNotNil(data.range(of: sidecarBytes))
+        XCTAssertTrue(text.contains("filename=\"a___Injected.jpg\""))
+        XCTAssertTrue(text.contains("name=\"sidecarData\"; filename=\"photo.xmp\""))
         XCTAssertTrue(data.suffix(14).elementsEqual(Data("--boundary--\r\n".utf8)))
     }
 }
