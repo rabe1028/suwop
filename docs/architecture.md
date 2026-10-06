@@ -23,7 +23,7 @@ Apple Photos は `PHAssetResource` を列挙し、JPEG/HEIC、RAW、動画、Liv
 
 状態は `copying → copied → deletingSource → moved`。削除結果が不明な場合は `deletionUncertain` とし、自動再試行しません。
 
-Live Photo、編集・補助データ付き、バースト、Immich External Library、XMP sidecar 付きなど、安全に削除できないケースはコピーのみです。Immich v3.2+ では `/asset-files?assetId=...` で sidecar を inventory し、削除直前にも再確認します。旧 Immich や `assetFile.read` 権限不足で sidecar 状態を確認できない場合も、コピーは許可しますが Immich 側の削除は拒否します。
+Live Photo、編集・補助データ付き、バースト、Immich External Library、XMP sidecar 付き、独立asset間で同一バイト列の原本が重複する場合など、安全に削除できないケースはコピーのみです。Immich v3.2+ では `/asset-files?assetId=...` で sidecar を inventory し、削除直前にも再確認します。旧 Immich や `assetFile.read` 権限不足で sidecar 状態を確認できない場合も、コピーは許可しますが Immich 側の削除は拒否します。
 
 ## 実装境界
 
