@@ -182,7 +182,14 @@ public enum Catalog {
         return groups.values.map { group in
             let apple = group.filter { $0.key.provider == .apple }
             let immich = group.filter { $0.key.provider == .immich }
-            let a = Set(apple.flatMap { $0.checksums }), b = Set(immich.flatMap { $0.checksums })
+            func checksumCounts(_ assets: [StoredAsset]) -> [String: Int] {
+                var counts: [String: Int] = [:]
+                for checksum in assets.flatMap({ $0.originals.compactMap(\.sha1) }) {
+                    counts[checksum, default: 0] += 1
+                }
+                return counts
+            }
+            let a = checksumCounts(apple), b = checksumCounts(immich)
             let presence: Presence
             if group.contains(where: \.isOffline) { presence = .unverified }
             else if !apple.isEmpty && !immich.isEmpty {
