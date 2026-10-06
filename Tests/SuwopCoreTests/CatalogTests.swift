@@ -18,6 +18,17 @@ final class CatalogTests: XCTestCase {
         let photos = Catalog.merge([snapshot(.apple, [asset(.apple, "a")]), snapshot(.immich, [asset(.immich, "i")])])
         XCTAssertEqual(photos.count, 1); XCTAssertEqual(photos[0].presence, .both)
     }
+    func testByteIdenticalDuplicateMultiplicityIsPartial() {
+        let photos = Catalog.merge([
+            snapshot(.apple, [asset(.apple, "a1"), asset(.apple, "a2")]),
+            snapshot(.immich, [asset(.immich, "i")]),
+        ])
+        XCTAssertEqual(photos.count, 1)
+        XCTAssertEqual(photos[0].presence, .partial)
+        XCTAssertEqual(photos[0].assets.filter { $0.key.provider == .apple }.count, 2)
+        XCTAssertEqual(photos[0].assets.filter { $0.key.provider == .immich }.count, 1)
+    }
+
     func testFilenameIsNeverEvidence() {
         let photos = Catalog.merge([snapshot(.apple, [asset(.apple, "a")]), snapshot(.immich, [asset(.immich, "i", hashes: [otherHash])])])
         XCTAssertEqual(photos.count, 2)
