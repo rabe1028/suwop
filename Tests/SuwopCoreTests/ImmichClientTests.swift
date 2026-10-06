@@ -152,7 +152,8 @@ final class ImmichClientTests: XCTestCase {
         let client = try ImmichClient(endpoint: ImmichEndpoint("https://photos.example"), apiKey: "key", transport: http)
         let files = try await client.assetFiles(firstID)
         XCTAssertEqual(files.map(\.type), ["sidecar"])
-        let request = try XCTUnwrap(await http.requests.first)
+        let requests = await http.requests
+        let request = try XCTUnwrap(requests.first)
         XCTAssertEqual(request.url?.path, "/api/asset-files")
         let query = URLComponents(url: try XCTUnwrap(request.url), resolvingAgainstBaseURL: false)?.queryItems
         XCTAssertEqual(query?.first(where: { $0.name == "assetId" })?.value, firstID)
