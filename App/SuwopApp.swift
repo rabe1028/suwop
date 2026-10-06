@@ -253,7 +253,7 @@ private struct ConnectionView: View {
                     Text("初回はメタデータのみ取得します。原本照合はメニューから明示的に実行してください。")
                 }.font(.callout)
                 Section("権限と保存") {
-                    Text("API キーには自分の写真の検索・表示・原本ダウンロードと、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロード、Immich からの移動には削除の権限も必要です。")
+                    Text("API キーには自分の写真の検索・表示・原本ダウンロードと、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロード、Immich からの移動には削除と assetFile.read（XMP sidecar の確認）の権限も必要です。assetFile.read がない場合はコピーのみです。")
                     Text("API キーは Keychain、照合結果と転送記録はアプリ内に保存します。RAW・JPEG・動画は原本のまま転送します。")
                     Text("Live Photo、編集・補助データ付き、バースト、Immich External Library はコピーのみです。永久削除は行いません。")
                 }.font(.caption).foregroundStyle(.secondary)
