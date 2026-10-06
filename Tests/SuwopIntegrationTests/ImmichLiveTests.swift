@@ -14,7 +14,7 @@ final class ImmichLiveTests: XCTestCase {
     private let redPNGSHA256 = "4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5"
 
     func testUploadListDownloadAndTrashAgainstRealImmich() async throws {
-        let environment = try liveEnvironment()
+        let environment = try await liveEnvironment()
         let client = environment.client
         let identity = environment.identity
         XCTAssertEqual(identity.version.major, 3)
@@ -53,7 +53,7 @@ final class ImmichLiveTests: XCTestCase {
     }
 
     func testListAssetsIncludesEveryMemberOfStack() async throws {
-        let environment = try liveEnvironment()
+        let environment = try await liveEnvironment()
         let client = environment.client
         let identity = environment.identity
         let workspace = try makeWorkspace()
@@ -96,22 +96,6 @@ final class ImmichLiveTests: XCTestCase {
                       "withStacked=true must enumerate primary and secondary stack members")
 
         try await client.trash([firstID, secondID])
-    }
-
-    private func liveEnvironment() throws -> (endpoint: ImmichEndpoint, apiKey: String, client: ImmichClient, identity: ImmichIdentity) {
-        guard ProcessInfo.processInfo.environment["RUN_IMMICH_INTEGRATION"] == "1" else {
-            throw XCTSkip("Set RUN_IMMICH_INTEGRATION=1 to run against Docker Immich")
-        }
-        guard let key = ProcessInfo.processInfo.environment["SUWOP_IMMICH_API_KEY"], !key.isEmpty else {
-            throw SuwopError("SUWOP_IMMICH_API_KEY is required")
-        }
-        let address = ProcessInfo.processInfo.environment["SUWOP_IMMICH_URL"] ?? "http://127.0.0.1:2283"
-        let endpoint = try ImmichEndpoint(address, allowHTTP: true)
-        let client = try ImmichClient(endpoint: endpoint, apiKey: key)
-
-        // XCTest cannot await from a synchronous helper. The caller fills identity below.
-        // This tuple placeholder is replaced by the async overload.
-        throw SuwopError("internal helper misuse")
     }
 
     private func liveEnvironment() async throws -> (endpoint: ImmichEndpoint, apiKey: String, client: ImmichClient, identity: ImmichIdentity) {
