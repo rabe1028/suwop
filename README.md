@@ -12,7 +12,7 @@ Apple Photos と Immich の写真を一つの一覧で確認し、原本の保�
 - API キーは Keychain に保存。
 - Immich 2.x / 3.x の API 形状を分岐。現在の統合テスト基準は v3.2.4。
 
-Live Photo、編集・補助データ付き写真、バースト、Immich External Library など、安全に削除できないケースはコピーのみです。完全削除 API は使用しません。
+Live Photo、編集・補助データ付き写真、バースト、Immich External Library、XMP sidecar 付き写真など、安全に削除できないケースはコピーのみです。Immich 3.2 未満や `assetFile.read` 権限がなく sidecar の有無を確認できない場合も、Immich からの移動は無効になります。完全削除 API は使用しません。
 
 ## 起動
 
