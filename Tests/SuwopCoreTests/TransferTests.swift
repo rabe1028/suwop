@@ -27,6 +27,38 @@ import XCTest
         if failTrash { throw SuwopError("unknown outcome") }
     }
 }
+@MainActor final class DuplicateSourceStore: AssetStore {
+    let provider: Provider = .apple
+    let scope = Provider.apple.rawValue
+    var records: [StoredAsset]
+    var trashed = 0
+
+    init() {
+        records = [
+            asset(.apple, "duplicate-a", hashes: [jpegHash]),
+            asset(.apple, "duplicate-b", hashes: [jpegHash]),
+        ]
+    }
+
+    func export(_ keys: [AssetKey], to directory: URL) async throws -> TransferBundle {
+        let wanted = Set(keys)
+        let selected = records.filter { wanted.contains($0.key) }
+        let signature = FileSignature(sha256: String(repeating: "a", count: 64), bytes: 100)
+        let files = selected.flatMap { record in
+            record.originals.map {
+                TransferFile(resource: $0, url: URL(fileURLWithPath: "/unused-by-test"), signature: signature)
+            }
+        }
+        return TransferBundle(assets: selected, files: files)
+    }
+
+    func importBundle(_ bundle: TransferBundle) async throws -> [AssetKey] { [] }
+
+    func trash(_ assets: [StoredAsset]) async throws {
+        trashed += assets.count
+    }
+}
+
 @MainActor final class MemoryJournal: TransferJournal {
     var records: [TransferReceipt] = []
     var failingPhase: TransferPhase?
@@ -139,6 +171,33 @@ import XCTest
         do { _ = try await task.value; XCTFail("deleted cancelled transfer") } catch {}
         XCTAssertEqual(s.trashed, 0)
     }
+    func testByteIdenticalIndependentAssetsCanCopyButNeverMove() async throws {
+        let source = DuplicateSourceStore()
+        let target = FakeStore(.immich)
+        let engine = TransferCoordinator(journal: MemoryJournal())
+
+        let receipt = try await engine.copy(source.records.map(\.key), from: source, to: target)
+        XCTAssertEqual(receipt.phase, .copied)
+        XCTAssertEqual(receipt.source.count, 2)
+        XCTAssertEqual(receipt.destination.count, 1, "destination may deduplicate identical bytes")
+        XCTAssertTrue(receipt.source.allSatisfy {
+            $0.deletionBlockers.contains(where: { $0.contains("同一バイト列") })
+        })
+
+        // Also model an old receipt created before this blocker existed. Fresh source
+        // verification must independently detect multiplicity before deleting.
+        var legacyReceipt = receipt
+        for index in legacyReceipt.source.indices {
+            legacyReceipt.source[index].deletionBlockers.removeAll { $0.contains("同一バイト列") }
+        }
+        do {
+            _ = try await TransferCoordinator(journal: MemoryJournal())
+                .completeMove(legacyReceipt, from: source, to: target)
+            XCTFail("deleted independent duplicate assets after destination deduplication")
+        } catch {}
+        XCTAssertEqual(source.trashed, 0)
+    }
+
     func testMissingDuplicateResourceIsRejected() async throws {
         let s = FakeStore(.apple, hashes: [jpegHash, jpegHash])
         var bundle = try await s.export([s.record.key], to: URL(fileURLWithPath: "/unused"))
