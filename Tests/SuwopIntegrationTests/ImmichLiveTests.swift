@@ -12,6 +12,9 @@ final class ImmichLiveTests: XCTestCase {
     private let redPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg=="
     private let redPNGSHA1 = "9993ed1d2781fdafd876038e6be0a1162d377be1"
     private let redPNGSHA256 = "4ff6ab670a58c14270e034e2090d9a432caa263a14e0a25785386b0c12f880b5"
+    private let bluePNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg=="
+    private let bluePNGSHA1 = "6dae5eb90a4bc13922402939935f16140f08d53d"
+    private let bluePNGSHA256 = "6a34118ba2e0bf5da5ab14cb63b121e2e8b2987a876668a9b2f9c30e1357470b"
 
     func testUploadListDownloadAndTrashAgainstRealImmich() async throws {
         let environment = try await liveEnvironment()
@@ -61,17 +64,17 @@ final class ImmichLiveTests: XCTestCase {
 
         let first = try makeTransfer(
             workspace: workspace,
-            name: "stack-blue.png",
-            base64: pngBase64,
-            sha1: pngSHA1,
-            sha256: pngSHA256
-        )
-        let second = try makeTransfer(
-            workspace: workspace,
             name: "stack-red.png",
             base64: redPNGBase64,
             sha1: redPNGSHA1,
             sha256: redPNGSHA256
+        )
+        let second = try makeTransfer(
+            workspace: workspace,
+            name: "stack-blue.png",
+            base64: bluePNGBase64,
+            sha1: bluePNGSHA1,
+            sha256: bluePNGSHA256
         )
 
         let firstID = try await client.upload(first.file, metadata: first.metadata, version: identity.version)
