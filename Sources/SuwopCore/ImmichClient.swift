@@ -82,6 +82,7 @@ public struct ImmichVersion: Codable, Sendable {
     public let minor: Int
     public let patch: Int
     public var usesCursor: Bool { major == 3 && minor >= 2 }
+    public var supportsAssetFiles: Bool { major == 3 && minor >= 2 }
     public var description: String { "\(major).\(minor).\(patch)" }
     public init(major: Int, minor: Int, patch: Int) { self.major = major; self.minor = minor; self.patch = patch }
 }
@@ -102,6 +103,14 @@ public enum APIDate {
         return formatter.date(from: value)
     }
     public static func string(_ value: Date) -> String { ISO8601DateFormatter().string(from: value) }
+}
+
+public struct ImmichAssetFile: Decodable, Sendable {
+    public let id: String
+    public let type: String
+    public let path: String
+    public let updatedAt: String?
+    public let isEdited: Bool?
 }
 
 public struct ImmichAsset: Decodable, Sendable {
@@ -173,6 +182,31 @@ public struct ImmichAsset: Decodable, Sendable {
                            latitude: exifInfo?.latitude, longitude: exifInfo?.longitude,
                            inventoryComplete: livePhotoVideoId == nil || (companion?.id == livePhotoVideoId && companion?.ownerId == ownerId && companion?.isTrashed == false),
                            isOffline: isOffline || (companion?.isOffline ?? false), deletionBlockers: blockers)
+    }
+
+    /// Build the transfer-time record. A missing inventory is deliberately copy-only:
+    /// Immich < 3.2 has no public asset-file API, and a restricted v3.2+ API key can
+    /// likewise prevent Suwop from proving that no XMP sidecar exists.
+    public func transferRecord(scope: String, companion: ImmichAsset? = nil,
+                               assetFiles: [ImmichAssetFile]?) -> StoredAsset {
+        var result = record(scope: scope, companion: companion)
+        guard let assetFiles else {
+            result.deletionBlockers.append("XMP sidecar の有無を確認できないためコピーのみ")
+            return result
+        }
+
+        let sidecars = assetFiles.filter { $0.type == "sidecar" }
+        for sidecar in sidecars {
+            result.resources.append(
+                PhotoResource(id: sidecar.id,
+                              name: (sidecar.path as NSString).lastPathComponent,
+                              role: .auxiliary)
+            )
+        }
+        if !sidecars.isEmpty {
+            result.deletionBlockers.append("XMP sidecar があるためコピーのみ")
+        }
+        return result
     }
 }
 
@@ -254,6 +288,10 @@ public actor ImmichClient {
         try validateID(id)
         return try await json(["assets", id])
     }
+    public func assetFiles(_ assetID: String) async throws -> [ImmichAssetFile] {
+        try validateID(assetID)
+        return try await json(["asset-files"], query: [URLQueryItem(name: "assetId", value: assetID)])
+    }
     public func thumbnail(_ id: String) async throws -> Data {
         try validateID(id)
         let request = request(["assets", id, "thumbnail"], query: [URLQueryItem(name: "size", value: "thumbnail")])
@@ -270,14 +308,16 @@ public actor ImmichClient {
         } catch { try? FileManager.default.removeItem(at: url); throw error }
     }
     public func upload(_ file: TransferFile, metadata: StoredAsset, version: ImmichVersion,
-                       livePhotoVideoID: String? = nil) async throws -> String {
+                       livePhotoVideoID: String? = nil, sidecar: TransferFile? = nil) async throws -> String {
         var fields = ["fileCreatedAt": APIDate.string(metadata.capturedAt ?? Date()),
                       "fileModifiedAt": APIDate.string(metadata.modifiedAt ?? metadata.capturedAt ?? Date()),
                       "isFavorite": metadata.isFavorite ? "true" : "false"]
         if version.major < 3 { fields["deviceId"] = "suwop"; fields["deviceAssetId"] = file.resource.sha1 ?? UUID().uuidString }
         if let livePhotoVideoID { try validateID(livePhotoVideoID); fields["livePhotoVideoId"] = livePhotoVideoID }
         let boundary = "Suwop-\(UUID().uuidString)"
-        let multipart = try MultipartFile.make(fields: fields, file: file.url, filename: file.resource.name, boundary: boundary)
+        let multipart = try MultipartFile.make(fields: fields, file: file.url, filename: file.resource.name,
+                                               boundary: boundary, sidecarFile: sidecar?.url,
+                                               sidecarFilename: sidecar?.resource.name)
         defer { try? FileManager.default.removeItem(at: multipart) }
         var req = request(["assets"], method: "POST")
         req.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
@@ -299,8 +339,9 @@ public actor ImmichClient {
         let (_, response) = try await transport.data(for: req)
         try check(response)
     }
-    private func json<T: Decodable>(_ path: [String], method: String = "GET", body: [String: Any]? = nil) async throws -> T {
-        var req = request(path, method: method)
+    private func json<T: Decodable>(_ path: [String], method: String = "GET", body: [String: Any]? = nil,
+                                    query: [URLQueryItem] = []) async throws -> T {
+        var req = request(path, method: method, query: query)
         if let body {
             req.httpBody = try JSONSerialization.data(withJSONObject: body)
             req.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -333,7 +374,8 @@ public enum MultipartFile {
             .replacingOccurrences(of: "\r", with: "_").replacingOccurrences(of: "\n", with: "_")
         return base.isEmpty ? "original" : base
     }
-    public static func make(fields: [String: String], file: URL, filename: String, boundary: String) throws -> URL {
+    public static func make(fields: [String: String], file: URL, filename: String, boundary: String,
+                            sidecarFile: URL? = nil, sidecarFilename: String? = nil) throws -> URL {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("suwop-upload-\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600]) else {
             throw SuwopError("転送用ファイルを作成できません。")
@@ -345,14 +387,22 @@ public enum MultipartFile {
             for key in fields.keys.sorted() {
                 try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(safeName(key))\"\r\n\r\n\(fields[key]!)\r\n")
             }
-            try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"assetData\"; filename=\"\(safeName(filename))\"\r\nContent-Type: application/octet-stream\r\n\r\n")
-            let input = try FileHandle(forReadingFrom: file)
-            defer { try? input.close() }
-            while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
-                try Task.checkCancellation()
-                try output.write(contentsOf: chunk)
+            func writeFile(field: String, url: URL, filename: String) throws {
+                try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(field)\"; filename=\"\(safeName(filename))\"\r\nContent-Type: application/octet-stream\r\n\r\n")
+                let input = try FileHandle(forReadingFrom: url)
+                defer { try? input.close() }
+                while let chunk = try input.read(upToCount: 1_048_576), !chunk.isEmpty {
+                    try Task.checkCancellation()
+                    try output.write(contentsOf: chunk)
+                }
+                try write("\r\n")
             }
-            try write("\r\n--\(boundary)--\r\n")
+            try writeFile(field: "assetData", url: file, filename: filename)
+            if let sidecarFile {
+                try writeFile(field: "sidecarData", url: sidecarFile,
+                              filename: sidecarFilename ?? sidecarFile.lastPathComponent)
+            }
+            try write("--\(boundary)--\r\n")
             return url
         } catch { try? FileManager.default.removeItem(at: url); throw error }
     }
