@@ -342,7 +342,8 @@ private final class ImageRequestGate: @unchecked Sendable {
             let original = try await getOwned(key.assetID)
             let companion: ImmichAsset?
             if let id = original.livePhotoVideoId { companion = try await getOwned(id) } else { companion = nil }
-            var record = original.record(scope: scope, companion: companion)
+            let assetFiles = try await transferAssetFiles(original.id)
+            var record = original.transferRecord(scope: scope, companion: companion, assetFiles: assetFiles)
             for index in record.resources.indices where record.resources[index].role.isOriginal {
                 let resource = record.resources[index]
                 let url = directory.appendingPathComponent(UUID().uuidString)
@@ -402,17 +403,37 @@ private final class ImageRequestGate: @unchecked Sendable {
     }
 
     func trash(_ assets: [StoredAsset]) async throws {
+        guard identity.version.supportsAssetFiles else {
+            throw SuwopError("この Immich バージョンでは XMP sidecar の有無を確認できないため、コピーのみ利用できます。")
+        }
         for record in assets {
             try validate(record.key)
             let fresh = try await getOwned(record.key.assetID)
-            let current = fresh.record(scope: scope)
+            // Strict re-check immediately before trash. If this request is not permitted
+            // or fails, deletion fails closed instead of risking an un-copied XMP file.
+            let assetFiles = try await client.assetFiles(record.key.assetID)
+            let current = fresh.transferRecord(scope: scope, assetFiles: assetFiles)
             guard current.revision == record.revision, current.deletionBlockers.isEmpty else {
-                throw SuwopError("削除前に Immich の状態が変わりました。削除は行いません。")
+                throw SuwopError("削除前に Immich の状態または sidecar が変わりました。削除は行いません。")
             }
         }
         try Task.checkCancellation()
         try await client.trash(assets.map { $0.key.assetID })
     }
+
+    private func transferAssetFiles(_ assetID: String) async throws -> [ImmichAssetFile]? {
+        guard identity.version.supportsAssetFiles else { return nil }
+        do {
+            return try await client.assetFiles(assetID)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            // Copying the main original is still useful. Unknown sidecar state is
+            // encoded into transferRecord as a deletion blocker.
+            return nil
+        }
+    }
+
     private func getOwned(_ id: String) async throws -> ImmichAsset {
         let asset = try await client.asset(id)
         guard asset.ownerId == identity.userID, !asset.isOffline, !asset.isTrashed else {
