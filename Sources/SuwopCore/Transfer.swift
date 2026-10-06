@@ -22,6 +22,10 @@ public struct TransferBundle: Sendable {
     public var assets: [StoredAsset]
     public var files: [TransferFile]
     public var signatures: Set<FileSignature> { Set(files.map(\.signature)) }
+    public var hasRepeatedSignatures: Bool {
+        var seen = Set<FileSignature>()
+        return files.contains { !seen.insert($0.signature).inserted }
+    }
     public init(assets: [StoredAsset], files: [TransferFile]) { self.assets = assets; self.files = files }
     public func validate() throws {
         guard !assets.isEmpty, !files.isEmpty, assets.allSatisfy(\.fingerprintsComplete),
@@ -79,9 +83,10 @@ public struct TransferReceipt: Codable, Identifiable, Sendable {
         try checkScopes(keys, store: source)
         guard source.provider != destination.provider else { throw SuwopError("同じ保存先への転送はできません。") }
         let workspace = try makeWorkspace(); defer { try? FileManager.default.removeItem(at: workspace) }
-        let bundle = try await source.export(keys, to: workspace.appendingPathComponent("source"))
+        var bundle = try await source.export(keys, to: workspace.appendingPathComponent("source"))
         try bundle.validate()
         guard Set(bundle.assets.map(\.key)) == Set(keys) else { throw SuwopError("転送元の一覧が変わりました。") }
+        markRepeatedOriginalsCopyOnly(&bundle)
         var receipt = TransferReceipt(source: bundle.assets, destinationProvider: destination.provider,
                                       destinationScope: destination.scope, signatures: bundle.signatures)
         try journal.save(receipt)
@@ -112,8 +117,10 @@ public struct TransferReceipt: Codable, Identifiable, Sendable {
         try checkScopes(saved.destination.map(\.key), store: destination)
         try allowDeletion(saved.source)
         let workspace = try makeWorkspace(); defer { try? FileManager.default.removeItem(at: workspace) }
-        let freshSource = try await source.export(saved.source.map(\.key), to: workspace.appendingPathComponent("source"))
-        try freshSource.validate(); try allowDeletion(freshSource.assets)
+        var freshSource = try await source.export(saved.source.map(\.key), to: workspace.appendingPathComponent("source"))
+        try freshSource.validate()
+        markRepeatedOriginalsCopyOnly(&freshSource)
+        try allowDeletion(freshSource.assets)
         guard revisions(freshSource.assets) == revisions(saved.source), freshSource.signatures == saved.signatures else {
             throw SuwopError("コピー後に転送元が変更されています。元データは削除しません。")
         }
@@ -146,6 +153,13 @@ public struct TransferReceipt: Codable, Identifiable, Sendable {
         guard !keys.isEmpty, Set(keys).count == keys.count,
               keys.allSatisfy({ $0.provider == store.provider && $0.scope == store.scope }) else {
             throw SuwopError("写真ライブラリまたはアカウントが一致しません。")
+        }
+    }
+    private func markRepeatedOriginalsCopyOnly(_ bundle: inout TransferBundle) {
+        guard bundle.assets.count > 1, bundle.hasRepeatedSignatures else { return }
+        let blocker = "同一バイト列の独立した写真が複数あるため、個別のメタデータを保護するためコピーのみ"
+        for index in bundle.assets.indices where !bundle.assets[index].deletionBlockers.contains(blocker) {
+            bundle.assets[index].deletionBlockers.append(blocker)
         }
     }
     private func allowDeletion(_ assets: [StoredAsset]) throws {
