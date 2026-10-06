@@ -67,6 +67,7 @@ final class ImmichClientTests: XCTestCase {
         XCTAssertEqual(requests[2].url?.path, "/api/search/metadata")
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: requests[3].httpBody!) as? [String: Any])
         XCTAssertEqual(body["cursor"] as? String, "page2"); XCTAssertNil(body["page"])
+        XCTAssertEqual(body["withStacked"] as? Bool, true)
         XCTAssertNotNil(body["filter"]); XCTAssertNil(body["visibility"])
         XCTAssertEqual(requests[2].value(forHTTPHeaderField: "x-api-key"), "secret")
     }
@@ -81,6 +82,7 @@ final class ImmichClientTests: XCTestCase {
         let requests = await http.requests
         let body = try XCTUnwrap(JSONSerialization.jsonObject(with: requests[3].httpBody!) as? [String: Any])
         XCTAssertEqual(body["visibility"] as? String, "archive"); XCTAssertEqual(body["page"] as? Int, 1)
+        XCTAssertEqual(body["withStacked"] as? Bool, true)
         XCTAssertNil(body["filter"])
     }
     func testMissingPaginationFieldFailsClosed() async throws {
