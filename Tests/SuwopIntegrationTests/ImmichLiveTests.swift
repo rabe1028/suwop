@@ -15,6 +15,9 @@ final class ImmichLiveTests: XCTestCase {
     private let bluePNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNgYPj/HwADAgH/5ncLrgAAAABJRU5ErkJggg=="
     private let bluePNGSHA1 = "6dae5eb90a4bc13922402939935f16140f08d53d"
     private let bluePNGSHA256 = "6a34118ba2e0bf5da5ab14cb63b121e2e8b2987a876668a9b2f9c30e1357470b"
+    private let greenPNGBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGNg+M/wHwAEAQH/cetH5QAAAABJRU5ErkJggg=="
+    private let greenPNGSHA1 = "7619245bc2760f1ed44f4585d4912f8135ba9451"
+    private let greenPNGSHA256 = "619b0e8b0c8741604b8628c64323444df334846a0dfe13963662586a3603f14c"
 
     func testUploadListDownloadAndTrashAgainstRealImmich() async throws {
         let environment = try await liveEnvironment()
@@ -101,6 +104,42 @@ final class ImmichLiveTests: XCTestCase {
         try await client.trash([firstID, secondID])
     }
 
+    func testSidecarIsInventoriedAndMakesTransferCopyOnly() async throws {
+        let environment = try await liveEnvironment()
+        let client = environment.client
+        let identity = environment.identity
+        let workspace = try makeWorkspace()
+        defer { try? FileManager.default.removeItem(at: workspace) }
+
+        let fixture = try makeTransfer(
+            workspace: workspace,
+            name: "sidecar-green.png",
+            base64: greenPNGBase64,
+            sha1: greenPNGSHA1,
+            sha256: greenPNGSHA256
+        )
+        let sidecar = try makeSidecar(workspace: workspace)
+        let id = try await client.upload(
+            fixture.file, metadata: fixture.metadata, version: identity.version, sidecar: sidecar
+        )
+        defer { Task { try? await client.trash([id]) } }
+
+        var assetFiles: [ImmichAssetFile] = []
+        for _ in 0..<30 {
+            assetFiles = try await client.assetFiles(id)
+            if assetFiles.contains(where: { $0.type == "sidecar" }) { break }
+            try await Task.sleep(nanoseconds: 250_000_000)
+        }
+        XCTAssertTrue(assetFiles.contains(where: { $0.type == "sidecar" }))
+
+        let asset = try await client.asset(id)
+        let record = asset.transferRecord(scope: identity.scope, assetFiles: assetFiles)
+        XCTAssertTrue(record.deletionBlockers.contains(where: { $0.contains("sidecar") }))
+        XCTAssertTrue(record.resources.contains(where: { $0.role == .auxiliary && $0.name.hasSuffix(".xmp") }))
+
+        try await client.trash([id])
+    }
+
     private func liveEnvironment() async throws -> (endpoint: ImmichEndpoint, apiKey: String, client: ImmichClient, identity: ImmichIdentity) {
         guard ProcessInfo.processInfo.environment["RUN_IMMICH_INTEGRATION"] == "1" else {
             throw XCTSkip("Set RUN_IMMICH_INTEGRATION=1 to run against Docker Immich")
@@ -141,6 +180,26 @@ final class ImmichLiveTests: XCTestCase {
             resources: [resource]
         )
         return (transfer, metadata, bytes)
+    }
+
+    private func makeSidecar(workspace: URL) throws -> TransferFile {
+        let bytes = Data("""
+        <?xpacket begin=""?>
+        <x:xmpmeta xmlns:x="adobe:ns:meta/">
+          <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"/>
+        </x:xmpmeta>
+        <?xpacket end="w"?>
+        """.utf8)
+        let url = workspace.appendingPathComponent("\(UUID().uuidString)-photo.xmp")
+        try bytes.write(to: url, options: .atomic)
+        let resource = PhotoResource(
+            id: "sidecar-fixture", name: "photo.xmp", role: .auxiliary,
+            sha1: String(repeating: "a", count: 40), bytes: Int64(bytes.count)
+        )
+        return TransferFile(
+            resource: resource, url: url,
+            signature: FileSignature(sha256: String(repeating: "b", count: 64), bytes: Int64(bytes.count))
+        )
     }
 
     private func createStack(endpoint: ImmichEndpoint, apiKey: String, assetIDs: [String]) async throws {
