@@ -9,7 +9,7 @@
 | ライブラリ、日付別閲覧、並べ替え、表示密度 | 実装済み。iPhone 17 Pro / iOS 26.4 で標準写真6枚のグリッド・月別表示を操作確認、Rust 並べ替えテスト | iPad / Mac の操作、日付不明・大量写真、表示密度と各並べ替えの native 操作 |
 | 検索、保存先・メディア・お気に入りで絞る | Rust に実装・組み合わせと空結果・日付境界 / 夏時間のテスト。Simulator でお気に入りコレクション1件→解除後0件を確認 | 検索欄の native 操作、同一写真の操作後の再照合 |
 | 複数選択、全選択、選択解除、一括操作 | native asset key を選択の基準として実装。操作確認は未完了 | 検索・並べ替え・ライブラリ更新をまたいだ選択、一括保存 |
-| 全画面、前後移動、ズーム、動画、Live Photo | 静止画プレビュー・前後移動・ズーム、動画 / Live の原本再生を実装。Simulator で静止画と動画の再生・一時停止・巻き戻しを確認 | Live の native 再生、編集後の再生、音声、iPad / Mac、回転、取得停止、エラー・iCloud |
+| 全画面、前後移動、ズーム、動画、Live Photo | 静止画プレビュー・前後移動・ズーム、動画 / Live の原本再生を実装。Simulator で静止画、動画の再生・一時停止・巻き戻し、自作 Live Photo の復元・再生を確認 | 実機撮影 / Immich の Live、編集後の再生、音声、iPad / Mac、回転、取得停止、エラー・iCloud |
 | お気に入り、非表示、日時・位置・説明の変更 | お気に入りを実装。Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。他の変更は未実装 | Immich 保存の CI、実機 / iCloud、途中失敗時の表示。非表示・日時・位置・説明 |
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | 未実装 | 非破壊編集と元の保持、編集キャンセル、native 読込と保存 |
@@ -70,4 +70,6 @@
 - `make apple-build`: Apple の Rust 5 target、iOS Simulator / macOS app builds を通過。Rust / Swift の実 FFI で再生終了前に cleanup が発行されず、終了後にライブラリと履歴が残ることを確認。
 - `make check`: Rust 63 tests / Swift 18 tests、strict lint / format / architecture / generated DTO / hooks を通過。追加のテストは利用可能な保存先の選択、限定権限、原本の欠落・重複、内容変化・パスの逸脱、native 終了待ち、キャンセル・片付け失敗、Immich の認証された GET のみの原本取得を確認する。
 - iPhone 17 Pro / iOS 26.4 に自作の8秒動画を追加し、原本再生、5秒付近での一時停止、先頭への巻き戻しを確認。再生中のファイルは原本との SHA-256 一致を別に確認し、終了後に今回の作業フォルダーが消え、操作を再開できることを確認した。
-- ローカルの画面証拠は `target/acceptance/playback-20261012/native-video.png`。標準写真6枚と自作動画1件を保持する。VRT / golden 比較、実機 / iCloud / Live Photo / 音声 / 長い動画 / iPad / macOS の native 操作は未確認。編集後の再生と転送を待たないストリーミングも継続課題。
+- 自作の JPEG / MOV に同じ content identifier と still-image-time を書いたペアを、Simulator に Live Photo 1件として追加。PhotoKit で原本を取得し、PhotosUI の復元・再生・再生ボタンを確認。静止画 25,098 bytes / 動画 610,446 bytes は再生待ち中に原本との SHA-256 一致を別に確認し、終了後の今回の作業フォルダー削除・操作再開も確認した。実機で撮影した Live Photo の証拠には含めない。
+- ローカルの画面証拠は `target/acceptance/playback-20261012/native-video.png` と `native-live.png`。自作 fixture の生成 source も同じディレクトリに保存。標準写真6枚・自作動画1件・Live Photo 1件を保持する。VRT / golden 比較、実機 / iCloud / Immich Live Photo / 音声 / 長い動画 / iPad / macOS の native 操作は未確認。編集後の再生と転送を待たないストリーミングも継続課題。
+- 最初の Apple CI はテスト開始前の Clippy インストール競合で停止。Linux job と同じく、ジョブごとの空の Rustup 領域へ固定 toolchain / components を明示的にインストールしてから Apple checks を実行する。最終 HEAD の hosted checks は別に確認する。
