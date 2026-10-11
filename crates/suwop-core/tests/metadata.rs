@@ -3,11 +3,12 @@ use serde_json::{Value, json};
 use suwop_core::{
     app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
     domain::{
-        AssetKey, LibrarySnapshot, PhotoResource, Provider, ResourceRole, ScanAccess, StoredAsset,
-        TransferIntent, TransferPhase, TransferReceipt, catalog,
+        AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
+        ScanAccess, StoredAsset, TransferBundle, TransferFile, TransferIntent, TransferPhase,
+        TransferReceipt, catalog, verify_source,
     },
     immich::{Asset, HttpResponse, Session, Version},
-    metadata::{MetadataAction, MetadataInput, normalize, prepare, targets},
+    metadata::{MetadataAction, MetadataChange, MetadataInput, normalize, prepare, targets},
 };
 
 const ID: &str = "11111111-1111-4111-8111-111111111111";
@@ -247,6 +248,11 @@ enum Fault {
     WrongId,
     Owner,
     Zone,
+    Manifest,
+    Inventory,
+    ResourceDuplicate,
+    Role,
+    FreshFingerprint,
 }
 #[derive(Default)]
 struct Native {
@@ -254,6 +260,7 @@ struct Native {
     persists: usize,
     fault: Fault,
     input: Option<MetadataInput>,
+    apple_asset: Option<StoredAsset>,
 }
 impl Native {
     fn handle(&mut self, operation: &ShellOperation) -> Result<Value, String> {
@@ -263,26 +270,24 @@ impl Native {
                 if matches!(self.fault, Fault::Write) {
                     return Err("unknown native write result".into());
                 }
-                let mut record = asset(Provider::Apple);
+                let record = self.apple_record(change);
                 assert_eq!(keys, &vec![record.key.clone()]);
-                if !matches!(self.fault, Fault::Value) {
-                    match change.action {
-                        MetadataAction::SetCapturedAt => record.captured_at = change.captured_at,
-                        MetadataAction::SetLocation | MetadataAction::RemoveLocation => {
-                            record.latitude = change.location.as_ref().map(|p| p.latitude);
-                            record.longitude = change.location.as_ref().map(|p| p.longitude);
-                        }
-                    }
-                }
-                record.revision = "after".into();
-                record.resources[0].sha1 = None;
-                record.resources[0].bytes = None;
                 let records = match self.fault {
                     Fault::Missing => vec![],
                     Fault::Duplicate => vec![record.clone(), record],
                     _ => vec![record],
                 };
                 serde_json::to_value(records).map_err(|e| e.to_string())
+            }
+            ShellOperation::AppleScan { scope, .. } => {
+                assert_eq!(scope, "apple");
+                let input = self.input.as_ref().ok_or("missing input")?;
+                let record = self.apple_record(&normalize(input)?);
+                serde_json::to_value(LibrarySnapshot {
+                    assets: vec![record],
+                    ..snapshot(Provider::Apple, ScanAccess::Full)
+                })
+                .map_err(|e| e.to_string())
             }
             ShellOperation::Persist(_) => {
                 self.persists += 1;
@@ -344,6 +349,39 @@ impl Native {
             ),
         }
     }
+
+    fn apple_record(&self, change: &MetadataChange) -> StoredAsset {
+        let mut record = self
+            .apple_asset
+            .clone()
+            .unwrap_or_else(|| asset(Provider::Apple));
+        if !matches!(self.fault, Fault::Value) {
+            match change.action {
+                MetadataAction::SetCapturedAt => record.captured_at = change.captured_at,
+                MetadataAction::SetLocation | MetadataAction::RemoveLocation => {
+                    record.latitude = change.location.as_ref().map(|p| p.latitude);
+                    record.longitude = change.location.as_ref().map(|p| p.longitude);
+                }
+            }
+        }
+        record.revision = "after".into();
+        for resource in &mut record.resources {
+            resource.sha1 = None;
+            resource.bytes = None;
+        }
+        match self.fault {
+            Fault::Manifest => record.resources[0].id = "changed".into(),
+            Fault::Inventory => record.inventory_complete = false,
+            Fault::ResourceDuplicate => record.resources.push(record.resources[0].clone()),
+            Fault::Role => record.resources[0].role = ResourceRole::RawImage,
+            Fault::FreshFingerprint => {
+                record.resources[0].sha1 = Some("2".repeat(40));
+                record.resources[0].bytes = Some(99);
+            }
+            _ => {}
+        }
+        record
+    }
 }
 fn run(
     core: &Core<Suwop>,
@@ -397,7 +435,8 @@ fn native_metadata_changes_only_the_selected_field_and_preserves_transfer_histor
         let record = &core.view().state.snapshots[0].assets[0];
         assert!(record.is_favorite);
         assert_eq!(record.name, "photo.jpg");
-        assert!(record.resources[0].sha1.is_none());
+        assert_eq!(record.resources[0].sha1.as_deref(), Some(SHA));
+        assert_eq!(record.resources[0].bytes, Some(12));
         if change.action == MetadataAction::SetCapturedAt {
             assert_eq!(record.latitude, Some(1.0));
             assert_eq!(record.longitude, Some(2.0));
@@ -446,6 +485,173 @@ fn uncertain_incomplete_or_unpersisted_native_metadata_disables_writes_without_r
         );
         assert_eq!(core.view().state.receipts.len(), 1);
     }
+    Ok(())
+}
+
+#[test]
+fn metadata_and_normal_refresh_preserve_unified_identity_but_not_the_old_deletion_revision()
+-> Result<(), String> {
+    let mut state = core(Provider::Apple, ScanAccess::Full).view().state;
+    state
+        .snapshots
+        .push(snapshot(Provider::Immich, ScanAccess::Full));
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state,
+            ..Model::default()
+        },
+    );
+    assert_eq!(core.view().photos.len(), 1);
+    let mut native = Native::default();
+    run(&core, &mut native, Provider::Apple, date_input())?;
+    assert!(core.view().error.is_none());
+    assert_eq!(core.view().photos.len(), 1);
+    assert_eq!(core.view().photos[0].assets.len(), 2);
+    let fresh = core.view().state.snapshots[0].assets[0].clone();
+    assert!(fresh.fingerprints_complete());
+    assert_eq!(fresh.revision, "after");
+    let mut receipt = core.view().state.receipts[0].clone();
+    assert_eq!(receipt.source[0].revision, "before");
+    receipt.intent = TransferIntent::Move;
+    let signature = FileSignature {
+        sha256: "0".repeat(64),
+        bytes: 12,
+    };
+    receipt.signatures.insert(signature.clone());
+    let mut bundle = TransferBundle {
+        files: vec![TransferFile {
+            resource: fresh.resources[0].clone(),
+            path: "/tmp/export/photo.jpg".into(),
+            signature,
+        }],
+        assets: vec![fresh],
+    };
+    // Even restoring the old values cannot turn the new revision into the
+    // prior Move proof; the rejection is independent of cached fingerprints.
+    bundle.assets[0].captured_at = receipt.source[0].captured_at;
+    let error = verify_source(&receipt, &mut bundle)
+        .err()
+        .ok_or("old revision authorized deletion")?;
+    assert!(error.contains("コピー後に転送元が変更"));
+    let mut requests = core.process_event(Event::Refresh {
+        permission: false,
+        now: 20.0,
+    });
+    while !requests.is_empty() {
+        let Effect::Io(mut request) = requests.remove(0);
+        let value = native.handle(&request.operation)?;
+        requests.extend(
+            core.resolve(
+                &mut request,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+    let refreshed = core.view();
+    assert!(refreshed.error.is_none());
+    assert_eq!(refreshed.photos.len(), 1);
+    assert_eq!(refreshed.photos[0].assets.len(), 2);
+    let local = refreshed
+        .state
+        .snapshots
+        .iter()
+        .find(|s| s.provider == Provider::Apple)
+        .and_then(|s| s.assets.first())
+        .ok_or("missing refreshed Apple asset")?;
+    assert!(local.fingerprints_complete());
+    assert_eq!(local.resources[0].bytes, Some(12));
+    assert_eq!(native.writes, 1);
+    Ok(())
+}
+
+#[test]
+fn metadata_never_reuses_fingerprints_for_changed_or_incomplete_inventories() -> Result<(), String>
+{
+    for fault in [
+        Fault::Manifest,
+        Fault::Inventory,
+        Fault::ResourceDuplicate,
+        Fault::Role,
+        Fault::FreshFingerprint,
+    ] {
+        let core = core(Provider::Apple, ScanAccess::Full);
+        let mut native = Native {
+            fault,
+            ..Native::default()
+        };
+        run(&core, &mut native, Provider::Apple, date_input())?;
+        assert!(core.view().error.is_none());
+        let record = &core.view().state.snapshots[0].assets[0];
+        assert_eq!(record.revision, "after");
+        if matches!(fault, Fault::FreshFingerprint) {
+            assert_eq!(
+                record.resources[0].sha1.as_deref(),
+                Some("2".repeat(40).as_str())
+            );
+            assert_eq!(record.resources[0].bytes, Some(99));
+        } else {
+            assert!(
+                record
+                    .resources
+                    .iter()
+                    .all(|r| r.sha1.is_none() && r.bytes.is_none())
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn metadata_keeps_known_partial_original_matches_without_inventing_unknown_hashes()
+-> Result<(), String> {
+    let mut state = core(Provider::Apple, ScanAccess::Full).view().state;
+    state.snapshots[0].assets[0].resources.push(PhotoResource {
+        id: "raw".into(),
+        name: "photo.dng".into(),
+        role: ResourceRole::RawImage,
+        sha1: None,
+        bytes: None,
+    });
+    state.snapshots[0].assets[0].resources.push(PhotoResource {
+        id: "adjustment".into(),
+        name: "adjustment.plist".into(),
+        role: ResourceRole::Auxiliary,
+        sha1: Some("3".repeat(40)),
+        bytes: Some(4),
+    });
+    let source = state.snapshots[0].assets[0].clone();
+    assert!(!source.fingerprints_complete());
+    state
+        .snapshots
+        .push(snapshot(Provider::Immich, ScanAccess::Full));
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state,
+            ..Model::default()
+        },
+    );
+    assert_eq!(core.view().photos.len(), 1);
+    let mut native = Native {
+        apple_asset: Some(source),
+        ..Native::default()
+    };
+    run(&core, &mut native, Provider::Apple, location_input())?;
+    assert!(core.view().error.is_none());
+    assert_eq!(core.view().photos.len(), 1);
+    let record = &core.view().state.snapshots[0].assets[0];
+    assert_eq!(record.resources[0].sha1.as_deref(), Some(SHA));
+    assert_eq!(record.resources[0].bytes, Some(12));
+    assert!(record.resources[1].sha1.is_none() && record.resources[1].bytes.is_none());
+    assert!(record.resources[2].sha1.is_none() && record.resources[2].bytes.is_none());
+    assert!(!record.fingerprints_complete());
     Ok(())
 }
 

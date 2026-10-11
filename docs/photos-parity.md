@@ -80,8 +80,10 @@
 
 - 情報画面から保存先を選び、撮影日時または緯度・経度を変更する。関連する Live / RAW / JPEG が同じ保存先に複数ある場合は、1件の写真に属する完全な組を Rust が選び、半分だけの変更を拒否する。別の保存先には自動反映しない。
 - フルアクセスと現在の scope を確認し、日時・タイムゾーンと座標を Rust で検証する。保存後の全 ID・値・Immich timeZone の再取得が一致した場合だけ成功扱い。応答が不明、欠落・重複・不一致、状態保存失敗の場合は再試行せず一覧の再読込を案内する。
-- `make check`: Rust 74 tests / Swift 19 tests、strict lint / format / architecture / generated DTO / hooks を通過。単一フィールドの変更、権限制限・不正入力・異なる所有者 / ID の事前拒否、保存結果が不明な場合の再実行防止、転送履歴の保持、調整後の Immich EXIF 日時を優先する Rust tests と、実 FFI で Date の小数秒・native 応答・状態保存を確認する Swift test を追加。
+- `make check`: Rust 77 tests / Swift 19 tests、strict lint / format / architecture / generated DTO / hooks を通過。単一フィールドの変更、権限制限・不正入力・異なる所有者 / ID の事前拒否、保存結果が不明な場合の再実行防止、転送履歴の保持、調整後の Immich EXIF 日時を優先する Rust tests と、実 FFI で Date の小数秒・native 応答・状態保存を確認する Swift test を追加。
 - PhotoKit の位置情報削除に対応する。Immich の null 座標更新は非対応のため、0 / 0 を削除の代わりに使わない。原本の EXIF 除去、地名検索・地図、任意のタイムゾーン選択、取り消し / 復元は未実装。
 - `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。最新版を既存の iPhone Simulator にインストール・起動した。Mac がロック中で操作ツールから画面へアクセスできないため、日時・座標の native 操作と保存後の再起動確認は未完了。
 - local `make integration` は Docker daemon の socket が存在せず起動できない。実 Immich v3.2.4 に対する日時・timeZone・座標の更新と原本 checksum / 他の項目の保持を専用 CI で確認する。native 保存と最終 HEAD / main の hosted checks は別に記録する。
 - [初回の metadata CI](https://github.com/rabe1028/suwop/actions/runs/38174279455) は日時・timeZone の読戻しを通過した後、お気に入りを一律 false と期待したテストで失敗。fixture の2枚目は元からお気に入りだったため、編集前の ID・checksum・名前・お気に入り・ゴミ箱状態を取得し、日時と座標の変更後にそれぞれ保持されることを検証する形へ修正した。最終 HEAD で実通信テストを再実行する。
+
+- [テスト前提修正後の CI](https://github.com/rabe1028/suwop/actions/runs/38174639762/attempts/2) は core / apple / immich-integration の全 job が通過。最初の attempt はコンテナ取得のレジストリ制限で停止し、統合 job のみを再実行した。その後のレビューで、Apple の日時・GPS変更が照合済み hash を消し、Immich と統合された写真が分かれる問題を修正。成功を確認できた同一の原本構成だけ hash と byte count を保持し、未照合の RAW 原本の hash は補わない。原本構成・種別・IDの変化、取得不完全、重複リソース、新しい hash の観測では旧 hash を流用しない。通常の再読込後も統合を保ち、旧 Move receipt の revision では削除を許可しない回帰テストを追加。修正後の最終 HEAD で再確認する。

@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt, UnifiedPhoto,
-    catalog, same_location,
+    catalog, normalize_sha1, same_location,
 };
 
 #[derive(
@@ -233,6 +233,45 @@ fn matches_change(asset: &StoredAsset, change: &MetadataChange) -> bool {
             expected.latitude = change.location.as_ref().map(|p| p.latitude);
             expected.longitude = change.location.as_ref().map(|p| p.longitude);
             same_location(asset, &expected)
+        }
+    }
+}
+
+/// Successful `PhotoKit` property writes keep the immutable originals. Reuse
+/// their verified fingerprints only for an identical, complete inventory;
+/// never reuse the old revision or override a new fingerprint observation.
+pub(crate) fn preserve_original_fingerprints(old: &StoredAsset, fresh: &mut StoredAsset) {
+    if old.key.provider != Provider::Apple
+        || old.key != fresh.key
+        || !old.inventory_complete
+        || old.is_offline
+        || !fresh.inventory_complete
+        || fresh.is_offline
+        || old.resources.len() != fresh.resources.len()
+    {
+        return;
+    }
+    let cached: BTreeMap<_, _> = old.resources.iter().map(|r| (&r.id, r)).collect();
+    let observed: BTreeSet<_> = fresh.resources.iter().map(|r| &r.id).collect();
+    if cached.len() != old.resources.len()
+        || observed.len() != fresh.resources.len()
+        || fresh.resources.iter().any(|r| {
+            r.sha1.is_some()
+                || r.bytes.is_some()
+                || cached
+                    .get(&r.id)
+                    .is_none_or(|c| c.name != r.name || c.role != r.role)
+        })
+    {
+        return;
+    }
+    for resource in &mut fresh.resources {
+        if let Some(original) = cached
+            .get(&resource.id)
+            .filter(|r| r.role.is_original() && normalize_sha1(r.sha1.as_deref()).is_some())
+        {
+            resource.sha1.clone_from(&original.sha1);
+            resource.bytes = original.bytes;
         }
     }
 }
