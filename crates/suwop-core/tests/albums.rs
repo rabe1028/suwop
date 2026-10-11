@@ -1,0 +1,253 @@
+use crux_core::Core;
+use serde_json::{Value, json};
+use suwop_core::{
+    albums::{AlbumAction, AlbumEdit, AlbumKey, AlbumPermissions, AlbumSnapshot, StoredAlbum},
+    app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
+    domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset},
+};
+
+fn photo_key() -> AssetKey {
+    AssetKey {
+        provider: Provider::Apple,
+        scope: "apple".into(),
+        asset_id: "photo".into(),
+    }
+}
+fn album() -> StoredAlbum {
+    StoredAlbum {
+        key: AlbumKey {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            album_id: "album".into(),
+        },
+        title: "旅行".into(),
+        members: vec![],
+        permissions: AlbumPermissions {
+            add: true,
+            remove: true,
+            rename: true,
+            delete: true,
+        },
+    }
+}
+fn snapshot() -> AlbumSnapshot {
+    AlbumSnapshot {
+        provider: Provider::Apple,
+        scope: "apple".into(),
+        albums: vec![album()],
+        access: ScanAccess::Full,
+    }
+}
+fn core() -> Core<Suwop> {
+    Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: SavedLibrary {
+                schema_version: 2,
+                apple_scope: "apple".into(),
+                albums: vec![snapshot()],
+                snapshots: vec![LibrarySnapshot {
+                    provider: Provider::Apple,
+                    scope: "apple".into(),
+                    access: ScanAccess::Full,
+                    scanned_at: None,
+                    assets: vec![StoredAsset {
+                        key: photo_key(),
+                        name: "photo.jpg".into(),
+                        captured_at: None,
+                        modified_at: None,
+                        revision: "revision".into(),
+                        resources: vec![],
+                        is_favorite: false,
+                        latitude: None,
+                        longitude: None,
+                        inventory_complete: false,
+                        is_offline: false,
+                        deletion_blockers: vec![],
+                    }],
+                }],
+                ..SavedLibrary::default()
+            },
+            ..Model::default()
+        },
+    )
+}
+struct Native {
+    snapshot: AlbumSnapshot,
+    writes: usize,
+    persists: usize,
+    ignore_write: bool,
+}
+impl Native {
+    fn new() -> Self {
+        Self {
+            snapshot: snapshot(),
+            writes: 0,
+            persists: 0,
+            ignore_write: false,
+        }
+    }
+    fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
+        let mut effects = core.process_event(event);
+        let mut steps = 0;
+        while !effects.is_empty() {
+            steps += 1;
+            if steps > 30 {
+                return Err("nonterminating album workflow".into());
+            }
+            let Effect::Io(mut request) = effects.remove(0);
+            let value =
+                match &request.operation {
+                    ShellOperation::AppleAlbums { .. } => serde_json::to_value(&self.snapshot),
+                    ShellOperation::AppleAlbumCreate { title, .. } => {
+                        self.writes += 1;
+                        let mut created = album();
+                        created.key.album_id = "new".into();
+                        created.title.clone_from(title);
+                        self.snapshot.albums.push(created.clone());
+                        serde_json::to_value(created)
+                    }
+                    ShellOperation::AppleAlbumEdit { key, edit } => {
+                        self.writes += 1;
+                        if !self.ignore_write {
+                            if matches!(edit.action, AlbumAction::Delete) {
+                                self.snapshot.albums.retain(|a| a.key != *key);
+                            } else if let Some(album) =
+                                self.snapshot.albums.iter_mut().find(|a| a.key == *key)
+                            {
+                                match edit.action {
+                                    AlbumAction::Rename => {
+                                        album.title = edit.title.clone().ok_or("missing name")?;
+                                    }
+                                    AlbumAction::Add => album.members.extend(edit.keys.clone()),
+                                    AlbumAction::Remove => {
+                                        album.members.retain(|k| !edit.keys.contains(k));
+                                    }
+                                    AlbumAction::Delete => {}
+                                }
+                            }
+                        }
+                        Ok(Value::Null)
+                    }
+                    ShellOperation::Persist(_) => {
+                        self.persists += 1;
+                        Ok(Value::Null)
+                    }
+                    _ => return Err(
+                        "albums must not mutate photo files, transfer receipts or asset deletion"
+                            .into(),
+                    ),
+                }
+                .map_err(|e| e.to_string())?;
+            effects.extend(
+                core.resolve(
+                    &mut request,
+                    ShellResponse {
+                        value: Some(value),
+                        error: None,
+                    },
+                )
+                .map_err(|e| e.to_string())?,
+            );
+        }
+        assert!(!core.view().busy);
+        Ok(())
+    }
+}
+fn edit(action: AlbumAction, keys: Vec<AssetKey>, title: Option<&str>) -> Event {
+    Event::EditAlbum {
+        key: album().key,
+        edit: AlbumEdit {
+            action,
+            keys,
+            title: title.map(str::to_owned),
+        },
+    }
+}
+
+#[test]
+fn create_rename_add_remove_and_delete_only_change_the_collection() -> Result<(), String> {
+    let core = core();
+    let mut native = Native::new();
+    native.run(
+        &core,
+        Event::CreateAlbum {
+            provider: Provider::Apple,
+            title: "  新しい旅行  ".into(),
+        },
+    )?;
+    assert!(core.view().error.is_none());
+    assert!(
+        core.view()
+            .albums
+            .iter()
+            .any(|a| a.album.title == "新しい旅行")
+    );
+    native.run(&core, edit(AlbumAction::Rename, vec![], Some("家族")))?;
+    assert_eq!(core.view().albums[0].album.title, "家族");
+    native.run(&core, edit(AlbumAction::Add, vec![photo_key()], None))?;
+    assert_eq!(core.view().albums[0].photo_ids.len(), 1);
+    native.run(&core, edit(AlbumAction::Remove, vec![photo_key()], None))?;
+    assert!(core.view().albums[0].photo_ids.is_empty());
+    native.run(&core, edit(AlbumAction::Delete, vec![], None))?;
+    assert!(core.view().error.is_none());
+    assert_eq!(core.view().photos.len(), 1);
+    assert!(core.view().state.receipts.is_empty());
+    assert_eq!(native.writes, 5);
+    assert_eq!(native.persists, 5);
+    Ok(())
+}
+
+#[test]
+fn fresh_capabilities_and_cross_scope_members_stop_before_native_mutation() -> Result<(), String> {
+    for denied in [true, false] {
+        let core = core();
+        let mut native = Native::new();
+        let mut key = photo_key();
+        if denied {
+            native.snapshot.albums[0].permissions.add = false;
+        } else {
+            key.scope = "other".into();
+        }
+        native.run(&core, edit(AlbumAction::Add, vec![key], None))?;
+        assert!(core.view().error.is_some());
+        assert_eq!(native.writes, 0);
+        assert_eq!(core.view().photos.len(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn successful_native_callback_without_saved_membership_invalidates_album_state()
+-> Result<(), String> {
+    let core = core();
+    let mut native = Native::new();
+    native.ignore_write = true;
+    native.run(&core, edit(AlbumAction::Add, vec![photo_key()], None))?;
+    assert!(core.view().error.is_some());
+    assert_eq!(core.view().albums[0].access, ScanAccess::Unavailable);
+    assert!(!core.view().albums[0].album.permissions.add);
+    assert_eq!(native.persists, 0);
+    assert_eq!(core.view().photos.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn same_named_albums_remain_separate_and_unavailable_snapshots_are_read_only() -> Result<(), String>
+{
+    let mut first = snapshot();
+    let mut second = snapshot();
+    first.access = ScanAccess::Unavailable;
+    second.scope = "different".into();
+    second.albums[0].key.scope.clone_from(&second.scope);
+    let views = suwop_core::albums::views(&[first, second], &[], &[]);
+    assert_eq!(views.len(), 2);
+    assert_ne!(views[0].album.key, views[1].album.key);
+    assert!(views.iter().any(|a| !a.album.permissions.delete));
+    let state = suwop_core::workflow::migrate(
+        json!({"schemaVersion":2,"appleScope":"apple","snapshots":[],"receipts":[]}),
+    )?;
+    assert!(state.albums.is_empty());
+    Ok(())
+}

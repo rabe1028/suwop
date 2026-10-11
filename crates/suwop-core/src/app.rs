@@ -29,6 +29,8 @@ pub struct SavedLibrary {
     pub snapshots: Vec<LibrarySnapshot>,
     #[serde(default)]
     pub receipts: Vec<TransferReceipt>,
+    #[serde(default)]
+    pub albums: Vec<crate::albums::AlbumSnapshot>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -68,6 +70,17 @@ pub enum ShellOperation {
         keys: Vec<crate::domain::AssetKey>,
         value: bool,
     },
+    AppleAlbums {
+        scope: String,
+    },
+    AppleAlbumCreate {
+        scope: String,
+        title: String,
+    },
+    AppleAlbumEdit {
+        key: crate::albums::AlbumKey,
+        edit: crate::albums::AlbumEdit,
+    },
     Http(HttpRequest),
     HashFile {
         path: String,
@@ -90,6 +103,15 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    RefreshAlbums,
+    CreateAlbum {
+        provider: Provider,
+        title: String,
+    },
+    EditAlbum {
+        key: crate::albums::AlbumKey,
+        edit: crate::albums::AlbumEdit,
+    },
     Browse {
         options: crate::browser::BrowserOptions,
     },
@@ -154,6 +176,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub albums: Vec<crate::albums::AlbumView>,
     pub browser: crate::browser::BrowserView,
     pub state: SavedLibrary,
     pub photos: Vec<UnifiedPhoto>,
@@ -254,6 +277,7 @@ impl crux_core::App for Suwop {
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
+            albums: crate::albums::views(&model.state.albums, &photos, &model.state.snapshots),
             browser: crate::browser::browse(&photos, &model.browser),
             photos,
             pending_apple_count: model
@@ -275,6 +299,13 @@ impl crux_core::App for Suwop {
     }
 }
 fn invalidate_apple(state: &mut SavedLibrary) {
+    for s in state
+        .albums
+        .iter_mut()
+        .filter(|s| s.provider == Provider::Apple)
+    {
+        s.access = ScanAccess::Unavailable;
+    }
     for s in state
         .snapshots
         .iter_mut()

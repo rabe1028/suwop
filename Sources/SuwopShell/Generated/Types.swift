@@ -1,6 +1,83 @@
 // Generated from Rust schema. Run make generate-types; do not edit.
 import Foundation
 
+public enum AlbumAction: String, Codable, CaseIterable, Sendable {
+    case `rename`
+    case `add`
+    case `remove`
+    case `delete`
+}
+
+public struct AlbumCandidate: Codable, Sendable {
+    public var key: AssetKey
+    public var photoID: String
+    public init(key: AssetKey, photoID: String) {
+        self.key = key
+        self.photoID = photoID
+    }
+}
+
+public struct AlbumEdit: Codable, Sendable {
+    public var action: AlbumAction
+    public var keys: [AssetKey]
+    public var title: String?
+    public init(action: AlbumAction, keys: [AssetKey] = [], title: String? = nil) {
+        self.action = action
+        self.keys = keys
+        self.title = title
+    }
+}
+
+public struct AlbumKey: Codable, Sendable {
+    public var provider: Provider
+    public var scope: String
+    public var albumID: String
+    public init(provider: Provider, scope: String, albumID: String) {
+        self.provider = provider
+        self.scope = scope
+        self.albumID = albumID
+    }
+}
+
+public struct AlbumPermissions: Codable, Sendable {
+    public var add: Bool
+    public var delete: Bool
+    public var remove: Bool
+    public var rename: Bool
+    public init(add: Bool, delete: Bool, remove: Bool, rename: Bool) {
+        self.add = add
+        self.delete = delete
+        self.remove = remove
+        self.rename = rename
+    }
+}
+
+public struct AlbumSnapshot: Codable, Sendable {
+    public var access: ScanAccess
+    public var albums: [StoredAlbum]
+    public var provider: Provider
+    public var scope: String
+    public init(access: ScanAccess, albums: [StoredAlbum] = [], provider: Provider, scope: String) {
+        self.access = access
+        self.albums = albums
+        self.provider = provider
+        self.scope = scope
+    }
+}
+
+public struct AlbumView: Codable, Sendable {
+    public var access: ScanAccess
+    public var album: StoredAlbum
+    public var candidates: [AlbumCandidate]
+    public var photoIDs: [String]
+    public init(access: ScanAccess, album: StoredAlbum, candidates: [AlbumCandidate] = [], photoIDs: [String] = []) {
+        self.access = access
+        self.album = album
+        self.candidates = candidates
+        self.photoIDs = photoIDs
+    }
+}
+
 public struct AppleFacts: Codable, Sendable {
     public var asset: StoredAsset
     public var burst: Bool
@@ -205,12 +282,14 @@ public enum ResourceRole: String, Codable, CaseIterable, Sendable {
 }
 
 public struct SavedLibrary: Codable, Sendable {
+    public var albums: [AlbumSnapshot]
     public var appleScope: String
     public var connection: ConnectionSettings?
     public var receipts: [TransferReceipt]
     public var schemaVersion: Int64
     public var snapshots: [LibrarySnapshot]
-    public init(appleScope: String, connection: ConnectionSettings? = nil, receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
+        self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
         self.receipts = receipts
@@ -223,6 +302,19 @@ public enum ScanAccess: String, Codable, CaseIterable, Sendable {
     case `full`
     case `limited`
     case `unavailable`
+}
+
+public struct StoredAlbum: Codable, Sendable {
+    public var key: AlbumKey
+    public var members: [AssetKey]
+    public var permissions: AlbumPermissions
+    public var title: String
+    public init(key: AlbumKey, members: [AssetKey] = [], permissions: AlbumPermissions, title: String) {
+        self.key = key
+        self.members = members
+        self.permissions = permissions
+        self.title = title
+    }
 }
 
 public struct StoredAsset: Codable, Sendable {
@@ -331,6 +423,7 @@ public struct UploadPart: Codable, Sendable {
 }
 
 public struct ViewModel: Codable, Sendable {
+    public var albums: [AlbumView]
     public var browser: BrowserView
     public var busy: Bool
     public var canTransfer: Bool
@@ -341,7 +434,8 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+        self.albums = albums
         self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer

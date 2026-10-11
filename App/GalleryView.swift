@@ -12,6 +12,7 @@ struct GalleryView: View {
     @State private var selectedKeys: Set<AssetKey> = []
     @State private var viewer: AssetKey?
     @State private var confirmIndex = false
+    @State private var creatingAlbum = false
     @AppStorage("galleryDensity") private var density = 3
     @State private var timeline: TimelineGrouping = .all
 
@@ -197,7 +198,10 @@ struct GalleryView: View {
                     collectionRow(.live, count: model.browser?.live ?? 0)
                     collectionRow(.raw, count: model.browser?.raw ?? 0)
                 }
+                AlbumsSection(model: model, creating: $creatingAlbum)
             }.navigationTitle("コレクション")
+                .task { model.refreshAlbums() }
+                .sheet(isPresented: $creatingAlbum) { AlbumCreationView(model: model) }
         }
     }
 

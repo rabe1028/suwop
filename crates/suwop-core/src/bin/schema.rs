@@ -18,6 +18,7 @@ struct Protocol {
     response: HttpResponse,
     hash: HashResult,
     browser: suwop_core::browser::BrowserOptions,
+    album_edit: suwop_core::albums::AlbumEdit,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

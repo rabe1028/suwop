@@ -8,6 +8,7 @@ from pathlib import Path
 DATES = {"createdAt", "capturedAt", "modifiedAt", "scannedAt"}
 ORDER = {
     "AssetKey": ["provider", "scope", "assetID"],
+    "AlbumKey": ["provider", "scope", "albumID"],
     "PhotoResource": ["id", "name", "role", "sha1", "bytes"],
     "StoredAsset": [
         "key",

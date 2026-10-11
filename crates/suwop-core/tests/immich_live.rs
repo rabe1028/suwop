@@ -135,6 +135,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     wait_for(ctx, &session, &ids, true).await?;
     assert!(session.favorite(ctx, &ids[0], true).await?.is_favorite);
     assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
+    exercise_albums(ctx, &session, &ids[..2]).await?;
     let _: Value = session
         .json(
             ctx,
@@ -185,6 +186,33 @@ async fn wait_for(
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("search index did not reach the expected state".into())
+}
+
+async fn exercise_albums(ctx: &Context, session: &Session, ids: &[String]) -> Result<(), String> {
+    let album = session.create_album(ctx, "Suwop album contract").await?;
+    session
+        .rename_album(ctx, &album.id, "Suwop renamed album")
+        .await?;
+    session
+        .change_album_members(ctx, &album.id, ids, true)
+        .await?;
+    let members = session.album_members(ctx, &album.id).await?;
+    assert!(ids.iter().all(|id| members.iter().any(|a| &a.id == id)));
+    session
+        .change_album_members(ctx, &album.id, &ids[..1], false)
+        .await?;
+    assert!(
+        session
+            .album_members(ctx, &album.id)
+            .await?
+            .iter()
+            .all(|a| a.id != ids[0])
+    );
+    session.delete_album(ctx, &album.id).await?;
+    for id in ids {
+        assert!(!session.asset(ctx, id).await?.is_trashed);
+    }
+    Ok(())
 }
 
 fn execute(agent: &ureq::Agent, spec: &HttpRequest) -> Result<Value, String> {
