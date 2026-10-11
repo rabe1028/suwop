@@ -1,5 +1,5 @@
+import SuwopShell
 import SwiftUI
-import SuwopCore
 
 @main @MainActor struct SuwopApp: App {
     @StateObject private var model = LibraryModel()
@@ -20,9 +20,10 @@ private struct GalleryView: View {
     private var visible: [UnifiedPhoto] {
         model.photos.filter { photo in
             (filter == nil || photo.presence == filter) &&
-            (query.isEmpty || photo.assets.contains { $0.name.localizedCaseInsensitiveContains(query) })
+                (query.isEmpty || photo.assets.contains { $0.name.localizedCaseInsensitiveContains(query) })
         }
     }
+
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
@@ -33,18 +34,22 @@ private struct GalleryView: View {
                         ForEach(Presence.allCases, id: \.self) { filterChip($0, title: $0.title) }
                     }.padding(.horizontal).padding(.vertical, 10)
                 }
-                if model.photos.isEmpty && !model.isBusy {
+                if model.photos.isEmpty, !model.isBusy {
                     ContentUnavailableView {
                         Label("写真の保存先を、ひとつの一覧に", systemImage: "photo.on.rectangle.angled")
                     } description: {
                         Text("Apple Photos へのアクセスを許可し、Immich の URL と API キーを設定してください。")
                     } actions: {
-                        Button("Apple Photos を接続") { model.refresh(requestPermission: true) }.buttonStyle(.borderedProminent)
+                        Button("Apple Photos を接続") { model.refresh(requestPermission: true) }
+                            .buttonStyle(.borderedProminent)
                         Button("Immich を設定") { model.showSettings = true }.buttonStyle(.bordered)
                     }
                 } else {
                     ScrollView {
-                        LazyVGrid(columns: [GridItem(.adaptive(minimum: 150, maximum: 240), spacing: 10)], spacing: 14) {
+                        LazyVGrid(
+                            columns: [GridItem(.adaptive(minimum: 150, maximum: 240), spacing: 10)],
+                            spacing: 14
+                        ) {
                             ForEach(visible) { photo in
                                 Button { selected = photo } label: { PhotoTile(photo: photo, model: model) }
                                     .buttonStyle(.plain)
@@ -52,22 +57,31 @@ private struct GalleryView: View {
                             }
                         }.padding()
                     }.overlay {
-                        if visible.isEmpty && !model.isBusy { ContentUnavailableView.search(text: query) }
+                        if visible.isEmpty, !model.isBusy {
+                            ContentUnavailableView.search(text: query)
+                        }
                     }
                 }
                 Divider()
                 HStack {
-                    if model.isBusy { ProgressView().controlSize(.small) }
+                    if model.isBusy {
+                        ProgressView().controlSize(.small)
+                    }
                     Text(model.status).font(.caption).foregroundStyle(.secondary)
                     Spacer(minLength: 4)
-                    if model.isBusy { Button("停止") { model.stop() }.font(.caption) }
+                    if model.isBusy {
+                        Button("停止") { model.stop() }.font(.caption)
+                    }
                 }.padding(10)
             }
             .navigationTitle("Suwop")
             .searchable(text: $query, prompt: "ファイル名を検索")
             .toolbar {
                 ToolbarItemGroup(placement: .primaryAction) {
-                    Button { model.refresh(requestPermission: true) } label: { Label("更新", systemImage: "arrow.clockwise") }.disabled(model.isBusy)
+                    Button { model.refresh(requestPermission: true) } label: { Label(
+                        "更新",
+                        systemImage: "arrow.clockwise"
+                    ) }.disabled(model.isBusy)
                     Menu {
                         Button("未照合の原本を照合（\(model.pendingAppleCount) 件）") { confirmIndex = true }
                             .disabled(model.pendingAppleCount == 0 || model.isBusy)
@@ -84,19 +98,29 @@ private struct GalleryView: View {
             .sheet(item: $selected) { PhotoDetail(photo: $0, model: model) }
             .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
             .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
-            .alert("確認してください", isPresented: Binding(get: { model.errorMessage != nil }, set: { if !$0 { model.errorMessage = nil } })) {
+            .alert(
+                "確認してください",
+                isPresented: Binding(get: { model.errorMessage != nil }, set: {
+                    if !$0 {
+                        model.errorMessage = nil
+                    }
+                })
+            ) {
                 Button("閉じる") { model.errorMessage = nil }
             } message: { Text(model.errorMessage ?? "") }
         }
     }
+
     private var connectionSummary: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack {
                 ForEach(Provider.allCases, id: \.self) { provider in
                     let snapshot = model.snapshots.first { $0.provider == provider }
-                    Label("\(provider.title): \(snapshot?.assets.count ?? 0)",
-                          systemImage: snapshot?.access == .full ? "checkmark.circle" : "exclamationmark.circle")
-                        .font(.caption).foregroundStyle(snapshot?.access == .full ? .primary : .secondary)
+                    Label(
+                        "\(provider.title): \(snapshot?.assets.count ?? 0)",
+                        systemImage: snapshot?.access == .full ? "checkmark.circle" : "exclamationmark.circle"
+                    )
+                    .font(.caption).foregroundStyle(snapshot?.access == .full ? .primary : .secondary)
                 }
                 Spacer()
             }
@@ -114,11 +138,15 @@ private struct GalleryView: View {
             }
         }.padding(.horizontal).padding(.top, 8)
     }
+
     private func filterChip(_ value: Presence?, title: String) -> some View {
         let count = model.photos.filter { value == nil || $0.presence == value }.count
         return Button { filter = value } label: {
             Text("\(title) \(count)").font(.caption).padding(.horizontal, 12).padding(.vertical, 7)
-                .background(filter == value ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10), in: Capsule())
+                .background(
+                    filter == value ? Color.accentColor.opacity(0.18) : Color.secondary.opacity(0.10),
+                    in: Capsule()
+                )
         }.buttonStyle(.plain)
     }
 }
@@ -135,22 +163,33 @@ private struct PhotoTile: View {
                     if let image {
                         platformImage(image).resizable().scaledToFill()
                             .frame(width: geometry.size.width, height: geometry.size.height).clipped()
-                    } else { Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary) }
+                    } else {
+                        Image(systemName: "photo").font(.largeTitle).foregroundStyle(.secondary)
+                    }
                 }
             }.aspectRatio(1, contentMode: .fit).clipShape(RoundedRectangle(cornerRadius: 12))
             HStack(spacing: 5) {
-                if photo.providers.contains(.apple) { Label("Apple", systemImage: "photo.stack").font(.caption2) }
-                if photo.providers.contains(.immich) { Label("Immich", systemImage: "server.rack").font(.caption2) }
+                if photo.providers.contains(.apple) {
+                    Label("Apple", systemImage: "photo.stack").font(.caption2)
+                }
+                if photo.providers.contains(.immich) {
+                    Label("Immich", systemImage: "server.rack").font(.caption2)
+                }
                 Spacer(minLength: 0)
-                if photo.resources.contains(where: { $0.role == .rawImage }) { Text("RAW").font(.caption2.bold()) }
+                if photo.resources.contains(where: { $0.role == .rawImage }) {
+                    Text("RAW").font(.caption2.bold())
+                }
             }
-            Text(photo.presence.title).font(.caption).foregroundStyle(photo.presence == .both ? Color.green : Color.secondary)
+            Text(photo.presence.title).font(.caption)
+                .foregroundStyle(photo.presence == .both ? Color.green : Color.secondary)
             Text(photo.name).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
         }
         .task(id: "\(photo.id)|\(model.thumbnailGeneration)") {
             image = nil
             let loaded = try? await model.thumbnail(photo)
-            if !Task.isCancelled { image = loaded }
+            if !Task.isCancelled {
+                image = loaded
+            }
         }
     }
 }
@@ -166,13 +205,17 @@ private struct PhotoDetail: View {
             List {
                 Section {
                     Text(photo.name).font(.headline)
-                    if let date = photo.capturedAt { Text(date, style: .date).foregroundStyle(.secondary) }
+                    if let date = photo.capturedAt {
+                        Text(date, style: .date).foregroundStyle(.secondary)
+                    }
                     Text(photo.presence.title)
                 }
                 ForEach(Provider.allCases, id: \.self) { provider in
                     let assets = photo.assets.filter { $0.key.provider == provider }
                     Section(provider.title) {
-                        if assets.isEmpty { Text("未検出（未照合の原本がある場合は未確定）").foregroundStyle(.secondary) }
+                        if assets.isEmpty {
+                            Text("未検出（未照合の原本がある場合は未確定）").foregroundStyle(.secondary)
+                        }
                         ForEach(assets) { asset in
                             VStack(alignment: .leading, spacing: 7) {
                                 Text(asset.name).font(.subheadline.bold())
@@ -182,21 +225,33 @@ private struct PhotoDetail: View {
                                             Text(resource.role.title)
                                             Text(resource.name).lineLimit(1)
                                             Spacer()
-                                            if let bytes = resource.bytes { Text(ByteCountFormatter.string(fromByteCount: bytes, countStyle: .file)) }
+                                            if let bytes = resource.bytes {
+                                                Text(ByteCountFormatter.string(
+                                                    fromByteCount: bytes,
+                                                    countStyle: .file
+                                                ))
+                                            }
                                         }.font(.caption)
                                         Text(resource.sha1.map { "SHA-1: \($0)" } ?? "原本未照合")
-                                            .font(.caption2.monospaced()).foregroundStyle(.secondary).textSelection(.enabled)
+                                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                            .textSelection(.enabled)
                                     }
                                 }
-                                ForEach(asset.deletionBlockers, id: \.self) { Text($0).font(.caption).foregroundStyle(.orange) }
+                                ForEach(asset.deletionBlockers, id: \.self) {
+                                    Text($0).font(.caption).foregroundStyle(.orange)
+                                }
                             }.padding(.vertical, 4)
                         }
                         if !assets.isEmpty {
                             let destination = provider == .apple ? Provider.immich : .apple
-                            Button("\(destination.title) にコピー") { wantsMove = false; pendingSource = provider }
-                                .disabled(!model.canTransfer)
-                            Button("\(destination.title) へ移動") { wantsMove = true; pendingSource = provider }
-                                .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
+                            Button("\(destination.title) にコピー") { wantsMove = false
+                                pendingSource = provider
+                            }
+                            .disabled(!model.canTransfer)
+                            Button("\(destination.title) へ移動") { wantsMove = true
+                                pendingSource = provider
+                            }
+                            .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
                         }
                     }
                 }
@@ -207,12 +262,22 @@ private struct PhotoDetail: View {
             }
             .navigationTitle("写真の保存先")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
-            .confirmationDialog(wantsMove ? "移動の準備を開始しますか？" : "原本をコピーしますか？",
-                                isPresented: Binding(get: { pendingSource != nil }, set: { if !$0 { pendingSource = nil } }),
-                                titleVisibility: .visible) {
+            .confirmationDialog(
+                wantsMove ? "移動の準備を開始しますか？" : "原本をコピーしますか？",
+                isPresented: Binding(
+                    get: { pendingSource != nil },
+                    set: {
+                        if !$0 {
+                            pendingSource = nil
+                        }
+                    }
+                ),
+                titleVisibility: .visible
+            ) {
                 if let source = pendingSource {
                     Button(wantsMove ? "コピーして移動を準備" : "コピーを開始") {
-                        model.copy(photo, from: source, move: wantsMove); dismiss()
+                        model.copy(photo, from: source, move: wantsMove)
+                        dismiss()
                     }
                 }
             } message: { Text("原本のダウンロード・アップロード・検証に通信量と一時空き容量が必要です。この段階では元データを削除しません。") }
@@ -234,9 +299,9 @@ private struct ConnectionView: View {
             Form {
                 Section("Immich") {
                     TextField("https://immich.example.com", text: $address)
-                        #if os(iOS)
+                    #if os(iOS)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
-                        #endif
+                    #endif
                     SecureField("API キー", text: $key)
                     Toggle("HTTP 接続を許可（暗号化なし）", isOn: $allowHTTP)
                     if allowHTTP {
@@ -245,7 +310,9 @@ private struct ConnectionView: View {
                     }
                     Button("接続を確認して保存") { model.configure(address: address, apiKey: key, allowHTTP: allowHTTP) }
                         .disabled(model.isBusy || address.isEmpty || key.isEmpty)
-                    if let version = model.serverVersion { Text("接続中: Immich \(version)").font(.caption) }
+                    if let version = model.serverVersion {
+                        Text("接続中: Immich \(version)").font(.caption)
+                    }
                 }
                 Section("Apple Photos") {
                     Button("写真へのアクセスを許可・一覧を更新") { model.refresh(requestPermission: true) }.disabled(model.isBusy)
@@ -253,13 +320,19 @@ private struct ConnectionView: View {
                     Text("初回はメタデータのみ取得します。原本照合はメニューから明示的に実行してください。")
                 }.font(.callout)
                 Section("権限と保存") {
-                    Text("API キーには自分の写真の検索・表示・原本ダウンロードと、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロード、Immich からの移動には削除と assetFile.read（XMP sidecar の確認）の権限も必要です。assetFile.read がない場合はコピーのみです。")
+                    Text(
+                        "API キーには写真の検索・表示・原本取得、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロードとメタデータ更新の権限も必要です。"
+                    )
+                    Text("Immich からの移動には削除と assetFile.read の権限も必要です。assetFile.read がない場合はコピーのみです。")
                     Text("API キーは Keychain、照合結果と転送記録はアプリ内に保存します。RAW・JPEG・動画は原本のまま転送します。")
                     Text("Live Photo、編集・補助データ付き、バースト、Immich External Library はコピーのみです。永久削除は行いません。")
                 }.font(.caption).foregroundStyle(.secondary)
                 if model.connection != nil {
                     Section {
-                        Button("Immich の接続を解除", role: .destructive) { model.disconnect(); key = "" }.disabled(model.isBusy)
+                        Button("Immich の接続を解除", role: .destructive) { model.disconnect()
+                            key = ""
+                        }
+                        .disabled(model.isBusy)
                     }
                 }
             }
@@ -267,7 +340,8 @@ private struct ConnectionView: View {
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
             .onAppear {
                 if let settings = model.connection {
-                    address = settings.address; allowHTTP = settings.allowHTTP
+                    address = settings.address
+                    allowHTTP = settings.allowHTTP
                     key = (try? Credentials.read(settings.credentialID)) ?? ""
                 }
             }
@@ -292,10 +366,13 @@ private struct TransfersView: View {
                 ForEach(model.receipts.sorted { $0.createdAt > $1.createdAt }) { receipt in
                     Section {
                         Text(receipt.source.first?.name ?? "写真").font(.headline)
-                        Text("\(receipt.source.first?.key.provider.title ?? "転送元") → \(receipt.destinationProvider.title)")
+                        Text(
+                            "\(receipt.source.first?.key.provider.title ?? "転送元") → \(receipt.destinationProvider.title)"
+                        )
                         Text(receipt.createdAt, style: .date).font(.caption).foregroundStyle(.secondary)
                         Text(phase(receipt.phase))
-                        Text("転送元 \(receipt.source.count) アセット / 検証した原本 \(receipt.signatures.count) ファイル").font(.caption)
+                        Text("転送元 \(receipt.source.count) アセット / 検証した原本 \(receipt.signatures.count) ファイル")
+                            .font(.caption)
                         if receipt.phase == .copied {
                             let blockers = model.moveBlockers(receipt)
                             if blockers.isEmpty {
@@ -322,34 +399,44 @@ private struct TransfersView: View {
             }
             .navigationTitle("転送履歴・移動確認")
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
-            .confirmationDialog("元データを削除して移動を完了しますか？",
-                isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }), titleVisibility: .visible) {
+            .confirmationDialog(
+                "元データを削除して移動を完了しますか？",
+                isPresented: Binding(get: { pending != nil }, set: {
+                    if !$0 {
+                        pending = nil
+                    }
+                }),
+                titleVisibility: .visible
+            ) {
                 if let receipt = pending {
                     Button("原本を再検証して移動を完了", role: .destructive) { model.completeMove(receipt) }
                 }
             } message: {
-                Text("Apple Photos の削除は、iCloud 写真が有効な他の端末にも同期されます。転送元のアルバム所属・編集履歴などは移行されません。元データは最近削除した項目／ゴミ箱に入り、永久削除は要求しません。")
+                Text(
+                    "Apple Photos の削除は、iCloud 写真が有効な他の端末にも同期されます。転送元のアルバム所属・編集履歴などは移行されません。元データは最近削除した項目／ゴミ箱に入り、永久削除は要求しません。"
+                )
             }
         }
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 600)
         #endif
     }
+
     private func phase(_ phase: TransferPhase) -> String {
         switch phase {
-        case .copying: return "転送・検証が未完了"
-        case .copied: return "コピー検証済み・元データ保持"
-        case .deletingSource: return "削除処理の結果を要確認"
-        case .moved: return "移動完了"
-        case .deletionUncertain: return "削除結果が未確定"
+        case .copying: "転送・検証が未完了"
+        case .copied: "コピー検証済み・元データ保持"
+        case .deletingSource: "削除処理の結果を要確認"
+        case .moved: "移動完了"
+        case .deletionUncertain: "削除結果が未確定"
         }
     }
 }
 
 private func platformImage(_ image: PlatformImage) -> Image {
     #if os(iOS)
-    return Image(uiImage: image)
+        return Image(uiImage: image)
     #else
-    return Image(nsImage: image)
+        return Image(nsImage: image)
     #endif
 }

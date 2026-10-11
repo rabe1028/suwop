@@ -14,44 +14,35 @@ concurrency:
 jobs:
   core:
     runs-on: ubuntu-latest
-    container: swift:6.2
     steps:
-      - uses: actions/checkout@v4
-      - run: swift test
-      - run: swift test -c release
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned quality tools
+        run: bash scripts/install-tools.sh
+      - name: Enforce Rust, script, workflow and architecture rules
+        run: make lint-common
+      - run: cargo test --locked --workspace --all-features
+      - run: cargo test --locked --workspace --all-features --release
 
   immich-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: swift-actions/setup-swift@v2
-        with:
-          swift-version: '6.2'
-      - name: Run Suwop against Immich v3.2.4 in Docker
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Run Rust core against Immich v3.2.4 in Docker
         env:
           IMMICH_VERSION: v3.2.4
-        run: bash ./scripts/immich-integration-test.sh
+        run: make integration
 
   apple:
     runs-on: macos-15
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
-      - name: Test shared core on macOS
-        run: swift test
-      - name: Build iOS simulator app
-        run: >-
-          xcodebuild -project Suwop.xcodeproj -scheme SuwopiOS
-          -destination 'generic/platform=iOS Simulator'
-          -derivedDataPath DerivedData/iOS
-          CODE_SIGNING_ALLOWED=NO build
-      - name: Build macOS app
-        run: >-
-          xcodebuild -project Suwop.xcodeproj -scheme SuwopmacOS
-          -destination 'generic/platform=macOS'
-          -derivedDataPath DerivedData/macOS
-          CODE_SIGNING_ALLOWED=NO build
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Install pinned quality tools
+        run: bash scripts/install-tools.sh
+      - name: Enforce Swift formatting and strict lint
+        run: make lint-swift
+      - name: Test the real Rust-to-Swift bridge
+        run: make test
+      - name: Build universal Rust libraries, iOS and macOS apps
+        run: make apple-build

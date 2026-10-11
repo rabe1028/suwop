@@ -2,9 +2,9 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE=(docker compose -f "$ROOT/docker/immich-test/docker-compose.yml")
+COMPOSE=(docker compose -p "${IMMICH_TEST_PROJECT:-suwop-rust-test}" -f "$ROOT/docker/immich-test/docker-compose.yml")
 export IMMICH_VERSION="${IMMICH_VERSION:-v3.2.4}"
-export IMMICH_TEST_PORT="${IMMICH_TEST_PORT:-2283}"
+export IMMICH_TEST_PORT="${IMMICH_TEST_PORT:-2289}"
 export SUWOP_IMMICH_URL="${SUWOP_IMMICH_URL:-http://127.0.0.1:${IMMICH_TEST_PORT}}"
 
 cleanup() {
@@ -23,7 +23,6 @@ if ! SUWOP_IMMICH_API_KEY="$(python3 "$ROOT/scripts/bootstrap_immich.py")"; then
   exit 1
 fi
 export SUWOP_IMMICH_API_KEY
-export RUN_IMMICH_INTEGRATION=1
 
 cd "$ROOT"
-swift test --filter ImmichLiveTests
+cargo test --locked -p suwop-core --test immich_live -- --ignored

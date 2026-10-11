@@ -4,10 +4,13 @@ options:
   createIntermediateGroups: true
 settings:
   base:
-    SWIFT_VERSION: '5.0'
+    SWIFT_VERSION: '6.0'
+    SWIFT_STRICT_CONCURRENCY: complete
+    SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
+    GCC_TREAT_WARNINGS_AS_ERRORS: YES
     ENABLE_USER_SCRIPT_SANDBOXING: YES
 packages:
-  SuwopCore:
+  SuwopShell:
     path: .
 targets:
   SuwopiOS:
@@ -16,8 +19,8 @@ targets:
     deploymentTarget: '17.0'
     sources: [App]
     dependencies:
-      - package: SuwopCore
-        product: SuwopCore
+      - package: SuwopShell
+        product: SuwopShell
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.ios
@@ -41,8 +44,8 @@ targets:
     deploymentTarget: '14.0'
     sources: [App]
     dependencies:
-      - package: SuwopCore
-        product: SuwopCore
+      - package: SuwopShell
+        product: SuwopShell
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.mac

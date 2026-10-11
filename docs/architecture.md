@@ -1,49 +1,49 @@
 # 設計
 
+## Crux と実装境界
+
+`crates/suwop-core` の `Suwop` は Crux の `App` を実装します。Swift から Event を受け、Rust の Model を更新し、ViewModel と ShellOperation の effect を返します。Swift は effect の入出力を実行して応答を Rust に戻します。状態の判断と操作の順序は Rust にあります。
+
+- `domain.rs`: 同一性、RAW/JPEG の多重度、保存状態、削除条件、PhotoKit 入出力計画。
+- `workflow.rs`: 接続、走査、照合、コピー、移動、履歴保存、旧形式の移行。
+- `immich.rs`: URL／origin 検証、API、ページング、multipart の仕様、レスポンス解釈。
+- `crates/suwop-ffi`: Crux の JSON FFI と C ABI、ファイルをストリームでハッシュするネイティブ入出力。
+- `Sources/SuwopShell`: FFI actor、JSON、生成された DTO、表示用の補助値。
+- `App/AppleShell.swift`: 汎用 effect の振り分け、原子的なファイル保存。
+- `App/ApplePhotos.swift`: PhotoKit の観測とリソース入出力。削除直前にも Rust に観測結果を渡す。
+- `App/Credentials.swift` / `HTTPExecutor.swift`: Keychain と汎用 HTTP の入出力。
+- `App/LibraryModel.swift` / `SuwopApp.swift`: ViewModel の公開、画像キャッシュ、SwiftUI。
+
+PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust の JSON Schema から Swift DTO を生成し、生成差分と実ライブラリをリンクしたテストを CI に含めます。FFI の unsafe は `suwop-ffi` の ABI 境界に限定します。Swift 側は actor を使い、PhotoKit のキャンセル用ゲートだけロックの不変条件を明記した `@unchecked Sendable` を使います。
+
 ## 写真と保存先
 
-`AssetKey = provider + scope + assetID`。Apple の scope はアプリデータの生成時 UUID、Immich は正規化した API URL と `/users/me` の user ID です。接続先を変更しても別アカウントの ID や照合を流用しません。
+`AssetKey = provider + scope + assetID`。Apple の scope はアプリデータ生成時の UUID、Immich は正規化した API URL と利用者 ID です。別アカウントの照合を流用しません。
 
-`StoredAsset` は各サービス上の一枚、`PhotoResource` は原本や補助リソース、`UnifiedPhoto` は同じ原本を持つ StoredAsset をまとめた表示単位です。ファイル名・撮影日だけで同一判定しません。
+`StoredAsset` は各サービス上の一枚、`PhotoResource` は原本・補助リソース、`UnifiedPhoto` は同じ原本を持つ写真をまとめた表示単位です。ファイル名や撮影日では同一判定しません。SHA-1 は Immich の互換照合用、削除前の原本検証は SHA-256 とバイト長です。RAW、JPEG、動画は個数も比較します。未照合、権限制限、オフラインを「片側に存在しない」証拠として扱いません。
 
-Apple Photos は `PHAssetResource` を列挙し、JPEG/HEIC、RAW、動画、Live Photo 動画を別リソースとして扱います。Immich の SHA-1 は照合キーとして正規化します。RAW と JPEG の一方しか一致しない場合は「一部だけ両方」とし、全原本の集合が一致した時だけ「両方」とします。
+## 移動と永続化
 
-## 移動プロトコル
+1. 転送元の全原本をエクスポートし、実バイトの署名を記録。
+2. `copying` と Copy / Move の意図を保存してからアップロード。
+3. 転送先の原本を再取得し、署名を検証。Move では位置情報も確認。
+4. `copied` を保存。元データは残す。
+5. Move として準備された履歴だけ、別操作で完了できる。
+6. 両側の原本、revision、位置情報、保存先の利用者、削除条件を再検証。
+7. `deletingSource` の保存成功後だけゴミ箱操作を実行。
+8. 成功は `moved`、応答が不明なら `deletionUncertain`。終端状態は再試行しない。
 
-`TransferCoordinator` はコピーと削除を分離します。
+保存形式は schemaVersion 2、日時は UNIX 秒です。旧 schemaVersion 1 の Apple 基準日時を変換し、意図が記録されていない旧履歴は全て Copy にします。不正または未来の形式は処理を停止し、元ファイルを上書きしません。
 
-1. 転送元の全原本をエクスポート。
-2. SHA-256 + バイト長で実データを記録。
-3. 転送先へコピー。
-4. 転送先から原本を再取得し、実データを再検証。
-5. `copied` として履歴を永続化。ここでは元データを残す。
-6. ユーザーが別操作で「移動を完了」を選ぶ。
-7. 転送元・転送先・revision・原本を再検証。
-8. `deletingSource` を永続化できた後だけ、転送元をゴミ箱へ移す。
+独立 asset が同じバイト列を持つ場合、編集・補助データ、Live Photo、バースト、External Library、未確認の保存種別、sidecar がある場合はコピーのみです。Immich の公開 API に `isExternal` がない場合は `libraryId` を確認します。フィールド欠落と明示的な null を区別し、欠落を内部保存の証拠にしません。
 
-状態は `copying → copied → deletingSource → moved`。削除結果が不明な場合は `deletionUncertain` とし、自動再試行しません。
+Immich への新規アップロード後に調整済みの位置情報を PUT します。既存の重複写真の独立メタデータは変更しません。位置情報が一致しない場合、Move の検証は失敗します。Immich の API は位置情報の null 更新を受け付けないため、位置情報なしの原本と EXIF 付き転送先が一致しない場合も削除を止めます。
 
-Live Photo、編集・補助データ付き、バースト、Immich External Library、XMP sidecar 付き、独立asset間で同一バイト列の原本が重複する場合など、安全に削除できないケースはコピーのみです。Immich v3.2+ では `/asset-files?assetId=...` で sidecar を inventory し、削除直前にも再確認します。旧 Immich や `assetFile.read` 権限不足で sidecar 状態を確認できない場合も、コピーは許可しますが Immich 側の削除は拒否します。
+## API 基準
 
-## 実装境界
+Immich v3.2.4 を実通信テストに使用します。3.2 以降は filter / orderBy / cursor、旧 2.x / 3.0–3.1 は flat fields / page を使います。実通信の証拠は v3.2.4 のみで、旧 API 形状は契約テストで確認します。不明なメジャー、ページ情報の欠落・循環は拒否します。
 
-- `Sources/SuwopCore/Catalog.swift`: ドメイン・同一性・存在判定
-- `Sources/SuwopCore/Transfer.swift`: 検証・移動状態機械
-- `Sources/SuwopCore/ImmichClient.swift`: Immich HTTP API、ページング、multipart
-- `App/ApplePhotos.swift`: PhotoKit / CryptoKit / 保存先アダプター
-- `App/LibraryModel.swift`: UI 状態、Keychain、永続化、キャッシュ
-- `App/SuwopApp.swift`: SwiftUI UI
-- `docker/immich-test/`: 実 Immich 統合テスト環境
-
-SHA-1 は Immich との互換照合用です。破壊的操作の判断では、実際に読み直したバイト列の SHA-256 とサイズも確認します。
-
-## Immich API
-
-基準は Immich v3.2.4。3.2 以降の metadata search は `filter/orderBy/cursor/nextCursor` を使い、旧 2.x は flat fields + page を使います。不明なメジャーバージョンは拒否します。
-
-- https://api.immich.app/
-- https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/search.dto.ts
-- https://github.com/immich-app/immich/blob/v3.2.4/server/src/controllers/asset-media.controller.ts
-- https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/asset-response.dto.ts
-- https://developer.apple.com/documentation/photos/phassetresource
-- https://developer.apple.com/documentation/photos/phassetresourcemanager
+- [Crux Apple shell](https://redbadger.github.io/crux/part-1/shell/apple/index.html)
+- [Immich asset DTO](https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/asset.dto.ts)
+- [Immich search DTO](https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/search.dto.ts)
+- [PhotoKit resources](https://developer.apple.com/documentation/photos/phassetresource)

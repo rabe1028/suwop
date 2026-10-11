@@ -1,7 +1,9 @@
 .DS_Store
 .build/
 DerivedData/
-Generated/
+/Generated/
 Suwop.xcodeproj/
 *.xcuserstate
 xcuserdata/
+/target/
+/.tools/
