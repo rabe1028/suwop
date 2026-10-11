@@ -68,6 +68,9 @@ fn has_role(photo: &UnifiedPhoto, role: ResourceRole) -> bool {
 fn favorite(photo: &UnifiedPhoto) -> bool {
     photo.assets.iter().any(|a| a.is_favorite)
 }
+fn video(photo: &UnifiedPhoto) -> bool {
+    has_role(photo, ResourceRole::Video) && !has_role(photo, ResourceRole::LiveVideo)
+}
 fn date(photo: &UnifiedPhoto) -> Option<f64> {
     photo
         .assets
@@ -125,8 +128,8 @@ pub fn browse(photos: &[UnifiedPhoto], options: &BrowserOptions) -> BrowserView 
                 && match options.filter {
                     PhotoFilter::All => true,
                     PhotoFilter::Favorites => favorite(photo),
-                    PhotoFilter::Photos => !has_role(photo, ResourceRole::Video),
-                    PhotoFilter::Videos => has_role(photo, ResourceRole::Video),
+                    PhotoFilter::Photos => !video(photo),
+                    PhotoFilter::Videos => video(photo),
                     PhotoFilter::Live => has_role(photo, ResourceRole::LiveVideo),
                     PhotoFilter::Raw => has_role(photo, ResourceRole::RawImage),
                 }
@@ -155,10 +158,7 @@ pub fn browse(photos: &[UnifiedPhoto], options: &BrowserOptions) -> BrowserView 
         photo_ids: visible.into_iter().map(photo_id).collect(),
         total: photos.len(),
         favorites: photos.iter().filter(|p| favorite(p)).count(),
-        videos: photos
-            .iter()
-            .filter(|p| has_role(p, ResourceRole::Video))
-            .count(),
+        videos: photos.iter().filter(|p| video(p)).count(),
         live: photos
             .iter()
             .filter(|p| has_role(p, ResourceRole::LiveVideo))
