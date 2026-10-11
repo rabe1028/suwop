@@ -1,0 +1,197 @@
+import Foundation
+import Photos
+import SuwopShell
+import SwiftUI
+
+@MainActor final class LibraryModel: ObservableObject {
+    @Published private var view: ViewModel?
+    @Published var errorMessage: String?
+    @Published var showSettings = false
+    @Published var showTransfers = false
+    @Published var thumbnailGeneration = UUID()
+    private var runtime: RustRuntime?
+    private var shell: AppleShell?
+    private var observer: PhotoObserver?
+    private var work: Task<Void, Never>?
+    private var started = false
+    private let thumbnails = NSCache<NSString, PlatformImage>()
+
+    init() {
+        do { runtime = try RustRuntime()
+            shell = try AppleShell()
+        } catch { errorMessage = error.localizedDescription }
+        thumbnails.countLimit = 300
+        thumbnails.totalCostLimit = 64 * 1024 * 1024
+        observer = PhotoObserver { [weak self] in
+            self?.thumbnailGeneration = UUID()
+            self?.thumbnails.removeAllObjects()
+            self?.notifyPhotoChange()
+        }
+        if let observer {
+            PHPhotoLibrary.shared().register(observer)
+        }
+    }
+
+    var photos: [UnifiedPhoto] {
+        view?.photos ?? []
+    }
+
+    var snapshots: [LibrarySnapshot] {
+        view?.state.snapshots ?? []
+    }
+
+    var receipts: [TransferReceipt] {
+        view?.state.receipts ?? []
+    }
+
+    var connection: ConnectionSettings? {
+        view?.state.connection
+    }
+
+    var serverVersion: String? {
+        view?.serverVersion
+    }
+
+    var isBusy: Bool {
+        work != nil || view?.busy == true
+    }
+
+    var status: String {
+        view?.status ?? "写真ライブラリを接続してください。"
+    }
+
+    var canTransfer: Bool {
+        view?.canTransfer == true && work == nil
+    }
+
+    var pendingAppleCount: Int64 {
+        view?.pendingAppleCount ?? 0
+    }
+
+    func start() {
+        guard !started else { return }
+        started = true
+        send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
+    }
+
+    func refresh(requestPermission: Bool = false) {
+        send([
+            "type": .string("refresh"),
+            "permission": .bool(requestPermission),
+            "now": .number(Date().timeIntervalSince1970),
+        ])
+    }
+
+    func configure(address: String, apiKey: String, allowHTTP: Bool) {
+        send([
+            "type": .string("configure"),
+            "address": .string(address),
+            "key": .string(apiKey),
+            "allowHTTP": .bool(allowHTTP),
+            "id": .string(UUID().uuidString),
+            "now": .number(Date().timeIntervalSince1970),
+        ])
+        showSettings = false
+    }
+
+    func disconnect() {
+        send(["type": .string("disconnect")])
+    }
+
+    func indexOriginals() {
+        send(["type": .string("index"), "id": .string(UUID().uuidString)])
+    }
+
+    func copy(_ photo: UnifiedPhoto, from provider: Provider, move: Bool = false) {
+        do {
+            let keys = photo.assets.filter { $0.key.provider == provider }.map(\.key)
+            try send([
+                "type": .string("copy"),
+                "keys": .from(keys),
+                "intent": .string(move ? "move" : "copy"),
+                "id": .string(UUID().uuidString),
+                "now": .number(Date().timeIntervalSince1970),
+            ])
+            showTransfers = true
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func completeMove(_ receipt: TransferReceipt) {
+        send(["type": .string("completeMove"), "id": .string(receipt.id), "workspace": .string(UUID().uuidString)])
+    }
+
+    func stop() {
+        work?.cancel()
+    }
+
+    func moveBlockers(_ receipt: TransferReceipt) -> [String] {
+        view?.moveBlockers[receipt.id] ?? ["記録を確認できません"]
+    }
+
+    func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        let cacheKey = "\(thumbnailGeneration)|\(photo.id)" as NSString
+        if let image = thumbnails.object(forKey: cacheKey) {
+            return image
+        }
+        guard let shell else { throw SuwopError("入出力が利用できません。") }
+        let image = try await shell.thumbnail(photo, connection: connection)
+        try Task.checkCancellation()
+        thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
+        return image
+    }
+
+    private func send(_ event: [String: JSONValue]) {
+        guard work == nil, let runtime, let shell else { return }
+        errorMessage = nil
+        work = Task {
+            defer { work = nil }
+            do {
+                var requests = try await runtime.update(.object(event))
+                try await readView()
+                while !requests.isEmpty {
+                    let request = requests.removeFirst()
+                    guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
+                    let value: JSONValue?
+                    let failure: String?
+                    do { value = try await shell.execute(operation)
+                        failure = nil
+                    } catch is CancellationError { value = nil
+                        failure = "cancelled"
+                    } catch { value = nil
+                        failure = error.localizedDescription
+                    }
+                    requests += try await runtime.resolve(id: request.id, value: value, error: failure)
+                    try await readView()
+                }
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    private func readView() async throws {
+        guard let runtime else { return }
+        view = try await runtime.view()
+        if let failure = view?.error {
+            errorMessage = failure
+        }
+    }
+
+    private func notifyPhotoChange() {
+        guard let runtime else { return }
+        Task {
+            do { _ = try await runtime.update(.object(["type": .string("appleChanged")]))
+                try await readView()
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+}
+
+private final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
+    let changed: @MainActor @Sendable () -> Void
+    init(changed: @escaping @MainActor @Sendable () -> Void) {
+        self.changed = changed
+    }
+
+    func photoLibraryDidChange(_ changeInstance: PHChange) {
+        Task { @MainActor in changed() }
+    }
+}

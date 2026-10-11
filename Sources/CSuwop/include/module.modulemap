@@ -1,0 +1,4 @@
+module CSuwop {
+    header "suwop.h"
+    export *
+}

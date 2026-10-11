@@ -1,0 +1,49 @@
+name: Test and build
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned quality tools
+        run: bash scripts/install-tools.sh
+      - name: Enforce Rust, script, workflow and architecture rules
+        run: make lint-common
+      - run: make test
+      - run: cargo test --locked --workspace --all-features --release
+
+  immich-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Run Rust core against Immich v3.2.4 in Docker
+        env:
+          IMMICH_VERSION: v3.2.4
+        run: make integration
+
+  apple:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned quality tools
+        run: bash scripts/install-tools.sh
+      - name: Enforce Swift formatting and strict lint
+        run: make lint-swift
+      - name: Test the real Rust-to-Swift bridge
+        run: make test
+      - name: Build universal Rust libraries, iOS and macOS apps
+        run: make apple-build

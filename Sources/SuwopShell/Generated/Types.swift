@@ -1,0 +1,307 @@
+// Generated from Rust schema. Run make generate-types; do not edit.
+import Foundation
+
+public struct AppleFacts: Codable, Sendable {
+    public var asset: StoredAsset
+    public var burst: Bool
+    public var canDelete: Bool
+    public var fullAccess: Bool
+    public var live: Bool
+    public var shared: Bool
+    public init(asset: StoredAsset, burst: Bool, canDelete: Bool, fullAccess: Bool, live: Bool, shared: Bool) {
+        self.asset = asset
+        self.burst = burst
+        self.canDelete = canDelete
+        self.fullAccess = fullAccess
+        self.live = live
+        self.shared = shared
+    }
+}
+
+public struct AppleImportEntry: Codable, Sendable {
+    public var file: TransferFile
+    public var kind: String
+    public init(file: TransferFile, kind: String) {
+        self.file = file
+        self.kind = kind
+    }
+}
+
+public struct AppleImportPlan: Codable, Sendable {
+    public var entries: [AppleImportEntry]
+    public var metadata: StoredAsset
+    public init(entries: [AppleImportEntry] = [], metadata: StoredAsset) {
+        self.entries = entries
+        self.metadata = metadata
+    }
+}
+
+public struct AssetKey: Codable, Sendable {
+    public var provider: Provider
+    public var scope: String
+    public var assetID: String
+    public init(provider: Provider, scope: String, assetID: String) {
+        self.provider = provider
+        self.scope = scope
+        self.assetID = assetID
+    }
+}
+
+public struct ConnectionSettings: Codable, Sendable {
+    public var address: String
+    public var allowHTTP: Bool
+    public var credentialID: String
+    public init(address: String, allowHTTP: Bool, credentialID: String) {
+        self.address = address
+        self.allowHTTP = allowHTTP
+        self.credentialID = credentialID
+    }
+}
+
+public struct FileSignature: Codable, Sendable {
+    public var bytes: Int64
+    public var sha256: String
+    public init(bytes: Int64, sha256: String) {
+        self.bytes = bytes
+        self.sha256 = sha256
+    }
+}
+
+public struct HashResult: Codable, Sendable {
+    public var sha1: String
+    public var signature: FileSignature
+    public init(sha1: String, signature: FileSignature) {
+        self.sha1 = sha1
+        self.signature = signature
+    }
+}
+
+public struct HttpRequest: Codable, Sendable {
+    public var body: JSONValue
+    public var downloadPath: String?
+    public var fields: [String: String]
+    public var files: [UploadPart]
+    public var headers: [String: String]
+    public var method: String
+    public var url: String
+    public init(body: JSONValue, downloadPath: String? = nil, fields: [String: String] = [:], files: [UploadPart] = [], headers: [String: String] = [:], method: String, url: String) {
+        self.body = body
+        self.downloadPath = downloadPath
+        self.fields = fields
+        self.files = files
+        self.headers = headers
+        self.method = method
+        self.url = url
+    }
+}
+
+public struct HttpResponse: Codable, Sendable {
+    public var body: JSONValue
+    public var path: String?
+    public var status: Int64
+    public init(body: JSONValue, path: String? = nil, status: Int64) {
+        self.body = body
+        self.path = path
+        self.status = status
+    }
+}
+
+public struct LibrarySnapshot: Codable, Sendable {
+    public var provider: Provider
+    public var scope: String
+    public var assets: [StoredAsset]
+    public var access: ScanAccess
+    public var scannedAt: Date?
+    public init(provider: Provider, scope: String, assets: [StoredAsset] = [], access: ScanAccess, scannedAt: Date? = nil) {
+        self.provider = provider
+        self.scope = scope
+        self.assets = assets
+        self.access = access
+        self.scannedAt = scannedAt
+    }
+}
+
+public struct PhotoResource: Codable, Sendable {
+    public var id: String
+    public var name: String
+    public var role: ResourceRole
+    public var sha1: String?
+    public var bytes: Int64?
+    public init(id: String, name: String, role: ResourceRole, sha1: String? = nil, bytes: Int64? = nil) {
+        self.id = id
+        self.name = name
+        self.role = role
+        self.sha1 = sha1
+        self.bytes = bytes
+    }
+}
+
+public enum Presence: String, Codable, CaseIterable, Sendable {
+    case `both`
+    case `appleOnly`
+    case `immichOnly`
+    case `partial`
+    case `unverified`
+}
+
+public enum Provider: String, Codable, CaseIterable, Sendable {
+    case `apple`
+    case `immich`
+}
+
+public enum ResourceRole: String, Codable, CaseIterable, Sendable {
+    case `image`
+    case `rawImage`
+    case `video`
+    case `liveVideo`
+    case `auxiliary`
+}
+
+public struct SavedLibrary: Codable, Sendable {
+    public var appleScope: String
+    public var connection: ConnectionSettings?
+    public var receipts: [TransferReceipt]
+    public var schemaVersion: Int64
+    public var snapshots: [LibrarySnapshot]
+    public init(appleScope: String, connection: ConnectionSettings? = nil, receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
+        self.appleScope = appleScope
+        self.connection = connection
+        self.receipts = receipts
+        self.schemaVersion = schemaVersion
+        self.snapshots = snapshots
+    }
+}
+
+public enum ScanAccess: String, Codable, CaseIterable, Sendable {
+    case `full`
+    case `limited`
+    case `unavailable`
+}
+
+public struct StoredAsset: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public var capturedAt: Date?
+    public var modifiedAt: Date?
+    public var revision: String
+    public var resources: [PhotoResource]
+    public var isFavorite: Bool
+    public var latitude: Double?
+    public var longitude: Double?
+    public var inventoryComplete: Bool
+    public var isOffline: Bool
+    public var deletionBlockers: [String]
+    public init(key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = []) {
+        self.key = key
+        self.name = name
+        self.capturedAt = capturedAt
+        self.modifiedAt = modifiedAt
+        self.revision = revision
+        self.resources = resources
+        self.isFavorite = isFavorite
+        self.latitude = latitude
+        self.longitude = longitude
+        self.inventoryComplete = inventoryComplete
+        self.isOffline = isOffline
+        self.deletionBlockers = deletionBlockers
+    }
+}
+
+public struct TransferBundle: Codable, Sendable {
+    public var assets: [StoredAsset]
+    public var files: [TransferFile]
+    public init(assets: [StoredAsset] = [], files: [TransferFile] = []) {
+        self.assets = assets
+        self.files = files
+    }
+}
+
+public struct TransferFile: Codable, Sendable {
+    public var resource: PhotoResource
+    public var path: String
+    public var signature: FileSignature
+    public init(resource: PhotoResource, path: String, signature: FileSignature) {
+        self.resource = resource
+        self.path = path
+        self.signature = signature
+    }
+}
+
+public enum TransferIntent: String, Codable, CaseIterable, Sendable {
+    case `copy`
+    case `move`
+}
+
+public enum TransferPhase: String, Codable, CaseIterable, Sendable {
+    case `copying`
+    case `copied`
+    case `deletingSource`
+    case `moved`
+    case `deletionUncertain`
+}
+
+public struct TransferReceipt: Codable, Sendable {
+    public var createdAt: Date
+    public var destination: [StoredAsset]
+    public var destinationProvider: Provider
+    public var destinationScope: String
+    public var id: String
+    public var intent: TransferIntent
+    public var phase: TransferPhase
+    public var signatures: [FileSignature]
+    public var source: [StoredAsset]
+    public init(createdAt: Date, destination: [StoredAsset] = [], destinationProvider: Provider, destinationScope: String, id: String, intent: TransferIntent, phase: TransferPhase, signatures: [FileSignature] = [], source: [StoredAsset] = []) {
+        self.createdAt = createdAt
+        self.destination = destination
+        self.destinationProvider = destinationProvider
+        self.destinationScope = destinationScope
+        self.id = id
+        self.intent = intent
+        self.phase = phase
+        self.signatures = signatures
+        self.source = source
+    }
+}
+
+public struct UnifiedPhoto: Codable, Sendable {
+    public var assets: [StoredAsset]
+    public var presence: Presence
+    public init(assets: [StoredAsset] = [], presence: Presence) {
+        self.assets = assets
+        self.presence = presence
+    }
+}
+
+public struct UploadPart: Codable, Sendable {
+    public var field: String
+    public var filename: String
+    public var path: String
+    public init(field: String, filename: String, path: String) {
+        self.field = field
+        self.filename = filename
+        self.path = path
+    }
+}
+
+public struct ViewModel: Codable, Sendable {
+    public var busy: Bool
+    public var canTransfer: Bool
+    public var error: String?
+    public var moveBlockers: [String: [String]]
+    public var pendingAppleCount: Int64
+    public var photos: [UnifiedPhoto]
+    public var serverVersion: String?
+    public var state: SavedLibrary
+    public var status: String
+    public init(busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+        self.busy = busy
+        self.canTransfer = canTransfer
+        self.error = error
+        self.moveBlockers = moveBlockers
+        self.pendingAppleCount = pendingAppleCount
+        self.photos = photos
+        self.serverVersion = serverVersion
+        self.state = state
+        self.status = status
+    }
+}

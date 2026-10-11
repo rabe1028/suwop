@@ -1,0 +1,60 @@
+strict: true
+included:
+  - App
+  - Sources/SuwopShell
+  - Tests/SuwopShellTests
+excluded:
+  - Sources/SuwopShell/Generated
+opt_in_rules:
+  - array_init
+  - closure_spacing
+  - contains_over_filter_count
+  - contains_over_filter_is_empty
+  - discouraged_optional_boolean
+  - empty_count
+  - empty_string
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - identical_operands
+  - last_where
+  - multiline_arguments
+  - multiline_parameters
+  - operator_usage_whitespace
+  - overridden_super_call
+  - prefer_self_type_over_type_of_self
+  - private_action
+  - private_outlet
+  - redundant_nil_coalescing
+  - sorted_imports
+  - unneeded_parentheses_in_closure_argument
+  - unused_optional_binding
+  - vertical_parameter_alignment_on_call
+force_cast: error
+force_try: error
+force_unwrapping: error
+line_length:
+  warning: 140
+  error: 180
+  ignores_urls: true
+  ignores_comments: true
+identifier_name:
+  min_length: 2
+  excluded: [id, x, y, i]
+function_body_length:
+  warning: 80
+  error: 120
+type_body_length:
+  warning: 350
+  error: 500
+file_length:
+  warning: 600
+  error: 800
+custom_rules:
+  no_force_sendable:
+    regex: '@unchecked\s+Sendable'
+    message: 'Use checked isolation, or document a narrow adapter exception in this configuration.'
+    severity: error
+
+trailing_comma:
+  mandatory_comma: true
