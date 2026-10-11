@@ -210,4 +210,40 @@
         }
         #expect(try Data(contentsOf: source) == before)
     }
+
+    @Test func oversizedInputsAreRejectedByRustBeforeNativePixelDecoding() throws {
+        // Complete all-black RGB PNG, 4,001 x 4,000, immediately above the
+        // input budget. Highly compressible on disk, 48 MB when decoded.
+        let source = try #require(Bundle.module.url(
+            forResource: "oversized", withExtension: "png", subdirectory: "Fixtures"
+        ))
+        let input = try #require(CGImageSourceCreateWithURL(source as CFURL, nil))
+        let properties = try #require(CGImageSourceCopyPropertiesAtIndex(input, 0, nil) as? [CFString: Any])
+        #expect((properties[kCGImagePropertyPixelWidth] as? NSNumber)?.intValue == 4001)
+        #expect((properties[kCGImagePropertyPixelHeight] as? NSNumber)?.intValue == 4000)
+        #expect(throws: SuwopError.self) {
+            do { _ = try NativeImageRenderer.facts(source.path) } catch {
+                #expect(error.localizedDescription.contains("1,600万画素"))
+                throw error
+            }
+        }
+        let dimensions = PixelSize(height: 4000, width: 4001)
+        #expect(throws: SuwopError.self) {
+            do {
+                _ = try NativeImageRenderer.preview(
+                    "missing-source",
+                    dimensions: dimensions,
+                    orientation: 1,
+                    transform: ImageTransform(
+                        clockwiseQuarterTurns: 0,
+                        crop: PixelCrop(height: 1, width: 1, x: 0, y: 0),
+                        flipHorizontal: false
+                    )
+                )
+            } catch {
+                #expect(error.localizedDescription.contains("1,600万画素"))
+                throw error
+            }
+        }
+    }
 #endif

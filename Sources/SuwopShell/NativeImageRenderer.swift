@@ -10,9 +10,16 @@
         public static func facts(_ path: String, orientation: Int64? = nil) throws -> ImageEncodingFacts {
             guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: path) as CFURL, nil),
                   CGImageSourceGetCount(source) == 1,
-                  let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
+                  let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+                  let width = properties[kCGImagePropertyPixelWidth] as? NSNumber,
+                  let height = properties[kCGImagePropertyPixelHeight] as? NSNumber
             else { throw SuwopError("静止画の編集データを読み込めません。") }
-            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any]
+            // Read dimensions without decoding pixels. Rust applies the same
+            // memory bound to native input, previews, persisted edits and saves.
+            try validate(PixelSize(height: height.int64Value, width: width.int64Value))
+            guard let image = CGImageSourceCreateImageAtIndex(
+                source, 0, [kCGImageSourceShouldCache: false] as CFDictionary
+            ) else { throw SuwopError("静止画の編集データを読み込めません。") }
             let alpha = image.alphaInfo
             var hdr = image.bitsPerComponent > 8 || image.bitmapInfo.contains(.floatComponents)
                 || CGImageSourceCopyAuxiliaryDataInfoAtIndex(source, 0, kCGImageAuxiliaryDataTypeHDRGainMap) != nil
@@ -28,7 +35,7 @@
                 hasAlpha: [.first, .last, .premultipliedFirst, .premultipliedLast, .alphaOnly].contains(alpha),
                 hasColorSpace: image.colorSpace != nil,
                 hdr: hdr,
-                orientation: orientation ?? (properties?[kCGImagePropertyOrientation] as? NSNumber)?.int64Value ?? 1,
+                orientation: orientation ?? (properties[kCGImagePropertyOrientation] as? NSNumber)?.int64Value ?? 1,
                 rawDimensions: PixelSize(height: Int64(image.height), width: Int64(image.width))
             )
         }
@@ -81,6 +88,7 @@
         private static func transformed(
             _ path: String, dimensions: PixelSize, orientation: Int64, transform: ImageTransform
         ) throws -> (CIImage, CGColorSpace) {
+            try validate(dimensions)
             guard let original = CIImage(
                 contentsOf: URL(fileURLWithPath: path),
                 options: [.applyOrientationProperty: false]
@@ -114,6 +122,10 @@
 
         private static func normalized(_ image: CIImage) -> CIImage {
             image.transformed(by: CGAffineTransform(translationX: -image.extent.minX, y: -image.extent.minY))
+        }
+
+        private static func validate(_ dimensions: PixelSize) throws {
+            _ = try CoreBridge.utility(11, input: .from(dimensions))
         }
     }
 #endif

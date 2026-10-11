@@ -103,10 +103,12 @@
 - Rust が保存先の1枚を選び、現在の scope・フルアクセス・完全な原本構成を確認する。Apple の1枚に属する RAW / JPEG の原本は同時に保持する。別の保存先や別の写真へ編集を書き込まない。Immich・動画・Live Photo の編集は選択画面に未対応と表示する。
 - Rust が EXIF を反映した原本の整数座標で切り抜き、時計回りの90度回転、上下・左右の反転、取り消し・やり直しを管理する。「開始時に戻す」は既存の編集を保持した開始状態へ戻す。「原本へ戻す」は別の操作として未実装。
 - PhotoKit の編集入力を取得し、認識できる原本ベースの Suwop 調整データだけを再構成する。既存の他アプリの編集や描画済みベースの調整は cannot-handle 経路で現在の見た目を入力とする。未知の調整を原本から再現できると偽って置き換えない。調整 ID・version・内容は Rust が定義する。
-- Swift は Core Image の描画と PhotoKit の入出力を実行する。元の色空間を使い、PhotoKit が許可する JPEG / HEIC で出力する。HDR・透過・色空間不明・初期の画素数上限を超える入力は拒否する。プレビューは1280px以内に縮小し、最新のプレビューを作れない状態で保存を有効にしない。
+- Swift は Core Image の描画と PhotoKit の入出力を実行する。元の色空間を使い、PhotoKit が許可する JPEG / HEIC で出力する。HDR・透過・色空間不明・1,600万画素を超える入力は拒否する。画像のプロパティだけを取得した段階で Rust の同じ画素数制限を適用し、制限外の画像をデコードしない。小さく切り抜いても元画像の制限は解除しない。プレビューは1280px以内に縮小し、最新のプレビューを作れない状態で保存を有効にしない。24MP / 48MP・大型パノラマは、全体のRGBA bitmapを作らない描画方式と実機のメモリ検証を待つ。
 - 保存直前の PhotoKit 変更キューで権限・対象・revision・content 編集可否を再確認する。保存後は実際の調整データ、描画後の寸法、再取得した全原本の SHA-256 / 長さ / 名前 / 役割と日時・お気に入り・GPS を確認する。Auxiliary の置換を許し、原本の欠落や変化は拒否する。結果不明や記録の保存失敗は一覧更新まで Apple の書込みを無効にし、自動再試行しない。新しい Move receipt は作らない。
 - 編集画面は描画処理の停止を待ってから閉じる。ネイティブ入力の保持を解除してから作業領域を片付ける。解除に失敗した場合は使用中の可能性がある作業領域を保持し、エラーを表示する。旧SDKの非Sendableな入力と出力には、読取専用・構築後に不変・利用executorと寿命を限定した private capsule の例外を記載する。編集入力callbackにも明示的な Sendable を要求する strict lint を追加する。
-- ローカル `make check`: Rust 103 tests / Swift 26 tests。幾何・既存編集・改ざん・古い scope / 権限 / revision・キャンセル・保存結果不一致・原本変化・永続化失敗・解放 / 片付け失敗、実FFIでの履歴と保存 / 解放順を確認。Core Imageの8通りの幾何とEXIFの8方向、切り抜きの画素位置、JPEG / HEIC の Display P3と向き・寸法、入力バイト保持を確認した。追加lintも正しいcallback2種の通過とactorを引き継ぐcallbackの拒否を実SwiftLintで確認。最終HEAD CIは別途記録する。
+- ローカル `make check`: Rust 104 tests / Swift 27 tests。幾何・既存編集・改ざん・古い scope / 権限 / revision・キャンセル・保存結果不一致・原本変化・永続化失敗・解放 / 片付け失敗、実FFIでの履歴と保存 / 解放順を確認。Core Imageの8通りの幾何とEXIFの8方向、切り抜きの画素位置、JPEG / HEIC の Display P3と向き・寸法、入力バイト保持を確認した。追加lintも正しいcallback2種の通過とactorを引き継ぐcallbackの拒否を実SwiftLintで確認。最終HEAD CIは別途記録する。
 - `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。Swift 6 strict concurrency / コンパイラ警告のエラー化を維持して、明示的なSendable callbackとネイティブ入力 / 出力の保持をコンパイルした。これをPhotoKit保存・操作の証拠には数えない。
 - 最新版を既存Simulatorにインストール・起動し、保存された一覧のAppleフルアクセス・8枚・転送履歴0件を再読込した。ローカル `make integration` はDocker daemonのsocketが存在せず、テスト開始前に停止。実Immichはhosted CIで別に確認し、純粋な編集系列parserの契約テストを実Immich編集の証拠に数えない。
 - Macのロックにより、Simulatorの編集画面操作・PhotoKit保存・再起動・既存のPhotos編集との往復は未検証。RAW、実機・iCloud・iPad・macOSのPhotoKit操作、HDR・透過、Immichの編集、明るさ・色・フィルター、原本へ戻す、編集後の共有は継続課題。コード / 画素テストをこれらの証拠に数えない。
+
+- 初回 HEAD `dc692b18ef4bfbb58e0179ad3d0bed9b5d6dcc96` の [CI](https://github.com/rabe1028/suwop/actions/runs/38182484113) は core / apple / immich-integration の全 job が通過。その後のレビューで、200MPまで許す全解像度RGBA描画のメモリ不足を修正した。入力を16MPまでに制限し、デコード前のnative metadata取得とプレビュー / 保存にもRustの同じ判定を適用。16MP境界と、16,004,000画素の有効PNGがnative decode前に拒否される回帰テストを通過。修正後の最終HEAD CIとPhotoKit操作は別に確認する。

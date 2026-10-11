@@ -114,6 +114,37 @@ fn ordered_rotation_and_mirrors_have_distinct_but_canonical_results() -> Result<
 }
 
 #[test]
+fn native_bitmap_budget_is_enforced_on_input_before_any_crop() -> Result<(), String> {
+    let supported = PixelSize {
+        width: 4_000,
+        height: 4_000,
+    };
+    supported.validate()?;
+    for size in [
+        PixelSize {
+            width: 4_001,
+            height: 4_000,
+        },
+        PixelSize {
+            width: 6_000,
+            height: 4_000,
+        },
+        PixelSize {
+            width: 8_000,
+            height: 6_000,
+        },
+        PixelSize {
+            width: 20_000,
+            height: 10_000,
+        },
+    ] {
+        assert!(size.validate().is_err());
+        assert!(crop(0, 0, 1, 1).validate(size).is_err());
+    }
+    Ok(())
+}
+
+#[test]
 fn invalid_or_overflowing_geometry_is_rejected_before_rendering() -> Result<(), String> {
     for size in [
         PixelSize {

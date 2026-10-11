@@ -174,6 +174,12 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             suwop_core::editing::verify_edit_source(&request.expected, &request.fresh)?;
             return Ok(Value::Null);
         }
+        11 => {
+            let dimensions: suwop_core::editing::PixelSize =
+                serde_json::from_str(input).map_err(|e| e.to_string())?;
+            dimensions.validate()?;
+            return Ok(Value::Null);
+        }
         _ => {}
     }
     let registry = cores()

@@ -18,6 +18,6 @@ let package = Package(
     targets: [
         nativeTarget,
         .target(name: "SuwopShell", dependencies: ["CSuwop"], linkerSettings: linkSettings),
-        .testTarget(name: "SuwopShellTests", dependencies: ["SuwopShell"]),
+        .testTarget(name: "SuwopShellTests", dependencies: ["SuwopShell"], resources: [.copy("Fixtures")]),
     ]
 )

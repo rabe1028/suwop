@@ -48,9 +48,11 @@ impl PixelSize {
     pub fn validate(self) -> Result<(), String> {
         if !(1..=131_072).contains(&self.width)
             || !(1..=131_072).contains(&self.height)
-            || u64::from(self.width) * u64::from(self.height) > 200_000_000
+            // The initial native encoder materializes an RGBA8 bitmap. Bound
+            // input as well as output before decoding, not merely after crop.
+            || u64::from(self.width) * u64::from(self.height) > 16_000_000
         {
-            return Err("この画像の大きさにはまだ編集が対応していません。".into());
+            return Err("写真編集は現在1,600万画素以内に対応しています。".into());
         }
         Ok(())
     }
