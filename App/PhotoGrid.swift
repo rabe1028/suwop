@@ -47,7 +47,7 @@ struct PhotoGrid: View {
     let density: Int
     let timeline: TimelineGrouping
     let sort: PhotoSort
-    let selecting: Bool
+    @Binding var selecting: Bool
     @Binding var selectedKeys: Set<AssetKey>
     let open: (AssetKey) -> Void
 
@@ -131,7 +131,15 @@ struct PhotoGrid: View {
             .accessibilityLabel("\(photo.name)、\(photo.presence.title)\(photo.isFavorite ? "、お気に入り" : "")")
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
             .accessibilityAddTraits(!selectedKeys.isDisjoint(with: photo.assets.map(\.key)) ? .isSelected : [])
+            .accessibilityAction(named: "写真を選択") {
+                selecting = true
+                selectedKeys.formUnion(photo.assets.map(\.key))
+            }
             .contextMenu {
+                Button("写真を選択", systemImage: "checkmark.circle") {
+                    selecting = true
+                    selectedKeys.formUnion(photo.assets.map(\.key))
+                }
                 Button(
                     photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加",
                     systemImage: photo.isFavorite ? "heart.slash" : "heart"

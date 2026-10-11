@@ -6,12 +6,14 @@
 
 - `domain.rs`: 同一性、RAW/JPEG の多重度、保存状態、削除条件、PhotoKit 入出力計画。
 - `workflow.rs`: 接続、走査、照合、コピー、移動、履歴保存、旧形式の移行。
+- `sharing.rs` / `workflow/sharing.rs`: 共有元の選択、原本の検証、共有ファイルの名前と作業領域の寿命。
 - `immich.rs`: URL／origin 検証、API、ページング、multipart の仕様、レスポンス解釈。
 - `crates/suwop-ffi`: Crux の JSON FFI と C ABI、ファイルをストリームでハッシュするネイティブ入出力。
 - `Sources/SuwopShell`: FFI actor、JSON、生成された DTO、表示用の補助値。
 - `App/AppleShell.swift`: 汎用 effect の振り分け、原子的なファイル保存。
 - `App/ApplePhotos.swift`: PhotoKit の観測とリソース入出力。削除直前にも Rust に観測結果を渡す。
 - `App/Credentials.swift` / `HTTPExecutor.swift`: Keychain と汎用 HTTP の入出力。
+- `App/SystemSharing.swift`: iOS の activity controller と macOS の sharing service。完了またはキャンセルまで effect を返さない。
 - `App/LibraryModel.swift` / `SuwopApp.swift`: ViewModel の公開、画像キャッシュ、SwiftUI。
 
 PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust の JSON Schema から Swift DTO を生成し、生成差分と実ライブラリをリンクしたテストを CI に含めます。FFI の unsafe は `suwop-ffi` の ABI 境界に限定します。原本のハッシュ計算は Rust の atomic なキャンセル状態を各読み取り前後に確認し、Swift の Task キャンセルを停止要求へ伝えます。PhotoKit 原本はキャンセル可能な `requestData` でチャンクごとに書き込み、停止時には native request の停止と途中ファイルの削除を行います。Swift 側は actor を使い、PhotoKit のキャンセル用ゲートだけロックの不変条件を明記した `@unchecked Sendable` を使います。
@@ -38,6 +40,12 @@ PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust
 独立 asset が同じバイト列を持つ場合、編集・補助データ、Live Photo、バースト、External Library、未確認の保存種別、sidecar がある場合はコピーのみです。Immich の公開 API に `isExternal` がない場合は `libraryId` を確認します。フィールド欠落と明示的な null を区別し、欠落を内部保存の証拠にしません。
 
 Immich への新規アップロード後に調整済みの位置情報を PUT します。既存の重複写真の独立メタデータは変更しません。位置情報が一致しない場合、Move の検証は失敗します。Immich の API は位置情報の null 更新を受け付けないため、位置情報なしの原本と EXIF 付き転送先が一致しない場合も削除を止めます。
+
+## 原本の共有
+
+共有は写真や転送履歴を変更しない操作です。統合された写真につき一つのアクセス可能な保存先を選び、Apple Photos を優先します。Immich が選ばれた場合だけ再接続を要求します。原本を取得した後、作業領域内へ元の名前でコピーし、SHA-1 / SHA-256 / バイト長を再検証してシステム共有画面へ渡します。位置情報を含む原本のメタデータや関連動画を保持することを UI で案内します。
+
+Rust は native service の応答まで作業領域を保持し、その後に削除します。共有先が読み取る間に Swift Task のキャンセルでファイルを消さないようにします。native delegate は操作ごとに独立させ、以前の callback が後の共有を完了扱いにしない構成です。取得・コピー・検証が失敗した場合も作業領域を片付け、片付けの失敗は表示します。強制終了では完了 callback を受け取れず、OS の一時領域にファイルが残る場合があります。再起動時の回収は継続作業です。
 
 ## API 基準
 

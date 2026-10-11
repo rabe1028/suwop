@@ -61,3 +61,19 @@ import Testing
     }
     #expect(try Data(contentsOf: url) == Data([1, 2, 3, 4]))
 }
+
+@MainActor @Test func resourceCallbacksDoNotInheritTheCallingActor() async throws {
+    let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: url) }
+    let gate = try FileDownloadGate(url: url) { _ in Issue.record("Completed request was cancelled") }
+    let receive = gate.receivedData
+    let complete = gate.completed
+    let worker = Task.detached {
+        receive(Data([1, 2]))
+        receive(Data([3, 4]))
+        complete(nil)
+    }
+    try await withCheckedThrowingContinuation { gate.install($0) }
+    await worker.value
+    #expect(try Data(contentsOf: url) == Data([1, 2, 3, 4]))
+}

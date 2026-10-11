@@ -13,6 +13,7 @@ struct GalleryView: View {
     @State private var viewer: AssetKey?
     @State private var confirmIndex = false
     @State private var creatingAlbum = false
+    @State private var confirmingShare = false
     @AppStorage("galleryDensity") private var density = 3
     @State private var timeline: TimelineGrouping = .all
 
@@ -68,6 +69,9 @@ struct GalleryView: View {
         .confirmationDialog("原本をダウンロードして照合しますか？", isPresented: $confirmIndex, titleVisibility: .visible) {
             Button("原本を照合") { model.indexOriginals() }
         } message: { Text("iCloud 上の原本を取得する場合があります。元の写真は変更しません。") }
+        .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
+            Button("\(selection.count) 件の原本を共有") { model.share(selection) }
+        } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
     }
 
     private var library: some View {
@@ -95,7 +99,7 @@ struct GalleryView: View {
                         density: density,
                         timeline: timeline,
                         sort: sort,
-                        selecting: selecting,
+                        selecting: $selecting,
                         selectedKeys: $selectedKeys
                     ) { viewer = $0 }
                 }
@@ -168,6 +172,7 @@ struct GalleryView: View {
                     Text("\(selection.count) 件を選択").font(.subheadline)
                     Spacer()
                     Menu {
+                        Button("原本ファイルを共有", systemImage: "square.and.arrow.up") { confirmingShare = true }
                         Button("お気に入りに追加", systemImage: "heart") { model.favorite(selection, value: true) }
                         Button("お気に入りから削除", systemImage: "heart.slash") { model.favorite(selection, value: false) }
                         Button("選択を解除") { selectedKeys.removeAll() }

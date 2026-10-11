@@ -304,6 +304,15 @@ public enum ScanAccess: String, Codable, CaseIterable, Sendable {
     case `unavailable`
 }
 
+public struct ShareFile: Codable, Sendable {
+    public var name: String
+    public var path: String
+    public init(name: String, path: String) {
+        self.name = name
+        self.path = path
+    }
+}
+
 public struct StoredAlbum: Codable, Sendable {
     public var key: AlbumKey
     public var members: [AssetKey]

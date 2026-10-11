@@ -54,6 +54,13 @@ pub enum ShellOperation {
     Cleanup {
         path: String,
     },
+    CopyFile {
+        source: String,
+        destination: String,
+    },
+    ShareFiles {
+        files: Vec<crate::sharing::ShareFile>,
+    },
     AppleScan {
         scope: String,
         permission: bool,
@@ -103,6 +110,10 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    Share {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
     RefreshAlbums,
     CreateAlbum {
         provider: Provider,
