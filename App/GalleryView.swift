@@ -45,6 +45,8 @@ struct GalleryView: View {
         .onChange(of: tab) { _, value in
             if value == 2 {
                 filter = .all
+            } else {
+                query = ""
             }
         }
         .onChange(of: model.photos.map(\.id)) { _, _ in

@@ -13,6 +13,9 @@ import SwiftUI
     private var shell: AppleShell?
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
+    private var browseWork: Task<Void, Never>?
+    private var browseGeneration: UInt64 = 0
+    private var publishedRevision: UInt64 = 0
     private var started = false
     private var pendingRefresh = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
@@ -49,7 +52,10 @@ import SwiftUI
 
     func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?) {
         guard let runtime else { return }
-        Task {
+        browseWork?.cancel()
+        browseGeneration &+= 1
+        let generation = browseGeneration
+        browseWork = Task {
             do {
                 let options = BrowserOptions(
                     filter: filter,
@@ -58,9 +64,14 @@ import SwiftUI
                     sort: sort,
                     timeZone: TimeZone.current.identifier
                 )
-                _ = try await runtime.update(.object(["type": .string("browse"), "options": .from(options)]))
-                try await readView()
-            } catch { errorMessage = error.localizedDescription }
+                let snapshot = try await runtime.browse(options)
+                guard !Task.isCancelled, generation == browseGeneration else { return }
+                publish(snapshot)
+            } catch {
+                if !Task.isCancelled, generation == browseGeneration {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 
@@ -219,7 +230,13 @@ import SwiftUI
 
     private func readView() async throws {
         guard let runtime else { return }
-        view = try await runtime.view()
+        try await publish(runtime.snapshot())
+    }
+
+    private func publish(_ snapshot: RuntimeSnapshot) {
+        guard snapshot.revision >= publishedRevision else { return }
+        publishedRevision = snapshot.revision
+        view = snapshot.view
         if let failure = view?.error {
             errorMessage = failure
         }
