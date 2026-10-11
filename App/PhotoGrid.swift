@@ -200,7 +200,7 @@ struct PhotoTile: View {
                 }
             }.clipped()
         }.aspectRatio(1, contentMode: .fit)
-            .task(id: "\(photo.id)|\(model.thumbnailGeneration)") {
+            .task(id: model.previewIdentifier(photo)) {
                 image = nil
                 let loaded = try? await model.thumbnail(photo)
                 if !Task.isCancelled {

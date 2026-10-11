@@ -558,6 +558,25 @@ public enum Presence: String, Codable, CaseIterable, Sendable {
     case `unverified`
 }
 
+public struct PreviewChoice: Codable, Sendable {
+    public var cacheId: String
+    public var capturedAt: Date?
+    public var disabledReason: String?
+    public var key: AssetKey
+    public var modifiedAt: Date?
+    public var name: String
+    public var selected: Bool
+    public init(cacheId: String, capturedAt: Date? = nil, disabledReason: String? = nil, key: AssetKey, modifiedAt: Date? = nil, name: String, selected: Bool) {
+        self.cacheId = cacheId
+        self.capturedAt = capturedAt
+        self.disabledReason = disabledReason
+        self.key = key
+        self.modifiedAt = modifiedAt
+        self.name = name
+        self.selected = selected
+    }
+}
+
 public enum Provider: String, Codable, CaseIterable, Sendable {
     case `apple`
     case `immich`
@@ -726,6 +745,17 @@ public struct UploadPart: Codable, Sendable {
     }
 }
 
+public struct Version: Codable, Sendable {
+    public var major: Int64
+    public var minor: Int64
+    public var patch: Int64
+    public init(major: Int64, minor: Int64, patch: Int64) {
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+}
+
 public struct ViewModel: Codable, Sendable {
     public var albums: [AlbumView]
     public var browser: BrowserView
@@ -738,11 +768,13 @@ public struct ViewModel: Codable, Sendable {
     public var moveBlockers: [String: [String]]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
+    public var previewChoices: [String: [PreviewChoice]]
     public var previewSources: [String: AssetKey]
+    public var remoteVersion: Version?
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: SavedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy
@@ -754,7 +786,9 @@ public struct ViewModel: Codable, Sendable {
         self.moveBlockers = moveBlockers
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
+        self.previewChoices = previewChoices
         self.previewSources = previewSources
+        self.remoteVersion = remoteVersion
         self.serverVersion = serverVersion
         self.state = state
         self.status = status

@@ -28,6 +28,7 @@ fn real_immich_upload_gps_list_download_stack_sidecar_and_trash() -> Result<(), 
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
         let result = exercise(&ctx, &address, &key, &directory).await;
         ctx.send_event(Event::Finished {
+            preview_to_select: None,
             state: SavedLibrary::default(),
             session: None,
             status: String::new(),
@@ -137,6 +138,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
     exercise_metadata(ctx, &session, &ids[..2]).await?;
     exercise_albums(ctx, &session, &ids[..2]).await?;
+    ids.push(exercise_edited_preview(ctx, &session, directory, now).await?);
     let _: Value = session
         .json(
             ctx,
@@ -187,6 +189,153 @@ async fn wait_for(
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("search index did not reach the expected state".into())
+}
+
+async fn exercise_edited_preview(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+    now: f64,
+) -> Result<String, String> {
+    use suwop_core::editing::{ImageTransform, PixelCrop, PixelSize, read_immich_transform};
+    let bytes = base64::engine::general_purpose::STANDARD.decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAFElEQVR4nGP4z8DAAMb//0MZ2DgAGRwO8lIWG74AAAAASUVORK5CYII="
+    ).map_err(|e| e.to_string())?;
+    let input = directory.join("preview-contract.png");
+    std::fs::write(&input, &bytes).map_err(|e| e.to_string())?;
+    let resource = PhotoResource {
+        id: "preview".into(),
+        name: "preview-contract.png".into(),
+        role: ResourceRole::Image,
+        sha1: None,
+        bytes: Some(bytes.len() as u64),
+    };
+    let file = TransferFile {
+        resource: resource.clone(),
+        path: input.to_string_lossy().into_owned(),
+        signature: FileSignature {
+            sha256: "0".repeat(64),
+            bytes: bytes.len() as u64,
+        },
+    };
+    let id = session
+        .upload(ctx, &file, &fixture_metadata(resource, 4, now), now, None)
+        .await?;
+    let path = directory.join("preview.jpg");
+    let before_preview = wait_preview(ctx, session, &id, &path, 4.0 / 3.0).await?;
+    let before = session.asset(ctx, &id).await?;
+    let dimensions = PixelSize {
+        width: 4,
+        height: 3,
+    };
+    let transform = ImageTransform {
+        crop: PixelCrop {
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 1,
+        },
+        clockwise_quarter_turns: 1,
+        flip_horizontal: false,
+    };
+    let _: Value = session
+        .json(
+            ctx,
+            &format!("assets/{id}/edits"),
+            "PUT",
+            Some(json!({ "edits": transform.immich_actions(dimensions)? })),
+        )
+        .await?;
+    let actions: Value = session
+        .json(ctx, &format!("assets/{id}/edits"), "GET", None)
+        .await?;
+    assert_eq!(read_immich_transform(dimensions, &id, actions)?, transform);
+    // The service can return an unedited fallback while its queued renderer is
+    // pending. A successful HTTP response alone must not satisfy this test.
+    let edited_preview = wait_preview(ctx, session, &id, &path, 0.5).await?;
+    assert_ne!(before_preview, edited_preview);
+    let after = session.asset(ctx, &id).await?;
+    assert_eq!(after.id, before.id);
+    assert_eq!(after.checksum, before.checksum);
+    assert_eq!(after.original_file_name, before.original_file_name);
+    assert_eq!(after.is_favorite, before.is_favorite);
+    assert_eq!(
+        after.record(&session.scope, None, None).captured_at,
+        before.record(&session.scope, None, None).captured_at
+    );
+    assert_eq!(after.is_edited, Some(true));
+    let files = session.files(ctx, &id).await?;
+    assert!(
+        suwop_core::domain::allow_deletion(&[after.record(&session.scope, None, Some(&files))])
+            .is_err()
+    );
+    let original = directory.join("preview-original.png");
+    session
+        .download(ctx, &id, &original.to_string_lossy())
+        .await?;
+    assert_eq!(std::fs::read(original).map_err(|e| e.to_string())?, bytes);
+    Ok(id)
+}
+
+async fn wait_preview(
+    ctx: &Context,
+    session: &Session,
+    id: &str,
+    path: &Path,
+    aspect: f64,
+) -> Result<Vec<u8>, String> {
+    for _ in 0..80 {
+        let mut request = session.preview_request(id, true)?;
+        request.download_path = Some(path.to_string_lossy().into_owned());
+        let response: HttpResponse =
+            suwop_core::app::io(ctx, ShellOperation::Http(request)).await?;
+        if response.status == 200 {
+            let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+            if let Some((width, height)) = jpeg_dimensions(&bytes)
+                && (f64::from(width) / f64::from(height) - aspect).abs() < 0.02
+            {
+                return Ok(bytes);
+            }
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(format!(
+        "preview did not reach expected rendered aspect {aspect}"
+    ))
+}
+
+/// Read the SOF dimensions of the harness's JPEG previews without decoding
+/// pixels. Covers baseline/progressive JPEG and skips variable-size segments.
+fn jpeg_dimensions(bytes: &[u8]) -> Option<(u16, u16)> {
+    if bytes.get(..2)? != [0xff, 0xd8] {
+        return None;
+    }
+    let mut cursor: usize = 2;
+    while bytes.get(cursor)? == &0xff {
+        while bytes.get(cursor)? == &0xff {
+            cursor += 1;
+        }
+        let marker = *bytes.get(cursor)?;
+        cursor += 1;
+        if matches!(marker, 0xd9 | 0xda) {
+            return None;
+        }
+        if matches!(marker, 0x01 | 0xd0..=0xd8) {
+            continue;
+        }
+        let length = u16::from_be_bytes(bytes.get(cursor..cursor + 2)?.try_into().ok()?);
+        if length < 2 {
+            return None;
+        }
+        let segment = bytes.get(cursor..cursor.checked_add(usize::from(length))?)?;
+        if matches!(marker, 0xc0..=0xc3 | 0xc5..=0xc7 | 0xc9..=0xcb | 0xcd..=0xcf) && length >= 7 {
+            let height = u16::from_be_bytes(segment.get(3..5)?.try_into().ok()?);
+            let width = u16::from_be_bytes(segment.get(5..7)?.try_into().ok()?);
+            return (width > 0 && height > 0).then_some((width, height));
+        }
+        cursor += usize::from(length);
+    }
+    None
 }
 
 async fn exercise_albums(ctx: &Context, session: &Session, ids: &[String]) -> Result<(), String> {

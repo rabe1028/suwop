@@ -97,6 +97,7 @@ impl Runtime<'_> {
                     self.invalidate(Provider::Apple);
                     return Err(error);
                 }
+                self.preferred_preview = Some(key.clone());
                 Ok("写真の編集を保存しました。原本は残っています。".into())
             }
             Err(error) => {

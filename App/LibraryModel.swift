@@ -14,6 +14,7 @@ import SwiftUI
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
+    private var previewWork: Task<Void, Never>?
     private var browseGeneration: UInt64 = 0
     private var publishedRevision: UInt64 = 0
     private var started = false
@@ -113,7 +114,39 @@ import SwiftUI
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         guard let shell else { throw SuwopError("入出力が利用できません。") }
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
-        return try await shell.thumbnail(key, connection: connection, preview: true)
+        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: true)
+    }
+
+    func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
+        view?.previewChoices[photo.id] ?? []
+    }
+
+    func displayedSource(_ photo: UnifiedPhoto) -> PreviewChoice? {
+        previewChoices(photo).first(where: \.selected)
+    }
+
+    func previewIdentifier(_ photo: UnifiedPhoto) -> String {
+        "\(thumbnailGeneration)|\(displayedSource(photo)?.cacheId ?? "unavailable")"
+    }
+
+    func choosePreview(_ photo: UnifiedPhoto, key: AssetKey, chosen: @escaping @MainActor (AssetKey) -> Void) {
+        guard !isBusy, let runtime, let anchor = photo.assets.first?.key else { return }
+        previewWork?.cancel()
+        errorMessage = nil
+        previewWork = Task {
+            do {
+                let snapshot = try await runtime.choosePreview(anchor: anchor, key: key)
+                guard !Task.isCancelled else { return }
+                publish(snapshot)
+                if !snapshot.view.busy, snapshot.view.error == nil {
+                    chosen(key)
+                }
+            } catch {
+                if !Task.isCancelled {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
     }
 
     func playbackKind(_ photo: UnifiedPhoto) -> PlaybackKind? {
@@ -252,12 +285,12 @@ import SwiftUI
 
     func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
-        let cacheKey = "\(thumbnailGeneration)|\(photo.id)" as NSString
+        let cacheKey = previewIdentifier(photo) as NSString
         if let image = thumbnails.object(forKey: cacheKey) {
             return image
         }
         guard let shell else { throw SuwopError("入出力が利用できません。") }
-        let image = try await shell.thumbnail(key, connection: connection)
+        let image = try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion)
         try Task.checkCancellation()
         thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
         return image

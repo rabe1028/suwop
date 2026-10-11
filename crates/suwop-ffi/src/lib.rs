@@ -220,31 +220,23 @@ fn thumbnail_request(input: &str) -> Result<Value, String> {
         asset_id: String,
         #[serde(default)]
         preview: bool,
+        #[serde(default)]
+        version: Option<suwop_core::immich::Version>,
     }
     let request: Thumbnail = serde_json::from_str(input).map_err(|e| e.to_string())?;
-    suwop_core::immich::valid_id(&request.asset_id)?;
     let session = suwop_core::immich::Session {
         endpoint: request.address,
         key: request.key,
         user_id: String::new(),
         scope: String::new(),
-        version: suwop_core::immich::Version {
-            major: 3,
-            minor: 2,
-            patch: 4,
-        },
+        version: request.version.unwrap_or(suwop_core::immich::Version {
+            major: 2,
+            minor: 0,
+            patch: 0,
+        }),
     };
-    let size = if request.preview {
-        "preview"
-    } else {
-        "thumbnail"
-    };
-    serde_json::to_value(session.request(
-        &format!("assets/{}/thumbnail?size={size}", request.asset_id),
-        "GET",
-        None,
-    ))
-    .map_err(|e| e.to_string())
+    serde_json::to_value(session.preview_request(&request.asset_id, request.preview)?)
+        .map_err(|e| e.to_string())
 }
 fn hash_input(input: &str) -> Result<Value, String> {
     #[derive(serde::Deserialize)]

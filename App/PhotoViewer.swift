@@ -66,6 +66,7 @@ struct PhotoViewer: View {
                 onDismiss: {
                     if let target = pendingEdit {
                         pendingEdit = nil
+                        key = target.key
                         model.editImage(target)
                     }
                 },
@@ -103,7 +104,8 @@ struct PhotoViewer: View {
             Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("写真を閉じる")
             Spacer()
             VStack(spacing: 2) {
-                Text(photo?.capturedAt?.formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
+                Text(photo.flatMap { model.displayedSource($0)?.capturedAt }?
+                    .formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
                     .font(.subheadline.bold())
                 Text("\(index + 1) / \(pages.count)").font(.caption).foregroundStyle(.secondary)
             }
@@ -114,6 +116,10 @@ struct PhotoViewer: View {
 
     private func actions(_ photo: UnifiedPhoto) -> some View {
         VStack(spacing: 8) {
+            PreviewSourceMenu(choices: model.previewChoices(photo)) { chosen in
+                model.choosePreview(photo, key: chosen) { key = $0 }
+            }
+            .disabled(model.isBusy)
             if model.isBusy {
                 HStack {
                     ProgressView(model.status).font(.caption)
@@ -214,7 +220,8 @@ private struct ZoomablePhoto: View {
                             settledOffset = .zero
                         }
                     }.onTapGesture { toggleChrome() }
-                    .accessibilityLabel(photo.name).accessibilityIdentifier("photoPreview")
+                    .accessibilityLabel(model.displayedSource(photo)?.name ?? photo.name)
+                    .accessibilityIdentifier("photoPreview")
                     .accessibilityAction(named: "拡大・縮小") { scale = scale > 1 ? 1 : 2.5
                         settledScale = scale
                         offset = .zero
@@ -228,9 +235,13 @@ private struct ZoomablePhoto: View {
                     ProgressView("写真を読み込み中…")
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-        }.task(id: "\(photo.id)|\(model.thumbnailGeneration)|\(retry)") {
+        }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
             error = nil
+            scale = 1
+            settledScale = 1
+            offset = .zero
+            settledOffset = .zero
             do { let loaded = try await model.preview(photo)
                 try Task.checkCancellation()
                 image = loaded

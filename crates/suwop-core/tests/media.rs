@@ -6,7 +6,7 @@ use suwop_core::{
         AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
         ScanAccess, StoredAsset, TransferBundle, TransferFile,
     },
-    media::{PlaybackKind, files, kind, preview_source, source},
+    media::{PlaybackKind, PreviewAccess, files, kind, selected_preview, source},
     workflow::HashResult,
 };
 
@@ -57,6 +57,25 @@ fn snapshot(asset: StoredAsset, access: ScanAccess) -> LibrarySnapshot {
         access,
         scanned_at: None,
     }
+}
+fn session() -> suwop_core::immich::Session {
+    suwop_core::immich::Session {
+        endpoint: "https://example/api".into(),
+        key: "fixture".into(),
+        user_id: "user".into(),
+        scope: "remote".into(),
+        version: suwop_core::immich::Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+    }
+}
+fn preview_source(
+    photo: &suwop_core::domain::UnifiedPhoto,
+    snapshots: &[LibrarySnapshot],
+) -> Option<AssetKey> {
+    selected_preview(&PreviewAccess::new(snapshots, "apple", Some(&session())).choices(photo, &[]))
 }
 fn bundle(kind: PlaybackKind, directory: &str) -> TransferBundle {
     let asset = asset(kind);
@@ -213,9 +232,11 @@ fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -
             ready: true,
             state: SavedLibrary {
                 schema_version: 2,
+                apple_scope: "apple".into(),
                 snapshots: snapshots.clone(),
                 ..SavedLibrary::default()
             },
+            session: Some(session()),
             ..Model::default()
         },
     );

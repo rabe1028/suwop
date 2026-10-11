@@ -18,12 +18,14 @@ mod sharing;
 
 #[derive(Debug)]
 pub struct Outcome {
+    pub preview_to_select: Option<AssetKey>,
     pub state: SavedLibrary,
     pub session: Option<Session>,
     pub status: String,
     pub error: Option<String>,
 }
 struct Runtime<'a> {
+    preferred_preview: Option<AssetKey>,
     ctx: &'a Context,
     state: SavedLibrary,
     session: Option<Session>,
@@ -38,6 +40,7 @@ pub async fn run(
     session: Option<Session>,
 ) -> Outcome {
     let mut runtime = Runtime {
+        preferred_preview: None,
         ctx,
         state,
         session,
@@ -75,12 +78,14 @@ pub async fn run(
     }
     match result {
         Ok(status) => Outcome {
+            preview_to_select: runtime.preferred_preview,
             state: runtime.state,
             session: runtime.session,
             status,
             error: None,
         },
         Err(error) => Outcome {
+            preview_to_select: runtime.preferred_preview,
             state: runtime.state,
             session: runtime.session,
             status: if sharing {

@@ -22,6 +22,10 @@ impl Version {
         self.major == 3 && self.minor >= 2
     }
     #[must_use]
+    pub fn uses_edited_previews(&self) -> bool {
+        self.major == 3 || self.major == 2 && self.minor >= 6
+    }
+    #[must_use]
     pub fn description(&self) -> String {
         format!("{}.{}.{}", self.major, self.minor, self.patch)
     }
@@ -111,6 +115,21 @@ pub fn valid_id(id: &str) -> Result<(), String> {
     }
 }
 impl Session {
+    pub fn preview_request(&self, id: &str, preview: bool) -> Result<HttpRequest, String> {
+        valid_id(id)?;
+        let size = if preview { "preview" } else { "thumbnail" };
+        let edited = if self.version.uses_edited_previews() {
+            "&edited=true"
+        } else {
+            ""
+        };
+        Ok(self.request(
+            &format!("assets/{id}/thumbnail?size={size}{edited}"),
+            "GET",
+            None,
+        ))
+    }
+
     #[must_use]
     pub fn request(&self, path: &str, method: &str, body: Option<Value>) -> HttpRequest {
         HttpRequest {

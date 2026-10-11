@@ -112,3 +112,17 @@
 - Macのロックにより、Simulatorの編集画面操作・PhotoKit保存・再起動・既存のPhotos編集との往復は未検証。RAW、実機・iCloud・iPad・macOSのPhotoKit操作、HDR・透過、Immichの編集、明るさ・色・フィルター、原本へ戻す、編集後の共有は継続課題。コード / 画素テストをこれらの証拠に数えない。
 
 - 初回 HEAD `dc692b18ef4bfbb58e0179ad3d0bed9b5d6dcc96` の [CI](https://github.com/rabe1028/suwop/actions/runs/38182484113) は core / apple / immich-integration の全 job が通過。その後のレビューで、200MPまで許す全解像度RGBA描画のメモリ不足を修正した。入力を16MPまでに制限し、デコード前のnative metadata取得とプレビュー / 保存にもRustの同じ判定を適用。16MP境界と、16,004,000画素の有効PNGがnative decode前に拒否される回帰テストを通過。修正後の最終HEAD CIとPhotoKit操作は別に確認する。
+
+- 修正後の [最終 HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38183831004) は `4cbb264a20d00601b7516e28f6d71c6b0511f37c` で全3 jobが通過。メモリに関するレビュー指摘を解消し、[PR #9](https://github.com/rabe1028/suwop/pull/9)をマージ。main `929fc0a74e02c4003ea0b00bdd0e6ad03f08e23a` と検証済み tree `698e8f4f14641f5eb8d7def0b75e24aa96094543` の一致を確認し、[main CI](https://github.com/rabe1028/suwop/actions/runs/38184421960)も別に全3 jobが通過。最終修正後のPhotoKit保存の画面操作は未検証。
+
+## 統合した写真の表示元と編集後のプレビュー
+
+- Rust が統合した原本の中から、表示する1枚の保存先を選び、Swift は選択肢と選択済みの表示を描画する。静止画のグリッドと全画面に同じ選択を使い、撮影日は表示中のコピーの値を使う。表示元の変更で写真や転送履歴を書き換えない。
+- 選択は実際の asset key を保持するため、原本の照合で一覧が統合・分割されてもそのコピーを追う。削除されたコピーの選択は破棄する。選択した保存先がアクセス不可になった場合は別の見た目へ切り替えず、理由と明示的な再選択を提示する。選択の永続化は継続作業で、再起動時は既定の選択に戻る。
+- 現在の Apple scope / Immich session と snapshot にある実レコードを照合し、異なる接続先、欠落、重複・曖昧な inventory を拒否する。プレビューは読取りなので、限定権限や原本が取得不完全・オフラインでも現在のアクセスを確認できる保存先のサムネイルは要求できる。表示元の検証は一覧全体に索引を1回作り、各タイルで全写真の再走査をしない。
+- 選択したコピー、revision、原本・補助リソース、サーバーの version、アクセス状態を含めた Rust の cache identity を使う。表示元・内容・アクセス変更でグリッドと全画面の再読込を行い、ズーム位置も初期化する。検証して保存した編集のコピーを Rust が表示元に選ぶ。
+- Immich v2.6以降の2系と3系では Rust が `edited=true` のプレビューを組み立てる。古い版と version 不明の従来の FFI 入力は原本側の取得を保持する。v2.0 / v2.6 / v3.0 / v3.2.4 の公式 DTO を確認し、v2.0には未定義のパラメーターを送らない。実通信での確認対象は v3.2.4。
+- `make check`: Rust 113 tests / Swift 29 tests と strict lint / format / architecture / generated DTO / hooksを通過。コピーの切替と別写真の拒否、アクセス不可時の保持、カタログの再統合・分割・削除、scope / record / 重複の検証、cache identity、限定権限・オフラインの読取り、編集中の選択、保存後の表示元を確認。実 FFI でも選択と日時のDTO、cache identity、server versionに応じたURIを検証した。
+- 実Immichテストに、4×3のPNGを切り抜き・回転し、編集系列を読み直し、編集後のJPEGプレビューの縦横比と変更前後のバイト列を確認し、原本の内容・checksum・名前・日時・お気に入りを保持するケースを追加。HTTP 200だけを編集反映の証拠にしない。編集済みの写真がMoveの削除対象にならないことも確認する。ローカル `make integration` はDocker socket不在でテスト前に停止し、この新しいケースの実通信は最終HEAD CIで別に検証する。
+- `make apple-build` は Rust の Apple 5 target と iOS Simulator / macOS universal app builds を通過。保存先を選び直した後は、全画面の参照先もその asset key に変え、以前のコピーが一覧から消えても選択中のコピーを表示する。
+- 保存先切替のnative画面、実サーバーの編集直後の待機表示、キャッシュの実操作・性能・VoiceOverは別の確認対象。Macのロックによりnative操作は未完了。Immich編集の書込みUIはまだ公開していない。

@@ -83,3 +83,5 @@ Immich v3.2.4 を実通信テストに使用します。3.2 以降は filter / o
 - [Immich asset DTO](https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/asset.dto.ts)
 - [Immich search DTO](https://github.com/immich-app/immich/blob/v3.2.4/server/src/dtos/search.dto.ts)
 - [PhotoKit resources](https://developer.apple.com/documentation/photos/phassetresource)
+
+統合した写真のプレビューの保存先は `media/preview.rs` が選ぶ。現在の snapshot の一意な実レコードと scope / session を索引にし、表示元の選択、選択した保存先が使えない場合の保持、内容とアクセスを含む cache identity は Rust が管理する。Swift はこの identity で画像要求を再開し、選択肢と表示中のコピーの日時を表示する。PhotoKit の編集を検証・保存した後も Rust がそのコピーを表示元に選ぶ。Immich の preview URI と version に応じた edited 指定は `Session::preview_request` が組み立てる。表示元の設定は現段階では起動中の状態に保持する。
