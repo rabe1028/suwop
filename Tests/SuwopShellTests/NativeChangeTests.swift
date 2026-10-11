@@ -1,5 +1,6 @@
 #if canImport(os)
     import Foundation
+    import os
     import SuwopShell
     import Testing
 
@@ -27,5 +28,24 @@
                 completion(true, nil)
             }
         }
+    }
+
+    @Test func incompleteNativeRefetchStopsBeforeDeletionEvenIfCompletionReportsSuccess() async throws {
+        for returned in [["a"], ["a", "c"], ["a", "a"], []] {
+            let deleted = OSAllocatedUnfairLock(initialState: false)
+            let result: Result<Void, Error> = try await NativeChange.perform {
+                do {
+                    try NativeChange.validateIdentifiers(requested: ["a", "b"], returned: returned)
+                    deleted.withLock { $0 = true }
+                    return .success(())
+                } catch { return .failure(error) }
+            } submit: { changes, completion in
+                changes()
+                completion(true, nil)
+            }
+            #expect(throws: SuwopError.self) { try result.get() }
+            #expect(!deleted.withLock { $0 })
+        }
+        try NativeChange.validateIdentifiers(requested: ["a", "b", "a"], returned: ["b", "a"])
     }
 #endif

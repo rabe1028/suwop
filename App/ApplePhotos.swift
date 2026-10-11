@@ -167,6 +167,7 @@ import UniformTypeIdentifiers
         }
         var fresh: [StoredAsset] = []
         for record in assets {
+            try validate(record.key)
             let native = try Self.fetch(record.key.assetID)
             try fresh.append(Self.describe(native, scope: scope, fullAccess: true))
         }
@@ -174,12 +175,28 @@ import UniformTypeIdentifiers
         _ = try CoreBridge.utility(5, input: input)
         try Task.checkCancellation()
         let identifiers = assets.map(\.key.assetID)
-        try await NativeChange.perform {
-            let natives = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
-            PHAssetChangeRequest.deleteAssets(natives)
+        let scope = scope
+        let result: Result<Void, Error> = try await NativeChange.perform {
+            do {
+                guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
+                    throw SuwopError("写真ライブラリへのフルアクセスを確認できませんでした。")
+                }
+                let natives = try Self.fetchAll(identifiers)
+                let fresh = try (0 ..< natives.count).map {
+                    try Self.describe(natives.object(at: $0), scope: scope, fullAccess: true)
+                }
+                // Refetch and revalidate inside PhotoKit's change queue before any deletion.
+                let input: JSONValue = try .object(["saved": .from(assets), "fresh": .from(fresh)])
+                _ = try CoreBridge.utility(5, input: input)
+                PHAssetChangeRequest.deleteAssets(natives)
+                return .success(())
+            } catch {
+                return .failure(error)
+            }
         } submit: { changes, completion in
             PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion)
         }
+        try result.get()
     }
 
     func thumbnail(_ key: AssetKey, edge: CGFloat = 360) async throws -> PlatformImage {
@@ -242,6 +259,13 @@ import UniformTypeIdentifiers
             throw SuwopError("写真が見つからないか、アクセス権限がありません。")
         }
         return asset
+    }
+
+    nonisolated static func fetchAll(_ identifiers: [String]) throws -> PHFetchResult<PHAsset> {
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        let returned = (0 ..< assets.count).map { assets.object(at: $0).localIdentifier }
+        try NativeChange.validateIdentifiers(requested: identifiers, returned: returned)
+        return assets
     }
 
     private nonisolated static func role(_ resource: PHAssetResource) -> ResourceRole {

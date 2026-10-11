@@ -25,9 +25,10 @@
 
 ## 閲覧・お気に入りの検証（2026-10-12）
 
-- `make check`: Rust 41 tests、Swift 13 tests、厳格な lint / format / architecture / generated DTO / hook checks を通過。
+- `make check`: Rust 41 tests、Swift 14 tests、厳格な lint / format / architecture / generated DTO / hook checks を通過。
 - `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS のアプリビルドを通過。実機の署名・配布確認は含まない。
 - Simulator の標準写真だけを使用。全画面の前後移動、ズームの accessibility action、月別表示、お気に入り追加と解除、再起動後の native 再読込、コレクション件数を確認。
 - PhotoKit の変更用キューで MainActor を継承して crash する問題を再現・デバッガーで確認。`NativeChange` の Sendable callback bridge に修正し、off-main callback の回帰テストと native お気に入り保存を通過。取り込みとゴミ箱も同じ境界を使うが、今回その native 操作は未確認。
+- 削除用キュー内で要求した全 ID の完全一致と Rust の原本・メタデータ検証を再実行する。取得漏れ・異なる ID・重複・空の再取得は変更を開始せず、native completion が成功を返しても失敗を伝える回帰テストを通過。
 - Immich v3.2.4 のお気に入り true / false の保存確認を integration test に追加。local Docker は OrbStack の I/O エラーにより起動できず、local integration は未完了。Hosted CI の結果は PR で別途確認する。
 - 同一写真の整理は Apple Photos / Immich 両方に反映する前提。部分成功は巻き戻さず一覧を更新して確認する。写真の変更で原本の照合証拠が無効になった場合は再照合が必要。

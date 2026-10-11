@@ -12,15 +12,19 @@ extension ApplePhotosStore {
             return try Self.fetch(key.assetID).localIdentifier
         }
         try Task.checkCancellation()
-        try await NativeChange.perform {
-            let assets = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
-            for index in 0 ..< assets.count {
-                let asset = assets.object(at: index)
-                PHAssetChangeRequest(for: asset).isFavorite = value
-            }
+        let result: Result<Void, Error> = try await NativeChange.perform {
+            do {
+                let assets = try Self.fetchAll(identifiers)
+                for index in 0 ..< assets.count {
+                    let asset = assets.object(at: index)
+                    PHAssetChangeRequest(for: asset).isFavorite = value
+                }
+                return .success(())
+            } catch { return .failure(error) }
         } submit: { changes, completion in
             PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion)
         }
+        try result.get()
         return try keys.map { try Self.describe(Self.fetch($0.assetID), scope: scope, fullAccess: true) }
     }
 }
