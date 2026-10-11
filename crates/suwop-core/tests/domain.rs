@@ -285,6 +285,19 @@ fn move_preserves_capture_date_and_favorite() {
     assert!(verify_source(&saved, &mut fresh).is_err());
 }
 #[test]
+fn missing_capture_date_cannot_be_invented_or_removed_during_move() {
+    let mut source = bundle(vec![asset(Provider::Apple, "a", &[JPEG])]);
+    let mut target = bundle(vec![asset(Provider::Immich, "b", &[JPEG])]);
+    source.assets[0].captured_at = None;
+    let saved = receipt(TransferIntent::Move, &source, &target);
+    assert!(verify_destination(&saved, &target).is_err());
+    target.assets[0].captured_at = None;
+    assert!(verify_destination(&saved, &target).is_ok());
+    source.assets[0].captured_at = Some(10.0);
+    let saved = receipt(TransferIntent::Move, &source, &target);
+    assert!(verify_destination(&saved, &target).is_err());
+}
+#[test]
 fn terminal_or_uncertain_receipts_never_retry_deletion() {
     let source = bundle(vec![asset(Provider::Apple, "a", &[JPEG])]);
     let target = bundle(vec![asset(Provider::Immich, "b", &[JPEG])]);

@@ -40,7 +40,7 @@ impl Shell {
                 asset_id: "photo".into(),
             },
             name: "test.jpg".into(),
-            captured_at: None,
+            captured_at: Some(10.0),
             modified_at: None,
             revision: "1".into(),
             resources: vec![resource.clone()],
@@ -249,6 +249,18 @@ fn move_reverifies_and_persists_before_deleting() -> Result<(), String> {
         .position(|op| *op == "trash")
         .ok_or("trash missing")?;
     assert_eq!(shell.order[index - 1], "persist");
+    Ok(())
+}
+#[test]
+fn invented_capture_date_blocks_move_without_deleting_the_original() -> Result<(), String> {
+    let core = core();
+    let mut shell = Shell::new();
+    shell.source.assets[0].captured_at = None;
+    shell.run(&core, copy_event(&shell, TransferIntent::Move))?;
+    assert!(core.view().error.is_some());
+    shell.run(&core, move_event())?;
+    assert_eq!(shell.deleted, 0);
+    assert!(core.view().error.is_some());
     Ok(())
 }
 #[test]

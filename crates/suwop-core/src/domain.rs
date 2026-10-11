@@ -475,10 +475,13 @@ pub fn verify_destination(saved: &TransferReceipt, fresh: &TransferBundle) -> Re
         }
         if fresh.assets.iter().any(|a| {
             a.is_favorite != source.is_favorite
-                || source.captured_at.is_some_and(|date| {
-                    a.captured_at
-                        .is_none_or(|target| !target.is_finite() || (date - target).abs() > 0.001)
-                })
+                || !match (source.captured_at, a.captured_at) {
+                    (Some(date), Some(target)) => {
+                        date.is_finite() && target.is_finite() && (date - target).abs() <= 0.001
+                    }
+                    (None, None) => true,
+                    _ => false,
+                }
         }) {
             return Err(
                 "転送先の撮影日時またはお気に入りが一致しません。元データは残します。".into(),

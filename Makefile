@@ -31,7 +31,7 @@ format:
 	env cargo fmt --all
 	env ruff check --fix scripts
 	env ruff format scripts
-	@if [ "$$(uname -s)" = Darwin ]; then swiftformat App Sources Tests --config .swiftformat; fi
+	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests --config .swiftformat; fi
 
 test:
 	bash scripts/test-hooks.sh

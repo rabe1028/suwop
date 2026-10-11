@@ -90,15 +90,20 @@ import UniformTypeIdentifiers
                     .appendingPathExtension(ext.isEmpty ? "data" : ext)
                 let options = PHAssetResourceRequestOptions()
                 options.isNetworkAccessAllowed = true
-                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                    PHAssetResourceManager.default().writeData(for: resource, toFile: url, options: options) { error in
-                        if let error {
-                            continuation.resume(throwing: error)
-                        } else {
-                            continuation.resume()
+                let manager = PHAssetResourceManager.default()
+                let gate = try FileDownloadGate(url: url) { manager.cancelDataRequest($0) }
+                try await withTaskCancellationHandler {
+                    try Task.checkCancellation()
+                    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                        gate.install(continuation)
+                        let id = manager.requestData(for: resource, options: options) {
+                            gate.append($0)
+                        } completionHandler: {
+                            gate.finish(error: $0)
                         }
+                        gate.setRequest(id)
                     }
-                }
+                } onCancel: { gate.cancel() }
                 try Task.checkCancellation()
                 let hash = try await Self.hash(url)
                 record.resources[index].sha1 = hash.sha1
