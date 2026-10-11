@@ -101,17 +101,19 @@ import SuwopShell
 #endif
 
 #if os(macOS)
-    extension NativeSharePresentation: @MainActor NSSharingServicePickerDelegate, NSSharingServiceDelegate {
-        func sharingServicePicker(
+    extension NativeSharePresentation: NSSharingServicePickerDelegate, NSSharingServiceDelegate {
+        nonisolated func sharingServicePicker(
             _ sharingServicePicker: NSSharingServicePicker,
             didChoose service: NSSharingService?
         ) {
             if service == nil {
-                finish(completed: false)
+                Task { @MainActor [weak self] in self?.finish(completed: false) }
             }
         }
 
-        func sharingServicePicker(
+        /// The older SDK declares this synchronous delegate lookup nonisolated.
+        /// Returning this actor-bound delegate does not access its mutable state.
+        nonisolated func sharingServicePicker(
             _ sharingServicePicker: NSSharingServicePicker,
             delegateFor sharingService: NSSharingService
         ) -> (any NSSharingServiceDelegate)? {
