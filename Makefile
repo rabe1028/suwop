@@ -1,5 +1,8 @@
 export PATH := $(CURDIR)/.tools/bin:$(PATH)
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
+ifeq ($(shell uname -s),Darwin)
+export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
+endif
 
 .PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration
 setup:

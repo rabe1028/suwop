@@ -4,6 +4,8 @@ cd "$(dirname "$0")/.."
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 mkdir -p Generated
 if [[ "${1:-}" == "--host" ]]; then
+    export SDKROOT
+    SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"
     cargo build --locked -p suwop-ffi
     rm -rf Generated/RustCore.xcframework
     xcodebuild -create-xcframework -library target/debug/libsuwop_ffi.a \
@@ -13,6 +15,13 @@ fi
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
 for triple in "${TARGETS[@]}"; do
     rustup target add "$triple"
+    case "$triple" in
+        *-apple-darwin) SDK=macosx ;;
+        aarch64-apple-ios) SDK=iphoneos ;;
+        *) SDK=iphonesimulator ;;
+    esac
+    export SDKROOT
+    SDKROOT="$(xcrun --sdk "$SDK" --show-sdk-path)"
     cargo build --locked --release -p suwop-ffi --target "$triple"
 done
 mkdir -p target/apple/macos target/apple/simulator
