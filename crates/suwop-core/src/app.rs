@@ -84,6 +84,21 @@ pub enum ShellOperation {
         keys: Vec<crate::domain::AssetKey>,
         change: crate::metadata::MetadataChange,
     },
+    AppleEditOpen {
+        asset: crate::domain::StoredAsset,
+        directory: String,
+    },
+    EditImage {
+        presentation: crate::editing::ImageEditPresentation,
+    },
+    AppleEditSave {
+        token: String,
+        asset: crate::domain::StoredAsset,
+        plan: crate::editing::ImageRenderPlan,
+    },
+    AppleEditClose {
+        token: String,
+    },
     AppleAlbums {
         scope: String,
     },
@@ -117,6 +132,10 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    EditImage {
+        key: crate::domain::AssetKey,
+        id: String,
+    },
     SetMetadata {
         keys: Vec<crate::domain::AssetKey>,
         input: crate::metadata::MetadataInput,
@@ -202,6 +221,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub editing_targets: std::collections::BTreeMap<String, Vec<crate::editing::EditingTarget>>,
     pub metadata_targets: std::collections::BTreeMap<String, Vec<crate::metadata::MetadataTarget>>,
     pub preview_sources: std::collections::BTreeMap<String, crate::domain::AssetKey>,
     pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
@@ -306,6 +326,19 @@ impl crux_core::App for Suwop {
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
+            editing_targets: photos
+                .iter()
+                .map(|p| {
+                    (
+                        crate::browser::photo_id(p),
+                        crate::editing::targets(
+                            p,
+                            &model.state.snapshots,
+                            &model.state.apple_scope,
+                        ),
+                    )
+                })
+                .collect(),
             metadata_targets: photos
                 .iter()
                 .map(|p| {

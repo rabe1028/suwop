@@ -152,6 +152,34 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             )));
         }
         7 => return thumbnail_request(input),
+        8 => {
+            let request: suwop_core::editing::EditDraftRequest =
+                serde_json::from_str(input).map_err(|e| e.to_string())?;
+            let draft = match request.command {
+                Some(command) => request.draft.apply(command)?,
+                None => request.draft,
+            };
+            return serde_json::to_value(draft.view()?).map_err(|e| e.to_string());
+        }
+        9 => {
+            let payload: suwop_core::editing::AppleAdjustment =
+                serde_json::from_str(input).map_err(|e| e.to_string())?;
+            return Ok(Value::Bool(
+                suwop_core::editing::decode_original_adjustment(&payload).is_some(),
+            ));
+        }
+        10 => {
+            let request: suwop_core::editing::EditingSourceCheck =
+                serde_json::from_str(input).map_err(|e| e.to_string())?;
+            suwop_core::editing::verify_edit_source(&request.expected, &request.fresh)?;
+            return Ok(Value::Null);
+        }
+        11 => {
+            let dimensions: suwop_core::editing::PixelSize =
+                serde_json::from_str(input).map_err(|e| e.to_string())?;
+            dimensions.validate()?;
+            return Ok(Value::Null);
+        }
         _ => {}
     }
     let registry = cores()

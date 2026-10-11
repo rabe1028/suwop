@@ -8,17 +8,21 @@
 - `workflow.rs`: 接続、走査、照合、コピー、移動、履歴保存、旧形式の移行。
 - `sharing.rs` / `workflow/sharing.rs`: 共有元の選択、原本の検証、共有ファイルの名前と作業領域の寿命。
 - `metadata.rs` / `workflow/metadata.rs`: 保存先ごとの日時・位置情報、入力・権限の検証、保存結果の再取得。
+- `editing/` / `workflow/editing.rs`: 整数の編集幾何、開始状態と履歴、保存先・調整データ・保存結果の検証、native session と作業領域の寿命。
 - `immich.rs`: URL／origin 検証、API、ページング、multipart の仕様、レスポンス解釈。
 - `crates/suwop-ffi`: Crux の JSON FFI と C ABI、ファイルをストリームでハッシュするネイティブ入出力。
 - `Sources/SuwopShell`: FFI actor、JSON、生成された DTO、表示用の補助値。
 - `App/AppleShell.swift`: 汎用 effect の振り分け、原子的なファイル保存。
 - `App/ApplePhotos.swift`: PhotoKit の観測とリソース入出力。削除直前にも Rust に観測結果を渡す。
 - `App/ApplePhotosMetadata.swift`: Rust が指定した変更だけを PhotoKit の変更キューで実行し、全 ID の最新の結果を返す。
+- `App/ApplePhotoEditing.swift` / `ContentInputRequest.swift`: PhotoKit 編集入力と出力を保持し、保存直前の観測を Rust に渡し、保存後の実データを読み直す。
+- `Sources/SuwopShell/NativeImageRenderer.swift`: Rust が作った描画計画を Core Image / ImageIO で実行し、ネイティブの画像情報と符号化バイトを返す。
+- `App/SystemImageEditing.swift` / `ImageEditorModel.swift`: Rust の編集履歴を表示し、プレビューの完了と画面終了を待つ。
 - `App/Credentials.swift` / `HTTPExecutor.swift`: Keychain と汎用 HTTP の入出力。
 - `App/SystemSharing.swift`: iOS の activity controller と macOS の sharing service。完了またはキャンセルまで effect を返さない。
 - `App/LibraryModel.swift` / `SuwopApp.swift`: ViewModel の公開、画像キャッシュ、SwiftUI。
 
-PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust の JSON Schema から Swift DTO を生成し、生成差分と実ライブラリをリンクしたテストを CI に含めます。FFI の unsafe は `suwop-ffi` の ABI 境界に限定します。原本のハッシュ計算は Rust の atomic なキャンセル状態を各読み取り前後に確認し、Swift の Task キャンセルを停止要求へ伝えます。PhotoKit 原本はキャンセル可能な `requestData` でチャンクごとに書き込み、停止時には native request の停止と途中ファイルの削除を行います。Swift 側は actor を使い、PhotoKit のキャンセル用ゲートだけロックの不変条件を明記した `@unchecked Sendable` を使います。
+PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust の JSON Schema から Swift DTO を生成し、生成差分と実ライブラリをリンクしたテストを CI に含めます。FFI の unsafe は `suwop-ffi` の ABI 境界に限定します。原本のハッシュ計算は Rust の atomic なキャンセル状態を各読み取り前後に確認し、Swift の Task キャンセルを停止要求へ伝えます。PhotoKit 原本はキャンセル可能な `requestData` でチャンクごとに書き込み、停止時には native request の停止と途中ファイルの削除を行います。Swift 側は actor を使います。PhotoKit の画像キャンセル用ゲートはロック、編集入力は読取専用の callback から MainActor への移譲、編集出力は構築完了後に不変・1回の変更キューで読取という不変条件と寿命を明記した private `@unchecked Sendable` に限定します。CI の Swift 6 strict concurrency と警告のエラー化は維持します。
 
 ## 写真と保存先
 
