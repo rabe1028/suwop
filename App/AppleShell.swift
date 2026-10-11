@@ -6,6 +6,7 @@ import SuwopShell
     private let root: URL
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
+    private let sharing = SystemSharing()
     init() throws {
         root = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -40,7 +41,7 @@ import SuwopShell
                 operation.type,
                 data: data
             )
-        case "workspace", "cleanup": return try workspaceEffect(operation.type, data: data)
+        case "workspace", "cleanup", "copyFile", "shareFiles": return try await fileEffect(operation.type, data: data)
         case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite": return try await photoEffect(
                 operation.type,
                 data: data
@@ -117,8 +118,14 @@ import SuwopShell
         }
     }
 
-    private func workspaceEffect(_ type: String, data: JSONValue) throws -> JSONValue {
+    private func fileEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         switch type {
+        case "copyFile":
+            let source = try URL(fileURLWithPath: requiredString(data, "source"))
+            let destination = try URL(fileURLWithPath: requiredString(data, "destination"))
+            try await NativeFileCopy.copy(from: source, to: destination)
+            return .null
+        case "shareFiles": return try await .bool(sharing.present(data["files"].decode([ShareFile].self)))
         case "workspace":
             let id = try requiredString(data, "id")
             guard UUID(uuidString: id) != nil else { throw SuwopError("作業領域 ID が不正です。") }

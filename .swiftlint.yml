@@ -55,6 +55,10 @@ custom_rules:
     regex: '\.performChanges\s*\(?\s*\{'
     message: 'Use NativeChange.perform with Sendable callbacks for PhotoKit transactions.'
     severity: error
+  photokit_resource_callbacks:
+    regex: '\.requestData\s*\([^)]*\)\s*\{'
+    message: 'Use FileDownloadGate Sendable callbacks with labeled PhotoKit resource handlers.'
+    severity: error
   no_force_sendable:
     regex: '@unchecked\s+Sendable'
     message: 'Use checked isolation, or document a narrow adapter exception in this configuration.'

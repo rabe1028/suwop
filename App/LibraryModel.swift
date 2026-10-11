@@ -100,6 +100,16 @@ import SwiftUI
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func share(_ photos: [UnifiedPhoto]) {
+        do {
+            try send([
+                "type": .string("share"),
+                "keys": .from(Array(Set(photos.flatMap { $0.assets.map(\.key) }))),
+                "id": .string(UUID().uuidString),
+            ])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         guard let shell else { throw SuwopError("入出力が利用できません。") }
         return try await shell.thumbnail(photo, connection: connection, preview: true)

@@ -14,7 +14,7 @@
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | 未実装 | 非破壊編集と元の保持、編集キャンセル、native 読込と保存 |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
-| 共有、原本 / 編集後の書き出し、取り込み、複製 | 転送コピーのみ | システム共有画面、複数写真・動画、ファイル保持と後片付け |
+| 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、Rust / FFI で保持と後片付けを確認。編集後の共有・取り込み・複製は継続作業 | システム共有画面の native 操作、複数写真・動画、受信先での保存、強制終了後の片付け |
 | ゴミ箱、削除確認、復元、削除結果不明 | 移動後のゴミ箱のみ | native ゴミ箱との一致、結果不明の再実行を防ぐ、両側の保護 |
 | 保存先確認・照合・Copy / Move | Rust / FFI / Immich テスト、PR #2 CI | 実 PhotoKit の RAW / Live / 編集済み / iCloud / バースト / 限定権限 |
 | 場所、人物、分類、思い出、重複整理 | 未実装 | 検索・分類の実結果。公開 API で扱えない Photos 専用機能は差分と代替を明記 |
@@ -46,3 +46,15 @@
 - Apple の全画面プレビューは `.aspectFit` で全体を取得し、グリッドは `.aspectFill` で取得する。
 - Simulator で横長写真を縦横比を保って表示し、アルバム内の閲覧が「1 / 1」になることを確認。拡大中の移動範囲を実際に収まった画像の寸法から求め、縮小時も補正する。パンの限界と回転・大文字の操作確認は継続する。
 - ローカルの画面証拠は `target/acceptance/albums-20261012/` に保存。保存自体は VRT / golden 比較の通過を意味しない。
+- [アルバムの最終 HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38163855568)、[マージ後 main CI](https://github.com/rabe1028/suwop/actions/runs/38164333052) は別々に core / apple / immich-integration の全 job が通過。
+
+## 原本ファイルの共有
+
+- Rust が現在の catalog とアクセス権限から共有元を選ぶ。同一写真の両側を重複して共有せず、利用可能な Apple Photos を優先し、必要な場合だけ Immich へ再接続する。
+- 共有前に原本を再取得し、共有用ファイルの SHA-1 / SHA-256 / バイト長を再確認。作業領域外のパスや不正なファイル名を拒否する。写真、接続、転送履歴は変更しない。
+- `ShareFiles` effect は native 共有サービスが完了・キャンセルを返すまで待つ。途中で共有用ファイルを削除せず、終了後や取得失敗時に片付ける。片付けに失敗した場合もエラーを表示する。
+- `make check`: Rust 58 tests / Swift 17 tests を通過。新しい実 FFI test はシステム共有の応答前に cleanup が発行されないことを確認する。Rust tests は成功・キャンセル、取得中断、作業領域外のパス、コピー後の内容変更、片付け失敗、Immich 原本の GET のみの取得も検証する。
+- Simulator の初回原本取得で、PhotoKit の data callback が MainActor を継承して停止する問題を再現・crash log で確認。`FileDownloadGate` が Sendable callback を提供する構成に修正し、別 executor から呼び出す回帰テストと、直接の resource trailing callback を拒否する lint を追加した。
+- `make apple-build`: Apple の Rust 5 target と iOS Simulator / macOS app builds を通過。
+- iPhone 17 Pro / iOS 26.4 の標準写真で、単独 HEIC と HEIC + JPEG の複数選択から system share sheet の表示を確認。共有待ち中は元の名前・形式・全バイトを持つファイルが残り、原本との SHA-256 一致も別に確認。キャンセル後に今回の作業フォルダーが消え、写真6枚と選択を保持して操作が再開できることを確認した。写真を選択する読み上げアクションも native 操作で確認。
+- 画面証拠は `target/acceptance/sharing-20261012/` に保存。受信先へは送信しておらず、受信先での保存、iPad の popover、macOS のサービス、実機 / iCloud / 動画 / Live / RAW と強制終了後の回収は別途確認する。初回 crash で残った空の一時ファイルもあり、強制終了後の回収は未完了。編集後の書き出し、位置情報の除去、Photos 固有の All Photos Data / iCloud Link とはまだ差がある。

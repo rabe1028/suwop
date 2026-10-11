@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod sharing;
 
 #[derive(Debug)]
 pub struct Outcome {
@@ -41,9 +42,15 @@ pub async fn run(
         event,
         Event::SetFavorite { .. } | Event::CreateAlbum { .. } | Event::EditAlbum { .. }
     );
-    let result = runtime.execute(event).await;
+    let sharing = matches!(event, Event::Share { .. });
+    let mut result = runtime.execute(event).await;
     if let Some(path) = runtime.workspace.take() {
-        let _: Result<Value, _> = io(ctx, ShellOperation::Cleanup { path }).await;
+        let cleanup: Result<Value, _> = io(ctx, ShellOperation::Cleanup { path }).await;
+        if sharing && let Err(error) = cleanup {
+            result = Err(format!(
+                "共有用の作業ファイルを片付けられませんでした: {error}"
+            ));
+        }
     }
     match result {
         Ok(status) => Outcome {
@@ -55,7 +62,9 @@ pub async fn run(
         Err(error) => Outcome {
             state: runtime.state,
             session: runtime.session,
-            status: if metadata_change {
+            status: if sharing {
+                "共有処理で問題が発生しました。写真と転送履歴は変更していません。"
+            } else if metadata_change {
                 "変更が保存済みの場合があります。一覧を更新して確認してください。"
             } else {
                 "処理を完了できませんでした。元データと転送履歴を確認してください。"
@@ -127,6 +136,7 @@ impl Runtime<'_> {
             }
             Event::Index { id } => self.index(&id).await,
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
+            Event::Share { keys, id } => self.share(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,
             Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,
             Event::EditAlbum { key, edit } => self.edit_album(&key, &edit).await,

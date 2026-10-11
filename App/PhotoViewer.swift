@@ -6,6 +6,7 @@ struct PhotoViewer: View {
     @State private var key: AssetKey
     @State private var showInfo = false
     @State private var chrome = true
+    @State private var confirmingShare = false
     @Environment(\.dismiss) private var dismiss
     private let collection: AlbumKey?
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
@@ -58,6 +59,11 @@ struct PhotoViewer: View {
                     PhotoInfo(photo: photo, model: model)
                 }
             }
+            .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
+                if let photo {
+                    Button("原本を共有") { model.share([photo]) }
+                }
+            } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
             .alert(
                 "操作を完了できませんでした",
                 isPresented: Binding(get: { model.errorMessage != nil }, set: {
@@ -89,6 +95,12 @@ struct PhotoViewer: View {
 
     private func actions(_ photo: UnifiedPhoto) -> some View {
         VStack(spacing: 8) {
+            if model.isBusy {
+                HStack {
+                    ProgressView(model.status).font(.caption)
+                    Button("停止") { model.stop() }
+                }
+            }
             if photo.providers.count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }
@@ -97,6 +109,8 @@ struct PhotoViewer: View {
                     .accessibilityLabel("前の写真")
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 Spacer()
+                Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
+                    .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
                 Button { model.favorite([photo], value: !photo.isFavorite) } label: {
                     Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
                 }

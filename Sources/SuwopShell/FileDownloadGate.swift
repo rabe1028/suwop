@@ -47,6 +47,16 @@ public final class FileDownloadGate: @unchecked Sendable {
         }
     }
 
+    /// Construct these callbacks outside the caller's actor context. PhotoKit's
+    /// legacy completion types do not express their background executor.
+    public var receivedData: @Sendable (Data) -> Void {
+        { self.append($0) }
+    }
+
+    public var completed: @Sendable (Error?) -> Void {
+        { self.finish(error: $0) }
+    }
+
     public func append(_ data: Data) {
         lock.lock()
         guard result == nil else {

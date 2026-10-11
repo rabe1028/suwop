@@ -28,7 +28,7 @@ import UniformTypeIdentifiers
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         if requestPermission && status == .notDetermined {
             status = await withCheckedContinuation { continuation in
-                PHPhotoLibrary.requestAuthorization(for: .readWrite) { continuation.resume(returning: $0) }
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { @Sendable in continuation.resume(returning: $0) }
             }
         }
         guard status == .authorized || status == .limited else {
@@ -98,11 +98,12 @@ import UniformTypeIdentifiers
                     try Task.checkCancellation()
                     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                         gate.install(continuation)
-                        let id = manager.requestData(for: resource, options: options) {
-                            gate.append($0)
-                        } completionHandler: {
-                            gate.finish(error: $0)
-                        }
+                        let id = manager.requestData(
+                            for: resource,
+                            options: options,
+                            dataReceivedHandler: gate.receivedData,
+                            completionHandler: gate.completed
+                        )
                         gate.setRequest(id)
                     }
                 } onCancel: { gate.cancel() }
@@ -219,7 +220,7 @@ import UniformTypeIdentifiers
                     targetSize: CGSize(width: edge, height: edge),
                     contentMode: preview ? .aspectFit : .aspectFill,
                     options: options
-                ) { image, info in
+                ) { @Sendable image, info in
                     if (info?[PHImageResultIsDegradedKey] as? Bool) == true {
                         return
                     }
