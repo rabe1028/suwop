@@ -39,7 +39,7 @@ final class ImageRequestGate: @unchecked Sendable {
         }
     }
 
-    func finish(_ result: Result<PlatformImage, Error>) {
+    func finish(_ result: sending Result<PlatformImage, Error>) {
         lock.lock()
         let waiting = continuation
         continuation = nil
