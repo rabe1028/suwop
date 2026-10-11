@@ -42,7 +42,7 @@
 - `make check` は Rust 52 tests / Swift 15 tests を通過。Swift の新しいテストは実 FFI を通してアルバムの削除・再取得・保存を確認し、写真と転送履歴が残ることを確認する。
 - Immich へ再接続できない場合も Apple のアルバム一覧を更新し、ローカルの作成・名前変更を実行できる回帰テストを通過。Immich の操作だけ再接続を要求する。
 - `make apple-build` は Apple の Rust 5 target と iOS Simulator / macOS app builds を通過。iPhone 17 Pro / iOS 26.4 の標準写真6枚で、通常アルバム作成・名前変更・写真追加・再起動後の native 再取得・選択による所属解除（アルバム1枚→0枚、ライブラリ6枚を保持）を確認。アルバム削除の実 PhotoKit 操作、実機 / iCloud / iPad / Mac の操作は未確認。
-- Immich v3.2.4 の実 API にアルバム作成・名前変更・所属追加・解除・削除後の写真保持を検証するケースを追加。[最初の album CI](https://github.com/rabe1028/suwop/actions/runs/38162729624) の integration job は通過。Linux の初回ゲートは runner の不完全な Rustup toolchain による Clippy インストール競合で停止したため、CI の Rustup 保管先を専用の一時ディレクトリへ分離。修正後の最終 HEAD CI は別に確認する。
+- Immich v3.2.4 の実 API にアルバム作成・名前変更・所属追加・解除・削除後の写真保持を検証するケースを追加。[最初の album CI](https://github.com/rabe1028/suwop/actions/runs/38162729624) の integration job は通過。Linux gate は Rustup の Clippy インストール競合で停止。専用ディレクトリへの分離だけでは再発したため、新しい一時ディレクトリで明示的にインストールしてから検査する。バージョン検査も全出力を読み、producer を途中で終了させない shell 回帰テストを追加して local `make check` を通過。最終 HEAD CI は別に確認する。
 - Apple の全画面プレビューは `.aspectFit` で全体を取得し、グリッドは `.aspectFill` で取得する。
 - Simulator で横長写真を縦横比を保って表示し、アルバム内の閲覧が「1 / 1」になることを確認。拡大中の移動範囲を実際に収まった画像の寸法から求め、縮小時も補正する。パンの限界と回転・大文字の操作確認は継続する。
 - ローカルの画面証拠は `target/acceptance/albums-20261012/` に保存。保存自体は VRT / golden 比較の通過を意味しない。

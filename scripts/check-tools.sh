@@ -2,7 +2,10 @@
 set -euo pipefail
 check() {
   local actual
-  actual="$("$1" "$2" | head -n 1)"
+  # Rustup can initialize a toolchain during this command. Read all output so
+  # version checking never terminates the producer through a closed pipe.
+  actual="$("$1" "$2")"
+  actual="${actual%%$'\n'*}"
   if [[ "$actual" != *"$3"* ]]; then
     echo "Expected $1 $3; got $actual. Run make setup." >&2
     exit 1
