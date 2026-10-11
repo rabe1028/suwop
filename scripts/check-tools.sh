@@ -11,7 +11,7 @@ check() {
 check cargo --version 1.95.0
 check ruff --version 0.17.0
 check actionlint -version 1.7.12
-if ! shellcheck --version | rg -q 'version: 0.11.0'; then
+if [[ "$(shellcheck --version)" != *"version: 0.11.0"* ]]; then
   echo "Expected ShellCheck 0.11.0. Run make setup." >&2
   exit 1
 fi

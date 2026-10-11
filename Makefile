@@ -11,30 +11,30 @@ setup:
 
 lint-common:
 	bash scripts/check-tools.sh
-	cargo fmt --all -- --check
-	cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-	ruff check scripts
-	ruff format --check scripts
-	shellcheck scripts/*.sh .githooks/*
-	actionlint
+	env cargo fmt --all -- --check
+	env cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+	env ruff check scripts
+	env ruff format --check scripts
+	env shellcheck scripts/*.sh .githooks/*
+	env actionlint
 	python3 scripts/check-architecture.py
 	bash scripts/check-generated.sh
 
 lint-swift:
-	swiftformat App Sources Tests --lint --config .swiftformat
-	swiftlint lint --strict --quiet
+	env swiftformat App Sources Tests --lint --config .swiftformat
+	env swiftlint lint --strict --quiet
 
 lint: lint-common
 	@if [ "$$(uname -s)" = Darwin ]; then $(MAKE) lint-swift; fi
 
 format:
-	cargo fmt --all
-	ruff check --fix scripts
-	ruff format scripts
+	env cargo fmt --all
+	env ruff check --fix scripts
+	env ruff format scripts
 	@if [ "$$(uname -s)" = Darwin ]; then swiftformat App Sources Tests --config .swiftformat; fi
 
 test:
-	cargo test --locked --workspace --all-features
+	env cargo test --locked --workspace --all-features
 	@if [ "$$(uname -s)" = Darwin ]; then bash scripts/build-rust-apple.sh --host && swift test -Xswiftc -warnings-as-errors; fi
 
 check: lint test
