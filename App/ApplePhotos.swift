@@ -91,7 +91,9 @@ import UniformTypeIdentifiers
                 let options = PHAssetResourceRequestOptions()
                 options.isNetworkAccessAllowed = true
                 let manager = PHAssetResourceManager.default()
-                let gate = try FileDownloadGate(url: url) { manager.cancelDataRequest($0) }
+                // Older SDKs do not declare the native manager Sendable.
+                // Resolve PhotoKit's shared manager inside the cancellation callback.
+                let gate = try FileDownloadGate(url: url) { PHAssetResourceManager.default().cancelDataRequest($0) }
                 try await withTaskCancellationHandler {
                     try Task.checkCancellation()
                     try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
