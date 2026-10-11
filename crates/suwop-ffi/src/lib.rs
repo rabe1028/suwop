@@ -12,7 +12,10 @@ use std::{
     collections::BTreeMap,
     ffi::{CStr, CString, c_char},
     io::Read,
-    sync::{Mutex, OnceLock},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
+    },
 };
 use suwop_core::{
     app::Suwop,
@@ -23,6 +26,35 @@ use suwop_core::{
 type Runtime = Bridge<Suwop, JsonFfiFormat>;
 static CORES: OnceLock<Mutex<BTreeMap<u64, Runtime>>> = OnceLock::new();
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+type Cancellations = BTreeMap<u64, Arc<AtomicBool>>;
+static CANCELLATIONS: OnceLock<Mutex<Cancellations>> = OnceLock::new();
+fn cancellations() -> &'static Mutex<Cancellations> {
+    CANCELLATIONS.get_or_init(|| Mutex::new(BTreeMap::new()))
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn suwop_hash_new() -> u64 {
+    let Ok(mut registry) = cancellations().lock() else {
+        return 0;
+    };
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    registry.insert(id, Arc::new(AtomicBool::new(false)));
+    id
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn suwop_hash_cancel(handle: u64) {
+    if let Ok(registry) = cancellations().lock()
+        && let Some(flag) = registry.get(&handle)
+    {
+        flag.store(true, Ordering::Release);
+    }
+}
+#[unsafe(no_mangle)]
+pub extern "C" fn suwop_hash_drop(handle: u64) {
+    if let Ok(mut registry) = cancellations().lock() {
+        registry.remove(&handle);
+    }
+}
 fn cores() -> &'static Mutex<BTreeMap<u64, Runtime>> {
     CORES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
@@ -87,8 +119,7 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             return serde_json::to_value(describe_apple(facts)).map_err(|e| e.to_string());
         }
         4 => {
-            let path: String = serde_json::from_str(input).map_err(|e| e.to_string())?;
-            return serde_json::to_value(hash_file(&path)?).map_err(|e| e.to_string());
+            return hash_input(input);
         }
         5 => {
             #[derive(serde::Deserialize)]
@@ -179,16 +210,45 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
     }
     serde_json::from_slice(&output).map_err(|e| e.to_string())
 }
-fn hash_file(path: &str) -> Result<HashResult, String> {
-    let mut file = std::fs::File::open(path).map_err(|_| "原本を読み出せません。".to_owned())?;
+fn hash_input(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Input {
+        path: String,
+        cancellation: String,
+    }
+    let input: Input = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    let id = input
+        .cancellation
+        .parse::<u64>()
+        .map_err(|e| e.to_string())?;
+    let flag = cancellations()
+        .lock()
+        .map_err(|_| "Cancellation lock failed")?
+        .get(&id)
+        .cloned()
+        .ok_or("Invalid cancellation handle")?;
+    check_cancelled(&flag)?;
+    let file = std::fs::File::open(input.path).map_err(|_| "原本を読み出せません。".to_owned())?;
+    serde_json::to_value(hash_reader(file, &flag)?).map_err(|e| e.to_string())
+}
+fn check_cancelled(flag: &AtomicBool) -> Result<(), String> {
+    if flag.load(Ordering::Acquire) {
+        Err("cancelled".into())
+    } else {
+        Ok(())
+    }
+}
+fn hash_reader(mut file: impl Read, flag: &AtomicBool) -> Result<HashResult, String> {
     let mut sha1 = sha1::Sha1::new();
     let mut sha256 = sha2::Sha256::new();
     let mut count = 0;
     let mut buffer = vec![0_u8; 1024 * 1024];
     loop {
+        check_cancelled(flag)?;
         let n = file
             .read(&mut buffer)
             .map_err(|_| "原本を読み出せません。".to_owned())?;
+        check_cancelled(flag)?;
         if n == 0 {
             break;
         }
@@ -203,4 +263,49 @@ fn hash_file(path: &str) -> Result<HashResult, String> {
             bytes: count,
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{AtomicBool, Ordering, check_cancelled, hash_reader};
+    use std::io::{self, Read};
+
+    #[test]
+    fn stream_hashes_have_the_expected_signatures() -> Result<(), String> {
+        let result = hash_reader(io::Cursor::new(b"abc"), &AtomicBool::new(false))?;
+        assert_eq!(result.sha1, "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            result.signature.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(result.signature.bytes, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn cancellation_stops_streaming_before_the_next_read() {
+        struct Reader<'a> {
+            flag: &'a AtomicBool,
+            reads: usize,
+        }
+        impl Read for Reader<'_> {
+            fn read(&mut self, bytes: &mut [u8]) -> io::Result<usize> {
+                self.reads += 1;
+                bytes[0] = b'x';
+                self.flag.store(true, Ordering::Release);
+                Ok(1)
+            }
+        }
+        let flag = AtomicBool::new(false);
+        let mut reader = Reader {
+            flag: &flag,
+            reads: 0,
+        };
+        assert_eq!(
+            hash_reader(&mut reader, &flag).err().as_deref(),
+            Some("cancelled")
+        );
+        assert_eq!(reader.reads, 1);
+        assert!(check_cancelled(&flag).is_err());
+    }
 }

@@ -7,10 +7,12 @@ import UniformTypeIdentifiers
     import UIKit
 
     typealias PlatformImage = UIImage
+    typealias ThumbnailPayload = UIImage
 #else
     import AppKit
 
     typealias PlatformImage = NSImage
+    typealias ThumbnailPayload = Data
 #endif
 
 @MainActor final class ApplePhotosStore {
@@ -197,10 +199,13 @@ import UniformTypeIdentifiers
         options.deliveryMode = .highQualityFormat
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
-        let gate = ImageRequestGate(manager: imageManager)
-        return try await withTaskCancellationHandler {
+        let gate = ImageRequestGate<ThumbnailPayload>(manager: imageManager)
+        let payload = try await withTaskCancellationHandler {
             try Task.checkCancellation()
-            return try await withCheckedThrowingContinuation { continuation in
+            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<
+                ThumbnailPayload,
+                Error
+            >) in
                 gate.install(continuation)
                 let id = imageManager.requestImage(
                     for: asset,
@@ -212,7 +217,17 @@ import UniformTypeIdentifiers
                         return
                     }
                     if let image {
-                        gate.finish(.success(image))
+                        #if os(iOS)
+                            gate.finish(.success(image))
+                        #else
+                            // Older AppKit images are mutable and non-Sendable.
+                            // Pass a value snapshot, then construct NSImage on MainActor.
+                            if let bytes = image.tiffRepresentation {
+                                gate.finish(.success(bytes))
+                            } else {
+                                gate.finish(.failure(SuwopError("プレビューを変換できません。")))
+                            }
+                        #endif
                     } else {
                         gate.finish(.failure((info?[PHImageErrorKey] as? Error) ?? SuwopError("プレビューを取得できません。")))
                     }
@@ -220,6 +235,12 @@ import UniformTypeIdentifiers
                 gate.setRequest(id)
             }
         } onCancel: { gate.cancel() }
+        #if os(iOS)
+            return payload
+        #else
+            guard let image = NSImage(data: payload) else { throw SuwopError("プレビューを表示できません。") }
+            return image
+        #endif
     }
 
     private func validate(_ key: AssetKey) throws {
@@ -292,12 +313,23 @@ import UniformTypeIdentifiers
     }
 
     nonisolated static func hash(_ url: URL) async throws -> HashResult {
+        let request = try FileHashRequest()
         let worker = Task.detached(priority: .utility) {
             try Task.checkCancellation()
-            return try CoreBridge.utility(4, input: .string(url.path)).decode(HashResult.self)
+            return try request.read(url)
         }
-        let result = try await worker.value
-        try Task.checkCancellation()
-        return result
+        do {
+            let result = try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: {
+                request.cancel()
+                worker.cancel()
+            }
+            try Task.checkCancellation()
+            return result
+        } catch {
+            try Task.checkCancellation()
+            throw error
+        }
     }
 }

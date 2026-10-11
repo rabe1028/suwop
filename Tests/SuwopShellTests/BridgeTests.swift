@@ -35,3 +35,14 @@ import Testing
     ])).decode(Bool.self)
     #expect(!result)
 }
+
+@Test func cancelledHashNeverOpensTheFile() throws {
+    let request = try FileHashRequest()
+    request.cancel()
+    do {
+        _ = try request.read(URL(fileURLWithPath: "/suwop/nonexistent-original"))
+        Issue.record("Cancelled hashing unexpectedly succeeded")
+    } catch let error as SuwopError {
+        #expect(error.message == "cancelled")
+    }
+}

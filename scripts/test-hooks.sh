@@ -35,6 +35,16 @@ if bash "$SOURCE/scripts/install-hooks.sh" >/dev/null 2>&1; then
 fi
 [[ "$(cat .git/hooks/pre-commit)" == "original hook" ]]
 rm .git/hooks/pre-commit
+mkdir -p "$TEMP/custom-hooks"
+printf 'user hook\n' > "$TEMP/custom-hooks/pre-commit"
+git config --local core.hooksPath "$TEMP/custom-hooks"
+if bash "$SOURCE/scripts/install-hooks.sh" >/dev/null 2>&1; then
+  echo "Setup ignored a custom hooksPath." >&2
+  exit 1
+fi
+[[ "$(cat "$TEMP/custom-hooks/pre-commit")" == "user hook" ]]
+[[ ! -L .git/hooks/pre-commit ]]
+git config --local --unset core.hooksPath
 bash "$SOURCE/scripts/install-hooks.sh"
 bash "$SOURCE/scripts/install-hooks.sh"
 [[ "$(readlink .git/hooks/pre-commit)" == "$REPO/.githooks/pre-commit" ]]
