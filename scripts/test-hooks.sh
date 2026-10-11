@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 SOURCE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Git hooks export repository-local paths. The temporary repository must be isolated.
+while IFS= read -r variable; do
+  unset "$variable"
+done < <(git rev-parse --local-env-vars)
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
 git init --quiet --initial-branch=main "$TEMP/repo"
