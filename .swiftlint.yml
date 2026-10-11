@@ -59,6 +59,10 @@ custom_rules:
     regex: '\.requestData\s*\([^)]*\)\s*\{'
     message: 'Use FileDownloadGate Sendable callbacks with labeled PhotoKit resource handlers.'
     severity: error
+  photokit_editing_callbacks:
+    regex: '\.requestContentEditingInput\s*\([^)]*\)\s*\{(?!\s*@Sendable\b)'
+    message: 'PhotoKit editing input callbacks must explicitly use @Sendable, without inheriting MainActor.'
+    severity: error
   no_force_sendable:
     regex: '@unchecked\s+Sendable'
     message: 'Use checked isolation, or document a narrow adapter exception in this configuration.'

@@ -7,6 +7,8 @@ struct PhotoViewer: View {
     @State private var showInfo = false
     @State private var chrome = true
     @State private var confirmingShare = false
+    @State private var choosingEdit = false
+    @State private var pendingEdit: EditingTarget?
     @Environment(\.dismiss) private var dismiss
     private let collection: AlbumKey?
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
@@ -59,6 +61,23 @@ struct PhotoViewer: View {
                     PhotoInfo(photo: photo, model: model)
                 }
             }
+            .sheet(
+                isPresented: $choosingEdit,
+                onDismiss: {
+                    if let target = pendingEdit {
+                        pendingEdit = nil
+                        model.editImage(target)
+                    }
+                },
+                content: {
+                    if let photo {
+                        PhotoEditTargetPicker(targets: model.editingTargets(photo)) { target in
+                            pendingEdit = target
+                            choosingEdit = false
+                        }
+                    }
+                }
+            )
             .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
                 if let photo {
                     Button("原本を共有") { model.share([photo]) }
@@ -118,6 +137,8 @@ struct PhotoViewer: View {
                 }
                 Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
                     .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
+                Button { choosingEdit = true } label: { Image(systemName: "slider.horizontal.3") }
+                    .disabled(model.isBusy).accessibilityLabel("写真を編集")
                 Button { model.favorite([photo], value: !photo.isFavorite) } label: {
                     Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
                 }

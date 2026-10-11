@@ -12,7 +12,7 @@
 | 全画面、前後移動、ズーム、動画、Live Photo | 静止画プレビュー・前後移動・ズーム、動画 / Live の原本再生を実装。Simulator で静止画、動画の再生・一時停止・巻き戻し、自作 Live Photo の復元・再生を確認 | 実機撮影 / Immich の Live、編集後の再生、音声、iPad / Mac、回転、取得停止、エラー・iCloud |
 | お気に入り、非表示、日時・位置・説明の変更 | お気に入り、保存先ごとの日時・座標変更を実装。お気に入りは Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。日時・座標の native 保存は検証中 | 日時・座標の native / Immich 保存、実機 / iCloud、取り消し、地図・地名検索。非表示・説明 |
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
-| 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | 未実装 | 非破壊編集と元の保持、編集キャンセル、native 読込と保存 |
+| 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | Apple 静止画の切り抜き・90度回転・反転・編集履歴と保存を実装。Rust / 実FFI / Core Imageの画素・色空間テストを通過。PhotoKitの保存操作は未検証 | native 保存・再起動・既存編集の保持、Immich編集、HDR・透過、明るさ・色・フィルター、原本へ戻す |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
 | 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、単独 / 複数選択の native 画面とキャンセル・片付けを確認。編集後の共有・取り込み・複製は継続作業 | 動画の共有、受信先での保存、強制終了後の片付け |
 | ゴミ箱、削除確認、復元、削除結果不明 | 移動後のゴミ箱のみ | native ゴミ箱との一致、結果不明の再実行を防ぐ、両側の保護 |
@@ -96,3 +96,17 @@
 - 返却件数、重複のない全 ID とお気に入り値が一致しない場合、応答不明または保存記録失敗の場合は、その保存先への変更を一覧更新まで無効にする。確認済みの Apple の変更を、後の Immich の応答不明で巻き戻したり、両方を自動で再試行したりしない。
 - `make check`: 厳格な quality / architecture / generated / hooks と Rust 84 tests / Swift 19 tests を通過。統合した写真の保持、古い Move revision の拒否、両側の古い scope / 権限制限で書込みゼロ、欠落・重複・異なる ID / 値、応答不明、永続化失敗、部分成功と再取得後の再操作を検証した。
 - `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。最新版を既存 Simulator にインストール・起動したが、Mac のロックが継続しているため、今回の変更後の native 操作は未完了。最終 HEAD CI / main CI と実機・iCloud・iPad・Mac の操作は別に確認する。
+- [PR #8](https://github.com/rabe1028/suwop/pull/8) の最終 HEAD `bbc04e22fdc706676a81959ccc8c6ef9114e730b` の [CI](https://github.com/rabe1028/suwop/actions/runs/38178207124) は core / apple / immich-integration の全 job が通過。マージ後 main `455374c57ffdc85e672a96c623176ba0baf58d0a` と検証済み tree の一致も確認した。[main CI attempt 2](https://github.com/rabe1028/suwop/actions/runs/38178828044/attempts/2) も全 job が通過。最初の attempt はコンテナ取得のレジストリ制限でテスト前に停止し、全体の終了後に統合 job だけを再実行した。native 操作が未完了であることは変わらない。
+
+## Apple 静止画の切り抜き・回転・反転
+
+- Rust が保存先の1枚を選び、現在の scope・フルアクセス・完全な原本構成を確認する。Apple の1枚に属する RAW / JPEG の原本は同時に保持する。別の保存先や別の写真へ編集を書き込まない。Immich・動画・Live Photo の編集は選択画面に未対応と表示する。
+- Rust が EXIF を反映した原本の整数座標で切り抜き、時計回りの90度回転、上下・左右の反転、取り消し・やり直しを管理する。「開始時に戻す」は既存の編集を保持した開始状態へ戻す。「原本へ戻す」は別の操作として未実装。
+- PhotoKit の編集入力を取得し、認識できる原本ベースの Suwop 調整データだけを再構成する。既存の他アプリの編集や描画済みベースの調整は cannot-handle 経路で現在の見た目を入力とする。未知の調整を原本から再現できると偽って置き換えない。調整 ID・version・内容は Rust が定義する。
+- Swift は Core Image の描画と PhotoKit の入出力を実行する。元の色空間を使い、PhotoKit が許可する JPEG / HEIC で出力する。HDR・透過・色空間不明・初期の画素数上限を超える入力は拒否する。プレビューは1280px以内に縮小し、最新のプレビューを作れない状態で保存を有効にしない。
+- 保存直前の PhotoKit 変更キューで権限・対象・revision・content 編集可否を再確認する。保存後は実際の調整データ、描画後の寸法、再取得した全原本の SHA-256 / 長さ / 名前 / 役割と日時・お気に入り・GPS を確認する。Auxiliary の置換を許し、原本の欠落や変化は拒否する。結果不明や記録の保存失敗は一覧更新まで Apple の書込みを無効にし、自動再試行しない。新しい Move receipt は作らない。
+- 編集画面は描画処理の停止を待ってから閉じる。ネイティブ入力の保持を解除してから作業領域を片付ける。解除に失敗した場合は使用中の可能性がある作業領域を保持し、エラーを表示する。旧SDKの非Sendableな入力と出力には、読取専用・構築後に不変・利用executorと寿命を限定した private capsule の例外を記載する。編集入力callbackにも明示的な Sendable を要求する strict lint を追加する。
+- ローカル `make check`: Rust 103 tests / Swift 26 tests。幾何・既存編集・改ざん・古い scope / 権限 / revision・キャンセル・保存結果不一致・原本変化・永続化失敗・解放 / 片付け失敗、実FFIでの履歴と保存 / 解放順を確認。Core Imageの8通りの幾何とEXIFの8方向、切り抜きの画素位置、JPEG / HEIC の Display P3と向き・寸法、入力バイト保持を確認した。追加lintも正しいcallback2種の通過とactorを引き継ぐcallbackの拒否を実SwiftLintで確認。最終HEAD CIは別途記録する。
+- `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。Swift 6 strict concurrency / コンパイラ警告のエラー化を維持して、明示的なSendable callbackとネイティブ入力 / 出力の保持をコンパイルした。これをPhotoKit保存・操作の証拠には数えない。
+- 最新版を既存Simulatorにインストール・起動し、保存された一覧のAppleフルアクセス・8枚・転送履歴0件を再読込した。ローカル `make integration` はDocker daemonのsocketが存在せず、テスト開始前に停止。実Immichはhosted CIで別に確認し、純粋な編集系列parserの契約テストを実Immich編集の証拠に数えない。
+- Macのロックにより、Simulatorの編集画面操作・PhotoKit保存・再起動・既存のPhotos編集との往復は未検証。RAW、実機・iCloud・iPad・macOSのPhotoKit操作、HDR・透過、Immichの編集、明るさ・色・フィルター、原本へ戻す、編集後の共有は継続課題。コード / 画素テストをこれらの証拠に数えない。

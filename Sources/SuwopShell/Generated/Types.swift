@@ -1,6 +1,11 @@
 // Generated from Rust schema. Run make generate-types; do not edit.
 import Foundation
 
+public enum AdjustmentBase: String, Codable, CaseIterable, Sendable {
+    case `original`
+    case `rendered`
+}
+
 public enum AlbumAction: String, Codable, CaseIterable, Sendable {
     case `rename`
     case `add`
@@ -75,6 +80,51 @@ public struct AlbumView: Codable, Sendable {
         self.album = album
         self.candidates = candidates
         self.photoIDs = photoIDs
+    }
+}
+
+public struct AppleAdjustment: Codable, Sendable {
+    public var data: String
+    public var formatIdentifier: String
+    public var formatVersion: String
+    public init(data: String, formatIdentifier: String, formatVersion: String) {
+        self.data = data
+        self.formatIdentifier = formatIdentifier
+        self.formatVersion = formatVersion
+    }
+}
+
+public struct AppleEditInput: Codable, Sendable {
+    public var adjustment: AppleAdjustment?
+    public var asset: StoredAsset
+    public var canEdit: Bool
+    public var defaultFormat: String?
+    public var hasAdjustments: Bool
+    public var image: ImageEncodingFacts
+    public var path: String
+    public var supportedFormats: [String]
+    public var token: String
+    public init(adjustment: AppleAdjustment? = nil, asset: StoredAsset, canEdit: Bool, defaultFormat: String? = nil, hasAdjustments: Bool, image: ImageEncodingFacts, path: String, supportedFormats: [String] = [], token: String) {
+        self.adjustment = adjustment
+        self.asset = asset
+        self.canEdit = canEdit
+        self.defaultFormat = defaultFormat
+        self.hasAdjustments = hasAdjustments
+        self.image = image
+        self.path = path
+        self.supportedFormats = supportedFormats
+        self.token = token
+    }
+}
+
+public struct AppleEditResult: Codable, Sendable {
+    public var adjustment: AppleAdjustment
+    public var asset: StoredAsset
+    public var image: ImageEncodingFacts
+    public init(adjustment: AppleAdjustment, asset: StoredAsset, image: ImageEncodingFacts) {
+        self.adjustment = adjustment
+        self.asset = asset
+        self.image = image
     }
 }
 
@@ -176,6 +226,54 @@ public struct Coordinates: Codable, Sendable {
     }
 }
 
+public struct EditCommand: Codable, Sendable {
+    public var crop: PixelCrop?
+    public var kind: EditCommandKind
+    public init(crop: PixelCrop? = nil, kind: EditCommandKind) {
+        self.crop = crop
+        self.kind = kind
+    }
+}
+
+public enum EditCommandKind: String, Codable, CaseIterable, Sendable {
+    case `rotateClockwise`
+    case `mirrorHorizontal`
+    case `mirrorVertical`
+    case `crop`
+    case `undo`
+    case `redo`
+    case `resetDraft`
+}
+
+public struct EditDraftRequest: Codable, Sendable {
+    public var command: EditCommand?
+    public var draft: ImageEditDraft
+    public init(command: EditCommand? = nil, draft: ImageEditDraft) {
+        self.command = command
+        self.draft = draft
+    }
+}
+
+public struct EditingSourceCheck: Codable, Sendable {
+    public var expected: StoredAsset
+    public var fresh: StoredAsset
+    public init(expected: StoredAsset, fresh: StoredAsset) {
+        self.expected = expected
+        self.fresh = fresh
+    }
+}
+
+public struct EditingTarget: Codable, Sendable {
+    public var disabledReason: String?
+    public var key: AssetKey
+    public var name: String
+    public init(disabledReason: String? = nil, key: AssetKey, name: String) {
+        self.disabledReason = disabledReason
+        self.key = key
+        self.name = name
+    }
+}
+
 public struct FileSignature: Codable, Sendable {
     public var bytes: Int64
     public var sha256: String
@@ -221,6 +319,94 @@ public struct HttpResponse: Codable, Sendable {
         self.body = body
         self.path = path
         self.status = status
+    }
+}
+
+public struct ImageEditDraft: Codable, Sendable {
+    public var cursor: Int64
+    public var dimensions: PixelSize
+    public var history: [ImageTransform]
+    public var initial: ImageTransform
+    public init(cursor: Int64, dimensions: PixelSize, history: [ImageTransform] = [], initial: ImageTransform) {
+        self.cursor = cursor
+        self.dimensions = dimensions
+        self.history = history
+        self.initial = initial
+    }
+}
+
+public struct ImageEditPresentation: Codable, Sendable {
+    public var base: AdjustmentBase
+    public var draft: ImageEditDraft
+    public var name: String
+    public var orientation: Int64
+    public var outputFormat: RenderFormat
+    public var path: String
+    public init(base: AdjustmentBase, draft: ImageEditDraft, name: String, orientation: Int64, outputFormat: RenderFormat, path: String) {
+        self.base = base
+        self.draft = draft
+        self.name = name
+        self.orientation = orientation
+        self.outputFormat = outputFormat
+        self.path = path
+    }
+}
+
+public struct ImageEditState: Codable, Sendable {
+    public var canRedo: Bool
+    public var canSave: Bool
+    public var canUndo: Bool
+    public var draft: ImageEditDraft
+    public var outputSize: PixelSize
+    public var transform: ImageTransform
+    public init(canRedo: Bool, canSave: Bool, canUndo: Bool, draft: ImageEditDraft, outputSize: PixelSize, transform: ImageTransform) {
+        self.canRedo = canRedo
+        self.canSave = canSave
+        self.canUndo = canUndo
+        self.draft = draft
+        self.outputSize = outputSize
+        self.transform = transform
+    }
+}
+
+public struct ImageEncodingFacts: Codable, Sendable {
+    public var hasAlpha: Bool
+    public var hasColorSpace: Bool
+    public var hdr: Bool
+    public var orientation: Int64
+    public var rawDimensions: PixelSize
+    public init(hasAlpha: Bool, hasColorSpace: Bool, hdr: Bool, orientation: Int64, rawDimensions: PixelSize) {
+        self.hasAlpha = hasAlpha
+        self.hasColorSpace = hasColorSpace
+        self.hdr = hdr
+        self.orientation = orientation
+        self.rawDimensions = rawDimensions
+    }
+}
+
+public struct ImageRenderPlan: Codable, Sendable {
+    public var adjustment: AppleAdjustment
+    public var dimensions: PixelSize
+    public var orientation: Int64
+    public var outputFormat: RenderFormat
+    public var transform: ImageTransform
+    public init(adjustment: AppleAdjustment, dimensions: PixelSize, orientation: Int64, outputFormat: RenderFormat, transform: ImageTransform) {
+        self.adjustment = adjustment
+        self.dimensions = dimensions
+        self.orientation = orientation
+        self.outputFormat = outputFormat
+        self.transform = transform
+    }
+}
+
+public struct ImageTransform: Codable, Sendable {
+    public var clockwiseQuarterTurns: Int64
+    public var crop: PixelCrop
+    public var flipHorizontal: Bool
+    public init(clockwiseQuarterTurns: Int64, crop: PixelCrop, flipHorizontal: Bool) {
+        self.clockwiseQuarterTurns = clockwiseQuarterTurns
+        self.crop = crop
+        self.flipHorizontal = flipHorizontal
     }
 }
 
@@ -326,6 +512,28 @@ public enum PhotoSort: String, Codable, CaseIterable, Sendable {
     case `name`
 }
 
+public struct PixelCrop: Codable, Sendable {
+    public var height: Int64
+    public var width: Int64
+    public var x: Int64
+    public var y: Int64
+    public init(height: Int64, width: Int64, x: Int64, y: Int64) {
+        self.height = height
+        self.width = width
+        self.x = x
+        self.y = y
+    }
+}
+
+public struct PixelSize: Codable, Sendable {
+    public var height: Int64
+    public var width: Int64
+    public init(height: Int64, width: Int64) {
+        self.height = height
+        self.width = width
+    }
+}
+
 public enum PlaybackKind: String, Codable, CaseIterable, Sendable {
     case `video`
     case `live`
@@ -353,6 +561,11 @@ public enum Presence: String, Codable, CaseIterable, Sendable {
 public enum Provider: String, Codable, CaseIterable, Sendable {
     case `apple`
     case `immich`
+}
+
+public enum RenderFormat: String, Codable, CaseIterable, Sendable {
+    case `jpeg`
+    case `heic`
 }
 
 public enum ResourceRole: String, Codable, CaseIterable, Sendable {
@@ -518,6 +731,7 @@ public struct ViewModel: Codable, Sendable {
     public var browser: BrowserView
     public var busy: Bool
     public var canTransfer: Bool
+    public var editingTargets: [String: [EditingTarget]]
     public var error: String?
     public var media: [String: PlaybackKind]
     public var metadataTargets: [String: [MetadataTarget]]
@@ -528,11 +742,12 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer
+        self.editingTargets = editingTargets
         self.error = error
         self.media = media
         self.metadataTargets = metadataTargets

@@ -8,6 +8,8 @@ import SuwopShell
     private let http = HTTPExecutor()
     private let sharing = SystemSharing()
     private let playback = SystemPlayback()
+    private let imageEditing = SystemImageEditing()
+    private let photoEditing = ApplePhotoEditing()
     init() throws {
         root = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -27,9 +29,13 @@ import SuwopShell
 
     func execute(_ operation: ShellOperation) async throws -> JSONValue {
         let data = operation.data ?? .null
-        if !["persist", "cleanup", "removeCredential"].contains(operation.type) {
+        if !["persist", "cleanup", "removeCredential", "appleEditClose"].contains(operation.type) {
             try Task.checkCancellation()
         }
+        return try await dispatch(operation, data: data)
+    }
+
+    private func dispatch(_ operation: ShellOperation, data: JSONValue) async throws -> JSONValue {
         switch operation.type {
         case "readState": return try readState()
         case "persist":
@@ -60,7 +66,31 @@ import SuwopShell
                 "path"
             ))))
         case "http": return try await .from(http.execute(data.decode(HttpRequest.self)))
+        case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage":
+            return try await editingEffect(operation.type, data: data)
         default: throw SuwopError("未知の入出力要求です: \(operation.type)")
+        }
+    }
+
+    private func editingEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        switch type {
+        case "appleEditOpen":
+            return try await .from(photoEditing.open(
+                data["asset"].decode(StoredAsset.self),
+                directory: requiredString(data, "directory")
+            ))
+        case "appleEditSave":
+            return try await .from(photoEditing.save(
+                requiredString(data, "token"),
+                expected: data["asset"].decode(StoredAsset.self),
+                plan: data["plan"].decode(ImageRenderPlan.self)
+            ))
+        case "appleEditClose":
+            try photoEditing.close(requiredString(data, "token"))
+            return .null
+        case "editImage":
+            return try await .from(imageEditing.present(data["presentation"].decode(ImageEditPresentation.self)))
+        default: throw SuwopError("未知の写真編集入出力です。")
         }
     }
 

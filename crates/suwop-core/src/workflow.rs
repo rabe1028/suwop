@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod editing;
 mod favorites;
 mod media;
 mod metadata;
@@ -27,6 +28,7 @@ struct Runtime<'a> {
     state: SavedLibrary,
     session: Option<Session>,
     workspace: Option<String>,
+    editing_token: Option<String>,
 }
 
 pub async fn run(
@@ -40,6 +42,7 @@ pub async fn run(
         state,
         session,
         workspace: None,
+        editing_token: None,
     };
     let metadata_change = matches!(
         event,
@@ -47,13 +50,24 @@ pub async fn run(
             | Event::SetMetadata { .. }
             | Event::CreateAlbum { .. }
             | Event::EditAlbum { .. }
+            | Event::EditImage { .. }
     );
     let sharing = matches!(event, Event::Share { .. });
     let playback = matches!(event, Event::Play { .. });
+    let editing = matches!(event, Event::EditImage { .. });
     let mut result = runtime.execute(event).await;
+    if let Some(token) = runtime.editing_token.take() {
+        let close: Result<Value, _> = io(ctx, ShellOperation::AppleEditClose { token }).await;
+        if let Err(error) = close {
+            // A native lease may still be using these files. Retain the private
+            // workspace instead of deleting underneath the native session.
+            runtime.workspace = None;
+            result = Err(format!("編集用データを閉じられませんでした: {error}"));
+        }
+    }
     if let Some(path) = runtime.workspace.take() {
         let cleanup: Result<Value, _> = io(ctx, ShellOperation::Cleanup { path }).await;
-        if (sharing || playback)
+        if (sharing || playback || editing)
             && let Err(error) = cleanup
         {
             result = Err(format!("作業ファイルを片付けられませんでした: {error}"));
@@ -146,6 +160,7 @@ impl Runtime<'_> {
             Event::Index { id } => self.index(&id).await,
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
+            Event::EditImage { key, id } => self.edit_image(&key, &id).await,
             Event::Share { keys, id } => self.share(&keys, &id).await,
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,

@@ -124,6 +124,16 @@ import SwiftUI
         view?.metadataTargets[photo.id] ?? []
     }
 
+    func editingTargets(_ photo: UnifiedPhoto) -> [EditingTarget] {
+        view?.editingTargets[photo.id] ?? []
+    }
+
+    func editImage(_ target: EditingTarget) {
+        do {
+            try send(["type": .string("editImage"), "key": .from(target.key), "id": .string(UUID().uuidString)])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
         do {
             try send([
