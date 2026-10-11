@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod favorites;
 mod media;
 mod metadata;
 mod sharing;
@@ -166,62 +167,18 @@ impl Runtime<'_> {
             _ => Err("不正な操作です。".into()),
         }
     }
-    async fn favorite(&mut self, keys: &[AssetKey], value: bool) -> Result<String, String> {
-        let keys: BTreeSet<_> = keys.iter().cloned().collect();
-        if keys.is_empty() {
-            return Err("写真を選択してください。".into());
-        }
-        // Check every scope before performing any native mutation.
-        for key in &keys {
-            if !self.state.snapshots.iter().any(|s| {
-                s.access != ScanAccess::Unavailable
-                    && s.provider == key.provider
-                    && s.scope == key.scope
-                    && s.assets.iter().any(|a| a.key == *key)
-            }) {
-                return Err("選択した写真を確認できません。一覧を更新してください。".into());
-            }
-            if key.provider == Provider::Immich
-                && self.session.as_ref().is_none_or(|s| s.scope != key.scope)
+    fn preserve_original_fingerprints(&self, fresh: &mut [StoredAsset]) {
+        for record in fresh {
+            if let Some(old) = self
+                .state
+                .snapshots
+                .iter()
+                .flat_map(|s| &s.assets)
+                .find(|old| old.key == record.key)
             {
-                return Err("Immich の接続先が変わっています。".into());
+                crate::metadata::preserve_original_fingerprints(old, record);
             }
         }
-        let apple: Vec<_> = keys
-            .iter()
-            .filter(|k| k.provider == Provider::Apple)
-            .cloned()
-            .collect();
-        if !apple.is_empty() {
-            let fresh: Vec<StoredAsset> = io(
-                self.ctx,
-                ShellOperation::AppleFavorite {
-                    keys: apple.clone(),
-                    value,
-                },
-            )
-            .await?;
-            let returned: BTreeSet<_> = fresh.iter().map(|a| a.key.clone()).collect();
-            if returned != apple.into_iter().collect()
-                || fresh.iter().any(|a| a.is_favorite != value)
-            {
-                return Err(
-                    "Apple Photos の保存結果を確認できません。一覧を更新してください。".into(),
-                );
-            }
-            self.replace_records(fresh);
-            self.persist().await?;
-            self.progress("Apple Photos のお気に入りを保存しました。");
-        }
-        for key in keys.iter().filter(|k| k.provider == Provider::Immich) {
-            let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-            let fresh = session.favorite(self.ctx, &key.asset_id, value).await?;
-            let record = self.immich_record(&fresh).await?;
-            self.replace_records(vec![record]);
-            self.persist().await?;
-            self.progress("Immich のお気に入りを保存しました。");
-        }
-        Ok(format!("{} 件のお気に入りを変更しました。", keys.len()))
     }
     fn replace_records(&mut self, fresh: Vec<StoredAsset>) {
         for record in fresh {

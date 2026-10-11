@@ -1,7 +1,7 @@
 use crate::{
     app::{ShellOperation, io},
     domain::{AssetKey, Provider, StoredAsset},
-    metadata::{MetadataInput, prepare, preserve_original_fingerprints, verify},
+    metadata::{MetadataInput, prepare, verify},
 };
 
 use super::Runtime;
@@ -46,17 +46,7 @@ impl Runtime<'_> {
                 // Metadata changes do not produce a new transfer/deletion receipt.
                 // Keep catalog identity for unchanged PhotoKit originals, while
                 // fresh revisions invalidate the old deletion proof.
-                for record in &mut fresh {
-                    if let Some(old) = self
-                        .state
-                        .snapshots
-                        .iter()
-                        .flat_map(|s| &s.assets)
-                        .find(|old| old.key == record.key)
-                    {
-                        preserve_original_fingerprints(old, record);
-                    }
-                }
+                self.preserve_original_fingerprints(&mut fresh);
                 self.replace_records(fresh);
                 if let Err(error) = self.persist().await {
                     self.invalidate(target.provider);

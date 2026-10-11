@@ -86,4 +86,13 @@
 - local `make integration` は Docker daemon の socket が存在せず起動できない。実 Immich v3.2.4 に対する日時・timeZone・座標の更新と原本 checksum / 他の項目の保持を専用 CI で確認する。native 保存と最終 HEAD / main の hosted checks は別に記録する。
 - [初回の metadata CI](https://github.com/rabe1028/suwop/actions/runs/38174279455) は日時・timeZone の読戻しを通過した後、お気に入りを一律 false と期待したテストで失敗。fixture の2枚目は元からお気に入りだったため、編集前の ID・checksum・名前・お気に入り・ゴミ箱状態を取得し、日時と座標の変更後にそれぞれ保持されることを検証する形へ修正した。最終 HEAD で実通信テストを再実行する。
 
-- [テスト前提修正後の CI](https://github.com/rabe1028/suwop/actions/runs/38174639762/attempts/2) は core / apple / immich-integration の全 job が通過。最初の attempt はコンテナ取得のレジストリ制限で停止し、統合 job のみを再実行した。その後のレビューで、Apple の日時・GPS変更が照合済み hash を消し、Immich と統合された写真が分かれる問題を修正。成功を確認できた同一の原本構成だけ hash と byte count を保持し、未照合の RAW 原本の hash は補わない。原本構成・種別・IDの変化、取得不完全、重複リソース、新しい hash の観測では旧 hash を流用しない。通常の再読込後も統合を保ち、旧 Move receipt の revision では削除を許可しない回帰テストを追加。修正後の最終 HEAD で再確認する。
+- [テスト前提修正後の CI](https://github.com/rabe1028/suwop/actions/runs/38174639762/attempts/2) は core / apple / immich-integration の全 job が通過。最初の attempt はコンテナ取得のレジストリ制限で停止し、統合 job のみを再実行した。その後のレビューで、Apple の日時・GPS変更が照合済み hash を消し、Immich と統合された写真が分かれる問題を修正。成功を確認できた同一の原本構成だけ hash と byte count を保持し、未照合の RAW 原本の hash は補わない。原本構成・種別・IDの変化、取得不完全、重複リソース、新しい hash の観測では旧 hash を流用しない。通常の再読込後も統合を保ち、旧 Move receipt の revision では削除を許可しない回帰テストを追加。
+- レビュー修正後の [最終 HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38177326243) は `e15e46a75668c69546c0991d92d7217650a3cb12` で core / apple / immich-integration の全 job が通過。[PR #7](https://github.com/rabe1028/suwop/pull/7) をマージし、main `aef156e6ecbef81285c72937dbe119dda7d249fa` と検証済み HEAD の tree が一致することを確認した。マージ後の [main CI](https://github.com/rabe1028/suwop/actions/runs/38177838317) と native 保存の確認は別に追跡する。
+
+## お気に入り変更後の照合と結果不明
+
+- 日時・位置情報と同じ原本構成の検証を、成功を確認できた PhotoKit のお気に入り変更にも適用した。最新の revision を保存しながら既知の原本 hash / byte count を保持するため、正常な再読込後も Apple Photos と Immich の統合を保つ。原本構成が変わった場合は旧 hash を流用しない。
+- 全保存先の現在の scope、写真の所属とフルアクセスを最初の変更前に確認する。PhotoKit の変更キューでも権限、要求した全 ID と properties の変更可否を再確認する。
+- 返却件数、重複のない全 ID とお気に入り値が一致しない場合、応答不明または保存記録失敗の場合は、その保存先への変更を一覧更新まで無効にする。確認済みの Apple の変更を、後の Immich の応答不明で巻き戻したり、両方を自動で再試行したりしない。
+- `make check`: 厳格な quality / architecture / generated / hooks と Rust 84 tests / Swift 19 tests を通過。統合した写真の保持、古い Move revision の拒否、両側の古い scope / 権限制限で書込みゼロ、欠落・重複・異なる ID / 値、応答不明、永続化失敗、部分成功と再取得後の再操作を検証した。
+- `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。最新版を既存 Simulator にインストール・起動したが、Mac のロックが継続しているため、今回の変更後の native 操作は未完了。最終 HEAD CI / main CI と実機・iCloud・iPad・Mac の操作は別に確認する。

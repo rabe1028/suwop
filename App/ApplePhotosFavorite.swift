@@ -14,7 +14,15 @@ extension ApplePhotosStore {
         try Task.checkCancellation()
         let result: Result<Void, Error> = try await NativeChange.perform {
             do {
+                guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
+                    throw SuwopError("お気に入りの変更には写真ライブラリへのフルアクセスが必要です。")
+                }
                 let assets = try Self.fetchAll(identifiers)
+                for index in 0 ..< assets.count {
+                    guard assets.object(at: index).canPerform(.properties) else {
+                        throw SuwopError("この写真のお気に入りは変更できません。")
+                    }
+                }
                 for index in 0 ..< assets.count {
                     let asset = assets.object(at: index)
                     PHAssetChangeRequest(for: asset).isFavorite = value
