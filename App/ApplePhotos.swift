@@ -252,11 +252,15 @@ import UniformTypeIdentifiers
             )
         }
         let manifest = resources.map { "\($0.id)|\($0.name)|\($0.role.rawValue)" }.joined(separator: "\n")
-        let parts = [
-            asset.location?.coordinate.latitude.description ?? "nil",
-            asset.location?.coordinate.longitude.description ?? "nil",
-            asset.modificationDate?.timeIntervalSince1970.description ?? "unknown",
-            asset.creationDate?.timeIntervalSince1970.description ?? "unknown",
+        let latitude = asset.location?.coordinate.latitude.description ?? "nil"
+        let longitude = asset.location?.coordinate.longitude.description ?? "nil"
+        let modifiedAt = asset.modificationDate?.timeIntervalSince1970.description ?? "unknown"
+        let capturedAt = asset.creationDate?.timeIntervalSince1970.description ?? "unknown"
+        let parts: [String] = [
+            latitude,
+            longitude,
+            modifiedAt,
+            capturedAt,
             "\(asset.pixelWidth)x\(asset.pixelHeight)",
             asset.mediaSubtypes.rawValue.description,
             asset.isFavorite.description,

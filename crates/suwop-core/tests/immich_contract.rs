@@ -5,14 +5,30 @@ use suwop_core::{
     app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
     domain::{LibrarySnapshot, Provider, ScanAccess},
     immich::{
-        Asset, HttpRequest, HttpResponse, Session, Version, endpoint, safe_name, same_origin,
-        valid_id,
+        Asset, HttpRequest, HttpResponse, Session, Version, date_string, endpoint, safe_name,
+        same_origin, valid_id,
     },
 };
 const USER: &str = "22222222-2222-4222-8222-222222222222";
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 fn asset_json() -> Value {
     json!({"id":ID,"ownerId":USER,"type":"IMAGE","originalFileName":"raw.dng","checksum":"1111111111111111111111111111111111111111","fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"libraryId":null})
+}
+
+#[test]
+fn capture_dates_keep_subseconds_in_both_directions() -> Result<(), String> {
+    for date in [1_765_000_000.123_456, 35.999_999_999, -0.25, 10.0] {
+        let mut json = asset_json();
+        json["fileCreatedAt"] = Value::from(date_string(date));
+        let asset: Asset = serde_json::from_value(json).map_err(|e| e.to_string())?;
+        let captured = asset
+            .record("scope", None, Some(&[]))
+            .captured_at
+            .ok_or("missing capture date")?;
+        assert!((captured - date).abs() < 0.000_001);
+    }
+    assert!(date_string(f64::NAN).is_empty());
+    Ok(())
 }
 fn scan(
     version: Version,

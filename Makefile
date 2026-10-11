@@ -34,6 +34,7 @@ format:
 	@if [ "$$(uname -s)" = Darwin ]; then swiftformat App Sources Tests --config .swiftformat; fi
 
 test:
+	bash scripts/test-hooks.sh
 	env cargo test --locked --workspace --all-features
 	@if [ "$$(uname -s)" = Darwin ]; then bash scripts/build-rust-apple.sh --host && swift test -Xswiftc -warnings-as-errors; fi
 

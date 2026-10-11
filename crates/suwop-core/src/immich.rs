@@ -363,17 +363,28 @@ pub fn check_status(status: u16) -> Result<(), String> {
     }
 }
 #[must_use]
+// Chrono takes integer seconds/nanoseconds; the fractional part is bounded by floor.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
 pub fn date_string(seconds: f64) -> String {
-    #[allow(clippy::cast_possible_truncation)]
-    chrono::DateTime::from_timestamp(seconds as i64, 0).map_or_else(String::new, |d| {
-        d.to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+    if !seconds.is_finite() {
+        return String::new();
+    }
+    let whole = seconds.floor();
+    let nanos = ((seconds - whole) * 1_000_000_000.0).round() as u32;
+    let (whole, nanos) = if nanos == 1_000_000_000 {
+        (whole + 1.0, 0)
+    } else {
+        (whole, nanos)
+    };
+    chrono::DateTime::from_timestamp(whole as i64, nanos).map_or_else(String::new, |d| {
+        d.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
     })
 }
 fn parse_date(value: &str) -> Option<f64> {
     chrono::DateTime::parse_from_rfc3339(value).ok().map(|d| {
         #[allow(clippy::cast_precision_loss)]
         {
-            d.timestamp() as f64
+            d.timestamp() as f64 + f64::from(d.timestamp_subsec_nanos()) / 1_000_000_000.0
         }
     })
 }

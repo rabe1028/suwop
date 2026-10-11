@@ -104,24 +104,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
                 bytes: bytes.len() as u64,
             },
         };
-        let metadata = StoredAsset {
-            key: AssetKey {
-                provider: Provider::Apple,
-                scope: "fixture".into(),
-                asset_id: i.to_string(),
-            },
-            name: resource.name.clone(),
-            captured_at: Some(now),
-            modified_at: Some(now),
-            revision: "fixture".into(),
-            resources: vec![resource],
-            is_favorite: true,
-            latitude: Some(35.681_236),
-            longitude: Some(139.767_125),
-            inventory_complete: true,
-            is_offline: false,
-            deletion_blockers: vec![],
-        };
+        let metadata = fixture_metadata(resource, i, now);
         let id = if i == 3 {
             upload_sidecar(ctx, &session, &file, directory, now).await?
         } else {
@@ -129,6 +112,14 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
         };
         let fetched = session.asset(ctx, &id).await?;
         assert_eq!(fetched.original_file_name, metadata.name);
+        let captured = fetched
+            .record(&session.scope, None, None)
+            .captured_at
+            .ok_or("missing capture date")?;
+        assert!(
+            (captured - now).abs() < 0.001,
+            "subsecond capture date changed"
+        );
         if i < 3 {
             let exif = fetched.exif_info.ok_or("missing GPS metadata")?;
             assert!((exif.latitude.ok_or("missing latitude")? - 35.681_236).abs() < 0.000_001);
@@ -287,4 +278,25 @@ async fn upload_sidecar(
         .as_str()
         .ok_or("missing sidecar asset id")?
         .to_owned())
+}
+
+fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
+    StoredAsset {
+        key: AssetKey {
+            provider: Provider::Apple,
+            scope: "fixture".into(),
+            asset_id: index.to_string(),
+        },
+        name: resource.name.clone(),
+        captured_at: Some(now),
+        modified_at: Some(now),
+        revision: "fixture".into(),
+        resources: vec![resource],
+        is_favorite: true,
+        latitude: Some(35.681_236),
+        longitude: Some(139.767_125),
+        inventory_complete: true,
+        is_offline: false,
+        deletion_blockers: vec![],
+    }
 }
