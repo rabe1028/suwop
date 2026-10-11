@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
 mod media;
+mod metadata;
 mod sharing;
 
 #[derive(Debug)]
@@ -41,7 +42,10 @@ pub async fn run(
     };
     let metadata_change = matches!(
         event,
-        Event::SetFavorite { .. } | Event::CreateAlbum { .. } | Event::EditAlbum { .. }
+        Event::SetFavorite { .. }
+            | Event::SetMetadata { .. }
+            | Event::CreateAlbum { .. }
+            | Event::EditAlbum { .. }
     );
     let sharing = matches!(event, Event::Share { .. });
     let playback = matches!(event, Event::Play { .. });
@@ -140,6 +144,7 @@ impl Runtime<'_> {
             }
             Event::Index { id } => self.index(&id).await,
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
+            Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::Share { keys, id } => self.share(&keys, &id).await,
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,
@@ -204,7 +209,7 @@ impl Runtime<'_> {
                     "Apple Photos の保存結果を確認できません。一覧を更新してください。".into(),
                 );
             }
-            self.replace_favorite_records(fresh);
+            self.replace_records(fresh);
             self.persist().await?;
             self.progress("Apple Photos のお気に入りを保存しました。");
         }
@@ -212,13 +217,13 @@ impl Runtime<'_> {
             let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
             let fresh = session.favorite(self.ctx, &key.asset_id, value).await?;
             let record = self.immich_record(&fresh).await?;
-            self.replace_favorite_records(vec![record]);
+            self.replace_records(vec![record]);
             self.persist().await?;
             self.progress("Immich のお気に入りを保存しました。");
         }
         Ok(format!("{} 件のお気に入りを変更しました。", keys.len()))
     }
-    fn replace_favorite_records(&mut self, fresh: Vec<StoredAsset>) {
+    fn replace_records(&mut self, fresh: Vec<StoredAsset>) {
         for record in fresh {
             for snapshot in &mut self.state.snapshots {
                 if let Some(old) = snapshot.assets.iter_mut().find(|a| a.key == record.key) {

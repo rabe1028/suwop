@@ -120,6 +120,23 @@ import SwiftUI
         view?.media[photo.id]
     }
 
+    func metadataTargets(_ photo: UnifiedPhoto) -> [MetadataTarget] {
+        view?.metadataTargets[photo.id] ?? []
+    }
+
+    func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
+        do {
+            try send([
+                "type": .string("setMetadata"),
+                "keys": .from(target.keys),
+                "input": .from(input),
+            ], completion: completion)
+        } catch {
+            errorMessage = error.localizedDescription
+            completion(false)
+        }
+    }
+
     func play(_ photo: UnifiedPhoto) {
         do {
             try send([
@@ -236,8 +253,11 @@ import SwiftUI
         return image
     }
 
-    func send(_ event: [String: JSONValue]) {
-        guard work == nil, let runtime, let shell else { return }
+    func send(_ event: [String: JSONValue], completion: (@MainActor (Bool) -> Void)? = nil) {
+        guard work == nil, let runtime, let shell else {
+            completion?(false)
+            return
+        }
         errorMessage = nil
         work = Task {
             defer {
@@ -268,7 +288,11 @@ import SwiftUI
                     requests += try await runtime.resolve(id: request.id, value: value, error: failure)
                     try await readView()
                 }
-            } catch { errorMessage = error.localizedDescription }
+                completion?(view?.error == nil)
+            } catch {
+                errorMessage = error.localizedDescription
+                completion?(false)
+            }
         }
     }
 

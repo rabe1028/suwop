@@ -7,11 +7,13 @@
 - `domain.rs`: 同一性、RAW/JPEG の多重度、保存状態、削除条件、PhotoKit 入出力計画。
 - `workflow.rs`: 接続、走査、照合、コピー、移動、履歴保存、旧形式の移行。
 - `sharing.rs` / `workflow/sharing.rs`: 共有元の選択、原本の検証、共有ファイルの名前と作業領域の寿命。
+- `metadata.rs` / `workflow/metadata.rs`: 保存先ごとの日時・位置情報、入力・権限の検証、保存結果の再取得。
 - `immich.rs`: URL／origin 検証、API、ページング、multipart の仕様、レスポンス解釈。
 - `crates/suwop-ffi`: Crux の JSON FFI と C ABI、ファイルをストリームでハッシュするネイティブ入出力。
 - `Sources/SuwopShell`: FFI actor、JSON、生成された DTO、表示用の補助値。
 - `App/AppleShell.swift`: 汎用 effect の振り分け、原子的なファイル保存。
 - `App/ApplePhotos.swift`: PhotoKit の観測とリソース入出力。削除直前にも Rust に観測結果を渡す。
+- `App/ApplePhotosMetadata.swift`: Rust が指定した変更だけを PhotoKit の変更キューで実行し、全 ID の最新の結果を返す。
 - `App/Credentials.swift` / `HTTPExecutor.swift`: Keychain と汎用 HTTP の入出力。
 - `App/SystemSharing.swift`: iOS の activity controller と macOS の sharing service。完了またはキャンセルまで effect を返さない。
 - `App/LibraryModel.swift` / `SuwopApp.swift`: ViewModel の公開、画像キャッシュ、SwiftUI。
@@ -52,6 +54,16 @@ Rust は native service の応答まで作業領域を保持し、その後に�
 Crux の `Play` が1件の catalog photo と scope / access を検証し、必要な場合だけ Immich の現在の session を取得する。Live Photo は親 asset を選び、単独の付随動画へ代替しない。プレビューの保存先も Rust が選び、Swift は指定された asset の取得だけを行う。既存の原本 export と hash 検証を経て、再生用にコピーした動画1ファイルまたは Live Photo の静止画 / 動画2ファイルを `PlayMedia` effect へ渡す。取得中に構成が変わった場合や、コピーの内容・パスを確認できない場合は再生しない。
 
 Swift は `PlaybackPlan` の AVKit / PhotosUI 表示だけを担当する。終了時にプレーヤーを停止し、画面を閉じてから応答を返す。Rust はこの応答まで workspace を保持し、終了・失敗後に cleanup を実行する。写真と転送履歴には書き込まない。原本の再生と編集後の再生は別であり、画面に原本であることを示す。
+
+## 日時・位置情報
+
+情報画面で保存先を選び、その provider / scope にある関連原本の組へ1項目ずつ反映する。Rust が1件の catalog photo の完全な組、現在の scope、フルアクセス、日時と IANA time zone、有限かつ範囲内の座標を検証する。別の保存先、日時以外のメタデータ、転送履歴、原本ファイルのバイト列は変更しない。PhotoKit の creationDate は絶対日時として保存する。UI は端末のタイムゾーンを使用する。
+
+Swift は PhotoKit の変更キュー内で権限と全 ID・properties の変更可否を再確認してから、creationDate または location だけを変更する。Immich は全 ID の所有者と状態を先に確認してから bulk PUT を1回実行する。撮影日時は UTC の dateTimeOriginal と IANA timeZone を渡す。読込でも、元ファイルの timestamp より調整後の EXIF 日時を優先する。不正な調整日時を元の日時へ置き換えず、不明として表示する。
+
+Rust が変更後の全 ID、日時または座標と Immich の timeZone を再取得して確認し、最新のレコードを保存する。応答の欠落・重複・値の不一致・保存失敗は変更済みの可能性を表示し、保存先への変更を一覧の再読込まで無効にする。自動で再試行しない。成功を確認できた PhotoKit の属性変更では、同一の原本構成の既知の hash / byte count を維持し、写真の統合を保つ。原本の構成が変わった場合や新しい hash が得られた場合は旧 hash を流用しない。独立したメタデータ変更は新しい削除用の証拠を作らず、古い revision から削除を許可しない。
+
+位置情報の削除は PhotoKit の location = nil のみ対応する。Immich v3.2.4 の更新 DTO は null 座標を受け付けないため、削除を提供しない。0 / 0 は実在する座標として保存する。ライブラリの位置情報を変更しても、共有する原本ファイルの EXIF を除去したことにはならない。地名検索・地図、任意タイムゾーンの選択、取り消し・元の値への復元は継続作業。
 
 ## API 基準
 

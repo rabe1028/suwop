@@ -4,5 +4,6 @@ pub mod browser;
 pub mod domain;
 pub mod immich;
 pub mod media;
+pub mod metadata;
 pub mod sharing;
 pub mod workflow;

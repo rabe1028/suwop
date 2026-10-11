@@ -135,6 +135,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     wait_for(ctx, &session, &ids, true).await?;
     assert!(session.favorite(ctx, &ids[0], true).await?.is_favorite);
     assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
+    exercise_metadata(ctx, &session, &ids[..2]).await?;
     exercise_albums(ctx, &session, &ids[..2]).await?;
     let _: Value = session
         .json(
@@ -211,6 +212,63 @@ async fn exercise_albums(ctx: &Context, session: &Session, ids: &[String]) -> Re
     session.delete_album(ctx, &album.id).await?;
     for id in ids {
         assert!(!session.asset(ctx, id).await?.is_trashed);
+    }
+    Ok(())
+}
+
+async fn exercise_metadata(ctx: &Context, session: &Session, ids: &[String]) -> Result<(), String> {
+    use suwop_core::metadata::{MetadataAction, MetadataInput, normalize};
+    let mut before = Vec::new();
+    for id in ids {
+        before.push(session.asset(ctx, id).await?);
+    }
+    let date = MetadataInput {
+        action: MetadataAction::SetCapturedAt,
+        captured_at: Some(1_730_615_400.125),
+        time_zone: Some("America/New_York".into()),
+        latitude: None,
+        longitude: None,
+    };
+    let originals = session.metadata(ctx, ids, &normalize(&date)?).await?;
+    for (asset, original) in originals.iter().zip(&before) {
+        assert_eq!(
+            asset.record(&session.scope, None, None).captured_at,
+            date.captured_at
+        );
+        let exif = asset.exif_info.as_ref().ok_or("missing adjusted EXIF")?;
+        let prior = original.exif_info.as_ref().ok_or("missing original EXIF")?;
+        assert_eq!(exif.time_zone.as_deref(), Some("America/New_York"));
+        assert_eq!(
+            (exif.latitude, exif.longitude),
+            (prior.latitude, prior.longitude)
+        );
+        assert_eq!(asset.id, original.id);
+        assert_eq!(asset.checksum, original.checksum);
+        assert_eq!(asset.original_file_name, original.original_file_name);
+        assert_eq!(asset.is_favorite, original.is_favorite);
+        assert_eq!(asset.is_trashed, original.is_trashed);
+    }
+    let location = MetadataInput {
+        action: MetadataAction::SetLocation,
+        captured_at: None,
+        time_zone: None,
+        latitude: Some("0".into()),
+        longitude: Some("0".into()),
+    };
+    let located = session.metadata(ctx, ids, &normalize(&location)?).await?;
+    for (asset, before) in located.iter().zip(&originals) {
+        assert_eq!(asset.id, before.id);
+        assert_eq!(asset.checksum, before.checksum);
+        assert_eq!(asset.original_file_name, before.original_file_name);
+        assert_eq!(
+            asset.record(&session.scope, None, None).captured_at,
+            date.captured_at
+        );
+        let exif = asset.exif_info.as_ref().ok_or("missing adjusted EXIF")?;
+        assert_eq!((exif.latitude, exif.longitude), (Some(0.0), Some(0.0)));
+        assert_eq!(exif.time_zone.as_deref(), Some("America/New_York"));
+        assert_eq!(asset.is_favorite, before.is_favorite);
+        assert_eq!(asset.is_trashed, before.is_trashed);
     }
     Ok(())
 }

@@ -43,6 +43,7 @@ extension StoredAsset: Identifiable { public var id: String {
 extension AssetKey: Identifiable {}
 extension PhotoResource: Identifiable {}
 extension TransferReceipt: Identifiable {}
+extension MetadataTarget: Identifiable {}
 public extension UnifiedPhoto {
     var isFavorite: Bool {
         assets.contains(where: \.isFavorite)

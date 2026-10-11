@@ -46,7 +46,8 @@ import SuwopShell
                 operation.type,
                 data: data
             )
-        case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite": return try await photoEffect(
+        case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite",
+             "appleMetadata": return try await photoEffect(
                 operation.type,
                 data: data
             )
@@ -64,6 +65,21 @@ import SuwopShell
     }
 
     private func photoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        if type == "appleMetadata" {
+            return try await metadataEffect(data)
+        }
+        return try await basicPhotoEffect(type, data: data)
+    }
+
+    private func metadataEffect(_ data: JSONValue) async throws -> JSONValue {
+        let keys = try data["keys"].decode([AssetKey].self)
+        guard let first = keys.first else { throw SuwopError("写真を選択してください。") }
+        return try await .from(appleStore(scope: first.scope).setMetadata(
+            keys, change: data["change"].decode(MetadataChange.self)
+        ))
+    }
+
+    private func basicPhotoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         switch type {
         case "appleScan":
             let store = try appleStore(scope: requiredString(data, "scope"))
