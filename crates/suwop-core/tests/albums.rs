@@ -2,7 +2,10 @@ use crux_core::Core;
 use serde_json::{Value, json};
 use suwop_core::{
     albums::{AlbumAction, AlbumEdit, AlbumKey, AlbumPermissions, AlbumSnapshot, StoredAlbum},
-    app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
+    app::{
+        ConnectionSettings, Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse,
+        Suwop,
+    },
     domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset},
 };
 
@@ -97,6 +100,19 @@ impl Native {
                 return Err("nonterminating album workflow".into());
             }
             let Effect::Io(mut request) = effects.remove(0);
+            if matches!(&request.operation, ShellOperation::ReadCredential { .. }) {
+                effects.extend(
+                    core.resolve(
+                        &mut request,
+                        ShellResponse {
+                            value: None,
+                            error: Some("Immich credential unavailable".into()),
+                        },
+                    )
+                    .map_err(|e| e.to_string())?,
+                );
+                continue;
+            }
             let value =
                 match &request.operation {
                     ShellOperation::AppleAlbums { .. } => serde_json::to_value(&self.snapshot),
@@ -249,5 +265,45 @@ fn same_named_albums_remain_separate_and_unavailable_snapshots_are_read_only() -
         json!({"schemaVersion":2,"appleScope":"apple","snapshots":[],"receipts":[]}),
     )?;
     assert!(state.albums.is_empty());
+    Ok(())
+}
+
+#[test]
+fn apple_albums_remain_available_when_immich_reconnect_fails() -> Result<(), String> {
+    for event in [
+        Event::RefreshAlbums,
+        Event::CreateAlbum {
+            provider: Provider::Apple,
+            title: "local".into(),
+        },
+        edit(AlbumAction::Rename, vec![], Some("local")),
+    ] {
+        let refreshing = matches!(event, Event::RefreshAlbums);
+        let mut state = core().view().state;
+        state.connection = Some(ConnectionSettings {
+            address: "https://offline/api".into(),
+            allow_http: false,
+            credential_id: "missing".into(),
+        });
+        let core = Core::new_with(
+            Suwop,
+            Model {
+                state,
+                ready: true,
+                ..Model::default()
+            },
+        );
+        let mut native = Native::new();
+        native.run(&core, event)?;
+        assert_eq!(core.view().error.is_some(), refreshing);
+        assert!(
+            core.view()
+                .albums
+                .iter()
+                .all(|a| a.access == ScanAccess::Full)
+        );
+        assert_eq!(native.writes, usize::from(!refreshing));
+        assert_eq!(native.persists, 1);
+    }
     Ok(())
 }

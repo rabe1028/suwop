@@ -9,8 +9,11 @@ use crate::{
 
 impl Runtime<'_> {
     pub(super) async fn refresh_albums(&mut self) -> Result<String, String> {
-        self.ensure_session().await?;
         let mut errors = Vec::new();
+        if let Err(error) = self.ensure_session().await {
+            self.invalidate_albums(Provider::Immich);
+            errors.push(error);
+        }
         for provider in [Provider::Apple, Provider::Immich] {
             if provider == Provider::Immich && self.session.is_none() {
                 continue;
@@ -128,7 +131,9 @@ impl Runtime<'_> {
         title: &str,
     ) -> Result<String, String> {
         validate_title(title)?;
-        self.ensure_session().await?;
+        if provider == Provider::Immich {
+            self.ensure_session().await?;
+        }
         let scope = self.album_scope(provider)?.to_owned();
         let title = title.trim();
         let result: Result<StoredAlbum, String> = match provider {
@@ -189,7 +194,9 @@ impl Runtime<'_> {
         key: &AlbumKey,
         edit: &AlbumEdit,
     ) -> Result<String, String> {
-        self.ensure_session().await?;
+        if key.provider == Provider::Immich {
+            self.ensure_session().await?;
+        }
         if key.scope != self.album_scope(key.provider)? {
             return Err("アルバムの保存先が変わっています。".into());
         }

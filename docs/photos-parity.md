@@ -39,9 +39,10 @@
 - 保存先と scope を持つアルバム ID を使い、同じ名前でも統合しない。Apple Photos の通常アルバムと Immich の所有アルバムを扱う。Immich の他の所有者の共有アルバム、スマートアルバム、フォルダー、順番の編集は継続作業。
 - Rust が最新のアルバム・権限を読み直して操作を検証し、保存後も所属・名前・削除結果を再取得する。結果が不明なら変更済みの可能性を表示し、アルバムの変更権限を無効にして再読込を案内する。
 - PhotoKit の native adapter は変更キュー内でフルアクセス、collection の `canPerform`、全写真 ID の完全一致を確認する。アルバム削除と写真の削除には別の native API / Immich route を使う。
-- `make check` は Rust 51 tests / Swift 15 tests を通過。Swift の新しいテストは実 FFI を通してアルバムの削除・再取得・保存を確認し、写真と転送履歴が残ることを確認する。
+- `make check` は Rust 52 tests / Swift 15 tests を通過。Swift の新しいテストは実 FFI を通してアルバムの削除・再取得・保存を確認し、写真と転送履歴が残ることを確認する。
+- Immich へ再接続できない場合も Apple のアルバム一覧を更新し、ローカルの作成・名前変更を実行できる回帰テストを通過。Immich の操作だけ再接続を要求する。
 - `make apple-build` は Apple の Rust 5 target と iOS Simulator / macOS app builds を通過。iPhone 17 Pro / iOS 26.4 の標準写真6枚で、通常アルバム作成・名前変更・写真追加・再起動後の native 再取得・選択による所属解除（アルバム1枚→0枚、ライブラリ6枚を保持）を確認。アルバム削除の実 PhotoKit 操作、実機 / iCloud / iPad / Mac の操作は未確認。
-- Immich v3.2.4 の実 API にアルバム作成・名前変更・所属追加・解除・削除後の写真保持を検証するケースを追加。新しい HEAD の hosted CI と native 操作は別途確認する。
+- Immich v3.2.4 の実 API にアルバム作成・名前変更・所属追加・解除・削除後の写真保持を検証するケースを追加。[最初の album CI](https://github.com/rabe1028/suwop/actions/runs/38162729624) の integration job は通過。Linux の初回ゲートは runner の不完全な Rustup toolchain による Clippy インストール競合で停止したため、CI の Rustup 保管先を専用の一時ディレクトリへ分離。修正後の最終 HEAD CI は別に確認する。
 - Apple の全画面プレビューは `.aspectFit` で全体を取得し、グリッドは `.aspectFill` で取得する。
 - Simulator で横長写真を縦横比を保って表示し、アルバム内の閲覧が「1 / 1」になることを確認。拡大中の移動範囲を実際に収まった画像の寸法から求め、縮小時も補正する。パンの限界と回転・大文字の操作確認は継続する。
 - ローカルの画面証拠は `target/acceptance/albums-20261012/` に保存。保存自体は VRT / golden 比較の通過を意味しない。
