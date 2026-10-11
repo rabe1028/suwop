@@ -260,6 +260,22 @@ public enum PhotoSort: String, Codable, CaseIterable, Sendable {
     case `name`
 }
 
+public enum PlaybackKind: String, Codable, CaseIterable, Sendable {
+    case `video`
+    case `live`
+}
+
+public struct PlaybackPlan: Codable, Sendable {
+    public var files: [String]
+    public var kind: PlaybackKind
+    public var name: String
+    public init(files: [String] = [], kind: PlaybackKind, name: String) {
+        self.files = files
+        self.kind = kind
+        self.name = name
+    }
+}
+
 public enum Presence: String, Codable, CaseIterable, Sendable {
     case `both`
     case `appleOnly`
@@ -437,21 +453,25 @@ public struct ViewModel: Codable, Sendable {
     public var busy: Bool
     public var canTransfer: Bool
     public var error: String?
+    public var media: [String: PlaybackKind]
     public var moveBlockers: [String: [String]]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
+    public var previewSources: [String: AssetKey]
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer
         self.error = error
+        self.media = media
         self.moveBlockers = moveBlockers
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
+        self.previewSources = previewSources
         self.serverVersion = serverVersion
         self.state = state
         self.status = status

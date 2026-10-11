@@ -20,6 +20,7 @@ struct Protocol {
     browser: suwop_core::browser::BrowserOptions,
     album_edit: suwop_core::albums::AlbumEdit,
     share_file: suwop_core::sharing::ShareFile,
+    playback: suwop_core::media::PlaybackPlan,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

@@ -112,7 +112,22 @@ import SwiftUI
 
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         guard let shell else { throw SuwopError("入出力が利用できません。") }
-        return try await shell.thumbnail(photo, connection: connection, preview: true)
+        guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
+        return try await shell.thumbnail(key, connection: connection, preview: true)
+    }
+
+    func playbackKind(_ photo: UnifiedPhoto) -> PlaybackKind? {
+        view?.media[photo.id]
+    }
+
+    func play(_ photo: UnifiedPhoto) {
+        do {
+            try send([
+                "type": .string("play"),
+                "keys": .from(photo.assets.map(\.key)),
+                "id": .string(UUID().uuidString),
+            ])
+        } catch { errorMessage = error.localizedDescription }
     }
 
     var snapshots: [LibrarySnapshot] {
@@ -209,12 +224,13 @@ import SwiftUI
     }
 
     func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
         let cacheKey = "\(thumbnailGeneration)|\(photo.id)" as NSString
         if let image = thumbnails.object(forKey: cacheKey) {
             return image
         }
         guard let shell else { throw SuwopError("入出力が利用できません。") }
-        let image = try await shell.thumbnail(photo, connection: connection)
+        let image = try await shell.thumbnail(key, connection: connection)
         try Task.checkCancellation()
         thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
         return image
