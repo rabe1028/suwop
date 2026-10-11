@@ -14,6 +14,7 @@ import SwiftUI
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
     private var started = false
+    private var pendingRefresh = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
 
     init() {
@@ -34,6 +35,48 @@ import SwiftUI
 
     var photos: [UnifiedPhoto] {
         view?.photos ?? []
+    }
+
+    var visiblePhotos: [UnifiedPhoto] {
+        guard let browser = view?.browser else { return photos }
+        let byID = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return browser.photoIDs.compactMap { byID[$0] }
+    }
+
+    var browser: BrowserView? {
+        view?.browser
+    }
+
+    func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?) {
+        guard let runtime else { return }
+        Task {
+            do {
+                let options = BrowserOptions(
+                    filter: filter,
+                    presence: presence,
+                    query: query,
+                    sort: sort,
+                    timeZone: TimeZone.current.identifier
+                )
+                _ = try await runtime.update(.object(["type": .string("browse"), "options": .from(options)]))
+                try await readView()
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    func favorite(_ photos: [UnifiedPhoto], value: Bool) {
+        do {
+            try send([
+                "type": .string("setFavorite"),
+                "keys": .from(Array(Set(photos.flatMap { $0.assets.map(\.key) }))),
+                "value": .bool(value),
+            ])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        guard let shell else { throw SuwopError("入出力が利用できません。") }
+        return try await shell.thumbnail(photo, connection: connection, preview: true)
     }
 
     var snapshots: [LibrarySnapshot] {
@@ -71,6 +114,7 @@ import SwiftUI
     func start() {
         guard !started else { return }
         started = true
+        pendingRefresh = true
         send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
     }
 
@@ -144,7 +188,13 @@ import SwiftUI
         guard work == nil, let runtime, let shell else { return }
         errorMessage = nil
         work = Task {
-            defer { work = nil }
+            defer {
+                work = nil
+                if pendingRefresh, view?.state.schemaVersion == 2 {
+                    pendingRefresh = false
+                    refresh()
+                }
+            }
             do {
                 var requests = try await runtime.update(.object(event))
                 try await readView()
@@ -176,10 +226,15 @@ import SwiftUI
     }
 
     private func notifyPhotoChange() {
+        pendingRefresh = true
         guard let runtime else { return }
         Task {
             do { _ = try await runtime.update(.object(["type": .string("appleChanged")]))
                 try await readView()
+                if work == nil {
+                    pendingRefresh = false
+                    refresh()
+                }
             } catch { errorMessage = error.localizedDescription }
         }
     }

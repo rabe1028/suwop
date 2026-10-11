@@ -33,7 +33,7 @@ targets:
         CFBundleDisplayName: Suwop
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
-        NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
+        NSPhotoLibraryUsageDescription: 写真を閲覧・整理し、Apple Photos と Immich の原本を照合・コピー・移動します。
         NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
         NSAppTransportSecurity:
@@ -57,7 +57,7 @@ targets:
       properties:
         CFBundleDisplayName: Suwop
         LSApplicationCategoryType: public.app-category.photography
-        NSPhotoLibraryUsageDescription: Apple Photos と Immich の保存先を一覧表示し、原本を照合・コピー・移動します。
+        NSPhotoLibraryUsageDescription: 写真を閲覧・整理し、Apple Photos と Immich の原本を照合・コピー・移動します。
         NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
         NSAppTransportSecurity:

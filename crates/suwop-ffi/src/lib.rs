@@ -151,34 +151,7 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
                 &urls.second,
             )));
         }
-        7 => {
-            #[derive(serde::Deserialize)]
-            struct Thumbnail {
-                address: String,
-                key: String,
-                #[serde(rename = "assetID")]
-                asset_id: String,
-            }
-            let request: Thumbnail = serde_json::from_str(input).map_err(|e| e.to_string())?;
-            suwop_core::immich::valid_id(&request.asset_id)?;
-            let session = suwop_core::immich::Session {
-                endpoint: request.address,
-                key: request.key,
-                user_id: String::new(),
-                scope: String::new(),
-                version: suwop_core::immich::Version {
-                    major: 3,
-                    minor: 2,
-                    patch: 4,
-                },
-            };
-            return serde_json::to_value(session.request(
-                &format!("assets/{}/thumbnail?size=thumbnail", request.asset_id),
-                "GET",
-                None,
-            ))
-            .map_err(|e| e.to_string());
-        }
+        7 => return thumbnail_request(input),
         _ => {}
     }
     let registry = cores()
@@ -209,6 +182,41 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
         _ => return Err("Unknown bridge action".into()),
     }
     serde_json::from_slice(&output).map_err(|e| e.to_string())
+}
+fn thumbnail_request(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Thumbnail {
+        address: String,
+        key: String,
+        #[serde(rename = "assetID")]
+        asset_id: String,
+        #[serde(default)]
+        preview: bool,
+    }
+    let request: Thumbnail = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    suwop_core::immich::valid_id(&request.asset_id)?;
+    let session = suwop_core::immich::Session {
+        endpoint: request.address,
+        key: request.key,
+        user_id: String::new(),
+        scope: String::new(),
+        version: suwop_core::immich::Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+    };
+    let size = if request.preview {
+        "preview"
+    } else {
+        "thumbnail"
+    };
+    serde_json::to_value(session.request(
+        &format!("assets/{}/thumbnail?size={size}", request.asset_id),
+        "GET",
+        None,
+    ))
+    .map_err(|e| e.to_string())
 }
 fn hash_input(input: &str) -> Result<Value, String> {
     #[derive(serde::Deserialize)]

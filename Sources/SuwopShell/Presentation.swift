@@ -40,9 +40,14 @@ public extension AssetKey { var id: String {
 extension StoredAsset: Identifiable { public var id: String {
     key.id
 } }
+extension AssetKey: Identifiable {}
 extension PhotoResource: Identifiable {}
 extension TransferReceipt: Identifiable {}
 public extension UnifiedPhoto {
+    var isFavorite: Bool {
+        assets.contains(where: \.isFavorite)
+    }
+
     var name: String {
         assets.first?.name ?? "写真"
     }
@@ -57,6 +62,40 @@ public extension UnifiedPhoto {
 
     var providers: Set<Provider> {
         Set(assets.map(\.key.provider))
+    }
+}
+
+public extension PhotoFilter {
+    var title: String {
+        switch self {
+        case .all: "すべて"
+        case .favorites: "お気に入り"
+        case .photos: "写真"
+        case .videos: "ビデオ"
+        case .live: "Live Photos"
+        case .raw: "RAW"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .all: "photo.on.rectangle"
+        case .favorites: "heart.fill"
+        case .photos: "photo"
+        case .videos: "video.fill"
+        case .live: "livephoto"
+        case .raw: "camera.aperture"
+        }
+    }
+}
+
+public extension PhotoSort {
+    var title: String {
+        switch self {
+        case .newest: "新しい順"
+        case .oldest: "古い順"
+        case .name: "名前順"
+        }
     }
 }
 

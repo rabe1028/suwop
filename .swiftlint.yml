@@ -51,6 +51,10 @@ file_length:
   warning: 600
   error: 800
 custom_rules:
+  photokit_changes_boundary:
+    regex: '\.performChanges\s*\{'
+    message: 'Use NativeChange.perform with Sendable callbacks for PhotoKit transactions.'
+    severity: error
   no_force_sendable:
     regex: '@unchecked\s+Sendable'
     message: 'Use checked isolation, or document a narrow adapter exception in this configuration.'

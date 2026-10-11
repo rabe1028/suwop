@@ -75,6 +75,15 @@ impl Shell {
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
         match operation {
+            ShellOperation::AppleFavorite { keys, value } => {
+                for a in &mut self.source.assets {
+                    if keys.contains(&a.key) {
+                        a.is_favorite = value;
+                        a.revision = "favorite-changed".into();
+                    }
+                }
+                serde_json::to_value(&self.source.assets).map_err(|e| e.to_string())
+            }
             ShellOperation::Workspace { .. } => Ok(json!("/tmp/test-workspace")),
             ShellOperation::Cleanup { .. } => Ok(Value::Null),
             ShellOperation::AppleExport { .. } => {
@@ -222,6 +231,52 @@ fn move_event() -> Event {
     }
 }
 
+#[test]
+fn favorite_updates_the_native_library_and_persists_without_deleting() -> Result<(), String> {
+    let core = core();
+    let mut shell = Shell::new();
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 10.0,
+        },
+    )?;
+    let keys = shell.source.assets.iter().map(|a| a.key.clone()).collect();
+    shell.run(&core, Event::SetFavorite { keys, value: true })?;
+    assert!(core.view().error.is_none());
+    assert!(shell.source.assets[0].is_favorite);
+    assert!(core.view().photos[0].assets[0].is_favorite);
+    assert_eq!(core.view().browser.favorites, 1);
+    assert_eq!(shell.order.last(), Some(&"persist"));
+    assert_eq!(shell.deleted, 0);
+    Ok(())
+}
+#[test]
+fn favorite_checks_all_scopes_before_any_mutation() -> Result<(), String> {
+    let core = core();
+    let mut shell = Shell::new();
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 10.0,
+        },
+    )?;
+    let mut missing = shell.source.assets[0].key.clone();
+    missing.scope = "another-library".into();
+    shell.run(
+        &core,
+        Event::SetFavorite {
+            keys: vec![shell.source.assets[0].key.clone(), missing],
+            value: true,
+        },
+    )?;
+    assert!(core.view().error.is_some());
+    assert!(!shell.source.assets[0].is_favorite);
+    assert_eq!(shell.deleted, 0);
+    Ok(())
+}
 #[test]
 fn copy_then_complete_move_is_rejected_without_any_delete() -> Result<(), String> {
     let core = core();

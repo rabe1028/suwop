@@ -130,31 +130,22 @@ import UniformTypeIdentifiers
             throw SuwopError("この端末は選択した原本の組み合わせに対応していません。")
         }
         let metadata = plan.metadata
-        var identifier: String?
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHPhotoLibrary.shared().performChanges {
-                let request = PHAssetCreationRequest.forAsset()
-                request.creationDate = metadata.capturedAt
-                request.isFavorite = metadata.isFavorite
-                if let lat = metadata.latitude, let lon = metadata.longitude {
-                    request.location = CLLocation(latitude: lat, longitude: lon)
-                }
-                for (file, type) in entries {
-                    let options = PHAssetResourceCreationOptions()
-                    options.originalFilename = file.resource.name
-                    options.shouldMoveFile = false
-                    request.addResource(with: type, fileURL: URL(fileURLWithPath: file.path), options: options)
-                }
-                identifier = request.placeholderForCreatedAsset?.localIdentifier
-            } completionHandler: { success, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if success {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: SuwopError("写真の追加に失敗しました。"))
-                }
+        let identifier = try await NativeChange.perform {
+            let request = PHAssetCreationRequest.forAsset()
+            request.creationDate = metadata.capturedAt
+            request.isFavorite = metadata.isFavorite
+            if let lat = metadata.latitude, let lon = metadata.longitude {
+                request.location = CLLocation(latitude: lat, longitude: lon)
             }
+            for (file, type) in entries {
+                let options = PHAssetResourceCreationOptions()
+                options.originalFilename = file.resource.name
+                options.shouldMoveFile = false
+                request.addResource(with: type, fileURL: URL(fileURLWithPath: file.path), options: options)
+            }
+            return request.placeholderForCreatedAsset?.localIdentifier
+        } submit: { changes, completion in
+            PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion)
         }
         guard let identifier else { throw SuwopError("追加した写真の ID を確認できません。ライブラリを更新してください。") }
         return [AssetKey(provider: .apple, scope: scope, assetID: identifier)]
@@ -174,32 +165,24 @@ import UniformTypeIdentifiers
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
             throw SuwopError("移動には写真ライブラリへのフルアクセスが必要です。")
         }
-        var natives: [PHAsset] = []
         var fresh: [StoredAsset] = []
         for record in assets {
             let native = try Self.fetch(record.key.assetID)
             try fresh.append(Self.describe(native, scope: scope, fullAccess: true))
-            natives.append(native)
         }
         let input: JSONValue = try .object(["saved": .from(assets), "fresh": .from(fresh)])
         _ = try CoreBridge.utility(5, input: input)
         try Task.checkCancellation()
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-            PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.deleteAssets(natives as NSArray)
-            } completionHandler: { success, error in
-                if let error {
-                    continuation.resume(throwing: error)
-                } else if success {
-                    continuation.resume()
-                } else {
-                    continuation.resume(throwing: SuwopError("写真の削除がキャンセルされました。"))
-                }
-            }
+        let identifiers = assets.map(\.key.assetID)
+        try await NativeChange.perform {
+            let natives = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+            PHAssetChangeRequest.deleteAssets(natives)
+        } submit: { changes, completion in
+            PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion)
         }
     }
 
-    func thumbnail(_ key: AssetKey) async throws -> PlatformImage {
+    func thumbnail(_ key: AssetKey, edge: CGFloat = 360) async throws -> PlatformImage {
         try validate(key)
         let asset = try Self.fetch(key.assetID)
         let options = PHImageRequestOptions()
@@ -216,7 +199,7 @@ import UniformTypeIdentifiers
                 gate.install(continuation)
                 let id = imageManager.requestImage(
                     for: asset,
-                    targetSize: CGSize(width: 360, height: 360),
+                    targetSize: CGSize(width: edge, height: edge),
                     contentMode: .aspectFill,
                     options: options
                 ) { image, info in
@@ -250,11 +233,11 @@ import UniformTypeIdentifiers
         #endif
     }
 
-    private func validate(_ key: AssetKey) throws {
+    func validate(_ key: AssetKey) throws {
         guard key.provider == provider, key.scope == scope else { throw SuwopError("別の Apple Photos ライブラリです。") }
     }
 
-    private nonisolated static func fetch(_ id: String) throws -> PHAsset {
+    nonisolated static func fetch(_ id: String) throws -> PHAsset {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
             throw SuwopError("写真が見つからないか、アクセス権限がありません。")
         }
@@ -271,7 +254,7 @@ import UniformTypeIdentifiers
         }
     }
 
-    private nonisolated static func describe(_ asset: PHAsset, scope: String, fullAccess: Bool) throws -> StoredAsset {
+    nonisolated static func describe(_ asset: PHAsset, scope: String, fullAccess: Bool) throws -> StoredAsset {
         let resources = PHAssetResource.assetResources(for: asset).enumerated().map { index, resource in
             PhotoResource(
                 id: "\(index):\(resource.type.rawValue)",

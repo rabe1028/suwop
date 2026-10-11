@@ -151,6 +151,23 @@ impl Session {
         self.json(ctx, &format!("asset-files?assetId={id}"), "GET", None)
             .await
     }
+    pub async fn favorite(&self, ctx: &Context, id: &str, value: bool) -> Result<Asset, String> {
+        // Validate ownership before changing an asset, then confirm the saved value.
+        self.asset(ctx, id).await?;
+        let _: Value = self
+            .json(
+                ctx,
+                &format!("assets/{id}"),
+                "PUT",
+                Some(json!({"isFavorite":value})),
+            )
+            .await?;
+        let current = self.asset(ctx, id).await?;
+        if current.is_favorite != value {
+            return Err("お気に入りの保存結果を確認できません。一覧を更新してください。".into());
+        }
+        Ok(current)
+    }
     pub async fn list(&self, ctx: &Context, now: f64) -> Result<Vec<Asset>, String> {
         let mut assets = BTreeMap::new();
         for view in if self.version.uses_cursor() {

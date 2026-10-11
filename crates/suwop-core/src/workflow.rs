@@ -36,6 +36,7 @@ pub async fn run(
         session,
         workspace: None,
     };
+    let favorite = matches!(event, Event::SetFavorite { .. });
     let result = runtime.execute(event).await;
     if let Some(path) = runtime.workspace.take() {
         let _: Result<Value, _> = io(ctx, ShellOperation::Cleanup { path }).await;
@@ -50,7 +51,12 @@ pub async fn run(
         Err(error) => Outcome {
             state: runtime.state,
             session: runtime.session,
-            status: "処理を完了できませんでした。元データと転送履歴を確認してください。".into(),
+            status: if favorite {
+                "一部の保存先は変更済みの場合があります。一覧を更新して確認してください。"
+            } else {
+                "処理を完了できませんでした。元データと転送履歴を確認してください。"
+            }
+            .into(),
             error: Some(error),
         },
     }
@@ -112,6 +118,7 @@ impl Runtime<'_> {
                 Ok("接続を解除しました。転送履歴は保持しています。".into())
             }
             Event::Index { id } => self.index(&id).await,
+            Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::Copy {
                 keys,
                 intent,
@@ -126,6 +133,72 @@ impl Runtime<'_> {
                 Ok("移動が完了しました。転送元のゴミ箱を確認してください。".into())
             }
             _ => Err("不正な操作です。".into()),
+        }
+    }
+    async fn favorite(&mut self, keys: &[AssetKey], value: bool) -> Result<String, String> {
+        let keys: BTreeSet<_> = keys.iter().cloned().collect();
+        if keys.is_empty() {
+            return Err("写真を選択してください。".into());
+        }
+        // Check every scope before performing any native mutation.
+        for key in &keys {
+            if !self.state.snapshots.iter().any(|s| {
+                s.access != ScanAccess::Unavailable
+                    && s.provider == key.provider
+                    && s.scope == key.scope
+                    && s.assets.iter().any(|a| a.key == *key)
+            }) {
+                return Err("選択した写真を確認できません。一覧を更新してください。".into());
+            }
+            if key.provider == Provider::Immich
+                && self.session.as_ref().is_none_or(|s| s.scope != key.scope)
+            {
+                return Err("Immich の接続先が変わっています。".into());
+            }
+        }
+        let apple: Vec<_> = keys
+            .iter()
+            .filter(|k| k.provider == Provider::Apple)
+            .cloned()
+            .collect();
+        if !apple.is_empty() {
+            let fresh: Vec<StoredAsset> = io(
+                self.ctx,
+                ShellOperation::AppleFavorite {
+                    keys: apple.clone(),
+                    value,
+                },
+            )
+            .await?;
+            let returned: BTreeSet<_> = fresh.iter().map(|a| a.key.clone()).collect();
+            if returned != apple.into_iter().collect()
+                || fresh.iter().any(|a| a.is_favorite != value)
+            {
+                return Err(
+                    "Apple Photos の保存結果を確認できません。一覧を更新してください。".into(),
+                );
+            }
+            self.replace_favorite_records(fresh);
+            self.persist().await?;
+            self.progress("Apple Photos のお気に入りを保存しました。");
+        }
+        for key in keys.iter().filter(|k| k.provider == Provider::Immich) {
+            let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
+            let fresh = session.favorite(self.ctx, &key.asset_id, value).await?;
+            let record = self.immich_record(&fresh).await?;
+            self.replace_favorite_records(vec![record]);
+            self.persist().await?;
+            self.progress("Immich のお気に入りを保存しました。");
+        }
+        Ok(format!("{} 件のお気に入りを変更しました。", keys.len()))
+    }
+    fn replace_favorite_records(&mut self, fresh: Vec<StoredAsset>) {
+        for record in fresh {
+            for snapshot in &mut self.state.snapshots {
+                if let Some(old) = snapshot.assets.iter_mut().find(|a| a.key == record.key) {
+                    *old = record.clone();
+                }
+            }
         }
     }
     async fn configure(

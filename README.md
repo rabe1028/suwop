@@ -4,6 +4,8 @@ Apple Photos と Immich の写真を一つの一覧で確認し、原本の保�
 
 共通コアは Rust + Crux 0.20.0、UI は SwiftUI です。Swift に残すのは表示、PhotoKit、Keychain、URLSession、ファイルの入出力です。写真の同一性判定、保存状態、コピー／移動の進行、削除可否、Immich API の構築は Rust が担当します。
 
+日・月・年のグリッド、表示密度、名前・撮影日の検索、メディアと保存先の絞り込み、複数選択、お気に入りの整理、静止画の全画面閲覧・前後移動・ズームを備えています。お気に入りは、統合された写真の Apple Photos / Immich の両方へ反映します。日付検索は端末のタイムゾーンで照合します。動画・Live Photo の再生、アルバム、写真編集、共有は今後の実装対象です。実装と実機での検証状況は [Photos 操作の到達条件](docs/photos-parity.md) を参照してください。
+
 ## 起動と開発
 
 必要: macOS、Xcode、Homebrew、Python 3.11 以上、rustup。Docker 統合テストには Docker が必要です。
@@ -38,7 +40,7 @@ Rust 1.95.0、SwiftLint 0.65.1、SwiftFormat 0.63.1、Ruff 0.17.0、ShellCheck 0
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。
 
-Docker テストは `suwop-rust-test` という専用プロジェクトと localhost:2289 を使い、終了時にそのコンテナと volume を削除します。実際のアップロード、位置情報の反映、一覧、原本ダウンロード、スタック、XMP sidecar、ゴミ箱への移動を確認します。調査用に残す場合は `KEEP_IMMICH_TEST_ENV=1 make integration` を使います。プロジェクト名とポートは `IMMICH_TEST_PROJECT` / `IMMICH_TEST_PORT` で変更できます。
+Docker テストは `suwop-rust-test` という専用プロジェクトと localhost:2289 を使い、終了時にそのコンテナと volume を削除します。実際のアップロード、位置情報・お気に入りの反映、一覧、原本ダウンロード、スタック、XMP sidecar、ゴミ箱への移動を確認します。調査用に残す場合は `KEEP_IMMICH_TEST_ENV=1 make integration` を使います。プロジェクト名とポートは `IMMICH_TEST_PROJECT` / `IMMICH_TEST_PORT` で変更できます。
 
 ## コピーと移動
 
