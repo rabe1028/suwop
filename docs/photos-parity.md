@@ -84,3 +84,4 @@
 - PhotoKit の位置情報削除に対応する。Immich の null 座標更新は非対応のため、0 / 0 を削除の代わりに使わない。原本の EXIF 除去、地名検索・地図、任意のタイムゾーン選択、取り消し / 復元は未実装。
 - `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。最新版を既存の iPhone Simulator にインストール・起動した。Mac がロック中で操作ツールから画面へアクセスできないため、日時・座標の native 操作と保存後の再起動確認は未完了。
 - local `make integration` は Docker daemon の socket が存在せず起動できない。実 Immich v3.2.4 に対する日時・timeZone・座標の更新と原本 checksum / 他の項目の保持を専用 CI で確認する。native 保存と最終 HEAD / main の hosted checks は別に記録する。
+- [初回の metadata CI](https://github.com/rabe1028/suwop/actions/runs/38174279455) は日時・timeZone の読戻しを通過した後、お気に入りを一律 false と期待したテストで失敗。fixture の2枚目は元からお気に入りだったため、編集前の ID・checksum・名前・お気に入り・ゴミ箱状態を取得し、日時と座標の変更後にそれぞれ保持されることを検証する形へ修正した。最終 HEAD で実通信テストを再実行する。
