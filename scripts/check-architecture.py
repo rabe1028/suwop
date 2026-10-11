@@ -7,7 +7,10 @@ ROOT = Path(__file__).resolve().parent.parent
 FORBIDDEN = {
     "domain orchestration": r"\b(?:Catalog|TransferCoordinator|ImmichClient|SHA1Value)\b",
     "hash algorithms": r"\b(?:CryptoKit|Insecure\.SHA1|SHA256\.hash)\b",
-    "Immich routes": r'["\'](?:/assets|assets/|search/metadata|server/version|users/me|stacks/)',
+    "Immich routes": (
+        r'["\'](?:/assets|assets/|/albums|albums/'
+        r"|search/metadata|server/version|users/me|stacks/)"
+    ),
 }
 errors = []
 for directory in ("App", "Sources/SuwopShell"):

@@ -199,7 +199,7 @@ import UniformTypeIdentifiers
         try result.get()
     }
 
-    func thumbnail(_ key: AssetKey, edge: CGFloat = 360) async throws -> PlatformImage {
+    func thumbnail(_ key: AssetKey, edge: CGFloat = 360, preview: Bool = false) async throws -> PlatformImage {
         try validate(key)
         let asset = try Self.fetch(key.assetID)
         let options = PHImageRequestOptions()
@@ -217,7 +217,7 @@ import UniformTypeIdentifiers
                 let id = imageManager.requestImage(
                     for: asset,
                     targetSize: CGSize(width: edge, height: edge),
-                    contentMode: .aspectFill,
+                    contentMode: preview ? .aspectFit : .aspectFill,
                     options: options
                 ) { image, info in
                     if (info?[PHImageResultIsDegradedKey] as? Bool) == true {

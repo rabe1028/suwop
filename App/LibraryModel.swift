@@ -18,6 +18,8 @@ import SwiftUI
     private var publishedRevision: UInt64 = 0
     private var started = false
     private var pendingRefresh = false
+    private var pendingAlbumsRefresh = false
+    private var albumsRequested = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
 
     init() {
@@ -48,6 +50,19 @@ import SwiftUI
 
     var browser: BrowserView? {
         view?.browser
+    }
+
+    var albums: [AlbumView] {
+        view?.albums ?? []
+    }
+
+    func refreshAlbums() {
+        albumsRequested = true
+        if isBusy {
+            pendingAlbumsRefresh = true
+        } else {
+            send(["type": .string("refreshAlbums")])
+        }
     }
 
     func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?) {
@@ -195,7 +210,7 @@ import SwiftUI
         return image
     }
 
-    private func send(_ event: [String: JSONValue]) {
+    func send(_ event: [String: JSONValue]) {
         guard work == nil, let runtime, let shell else { return }
         errorMessage = nil
         work = Task {
@@ -204,6 +219,9 @@ import SwiftUI
                 if pendingRefresh, view?.state.schemaVersion == 2 {
                     pendingRefresh = false
                     refresh()
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 2 {
+                    pendingAlbumsRefresh = false
+                    refreshAlbums()
                 }
             }
             do {
@@ -244,6 +262,7 @@ import SwiftUI
 
     private func notifyPhotoChange() {
         pendingRefresh = true
+        pendingAlbumsRefresh = albumsRequested
         guard let runtime else { return }
         Task {
             do { _ = try await runtime.update(.object(["type": .string("appleChanged")]))

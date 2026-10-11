@@ -11,7 +11,7 @@
 | 複数選択、全選択、選択解除、一括操作 | native asset key を選択の基準として実装。操作確認は未完了 | 検索・並べ替え・ライブラリ更新をまたいだ選択、一括保存 |
 | 全画面、前後移動、ズーム、動画、Live Photo | 静止画の高解像度プレビュー・前後移動・ズームを実装、Simulator で確認。動画 / Live 再生は未実装 | iPad / Mac、回転・再生、取得停止、エラー・iCloud |
 | お気に入り、非表示、日時・位置・説明の変更 | お気に入りを実装。Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。他の変更は未実装 | Immich 保存の CI、実機 / iCloud、途中失敗時の表示。非表示・日時・位置・説明 |
-| アルバム、作成・名前変更・削除、所属追加・解除 | 未実装 | 両 provider の既存アルバムと native 保存結果。アルバム削除で写真を削除しない |
+| アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | 未実装 | 非破壊編集と元の保持、編集キャンセル、native 読込と保存 |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
 | 共有、原本 / 編集後の書き出し、取り込み、複製 | 転送コピーのみ | システム共有画面、複数写真・動画、ファイル保持と後片付け |
@@ -31,5 +31,18 @@
 - Simulator の標準写真だけを使用。全画面の前後移動、ズームの accessibility action、月別表示、お気に入り追加と解除、再起動後の native 再読込、コレクション件数を確認。
 - PhotoKit の変更用キューで MainActor を継承して crash する問題を再現・デバッガーで確認。`NativeChange` の Sendable callback bridge に修正し、off-main callback の回帰テストと native お気に入り保存を通過。取り込みとゴミ箱も同じ境界を使うが、今回その native 操作は未確認。
 - 削除用キュー内で要求した全 ID の完全一致と Rust の原本・メタデータ検証を再実行する。取得漏れ・異なる ID・重複・空の再取得は変更を開始せず、native completion が成功を返しても失敗を伝える回帰テストを通過。
-- Immich v3.2.4 のお気に入り true / false の保存確認を integration test に追加。local Docker は OrbStack の I/O エラーにより起動できず、local integration は未完了。Hosted CI の結果は PR で別途確認する。
+- Immich v3.2.4 のお気に入り true / false の保存確認を integration test に追加。local Docker は OrbStack の I/O エラーにより起動できず、local integration は未完了。[PR #3 の最終 HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38161334038) は core / apple / immich-integration の全 job が通過。マージ後 main の CI は別に確認する。
 - 同一写真の整理は Apple Photos / Immich 両方に反映する前提。部分成功は巻き戻さず一覧を更新して確認する。写真の変更で原本の照合証拠が無効になった場合は再照合が必要。
+
+## アルバムの実装と検証
+
+- 保存先と scope を持つアルバム ID を使い、同じ名前でも統合しない。Apple Photos の通常アルバムと Immich の所有アルバムを扱う。Immich の他の所有者の共有アルバム、スマートアルバム、フォルダー、順番の編集は継続作業。
+- Rust が最新のアルバム・権限を読み直して操作を検証し、保存後も所属・名前・削除結果を再取得する。結果が不明なら変更済みの可能性を表示し、アルバムの変更権限を無効にして再読込を案内する。
+- PhotoKit の native adapter は変更キュー内でフルアクセス、collection の `canPerform`、全写真 ID の完全一致を確認する。アルバム削除と写真の削除には別の native API / Immich route を使う。
+- `make check` は Rust 52 tests / Swift 15 tests を通過。Swift の新しいテストは実 FFI を通してアルバムの削除・再取得・保存を確認し、写真と転送履歴が残ることを確認する。
+- Immich へ再接続できない場合も Apple のアルバム一覧を更新し、ローカルの作成・名前変更を実行できる回帰テストを通過。Immich の操作だけ再接続を要求する。
+- `make apple-build` は Apple の Rust 5 target と iOS Simulator / macOS app builds を通過。iPhone 17 Pro / iOS 26.4 の標準写真6枚で、通常アルバム作成・名前変更・写真追加・再起動後の native 再取得・選択による所属解除（アルバム1枚→0枚、ライブラリ6枚を保持）を確認。アルバム削除の実 PhotoKit 操作、実機 / iCloud / iPad / Mac の操作は未確認。
+- Immich v3.2.4 の実 API にアルバム作成・名前変更・所属追加・解除・削除後の写真保持を検証するケースを追加。[最初の album CI](https://github.com/rabe1028/suwop/actions/runs/38162729624) の integration job は通過。Linux gate は Rustup の Clippy インストール競合で停止。専用ディレクトリへの分離だけでは再発したため、新しい一時ディレクトリで明示的にインストールしてから検査する。バージョン検査も全出力を読み、producer を途中で終了させない shell 回帰テストを追加して local `make check` を通過。最終 HEAD CI は別に確認する。
+- Apple の全画面プレビューは `.aspectFit` で全体を取得し、グリッドは `.aspectFill` で取得する。
+- Simulator で横長写真を縦横比を保って表示し、アルバム内の閲覧が「1 / 1」になることを確認。拡大中の移動範囲を実際に収まった画像の寸法から求め、縮小時も補正する。パンの限界と回転・大文字の操作確認は継続する。
+- ローカルの画面証拠は `target/acceptance/albums-20261012/` に保存。保存自体は VRT / golden 比較の通過を意味しない。

@@ -9,6 +9,7 @@ use crate::{
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+mod albums;
 
 #[derive(Debug)]
 pub struct Outcome {
@@ -36,7 +37,10 @@ pub async fn run(
         session,
         workspace: None,
     };
-    let favorite = matches!(event, Event::SetFavorite { .. });
+    let metadata_change = matches!(
+        event,
+        Event::SetFavorite { .. } | Event::CreateAlbum { .. } | Event::EditAlbum { .. }
+    );
     let result = runtime.execute(event).await;
     if let Some(path) = runtime.workspace.take() {
         let _: Result<Value, _> = io(ctx, ShellOperation::Cleanup { path }).await;
@@ -51,8 +55,8 @@ pub async fn run(
         Err(error) => Outcome {
             state: runtime.state,
             session: runtime.session,
-            status: if favorite {
-                "一部の保存先は変更済みの場合があります。一覧を更新して確認してください。"
+            status: if metadata_change {
+                "変更が保存済みの場合があります。一覧を更新して確認してください。"
             } else {
                 "処理を完了できませんでした。元データと転送履歴を確認してください。"
             }
@@ -78,6 +82,9 @@ impl Runtime<'_> {
                 for s in &mut self.state.snapshots {
                     s.access = ScanAccess::Unavailable;
                 }
+                for s in &mut self.state.albums {
+                    s.access = ScanAccess::Unavailable;
+                }
                 self.persist().await?;
                 Ok("写真ライブラリを接続してください。".into())
             }
@@ -97,6 +104,7 @@ impl Runtime<'_> {
             } => self.configure(&address, &key, allow_http, id, now).await,
             Event::Disconnect => {
                 let old = self.state.clone();
+                self.state.albums.retain(|s| s.provider != Provider::Immich);
                 self.state.connection = None;
                 self.state
                     .snapshots
@@ -119,6 +127,9 @@ impl Runtime<'_> {
             }
             Event::Index { id } => self.index(&id).await,
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
+            Event::RefreshAlbums => self.refresh_albums().await,
+            Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,
+            Event::EditAlbum { key, edit } => self.edit_album(&key, &edit).await,
             Event::Copy {
                 keys,
                 intent,
@@ -224,6 +235,7 @@ impl Runtime<'_> {
         )
         .await?;
         let old = self.state.clone();
+        self.state.albums.retain(|s| s.provider != Provider::Immich);
         self.state.connection = Some(settings);
         self.state
             .snapshots

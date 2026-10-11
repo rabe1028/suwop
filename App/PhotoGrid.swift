@@ -147,7 +147,7 @@ struct PhotoGrid: View {
     }
 }
 
-private struct PhotoTile: View {
+struct PhotoTile: View {
     let photo: UnifiedPhoto
     @ObservedObject var model: LibraryModel
     let selected: Bool

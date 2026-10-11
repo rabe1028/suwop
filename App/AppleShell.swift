@@ -45,6 +45,10 @@ import SuwopShell
                 operation.type,
                 data: data
             )
+        case "appleAlbums", "appleAlbumCreate", "appleAlbumEdit": return try await albumEffect(
+                operation.type,
+                data: data
+            )
         case "hashFile": return try await .from(ApplePhotosStore.hash(URL(fileURLWithPath: requiredString(
                 data,
                 "path"
@@ -96,6 +100,23 @@ import SuwopShell
         }
     }
 
+    private func albumEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        switch type {
+        case "appleAlbums":
+            return try await .from(appleStore(scope: requiredString(data, "scope")).albums())
+        case "appleAlbumCreate":
+            return try await .from(appleStore(scope: requiredString(data, "scope")).createAlbum(title: requiredString(
+                data,
+                "title"
+            )))
+        case "appleAlbumEdit":
+            let key = try data["key"].decode(AlbumKey.self)
+            try await appleStore(scope: key.scope).editAlbum(key, edit: data["edit"].decode(AlbumEdit.self))
+            return .null
+        default: throw SuwopError("未知のアルバム入出力です。")
+        }
+    }
+
     private func workspaceEffect(_ type: String, data: JSONValue) throws -> JSONValue {
         switch type {
         case "workspace":
@@ -141,7 +162,11 @@ import SuwopShell
         preview: Bool = false
     ) async throws -> PlatformImage {
         if let record = photo.assets.first(where: { $0.key.provider == .apple }) {
-            return try await appleStore(scope: record.key.scope).thumbnail(record.key, edge: preview ? 2048 : 360)
+            return try await appleStore(scope: record.key.scope).thumbnail(
+                record.key,
+                edge: preview ? 2048 : 360,
+                preview: preview
+            )
         }
         guard let connection, let record = photo.assets.first(where: { $0.key.provider == .immich }) else {
             throw SuwopError("プレビューを取得できません。")

@@ -7,8 +7,10 @@ struct PhotoViewer: View {
     @State private var showInfo = false
     @State private var chrome = true
     @Environment(\.dismiss) private var dismiss
-    init(model: LibraryModel, key: AssetKey) {
+    private let collection: AlbumKey?
+    init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
         self.model = model
+        self.collection = collection
         _key = State(initialValue: key)
     }
 
@@ -18,6 +20,10 @@ struct PhotoViewer: View {
 
     private var pages: [UnifiedPhoto] {
         var visible = model.visiblePhotos
+        if let collection {
+            let ids = Set(model.albums.first { $0.album.key == collection }?.photoIDs ?? [])
+            visible = model.photos.filter { ids.contains($0.id) }
+        }
         if let photo, !visible.contains(where: { $0.id == photo.id }) {
             visible.append(photo)
         }
@@ -134,13 +140,13 @@ private struct ZoomablePhoto: View {
                         height: geometry.size.height
                     )
                     .scaleEffect(scale).offset(offset)
-                    .gesture(MagnificationGesture().onChanged { scale = min(6, max(1, settledScale * $0)) }
-                        .onEnded { _ in settledScale = scale
-                            if scale == 1 {
-                                offset = .zero
-                                settledOffset = .zero
-                            }
-                        })
+                    .gesture(MagnificationGesture().onChanged { scale = min(6, max(1, settledScale * $0))
+                        offset = bounded(offset, size: geometry.size)
+                    }
+                    .onEnded { _ in settledScale = scale
+                        offset = bounded(offset, size: geometry.size)
+                        settledOffset = offset
+                    })
                     .simultaneousGesture(DragGesture().onChanged { value in
                         if scale > 1 {
                             offset = bounded(
@@ -195,7 +201,10 @@ private struct ZoomablePhoto: View {
     }
 
     private func bounded(_ value: CGSize, size: CGSize) -> CGSize {
-        let width = size.width * (scale - 1) / 2, height = size.height * (scale - 1) / 2
+        guard let image, image.size.width > 0, image.size.height > 0 else { return .zero }
+        let fit = min(size.width / image.size.width, size.height / image.size.height)
+        let width = max(0, (image.size.width * fit * scale - size.width) / 2)
+        let height = max(0, (image.size.height * fit * scale - size.height) / 2)
         return CGSize(width: min(width, max(-width, value.width)), height: min(height, max(-height, value.height)))
     }
 }
