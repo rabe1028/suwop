@@ -80,6 +80,10 @@ pub enum ShellOperation {
         keys: Vec<crate::domain::AssetKey>,
         value: bool,
     },
+    AppleMetadata {
+        keys: Vec<crate::domain::AssetKey>,
+        change: crate::metadata::MetadataChange,
+    },
     AppleAlbums {
         scope: String,
     },
@@ -113,6 +117,10 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    SetMetadata {
+        keys: Vec<crate::domain::AssetKey>,
+        input: crate::metadata::MetadataInput,
+    },
     Play {
         keys: Vec<crate::domain::AssetKey>,
         id: String,
@@ -194,6 +202,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub metadata_targets: std::collections::BTreeMap<String, Vec<crate::metadata::MetadataTarget>>,
     pub preview_sources: std::collections::BTreeMap<String, crate::domain::AssetKey>,
     pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
     pub albums: Vec<crate::albums::AlbumView>,
@@ -297,6 +306,15 @@ impl crux_core::App for Suwop {
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
+            metadata_targets: photos
+                .iter()
+                .map(|p| {
+                    (
+                        crate::browser::photo_id(p),
+                        crate::metadata::targets(p, &model.state.snapshots),
+                    )
+                })
+                .collect(),
             preview_sources: photos
                 .iter()
                 .filter_map(|p| {

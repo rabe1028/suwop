@@ -167,6 +167,15 @@ public struct ConnectionSettings: Codable, Sendable {
     }
 }
 
+public struct Coordinates: Codable, Sendable {
+    public var latitude: Double
+    public var longitude: Double
+    public init(latitude: Double, longitude: Double) {
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
 public struct FileSignature: Codable, Sendable {
     public var bytes: Int64
     public var sha256: String
@@ -227,6 +236,63 @@ public struct LibrarySnapshot: Codable, Sendable {
         self.assets = assets
         self.access = access
         self.scannedAt = scannedAt
+    }
+}
+
+public enum MetadataAction: String, Codable, CaseIterable, Sendable {
+    case `setCapturedAt`
+    case `setLocation`
+    case `removeLocation`
+}
+
+public struct MetadataChange: Codable, Sendable {
+    public var action: MetadataAction
+    public var capturedAt: Date?
+    public var location: Coordinates?
+    public var timeZone: String?
+    public init(action: MetadataAction, capturedAt: Date? = nil, location: Coordinates? = nil, timeZone: String? = nil) {
+        self.action = action
+        self.capturedAt = capturedAt
+        self.location = location
+        self.timeZone = timeZone
+    }
+}
+
+public struct MetadataInput: Codable, Sendable {
+    public var action: MetadataAction
+    public var capturedAt: Date?
+    public var latitude: String?
+    public var longitude: String?
+    public var timeZone: String?
+    public init(action: MetadataAction, capturedAt: Date? = nil, latitude: String? = nil, longitude: String? = nil, timeZone: String? = nil) {
+        self.action = action
+        self.capturedAt = capturedAt
+        self.latitude = latitude
+        self.longitude = longitude
+        self.timeZone = timeZone
+    }
+}
+
+public struct MetadataTarget: Codable, Sendable {
+    public var canRemoveLocation: Bool
+    public var capturedAt: Date?
+    public var datesVary: Bool
+    public var disabledReason: String?
+    public var id: String
+    public var keys: [AssetKey]
+    public var location: Coordinates?
+    public var locationsVary: Bool
+    public var provider: Provider
+    public init(canRemoveLocation: Bool, capturedAt: Date? = nil, datesVary: Bool, disabledReason: String? = nil, id: String, keys: [AssetKey] = [], location: Coordinates? = nil, locationsVary: Bool, provider: Provider) {
+        self.canRemoveLocation = canRemoveLocation
+        self.capturedAt = capturedAt
+        self.datesVary = datesVary
+        self.disabledReason = disabledReason
+        self.id = id
+        self.keys = keys
+        self.location = location
+        self.locationsVary = locationsVary
+        self.provider = provider
     }
 }
 
@@ -454,6 +520,7 @@ public struct ViewModel: Codable, Sendable {
     public var canTransfer: Bool
     public var error: String?
     public var media: [String: PlaybackKind]
+    public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
@@ -461,13 +528,14 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer
         self.error = error
         self.media = media
+        self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos

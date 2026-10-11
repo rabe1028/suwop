@@ -7,6 +7,7 @@ struct PhotoInfo: View {
     @Environment(\.dismiss) private var dismiss
     @State private var pendingSource: Provider?
     @State private var wantsMove = false
+    @State private var pendingMetadata: MetadataTarget?
     var body: some View {
         NavigationStack {
             List {
@@ -26,6 +27,14 @@ struct PhotoInfo: View {
                         ForEach(assets) { asset in
                             VStack(alignment: .leading, spacing: 7) {
                                 Text(asset.name).font(.subheadline.bold())
+                                if let date = asset.capturedAt {
+                                    Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption)
+                                } else {
+                                    Text("撮影日時不明").font(.caption).foregroundStyle(.secondary)
+                                }
+                                if let latitude = asset.latitude, let longitude = asset.longitude {
+                                    Text("位置: \(latitude), \(longitude)").font(.caption).textSelection(.enabled)
+                                }
                                 ForEach(asset.resources) { resource in
                                     VStack(alignment: .leading, spacing: 2) {
                                         HStack {
@@ -50,6 +59,10 @@ struct PhotoInfo: View {
                             }.padding(.vertical, 4)
                         }
                         if !assets.isEmpty {
+                            ForEach(model.metadataTargets(photo).filter { $0.provider == provider }) { target in
+                                Button("日時・位置情報を変更") { pendingMetadata = target }
+                                    .disabled(model.isBusy)
+                            }
                             let destination = provider == .apple ? Provider.immich : .apple
                             Button("\(destination.title) にコピー") { wantsMove = false
                                 pendingSource = provider
@@ -68,6 +81,7 @@ struct PhotoInfo: View {
                 }.font(.caption).foregroundStyle(.secondary)
             }
             .navigationTitle("写真の保存先")
+            .sheet(item: $pendingMetadata) { PhotoMetadataEditor(target: $0, model: model) }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
             .confirmationDialog(
                 wantsMove ? "移動の準備を開始しますか？" : "原本をコピーしますか？",

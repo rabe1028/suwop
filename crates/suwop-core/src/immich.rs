@@ -142,7 +142,7 @@ impl Session {
     pub async fn asset(&self, ctx: &Context, id: &str) -> Result<Asset, String> {
         valid_id(id)?;
         let a: Asset = self.json(ctx, &format!("assets/{id}"), "GET", None).await?;
-        if a.owner_id != self.user_id || a.is_trashed {
+        if a.id != id || a.owner_id != self.user_id || a.is_trashed {
             return Err("写真の所有者または状態が変わりました。".into());
         }
         Ok(a)
@@ -168,6 +168,35 @@ impl Session {
             return Err("お気に入りの保存結果を確認できません。一覧を更新してください。".into());
         }
         Ok(current)
+    }
+    pub async fn metadata(
+        &self,
+        ctx: &Context,
+        ids: &[String],
+        change: &crate::metadata::MetadataChange,
+    ) -> Result<Vec<Asset>, String> {
+        // Confirm every selected ID and owner before the single bulk write.
+        if ids.is_empty() {
+            return Err("変更する写真を選択してください。".into());
+        }
+        for id in ids {
+            self.asset(ctx, id).await?;
+        }
+        let mut body = change.immich_fields()?;
+        body["ids"] = json!(ids);
+        let _: Value = self.json(ctx, "assets", "PUT", Some(body)).await?;
+        let mut fresh = Vec::new();
+        for id in ids {
+            let asset = self.asset(ctx, id).await?;
+            if change.action == crate::metadata::MetadataAction::SetCapturedAt
+                && asset.exif_info.as_ref().and_then(|e| e.time_zone.as_ref())
+                    != change.time_zone.as_ref()
+            {
+                return Err("日時のタイムゾーンの保存結果を確認できません。".into());
+            }
+            fresh.push(asset);
+        }
+        Ok(fresh)
     }
     pub async fn list(&self, ctx: &Context, now: f64) -> Result<Vec<Asset>, String> {
         let mut assets = BTreeMap::new();
@@ -445,6 +474,8 @@ pub struct Asset {
 #[serde(rename_all = "camelCase")]
 pub struct Exif {
     pub file_size_in_byte: Option<u64>,
+    pub date_time_original: Option<String>,
+    pub time_zone: Option<String>,
     pub latitude: Option<f64>,
     pub longitude: Option<f64>,
 }
@@ -536,17 +567,9 @@ impl Asset {
                 asset_id: self.id.clone(),
             },
             name: self.original_file_name.clone(),
-            captured_at: parse_date(&self.file_created_at),
+            captured_at: self.capture_date(),
             modified_at: parse_date(&self.file_modified_at),
-            revision: format!(
-                "{}|{}|{:?}|{:?}|{:?}|{:?}",
-                self.updated_at,
-                self.checksum,
-                self.live_photo_video_id,
-                companion.map(|c| &c.updated_at),
-                self.exif_info.as_ref().and_then(|e| e.latitude),
-                self.exif_info.as_ref().and_then(|e| e.longitude)
-            ),
+            revision: self.revision(companion),
             resources,
             is_favorite: self.is_favorite,
             latitude: self.exif_info.as_ref().and_then(|e| e.latitude),
@@ -560,6 +583,29 @@ impl Asset {
             is_offline: self.is_offline || companion.is_some_and(|c| c.is_offline),
             deletion_blockers: blockers,
         }
+    }
+    fn capture_date(&self) -> Option<f64> {
+        // Date adjustments update EXIF independently of the original file's
+        // timestamp. An invalid advertised adjustment must remain unknown.
+        self.exif_info
+            .as_ref()
+            .and_then(|e| e.date_time_original.as_deref())
+            .map_or_else(|| parse_date(&self.file_created_at), parse_date)
+    }
+    fn revision(&self, companion: Option<&Self>) -> String {
+        format!(
+            "{}|{}|{:?}|{:?}|{:?}|{:?}|{:?}|{:?}",
+            self.updated_at,
+            self.checksum,
+            self.live_photo_video_id,
+            companion.map(|c| &c.updated_at),
+            self.exif_info.as_ref().and_then(|e| e.latitude),
+            self.exif_info.as_ref().and_then(|e| e.longitude),
+            self.exif_info
+                .as_ref()
+                .and_then(|e| e.date_time_original.as_ref()),
+            self.exif_info.as_ref().and_then(|e| e.time_zone.as_ref())
+        )
     }
 }
 

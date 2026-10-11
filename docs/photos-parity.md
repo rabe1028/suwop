@@ -10,7 +10,7 @@
 | 検索、保存先・メディア・お気に入りで絞る | Rust に実装・組み合わせと空結果・日付境界 / 夏時間のテスト。Simulator でお気に入りコレクション1件→解除後0件を確認 | 検索欄の native 操作、同一写真の操作後の再照合 |
 | 複数選択、全選択、選択解除、一括操作 | native asset key を選択の基準として実装。操作確認は未完了 | 検索・並べ替え・ライブラリ更新をまたいだ選択、一括保存 |
 | 全画面、前後移動、ズーム、動画、Live Photo | 静止画プレビュー・前後移動・ズーム、動画 / Live の原本再生を実装。Simulator で静止画、動画の再生・一時停止・巻き戻し、自作 Live Photo の復元・再生を確認 | 実機撮影 / Immich の Live、編集後の再生、音声、iPad / Mac、回転、取得停止、エラー・iCloud |
-| お気に入り、非表示、日時・位置・説明の変更 | お気に入りを実装。Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。他の変更は未実装 | Immich 保存の CI、実機 / iCloud、途中失敗時の表示。非表示・日時・位置・説明 |
+| お気に入り、非表示、日時・位置・説明の変更 | お気に入り、保存先ごとの日時・座標変更を実装。お気に入りは Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。日時・座標の native 保存は検証中 | 日時・座標の native / Immich 保存、実機 / iCloud、取り消し、地図・地名検索。非表示・説明 |
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | 未実装 | 非破壊編集と元の保持、編集キャンセル、native 読込と保存 |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
@@ -74,3 +74,13 @@
 - ローカルの画面証拠は `target/acceptance/playback-20261012/native-video.png` と `native-live.png`。自作 fixture の生成 source も同じディレクトリに保存。標準写真6枚・自作動画1件・Live Photo 1件を保持する。VRT / golden 比較、実機 / iCloud / Immich Live Photo / 音声 / 長い動画 / iPad / macOS の native 操作は未確認。編集後の再生と転送を待たないストリーミングも継続課題。
 - 最初の Apple CI はテスト開始前の Clippy インストール競合で停止。Linux job と同じく、ジョブごとの空の Rustup 領域へ固定 toolchain / components を明示的にインストールしてから Apple checks を実行する。最終 HEAD の hosted checks は別に確認する。
 - 古い PhotoKit SDK に `PHLivePhoto` の Sendable 適合がないため、callback から secure coding の `Data` を渡し、MainActor 上で復元する構成へ修正。Swift concurrency の検査を弱めずに local checks と Apple の5 target / 両 app builds を通過。修正版を同じ Simulator で再生・再生ボタン・終了まで操作し、両原本の内容一致、今回の作業フォルダー削除、操作再開を再確認。画面証拠は `target/acceptance/playback-20261012/native-live-secure-archive.png`。hosted の古い SDK は最終 HEAD CI で別に確認する。
+- [再生の最終 HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38171000690) と [マージ後 main CI](https://github.com/rabe1028/suwop/actions/runs/38171605408) は別々に core / apple / immich-integration の全 job が通過。最終 HEAD とマージ後 main の tree は一致する。hosted の Swift 6.0 / Xcode 16.4 でも secure coding の境界を含めて通過した。
+
+## 保存先ごとの日時・位置情報
+
+- 情報画面から保存先を選び、撮影日時または緯度・経度を変更する。関連する Live / RAW / JPEG が同じ保存先に複数ある場合は、1件の写真に属する完全な組を Rust が選び、半分だけの変更を拒否する。別の保存先には自動反映しない。
+- フルアクセスと現在の scope を確認し、日時・タイムゾーンと座標を Rust で検証する。保存後の全 ID・値・Immich timeZone の再取得が一致した場合だけ成功扱い。応答が不明、欠落・重複・不一致、状態保存失敗の場合は再試行せず一覧の再読込を案内する。
+- `make check`: Rust 74 tests / Swift 19 tests、strict lint / format / architecture / generated DTO / hooks を通過。単一フィールドの変更、権限制限・不正入力・異なる所有者 / ID の事前拒否、保存結果が不明な場合の再実行防止、転送履歴の保持、調整後の Immich EXIF 日時を優先する Rust tests と、実 FFI で Date の小数秒・native 応答・状態保存を確認する Swift test を追加。
+- PhotoKit の位置情報削除に対応する。Immich の null 座標更新は非対応のため、0 / 0 を削除の代わりに使わない。原本の EXIF 除去、地名検索・地図、任意のタイムゾーン選択、取り消し / 復元は未実装。
+- `make apple-build`: Rust の Apple 5 target と iOS Simulator / macOS app builds を通過。最新版を既存の iPhone Simulator にインストール・起動した。Mac がロック中で操作ツールから画面へアクセスできないため、日時・座標の native 操作と保存後の再起動確認は未完了。
+- local `make integration` は Docker daemon の socket が存在せず起動できない。実 Immich v3.2.4 に対する日時・timeZone・座標の更新と原本 checksum / 他の項目の保持を専用 CI で確認する。native 保存と最終 HEAD / main の hosted checks は別に記録する。
