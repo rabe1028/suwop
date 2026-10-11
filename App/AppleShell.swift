@@ -41,7 +41,7 @@ import SuwopShell
                 data: data
             )
         case "workspace", "cleanup": return try workspaceEffect(operation.type, data: data)
-        case "appleScan", "appleExport", "appleImport", "appleTrash": return try await photoEffect(
+        case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite": return try await photoEffect(
                 operation.type,
                 data: data
             )
@@ -73,6 +73,13 @@ import SuwopShell
             guard let apple else { throw SuwopError("Apple Photos に接続してください。") }
             try await apple.trash(assets)
             return .null
+        case "appleFavorite":
+            let keys = try data["keys"].decode([AssetKey].self)
+            guard let first = keys.first else { throw SuwopError("写真を選択してください。") }
+            return try await .from(appleStore(scope: first.scope).setFavorite(
+                keys,
+                value: data["value"].decode(Bool.self)
+            ))
         default: throw SuwopError("未知の PhotoKit 入出力です。")
         }
     }
@@ -128,9 +135,13 @@ import SuwopShell
         return store
     }
 
-    func thumbnail(_ photo: UnifiedPhoto, connection: ConnectionSettings?) async throws -> PlatformImage {
+    func thumbnail(
+        _ photo: UnifiedPhoto,
+        connection: ConnectionSettings?,
+        preview: Bool = false
+    ) async throws -> PlatformImage {
         if let record = photo.assets.first(where: { $0.key.provider == .apple }) {
-            return try await appleStore(scope: record.key.scope).thumbnail(record.key)
+            return try await appleStore(scope: record.key.scope).thumbnail(record.key, edge: preview ? 2048 : 360)
         }
         guard let connection, let record = photo.assets.first(where: { $0.key.provider == .immich }) else {
             throw SuwopError("プレビューを取得できません。")
@@ -140,6 +151,7 @@ import SuwopShell
             "address": .string(connection.address),
             "key": .string(key),
             "assetID": .string(record.key.assetID),
+            "preview": .bool(preview),
         ])
         let request = try CoreBridge.utility(7, input: input).decode(HttpRequest.self)
         let bytes = try await http.thumbnail(request)

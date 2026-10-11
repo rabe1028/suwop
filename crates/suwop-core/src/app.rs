@@ -64,6 +64,10 @@ pub enum ShellOperation {
     AppleTrash {
         assets: Vec<crate::domain::StoredAsset>,
     },
+    AppleFavorite {
+        keys: Vec<crate::domain::AssetKey>,
+        value: bool,
+    },
     Http(HttpRequest),
     HashFile {
         path: String,
@@ -86,6 +90,13 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    Browse {
+        options: crate::browser::BrowserOptions,
+    },
+    SetFavorite {
+        keys: Vec<crate::domain::AssetKey>,
+        value: bool,
+    },
     Initialize {
         scope: String,
     },
@@ -131,6 +142,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
     pub session: Option<Session>,
     pub busy: bool,
@@ -142,6 +154,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub browser: crate::browser::BrowserView,
     pub state: SavedLibrary,
     pub photos: Vec<UnifiedPhoto>,
     pub busy: bool,
@@ -161,6 +174,10 @@ impl crux_core::App for Suwop {
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
         match event {
+            Event::Browse { options } => {
+                model.browser = options;
+                Command::done()
+            }
             Event::Progress { mut state, status } => {
                 if model.changed_during_work {
                     invalidate_apple(&mut state);
@@ -235,8 +252,10 @@ impl crux_core::App for Suwop {
             }
             move_blockers.insert(receipt.id.clone(), blockers);
         }
+        let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
-            photos: catalog(&model.state.snapshots, &model.state.receipts),
+            browser: crate::browser::browse(&photos, &model.browser),
+            photos,
             pending_apple_count: model
                 .state
                 .snapshots

@@ -47,6 +47,38 @@ public struct AssetKey: Codable, Sendable {
     }
 }
 
+public struct BrowserOptions: Codable, Sendable {
+    public var filter: PhotoFilter
+    public var presence: Presence?
+    public var query: String
+    public var sort: PhotoSort
+    public var timeZone: String?
+    public init(filter: PhotoFilter, presence: Presence? = nil, query: String, sort: PhotoSort, timeZone: String? = nil) {
+        self.filter = filter
+        self.presence = presence
+        self.query = query
+        self.sort = sort
+        self.timeZone = timeZone
+    }
+}
+
+public struct BrowserView: Codable, Sendable {
+    public var favorites: Int64
+    public var live: Int64
+    public var photoIDs: [String]
+    public var raw: Int64
+    public var total: Int64
+    public var videos: Int64
+    public init(favorites: Int64, live: Int64, photoIDs: [String] = [], raw: Int64, total: Int64, videos: Int64) {
+        self.favorites = favorites
+        self.live = live
+        self.photoIDs = photoIDs
+        self.raw = raw
+        self.total = total
+        self.videos = videos
+    }
+}
+
 public struct ConnectionSettings: Codable, Sendable {
     public var address: String
     public var allowHTTP: Bool
@@ -121,6 +153,15 @@ public struct LibrarySnapshot: Codable, Sendable {
     }
 }
 
+public enum PhotoFilter: String, Codable, CaseIterable, Sendable {
+    case `all`
+    case `favorites`
+    case `photos`
+    case `videos`
+    case `live`
+    case `raw`
+}
+
 public struct PhotoResource: Codable, Sendable {
     public var id: String
     public var name: String
@@ -134,6 +175,12 @@ public struct PhotoResource: Codable, Sendable {
         self.sha1 = sha1
         self.bytes = bytes
     }
+}
+
+public enum PhotoSort: String, Codable, CaseIterable, Sendable {
+    case `newest`
+    case `oldest`
+    case `name`
 }
 
 public enum Presence: String, Codable, CaseIterable, Sendable {
@@ -284,6 +331,7 @@ public struct UploadPart: Codable, Sendable {
 }
 
 public struct ViewModel: Codable, Sendable {
+    public var browser: BrowserView
     public var busy: Bool
     public var canTransfer: Bool
     public var error: String?
@@ -293,7 +341,8 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+        self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer
         self.error = error

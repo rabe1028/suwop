@@ -133,6 +133,8 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
         ids.push(id);
     }
     wait_for(ctx, &session, &ids, true).await?;
+    assert!(session.favorite(ctx, &ids[0], true).await?.is_favorite);
+    assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
     let _: Value = session
         .json(
             ctx,

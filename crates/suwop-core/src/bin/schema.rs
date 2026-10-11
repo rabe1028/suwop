@@ -17,6 +17,7 @@ struct Protocol {
     http: HttpRequest,
     response: HttpResponse,
     hash: HashResult,
+    browser: suwop_core::browser::BrowserOptions,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

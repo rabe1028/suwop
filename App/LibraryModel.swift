@@ -13,7 +13,11 @@ import SwiftUI
     private var shell: AppleShell?
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
+    private var browseWork: Task<Void, Never>?
+    private var browseGeneration: UInt64 = 0
+    private var publishedRevision: UInt64 = 0
     private var started = false
+    private var pendingRefresh = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
 
     init() {
@@ -34,6 +38,56 @@ import SwiftUI
 
     var photos: [UnifiedPhoto] {
         view?.photos ?? []
+    }
+
+    var visiblePhotos: [UnifiedPhoto] {
+        guard let browser = view?.browser else { return photos }
+        let byID = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        return browser.photoIDs.compactMap { byID[$0] }
+    }
+
+    var browser: BrowserView? {
+        view?.browser
+    }
+
+    func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?) {
+        guard let runtime else { return }
+        browseWork?.cancel()
+        browseGeneration &+= 1
+        let generation = browseGeneration
+        browseWork = Task {
+            do {
+                let options = BrowserOptions(
+                    filter: filter,
+                    presence: presence,
+                    query: query,
+                    sort: sort,
+                    timeZone: TimeZone.current.identifier
+                )
+                let snapshot = try await runtime.browse(options)
+                guard !Task.isCancelled, generation == browseGeneration else { return }
+                publish(snapshot)
+            } catch {
+                if !Task.isCancelled, generation == browseGeneration {
+                    errorMessage = error.localizedDescription
+                }
+            }
+        }
+    }
+
+    func favorite(_ photos: [UnifiedPhoto], value: Bool) {
+        do {
+            try send([
+                "type": .string("setFavorite"),
+                "keys": .from(Array(Set(photos.flatMap { $0.assets.map(\.key) }))),
+                "value": .bool(value),
+            ])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        guard let shell else { throw SuwopError("入出力が利用できません。") }
+        return try await shell.thumbnail(photo, connection: connection, preview: true)
     }
 
     var snapshots: [LibrarySnapshot] {
@@ -71,6 +125,7 @@ import SwiftUI
     func start() {
         guard !started else { return }
         started = true
+        pendingRefresh = true
         send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
     }
 
@@ -144,7 +199,13 @@ import SwiftUI
         guard work == nil, let runtime, let shell else { return }
         errorMessage = nil
         work = Task {
-            defer { work = nil }
+            defer {
+                work = nil
+                if pendingRefresh, view?.state.schemaVersion == 2 {
+                    pendingRefresh = false
+                    refresh()
+                }
+            }
             do {
                 var requests = try await runtime.update(.object(event))
                 try await readView()
@@ -169,17 +230,28 @@ import SwiftUI
 
     private func readView() async throws {
         guard let runtime else { return }
-        view = try await runtime.view()
+        try await publish(runtime.snapshot())
+    }
+
+    private func publish(_ snapshot: RuntimeSnapshot) {
+        guard snapshot.revision >= publishedRevision else { return }
+        publishedRevision = snapshot.revision
+        view = snapshot.view
         if let failure = view?.error {
             errorMessage = failure
         }
     }
 
     private func notifyPhotoChange() {
+        pendingRefresh = true
         guard let runtime else { return }
         Task {
             do { _ = try await runtime.update(.object(["type": .string("appleChanged")]))
                 try await readView()
+                if work == nil {
+                    pendingRefresh = false
+                    refresh()
+                }
             } catch { errorMessage = error.localizedDescription }
         }
     }
