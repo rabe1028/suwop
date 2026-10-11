@@ -32,7 +32,34 @@ fn asset_kind(asset: &StoredAsset) -> Option<PlaybackKind> {
 
 #[must_use]
 pub fn kind(photo: &UnifiedPhoto) -> Option<PlaybackKind> {
-    photo.assets.iter().find_map(asset_kind)
+    // A standalone companion can sort before its parent by asset ID. Preserve
+    // the catalog's Live Photo representation regardless of that ordering.
+    photo
+        .assets
+        .iter()
+        .filter_map(asset_kind)
+        .min_by_key(|kind| *kind != PlaybackKind::Live)
+}
+
+#[must_use]
+pub fn preview_source(photo: &UnifiedPhoto, snapshots: &[LibrarySnapshot]) -> Option<AssetKey> {
+    photo
+        .assets
+        .iter()
+        .filter(|a| {
+            snapshots.iter().any(|s| {
+                s.access != ScanAccess::Unavailable
+                    && s.provider == a.key.provider
+                    && s.scope == a.key.scope
+            })
+        })
+        .min_by_key(|a| {
+            (
+                std::cmp::Reverse(a.originals().count()),
+                a.key.provider != Provider::Apple,
+            )
+        })
+        .map(|a| a.key.clone())
 }
 
 /// Playback is a read of one catalog photo, including a limited Apple library.
@@ -58,6 +85,7 @@ pub fn source(
     if selected.len() != 1 {
         return Err("再生する写真を1件選択してください。".into());
     }
+    let expected = kind(selected[0]).ok_or("再生できるメディアではありません。")?;
     let available: BTreeSet<_> = snapshots
         .iter()
         .filter(|s| s.access != ScanAccess::Unavailable)
@@ -67,7 +95,11 @@ pub fn source(
         .assets
         .iter()
         .filter(|a| available.contains(&a.key) && !a.is_offline && a.inventory_complete)
-        .filter_map(|a| asset_kind(a).map(|kind| (a, kind)))
+        .filter_map(|a| {
+            asset_kind(a)
+                .filter(|kind| *kind == expected)
+                .map(|kind| (a, kind))
+        })
         .min_by_key(|(a, _)| a.key.provider != Provider::Apple)
         .map(|(a, kind)| (a.key.clone(), kind))
         .ok_or_else(|| "再生できる動画・Live Photo の原本がありません。".into())

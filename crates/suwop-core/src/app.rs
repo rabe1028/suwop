@@ -194,6 +194,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub preview_sources: std::collections::BTreeMap<String, crate::domain::AssetKey>,
     pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
     pub albums: Vec<crate::albums::AlbumView>,
     pub browser: crate::browser::BrowserView,
@@ -296,6 +297,13 @@ impl crux_core::App for Suwop {
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
+            preview_sources: photos
+                .iter()
+                .filter_map(|p| {
+                    crate::media::preview_source(p, &model.state.snapshots)
+                        .map(|key| (crate::browser::photo_id(p), key))
+                })
+                .collect(),
             media: photos
                 .iter()
                 .filter_map(|p| {

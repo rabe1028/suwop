@@ -324,6 +324,86 @@ fn sharing_deduplicates_catalog_photos_and_prefers_accessible_local_sources() ->
 }
 
 #[test]
+fn sharing_live_parent_does_not_duplicate_its_standalone_companion() -> Result<(), String> {
+    let mut parent = asset();
+    parent.key.provider = Provider::Immich;
+    parent.key.scope = "remote".into();
+    parent.key.asset_id = "z-parent".into();
+    let mut motion = parent.resources[0].clone();
+    motion.id = "motion".into();
+    motion.name = "motion.mov".into();
+    motion.role = ResourceRole::LiveVideo;
+    motion.sha1 = Some("2".repeat(40));
+    parent.resources.push(motion.clone());
+    let mut companion = parent.clone();
+    companion.key.asset_id = "a-companion".into();
+    motion.role = ResourceRole::Video;
+    companion.resources = vec![motion];
+    let mut remote = snapshot(parent.clone(), ScanAccess::Full);
+    remote.assets.push(companion.clone());
+    assert_eq!(sources(&[remote], &[], &[companion.key])?, vec![parent.key]);
+    Ok(())
+}
+
+#[test]
+fn sharing_never_falls_back_to_only_one_component_of_a_known_pair() {
+    let mut parent = asset();
+    let mut motion = parent.resources[0].clone();
+    motion.id = "motion".into();
+    motion.role = ResourceRole::LiveVideo;
+    motion.sha1 = Some("2".repeat(40));
+    parent.resources.push(motion.clone());
+    let mut companion = parent.clone();
+    companion.key.provider = Provider::Immich;
+    companion.key.scope = "remote".into();
+    motion.role = ResourceRole::Video;
+    companion.resources = vec![motion];
+    let mut snapshots = vec![
+        snapshot(parent, ScanAccess::Unavailable),
+        snapshot(companion.clone(), ScanAccess::Full),
+    ];
+    assert!(sources(&snapshots, &[], &[companion.key.clone()]).is_err());
+    snapshots[0].access = ScanAccess::Full;
+    snapshots[0].assets[0].inventory_complete = false;
+    assert!(sources(&snapshots, &[], &[companion.key.clone()]).is_err());
+    snapshots[0].assets[0].inventory_complete = true;
+    snapshots[0].assets[0].is_offline = true;
+    assert!(sources(&snapshots, &[], &[companion.key]).is_err());
+}
+
+#[test]
+fn sharing_keeps_raw_and_jpeg_when_one_photo_is_split_across_remote_assets() -> Result<(), String> {
+    let mut local = asset();
+    let mut raw = local.resources[0].clone();
+    raw.id = "raw".into();
+    raw.name = "original.dng".into();
+    raw.role = ResourceRole::RawImage;
+    raw.sha1 = Some("2".repeat(40));
+    local.resources.push(raw.clone());
+    let mut jpeg = local.clone();
+    jpeg.key.provider = Provider::Immich;
+    jpeg.key.scope = "remote".into();
+    jpeg.key.asset_id = "jpeg".into();
+    jpeg.resources.truncate(1);
+    let mut remote_raw = jpeg.clone();
+    remote_raw.key.asset_id = "raw".into();
+    remote_raw.resources = vec![raw];
+    let mut remote = snapshot(jpeg.clone(), ScanAccess::Full);
+    remote.assets.push(remote_raw.clone());
+    let mut snapshots = vec![snapshot(local.clone(), ScanAccess::Unavailable), remote];
+    assert_eq!(suwop_core::domain::catalog(&snapshots, &[]).len(), 1);
+    assert_eq!(
+        sources(&snapshots, &[], &[jpeg.key.clone()])?,
+        vec![jpeg.key.clone(), remote_raw.key]
+    );
+    snapshots[1].assets[1].is_offline = true;
+    assert!(sources(&snapshots, &[], &[jpeg.key.clone()]).is_err());
+    snapshots[0].access = ScanAccess::Limited;
+    assert_eq!(sources(&snapshots, &[], &[jpeg.key])?, vec![local.key]);
+    Ok(())
+}
+
+#[test]
 fn export_names_and_file_paths_cannot_escape_the_workspace() -> Result<(), String> {
     assert_eq!(filename("../../photo.jpg")?, "photo.jpg");
     for name in [".", "..", "bad\0.jpg"] {

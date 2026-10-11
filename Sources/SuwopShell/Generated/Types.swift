@@ -457,10 +457,11 @@ public struct ViewModel: Codable, Sendable {
     public var moveBlockers: [String: [String]]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
+    public var previewSources: [String: AssetKey]
     public var serverVersion: String?
     public var state: SavedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, error: String? = nil, media: [String: PlaybackKind] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewSources: [String: AssetKey] = [:], serverVersion: String? = nil, state: SavedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy
@@ -470,6 +471,7 @@ public struct ViewModel: Codable, Sendable {
         self.moveBlockers = moveBlockers
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
+        self.previewSources = previewSources
         self.serverVersion = serverVersion
         self.state = state
         self.status = status

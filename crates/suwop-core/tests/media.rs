@@ -6,7 +6,7 @@ use suwop_core::{
         AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
         ScanAccess, StoredAsset, TransferBundle, TransferFile,
     },
-    media::{PlaybackKind, files, source},
+    media::{PlaybackKind, files, kind, preview_source, source},
     workflow::HashResult,
 };
 
@@ -165,6 +165,89 @@ fn live_playback_requires_the_exact_still_and_companion_not_raw_or_auxiliary_fil
     assert!(files(&bundle, PlaybackKind::Live).is_err());
     bundle.assets[0].resources[0].role = ResourceRole::RawImage;
     assert!(files(&bundle, PlaybackKind::Live).is_err());
+    Ok(())
+}
+
+#[test]
+fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -> Result<(), String>
+{
+    let mut parent = asset(PlaybackKind::Live);
+    parent.key.provider = Provider::Immich;
+    parent.key.scope = "remote".into();
+    parent.key.asset_id = "z-parent".into();
+    let mut companion = asset(PlaybackKind::Video);
+    companion.key = AssetKey {
+        asset_id: "a-companion".into(),
+        ..parent.key.clone()
+    };
+    companion.resources[0]
+        .sha1
+        .clone_from(&parent.resources[1].sha1);
+    let mut remote = snapshot(parent.clone(), ScanAccess::Full);
+    remote.assets.push(companion.clone());
+    let mut snapshots = vec![remote];
+    let photos = suwop_core::domain::catalog(&snapshots, &[]);
+    assert_eq!(photos.len(), 1);
+    assert_eq!(photos[0].assets[0].key, companion.key);
+    assert_eq!(kind(&photos[0]), Some(PlaybackKind::Live));
+    assert_eq!(
+        preview_source(&photos[0], &snapshots),
+        Some(parent.key.clone())
+    );
+    assert_eq!(
+        source(&snapshots, &[], &[companion.key.clone()])?,
+        (parent.key.clone(), PlaybackKind::Live)
+    );
+    // An Apple copy of only the motion component does not provide a Live pair.
+    let mut local_companion = companion.clone();
+    local_companion.key.provider = Provider::Apple;
+    local_companion.key.scope = "apple".into();
+    snapshots.push(snapshot(local_companion, ScanAccess::Limited));
+    assert_eq!(
+        source(&snapshots, &[], &[companion.key.clone()])?,
+        (parent.key.clone(), PlaybackKind::Live)
+    );
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: SavedLibrary {
+                schema_version: 2,
+                snapshots: snapshots.clone(),
+                ..SavedLibrary::default()
+            },
+            ..Model::default()
+        },
+    );
+    assert_eq!(core.view().media.values().next(), Some(&PlaybackKind::Live));
+    assert_eq!(
+        core.view().preview_sources.values().next(),
+        Some(&parent.key)
+    );
+    // Do not fall back to an ordinary video when its Live parent is incomplete.
+    snapshots[0].assets[0].inventory_complete = false;
+    assert!(source(&snapshots, &[], &[companion.key.clone()]).is_err());
+    let mut local_parent = parent.clone();
+    local_parent.key.provider = Provider::Apple;
+    local_parent.key.scope = "apple".into();
+    snapshots[1].assets.push(local_parent.clone());
+    let photos = suwop_core::domain::catalog(&snapshots, &[]);
+    assert_eq!(
+        preview_source(&photos[0], &snapshots),
+        Some(local_parent.key.clone())
+    );
+    snapshots[1].access = ScanAccess::Unavailable;
+    assert_eq!(
+        preview_source(&photos[0], &snapshots),
+        Some(parent.key.clone())
+    );
+    snapshots[0].access = ScanAccess::Unavailable;
+    assert_eq!(preview_source(&photos[0], &snapshots), None);
+    snapshots[1].access = ScanAccess::Limited;
+    assert_eq!(
+        source(&snapshots, &[], &[companion.key])?,
+        (local_parent.key, PlaybackKind::Live)
+    );
     Ok(())
 }
 

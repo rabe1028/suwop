@@ -171,25 +171,25 @@ import SuwopShell
     }
 
     func thumbnail(
-        _ photo: UnifiedPhoto,
+        _ key: AssetKey,
         connection: ConnectionSettings?,
         preview: Bool = false
     ) async throws -> PlatformImage {
-        if let record = photo.assets.first(where: { $0.key.provider == .apple }) {
-            return try await appleStore(scope: record.key.scope).thumbnail(
-                record.key,
+        if key.provider == .apple {
+            return try await appleStore(scope: key.scope).thumbnail(
+                key,
                 edge: preview ? 2048 : 360,
                 preview: preview
             )
         }
-        guard let connection, let record = photo.assets.first(where: { $0.key.provider == .immich }) else {
+        guard let connection else {
             throw SuwopError("プレビューを取得できません。")
         }
-        let key = try Credentials.read(connection.credentialID)
+        let credential = try Credentials.read(connection.credentialID)
         let input: JSONValue = .object([
             "address": .string(connection.address),
-            "key": .string(key),
-            "assetID": .string(record.key.assetID),
+            "key": .string(credential),
+            "assetID": .string(key.assetID),
             "preview": .bool(preview),
         ])
         let request = try CoreBridge.utility(7, input: input).decode(HttpRequest.self)

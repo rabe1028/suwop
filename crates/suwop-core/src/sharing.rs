@@ -1,6 +1,78 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, TransferReceipt, catalog};
+use crate::domain::{
+    AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt, catalog,
+    normalize_sha1,
+};
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+enum OriginalIdentity {
+    Digest(String),
+    Resource(AssetKey, String),
+}
+
+fn identities(asset: &StoredAsset) -> BTreeSet<OriginalIdentity> {
+    asset
+        .originals()
+        .map(|r| {
+            normalize_sha1(r.sha1.as_deref()).map_or_else(
+                || OriginalIdentity::Resource(asset.key.clone(), r.id.clone()),
+                OriginalIdentity::Digest,
+            )
+        })
+        .collect()
+}
+
+fn source_group(assets: &[&StoredAsset]) -> (Vec<AssetKey>, usize) {
+    let mut assets = assets.to_vec();
+    assets.sort_by_key(|a| (std::cmp::Reverse(a.originals().count()), &a.key));
+    let mut covered = BTreeSet::new();
+    let mut keys = Vec::new();
+    for asset in assets {
+        let originals = identities(asset);
+        if !originals.is_subset(&covered) {
+            covered.extend(originals);
+            keys.push(asset.key.clone());
+        }
+    }
+    (keys, covered.len())
+}
+
+fn complete_sources(
+    assets: &[StoredAsset],
+    available: &BTreeSet<&AssetKey>,
+) -> Result<Vec<AssetKey>, String> {
+    let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
+    for asset in assets.iter().filter(|a| a.inventory_complete) {
+        groups
+            .entry((asset.key.provider, &asset.key.scope))
+            .or_default()
+            .push(asset);
+    }
+    // Preserve a complete provider's originals, including RAW/JPEG spread over
+    // separate Immich assets. A Live companion must not replace its parent.
+    let required = groups
+        .values()
+        .map(|g| source_group(g).1)
+        .chain(assets.iter().map(|a| a.originals().count()))
+        .max()
+        .unwrap_or(0);
+    groups
+        .into_iter()
+        .filter_map(|((provider, _), group)| {
+            let accessible: Vec<_> = group
+                .into_iter()
+                .filter(|a| available.contains(&a.key) && !a.is_offline)
+                .collect();
+            let (keys, count) = source_group(&accessible);
+            (count >= required && !keys.is_empty()).then_some((provider, keys, count))
+        })
+        .min_by_key(|(provider, _, count)| {
+            (std::cmp::Reverse(*count), *provider != Provider::Apple)
+        })
+        .map(|(_, keys, _)| keys)
+        .ok_or_else(|| "共有する写真の全原本にアクセスできません。一覧を更新してください。".into())
+}
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct ShareFile {
@@ -8,8 +80,8 @@ pub struct ShareFile {
     pub name: String,
 }
 
-/// Select one available source for each selected catalog photo. Prefer the local
-/// source so sharing an Apple photo never depends on an unrelated remote outage.
+/// Select a complete source group for each catalog photo. Prefer Apple when it
+/// provides the same complete originals, without duplicating related resources.
 pub fn sources(
     snapshots: &[LibrarySnapshot],
     receipts: &[TransferReceipt],
@@ -35,16 +107,9 @@ pub fn sources(
     photos
         .iter()
         .filter(|p| p.assets.iter().any(|a| requested.contains(&a.key)))
-        .map(|photo| {
-            photo
-                .assets
-                .iter()
-                .filter(|a| available.contains(&a.key))
-                .min_by_key(|a| a.key.provider != Provider::Apple)
-                .map(|a| a.key.clone())
-                .ok_or_else(|| "共有する写真にアクセスできません。一覧を更新してください。".into())
-        })
-        .collect()
+        .map(|photo| complete_sources(&photo.assets, &available))
+        .collect::<Result<Vec<_>, _>>()
+        .map(|groups| groups.into_iter().flatten().collect())
 }
 
 pub fn filename(name: &str) -> Result<String, String> {

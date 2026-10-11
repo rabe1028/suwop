@@ -65,13 +65,12 @@ import SwiftUI
             return .video(player)
         case .live:
             guard urls.count == 2 else { throw SuwopError("Live Photo の原本を確認できません。") }
-            let gate = ImageRequestGate<PHLivePhoto>()
-            let live = try await withTaskCancellationHandler {
+            // Older PhotoKit SDKs do not mark PHLivePhoto Sendable. Move a
+            // secure value archive across executors, then restore on MainActor.
+            let gate = ImageRequestGate<Data>()
+            let archive = try await withTaskCancellationHandler {
                 try Task.checkCancellation()
-                return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<
-                    PHLivePhoto,
-                    Error
-                >) in
+                return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
                     gate.install(continuation)
                     let id = PHLivePhoto.request(
                         withResourceFileURLs: urls,
@@ -83,7 +82,11 @@ import SwiftUI
                             return
                         }
                         if let live {
-                            gate.finish(.success(live))
+                            do {
+                                try gate.finish(.success(NSKeyedArchiver.archivedData(
+                                    withRootObject: live, requiringSecureCoding: true
+                                )))
+                            } catch { gate.finish(.failure(error)) }
                         } else {
                             gate
                                 .finish(.failure((info[PHLivePhotoInfoErrorKey] as? Error) ??
@@ -93,6 +96,9 @@ import SwiftUI
                     gate.setRequest(id)
                 }
             } onCancel: { gate.cancel() }
+            guard let live = try NSKeyedUnarchiver.unarchivedObject(ofClass: PHLivePhoto.self, from: archive) else {
+                throw SuwopError("Live Photo を復元できません。")
+            }
             return .live(live)
         }
     }

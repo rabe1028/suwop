@@ -50,7 +50,7 @@
 
 ## 原本ファイルの共有
 
-- Rust が現在の catalog とアクセス権限から共有元を選ぶ。同一写真の両側を重複して共有せず、利用可能な Apple Photos を優先し、必要な場合だけ Immich へ再接続する。
+- Rust が現在の catalog とアクセス権限から共有元を選ぶ。同一写真の両側を重複して共有せず、完全な原本の構成を保持できる Apple Photos を優先し、必要な場合だけ Immich へ再接続する。Live Photo 本体と単独の付随動画を重複して共有せず、RAW / JPEG が別の Immich asset でも両方の原本を選ぶ。既知の組の一方がオフライン・アクセス不可なら、片方だけの共有を拒否する。
 - 共有前に原本を再取得し、共有用ファイルの SHA-1 / SHA-256 / バイト長を再確認。作業領域外のパスや不正なファイル名を拒否する。写真、接続、転送履歴は変更しない。
 - `ShareFiles` effect は native 共有サービスが完了・キャンセルを返すまで待つ。途中で共有用ファイルを削除せず、終了後や取得失敗時に片付ける。片付けに失敗した場合もエラーを表示する。
 - `make check`: Rust 58 tests / Swift 17 tests を通過。新しい実 FFI test はシステム共有の応答前に cleanup が発行されないことを確認する。Rust tests は成功・キャンセル、取得中断、作業領域外のパス、コピー後の内容変更、片付け失敗、Immich 原本の GET のみの取得も検証する。
@@ -63,13 +63,14 @@
 
 ## 動画と Live Photo の原本再生
 
-- Rust が1件の catalog photo から利用可能な原本を選び、Apple 側を優先する。限定権限での読込を許可し、古い scope、オフライン、不完全な構成、複数写真の再生を拒否する。Apple から再生する場合は Immich の接続状態に依存しない。
+- Rust が1件の catalog photo から利用可能な原本を選び、同じメディア構成の Apple 側を優先する。単独の付随動画が ID 順で先に並んでも Live Photo 本体を選び、構成が不完全な場合に通常動画へ代替しない。プレビューの保存先も Rust が選び、完全な構成とアクセス可能な保存先を優先する。限定権限での読込を許可し、古い scope、オフライン、不完全な構成、複数写真の再生を拒否する。Apple から再生する場合は Immich の接続状態に依存しない。
 - 原本を再取得・検証し、動画は1ファイル、Live Photo は静止画と対応する動画の2ファイルを選ぶ。コピー後も SHA-1 / SHA-256 / バイト長と作業領域内のパスを検証する。再生前の構成変化や必要な原本の欠落・重複を拒否する。
 - Swift は AVKit の動画プレーヤーと PhotosUI の Live Photo view を表示する。原本の再生であることを画面に明記する。PhotoKit が2ファイルを Live Photo として復元できない場合はエラーを表示し、原本は変更しない。
 - プレーヤーの停止・画面終了まで Rust effect を完了せず、終了後に作業ファイルを片付ける。取得失敗、内容の変化、native 再生のエラー・キャンセル、片付け失敗も回帰テストの対象。強制終了後の回収は共有と同じ継続課題。
 - `make apple-build`: Apple の Rust 5 target、iOS Simulator / macOS app builds を通過。Rust / Swift の実 FFI で再生終了前に cleanup が発行されず、終了後にライブラリと履歴が残ることを確認。
-- `make check`: Rust 63 tests / Swift 18 tests、strict lint / format / architecture / generated DTO / hooks を通過。追加のテストは利用可能な保存先の選択、限定権限、原本の欠落・重複、内容変化・パスの逸脱、native 終了待ち、キャンセル・片付け失敗、Immich の認証された GET のみの原本取得を確認する。
+- `make check`: Rust 67 tests / Swift 18 tests、strict lint / format / architecture / generated DTO / hooks を通過。追加のテストは利用可能な保存先の選択、限定権限、原本の欠落・重複、内容変化・パスの逸脱、native 終了待ち、キャンセル・片付け失敗、Immich の認証された GET のみの原本取得を確認する。
 - iPhone 17 Pro / iOS 26.4 に自作の8秒動画を追加し、原本再生、5秒付近での一時停止、先頭への巻き戻しを確認。再生中のファイルは原本との SHA-256 一致を別に確認し、終了後に今回の作業フォルダーが消え、操作を再開できることを確認した。
 - 自作の JPEG / MOV に同じ content identifier と still-image-time を書いたペアを、Simulator に Live Photo 1件として追加。PhotoKit で原本を取得し、PhotosUI の復元・再生・再生ボタンを確認。静止画 25,098 bytes / 動画 610,446 bytes は再生待ち中に原本との SHA-256 一致を別に確認し、終了後の今回の作業フォルダー削除・操作再開も確認した。実機で撮影した Live Photo の証拠には含めない。
 - ローカルの画面証拠は `target/acceptance/playback-20261012/native-video.png` と `native-live.png`。自作 fixture の生成 source も同じディレクトリに保存。標準写真6枚・自作動画1件・Live Photo 1件を保持する。VRT / golden 比較、実機 / iCloud / Immich Live Photo / 音声 / 長い動画 / iPad / macOS の native 操作は未確認。編集後の再生と転送を待たないストリーミングも継続課題。
 - 最初の Apple CI はテスト開始前の Clippy インストール競合で停止。Linux job と同じく、ジョブごとの空の Rustup 領域へ固定 toolchain / components を明示的にインストールしてから Apple checks を実行する。最終 HEAD の hosted checks は別に確認する。
+- 古い PhotoKit SDK に `PHLivePhoto` の Sendable 適合がないため、callback から secure coding の `Data` を渡し、MainActor 上で復元する構成へ修正。Swift concurrency の検査を弱めずに local checks と Apple の5 target / 両 app builds を通過。修正版を同じ Simulator で再生・再生ボタン・終了まで操作し、両原本の内容一致、今回の作業フォルダー削除、操作再開を再確認。画面証拠は `target/acceptance/playback-20261012/native-live-secure-archive.png`。hosted の古い SDK は最終 HEAD CI で別に確認する。
