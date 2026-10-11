@@ -115,6 +115,20 @@ import SwiftUI
         return try await shell.thumbnail(photo, connection: connection, preview: true)
     }
 
+    func playbackKind(_ photo: UnifiedPhoto) -> PlaybackKind? {
+        view?.media[photo.id]
+    }
+
+    func play(_ photo: UnifiedPhoto) {
+        do {
+            try send([
+                "type": .string("play"),
+                "keys": .from(photo.assets.map(\.key)),
+                "id": .string(UUID().uuidString),
+            ])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     var snapshots: [LibrarySnapshot] {
         view?.state.snapshots ?? []
     }

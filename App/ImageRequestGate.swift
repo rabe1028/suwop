@@ -12,9 +12,18 @@ final class ImageRequestGate<Payload: Sendable>: @unchecked Sendable {
     private var continuation: CheckedContinuation<Payload, Error>?
     private var requestID: PHImageRequestID?
     private var cancelled = false
-    private let manager: PHImageManager
+    private enum Target {
+        case image(PHImageManager)
+        case livePhoto
+    }
+
+    private let target: Target
     init(manager: PHImageManager) {
-        self.manager = manager
+        target = .image(manager)
+    }
+
+    init() {
+        target = .livePhoto
     }
 
     func install(_ continuation: CheckedContinuation<Payload, Error>) {
@@ -35,7 +44,7 @@ final class ImageRequestGate<Payload: Sendable>: @unchecked Sendable {
         let stop = cancelled
         lock.unlock()
         if stop {
-            manager.cancelImageRequest(id)
+            cancelRequest(id)
         }
     }
 
@@ -55,8 +64,15 @@ final class ImageRequestGate<Payload: Sendable>: @unchecked Sendable {
         continuation = nil
         lock.unlock()
         if let id {
-            manager.cancelImageRequest(id)
+            cancelRequest(id)
         }
         waiting?.resume(throwing: CancellationError())
+    }
+
+    private func cancelRequest(_ id: Int32) {
+        switch target {
+        case let .image(manager): manager.cancelImageRequest(id)
+        case .livePhoto: PHLivePhoto.cancelRequest(withRequestID: id)
+        }
     }
 }

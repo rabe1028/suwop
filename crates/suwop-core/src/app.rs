@@ -61,6 +61,9 @@ pub enum ShellOperation {
     ShareFiles {
         files: Vec<crate::sharing::ShareFile>,
     },
+    PlayMedia {
+        plan: crate::media::PlaybackPlan,
+    },
     AppleScan {
         scope: String,
         permission: bool,
@@ -110,6 +113,10 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    Play {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
     Share {
         keys: Vec<crate::domain::AssetKey>,
         id: String,
@@ -187,6 +194,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
     pub albums: Vec<crate::albums::AlbumView>,
     pub browser: crate::browser::BrowserView,
     pub state: SavedLibrary,
@@ -288,6 +296,12 @@ impl crux_core::App for Suwop {
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
         ViewModel {
+            media: photos
+                .iter()
+                .filter_map(|p| {
+                    crate::media::kind(p).map(|kind| (crate::browser::photo_id(p), kind))
+                })
+                .collect(),
             albums: crate::albums::views(&model.state.albums, &photos, &model.state.snapshots),
             browser: crate::browser::browse(&photos, &model.browser),
             photos,

@@ -109,6 +109,13 @@ struct PhotoViewer: View {
                     .accessibilityLabel("前の写真")
                     .keyboardShortcut(.leftArrow, modifiers: [])
                 Spacer()
+                if let kind = model.playbackKind(photo) {
+                    Button { model.play(photo) } label: {
+                        Image(systemName: kind == .live ? "livephoto.play" : "play.circle")
+                    }
+                    .disabled(model.isBusy)
+                    .accessibilityLabel(kind == .live ? "Live Photo の原本を再生" : "動画の原本を再生")
+                }
                 Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
                     .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
                 Button { model.favorite([photo], value: !photo.isFavorite) } label: {
