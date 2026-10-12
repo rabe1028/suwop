@@ -225,7 +225,8 @@ async fn exercise_adjusted_dates(
         metadata.longitude = None;
         metadata.is_favorite = true;
         let expected = metadata.captured_at.unwrap_or(embedded);
-        let id = session.upload(ctx, &file, &metadata, now, None).await?;
+        let origin = date_fixture_origin(session, &file, &metadata, index);
+        let id = create_marked_date_fixture(ctx, session, &file, &origin, now).await?;
         let preview = directory.join(format!("date-{index}-preview.jpg"));
         wait_preview(ctx, session, &id, &preview, 4.0 / 3.0).await?;
         wait_metadata_queues(ctx, session).await?;
@@ -277,8 +278,7 @@ async fn exercise_adjusted_dates(
         assert!(before_duplicate.is_favorite && !before_duplicate.is_trashed);
         metadata.captured_at = Some(adjusted + 86_400.0);
         metadata.is_favorite = false;
-        let duplicate = session.upload(ctx, &file, &metadata, now, None).await?;
-        assert_eq!(duplicate, id);
+        verify_duplicate_keeps_origin(ctx, session, &file, &origin, &metadata, now).await?;
         let after_duplicate = session.asset(ctx, &id).await?;
         assert_eq!(after_duplicate.checksum, before_duplicate.checksum);
         assert_eq!(
@@ -747,5 +747,69 @@ fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAs
         inventory_complete: true,
         is_offline: false,
         deletion_blockers: vec![],
+    }
+}
+
+async fn create_marked_date_fixture(
+    ctx: &Context,
+    session: &Session,
+    file: &TransferFile,
+    origin: &suwop_core::immich::UploadIntent,
+    now: f64,
+) -> Result<String, String> {
+    let (id, created) = session
+        .create_intended_upload(ctx, file, origin, now)
+        .await?;
+    assert!(created);
+    assert_eq!(session.reconcile_upload_intent(ctx, origin).await?, id);
+    let plan = session
+        .prepare_upload_metadata(ctx, &id, &origin.source)
+        .await?;
+    session.apply_upload_metadata(ctx, &id, plan.body).await?;
+    Ok(id)
+}
+
+async fn verify_duplicate_keeps_origin(
+    ctx: &Context,
+    session: &Session,
+    file: &TransferFile,
+    origin: &suwop_core::immich::UploadIntent,
+    metadata: &StoredAsset,
+    now: f64,
+) -> Result<(), String> {
+    let id = session.reconcile_upload_intent(ctx, origin).await?;
+    let mut other_origin = origin.clone();
+    other_origin.token = origin
+        .token
+        .replace("44444444-4444-4444-8444", "55555555-5555-4555-8555");
+    other_origin.source = metadata.clone();
+    let (duplicate, created) = session
+        .create_intended_upload(ctx, file, &other_origin, now)
+        .await?;
+    assert!(!created);
+    assert_eq!(duplicate, id);
+    assert!(
+        session
+            .reconcile_upload_intent(ctx, &other_origin)
+            .await
+            .is_err()
+    );
+    assert_eq!(session.reconcile_upload_intent(ctx, origin).await?, id);
+    Ok(())
+}
+
+fn date_fixture_origin(
+    session: &Session,
+    file: &TransferFile,
+    metadata: &StoredAsset,
+    index: usize,
+) -> suwop_core::immich::UploadIntent {
+    suwop_core::immich::UploadIntent {
+        scope: session.scope.clone(),
+        token: format!("44444444-4444-4444-8444-{index:012}"),
+        source: metadata.clone(),
+        resource: file.resource.clone(),
+        signature: file.signature.clone(),
+        live_id: None,
     }
 }

@@ -620,7 +620,8 @@ public struct SavedLibrary: Codable, Sendable {
     public var receipts: [TransferReceipt]
     public var schemaVersion: Int64
     public var snapshots: [LibrarySnapshot]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
+    public var uploadIntents: [UploadIntent]
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
@@ -628,6 +629,7 @@ public struct SavedLibrary: Codable, Sendable {
         self.receipts = receipts
         self.schemaVersion = schemaVersion
         self.snapshots = snapshots
+        self.uploadIntents = uploadIntents
     }
 }
 
@@ -759,6 +761,34 @@ public struct UploadForgetPrompt: Codable, Sendable {
     public init(key: AssetKey, name: String) {
         self.key = key
         self.name = name
+    }
+}
+
+public struct UploadIntent: Codable, Sendable {
+    public var liveId: String?
+    public var resource: PhotoResource
+    public var scope: String
+    public var signature: FileSignature
+    public var source: StoredAsset
+    public var token: String
+    public init(liveId: String? = nil, resource: PhotoResource, scope: String, signature: FileSignature, source: StoredAsset, token: String) {
+        self.liveId = liveId
+        self.resource = resource
+        self.scope = scope
+        self.signature = signature
+        self.source = source
+        self.token = token
+    }
+}
+
+public struct UploadIntentForgetPrompt: Codable, Sendable {
+    public var name: String
+    public var scope: String
+    public var token: String
+    public init(name: String, scope: String, token: String) {
+        self.name = name
+        self.scope = scope
+        self.token = token
     }
 }
 

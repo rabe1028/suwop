@@ -15,6 +15,7 @@ mod favorites;
 mod media;
 mod metadata;
 mod sharing;
+mod upload_intents;
 mod uploads;
 
 #[derive(Debug)]
@@ -165,6 +166,9 @@ impl Runtime<'_> {
             }
             Event::Index { id } => self.index(&id).await,
             Event::ForgetUploadRecord { key } => self.forget_upload_record(&key).await,
+            Event::ForgetUploadIntent { scope, token } => {
+                self.forget_upload_intent(&scope, &token).await
+            }
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,

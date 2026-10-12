@@ -11,6 +11,8 @@ mod uploads;
 pub use uploads::{
     PendingUpload, UploadForgetPrompt, UploadMetadataPlan, UploadPhase, UploadResumePrompt,
 };
+mod upload_intents;
+pub use upload_intents::{UploadIntent, UploadIntentForgetPrompt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Version {

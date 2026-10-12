@@ -28,6 +28,9 @@ enum UploadFault {
     Duplicate,
     WrongIdentity,
     ForgetJournal,
+    IntentJournal,
+    PostLost,
+    IntentForgetJournal,
 }
 struct Shell {
     source: TransferBundle,
@@ -46,6 +49,8 @@ struct Shell {
     capture_date: String,
     http_requests: usize,
     uploaded_name: String,
+    uploaded_marker: Value,
+    reconciliation: Option<Value>,
 }
 impl Shell {
     fn new() -> Self {
@@ -101,10 +106,17 @@ impl Shell {
             capture_date: "1970-01-01T00:00:10Z".into(),
             http_requests: 0,
             uploaded_name: "test.jpg".into(),
+            uploaded_marker: Value::Null,
+            reconciliation: None,
         }
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
         match operation {
+            ShellOperation::RandomId => Ok(json!(if self.writes == 0 {
+                "33333333-3333-4333-8333-333333333333"
+            } else {
+                "44444444-4444-4444-8444-444444444444"
+            })),
             ShellOperation::AppleFavorite { keys, value } => {
                 for a in &mut self.source.assets {
                     if keys.contains(&a.key) {
@@ -146,6 +158,10 @@ impl Shell {
                 self.order.push("confirm-forget");
                 self.confirm.map(Value::Bool).ok_or("cancelled".into())
             }
+            ShellOperation::ConfirmForgetUploadIntent { .. } => {
+                self.order.push("confirm-forget-intent");
+                self.confirm.map(Value::Bool).ok_or("cancelled".into())
+            }
             ShellOperation::AppleTrash { .. } => {
                 self.order.push("trash");
                 self.deleted += 1;
@@ -173,6 +189,20 @@ impl Shell {
     }
     fn persist(&mut self, state: SavedLibrary) -> Result<Value, String> {
         self.order.push("persist");
+        if matches!(self.upload_fault, UploadFault::IntentForgetJournal)
+            && state.upload_intents.is_empty()
+            && self
+                .journal
+                .as_ref()
+                .is_some_and(|s| !s.upload_intents.is_empty())
+        {
+            return Err("intent retirement failed".into());
+        }
+        if matches!(self.upload_fault, UploadFault::IntentJournal)
+            && !state.upload_intents.is_empty()
+        {
+            return Err("intent journal failed".into());
+        }
         if matches!(self.upload_fault, UploadFault::ForgetJournal)
             && state.pending_uploads.is_empty()
             && self
@@ -207,13 +237,47 @@ impl Shell {
         self.journal = Some(state);
         Ok(Value::Null)
     }
+    fn upload_response(
+        &mut self,
+        request: &suwop_core::immich::HttpRequest,
+    ) -> Result<Value, String> {
+        let metadata: Value =
+            serde_json::from_str(request.fields.get("metadata").ok_or("no upload marker")?)
+                .map_err(|e| e.to_string())?;
+        let token = metadata[0]["value"]["token"]
+            .as_str()
+            .ok_or("no origin token")?;
+        if !self.journal.as_ref().is_some_and(|state| {
+            state
+                .upload_intents
+                .iter()
+                .any(|intent| intent.token == token)
+        }) {
+            return Err("POST must be preceded by durable matching intent".into());
+        }
+        self.writes += 1;
+        self.uploaded_name
+            .clone_from(&request.files.first().ok_or("no uploaded file")?.filename);
+        if !matches!(self.upload_fault, UploadFault::Duplicate) {
+            self.uploaded_marker = metadata[0]["value"].clone();
+        }
+        if matches!(self.upload_fault, UploadFault::PostLost) {
+            return Err("lost POST".into());
+        }
+        Ok(
+            json!({"id":ID,"status":if matches!(self.upload_fault, UploadFault::Duplicate) {"duplicate"} else {"created"}}),
+        )
+    }
     fn http(&mut self, request: suwop_core::immich::HttpRequest) -> Result<Value, String> {
         self.http_requests += 1;
-        let body = if request.method == "POST" && request.url.ends_with("/assets") {
-            self.writes += 1;
-            self.uploaded_name
-                .clone_from(&request.files.first().ok_or("no uploaded file")?.filename);
-            json!({"id":ID,"status":if matches!(self.upload_fault, UploadFault::Duplicate) {"duplicate"} else {"created"}})
+        let body = if request.url.ends_with("/assets/bulk-upload-check") {
+            let token =
+                request.body.as_ref().ok_or("no bulk check body")?["assets"][0]["id"].clone();
+            self.reconciliation.clone().unwrap_or_else(|| json!({"results":[{"id":token,"action":"reject","reason":"duplicate","assetId":ID,"isTrashed":false}]}))
+        } else if request.url.contains("/metadata/suwop.upload-origin.v1") {
+            json!({"key":"suwop.upload-origin.v1","value":self.uploaded_marker,"updatedAt":"1970-01-01T00:00:10Z"})
+        } else if request.method == "POST" && request.url.ends_with("/assets") {
+            self.upload_response(&request)?
         } else if request.method == "PUT" {
             self.metadata_writes += 1;
             if matches!(self.upload_fault, UploadFault::PutLostUnapplied) {
@@ -502,6 +566,157 @@ fn upload_journal_failure_prevents_metadata_writes() -> Result<(), String> {
         assert_eq!(
             (shell.writes, shell.metadata_writes, shell.deleted),
             (1, 0, 0)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn upload_intent_is_durable_before_post_and_can_reconcile_a_lost_created_id() -> Result<(), String>
+{
+    for fault in [UploadFault::CreatedJournal, UploadFault::PostLost] {
+        let mut shell = Shell::new();
+        shell.source.assets[0].captured_at = Some(20.0);
+        shell.upload_fault = fault;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        assert!(first.view().error.is_some());
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 0, 0)
+        );
+        let state = shell.journal.as_ref().ok_or("no durable intent")?;
+        assert_eq!(state.upload_intents.len(), 1);
+        assert!(state.pending_uploads.is_empty());
+        assert_eq!(first.view().state.upload_intents.len(), 1);
+        assert!(first.view().state.pending_uploads.is_empty());
+        let restored = restored_upload(&shell)?;
+        shell.upload_fault = UploadFault::None;
+        shell.run(&restored, retry_copy_event(&shell))?;
+        assert!(
+            restored.view().error.is_none(),
+            "{:?}",
+            restored.view().error
+        );
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 1, 0)
+        );
+        assert!(shell.order.contains(&"confirm-upload"));
+        assert!(restored.view().state.upload_intents.is_empty());
+        assert!(restored.view().state.pending_uploads.is_empty());
+        assert_eq!(
+            restored
+                .view()
+                .state
+                .receipts
+                .last()
+                .ok_or("no receipt")?
+                .phase,
+            TransferPhase::Copied
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn failed_intent_save_never_issues_post_or_leaks_into_an_unrelated_save() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.upload_fault = UploadFault::IntentJournal;
+    let first = core();
+    shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+    assert!(first.view().error.is_some());
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (0, 0, 0)
+    );
+    assert!(first.view().state.upload_intents.is_empty());
+    shell.upload_fault = UploadFault::None;
+    shell.run(
+        &first,
+        Event::Refresh {
+            permission: false,
+            now: 30.0,
+        },
+    )?;
+    assert!(
+        shell
+            .journal
+            .as_ref()
+            .ok_or("no journal")?
+            .upload_intents
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn unknown_post_never_retries_and_unrelated_duplicate_never_grants_metadata_ownership()
+-> Result<(), String> {
+    for response in [
+        json!({"results":[]}),
+        json!({"results":[{"id":"33333333-3333-4333-8333-333333333333","action":"accept"}]}),
+        json!({"results":[{"id":"wrong","action":"reject","reason":"duplicate","assetId":ID,"isTrashed":false}]}),
+        json!({"results":[{"id":"33333333-3333-4333-8333-333333333333","action":"reject","reason":"duplicate","assetId":ID,"isTrashed":true}]}),
+        Value::Null,
+    ] {
+        let mut shell = Shell::new();
+        shell.upload_fault = UploadFault::PostLost;
+        shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+        let restored = restored_upload(&shell)?;
+        shell.upload_fault = UploadFault::None;
+        shell.reconciliation = if response.is_null() {
+            shell.uploaded_marker = json!({"version":1,"token":"another-operation"});
+            None
+        } else {
+            Some(response)
+        };
+        shell.run(&restored, retry_copy_event(&shell))?;
+        assert!(restored.view().error.is_some());
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 0, 0)
+        );
+        assert!(!shell.order.contains(&"confirm-upload"));
+        assert_eq!(restored.view().state.upload_intents.len(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn forgetting_unknown_upload_is_local_only_and_cancel_or_save_failure_retains_it()
+-> Result<(), String> {
+    for confirmation in [Some(true), Some(false), None] {
+        let mut shell = Shell::new();
+        shell.upload_fault = UploadFault::PostLost;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        let before = serde_json::to_value(first.view().state).map_err(|e| e.to_string())?;
+        let intent = first.view().state.upload_intents[0].clone();
+        shell.confirm = confirmation;
+        let http = shell.http_requests;
+        shell.order.clear();
+        shell.run(
+            &first,
+            Event::ForgetUploadIntent {
+                scope: intent.scope,
+                token: intent.token,
+            },
+        )?;
+        assert_eq!(shell.http_requests, http);
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 0, 0)
+        );
+        let after = serde_json::to_value(first.view().state).map_err(|e| e.to_string())?;
+        assert_eq!(before["receipts"], after["receipts"]);
+        assert_eq!(before["snapshots"], after["snapshots"]);
+        assert_eq!(
+            after["uploadIntents"]
+                .as_array()
+                .ok_or("no intents")?
+                .is_empty(),
+            confirmation == Some(true)
         );
     }
     Ok(())
@@ -974,5 +1189,102 @@ fn an_unknown_forget_key_never_prompts_or_touches_io() -> Result<(), String> {
     assert!(first.view().error.is_some());
     assert_eq!(shell.http_requests, 0);
     assert!(!shell.order.contains(&"confirm-forget"));
+    Ok(())
+}
+
+#[test]
+fn intent_retirement_save_failure_restores_the_record() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.upload_fault = UploadFault::PostLost;
+    let first = core();
+    shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+    let before = first.view().state.upload_intents;
+    shell.upload_fault = UploadFault::IntentForgetJournal;
+    shell.run(
+        &first,
+        Event::ForgetUploadIntent {
+            scope: before[0].scope.clone(),
+            token: before[0].token.clone(),
+        },
+    )?;
+    assert!(first.view().error.is_some());
+    assert_eq!(
+        serde_json::to_value(first.view().state.upload_intents).map_err(|e| e.to_string())?,
+        serde_json::to_value(before).map_err(|e| e.to_string())?
+    );
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (1, 0, 0)
+    );
+    Ok(())
+}
+
+#[test]
+fn ambiguous_or_mismatched_intents_never_authorize_a_metadata_write() -> Result<(), String> {
+    for variant in 0..5 {
+        let mut shell = Shell::new();
+        shell.upload_fault = UploadFault::PostLost;
+        shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+        let mut state = shell.journal.clone().ok_or("no state")?;
+        match variant {
+            0 => state.upload_intents.push(state.upload_intents[0].clone()),
+            1 => state.upload_intents[0].token = "malformed".into(),
+            2 => state.upload_intents[0].scope = "another-server#another-owner".into(),
+            3 => shell.source.assets[0].revision = "new-source-revision".into(),
+            _ => shell.uploaded_marker = Value::Null,
+        }
+        let restored = core_from_state(state);
+        shell.upload_fault = if matches!(variant, 2 | 3) {
+            UploadFault::Duplicate
+        } else {
+            UploadFault::None
+        };
+        shell.run(&restored, retry_copy_event(&shell))?;
+        assert_eq!((shell.metadata_writes, shell.deleted), (0, 0));
+        assert!(!shell.order.contains(&"confirm-upload"));
+        assert_eq!(shell.writes, if matches!(variant, 2 | 3) { 2 } else { 1 });
+    }
+    Ok(())
+}
+
+#[test]
+fn failed_reconciliation_promotion_rolls_back_before_metadata_or_unrelated_save()
+-> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.source.assets[0].captured_at = Some(20.0);
+    shell.upload_fault = UploadFault::PostLost;
+    shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+    let restored = restored_upload(&shell)?;
+    shell.upload_fault = UploadFault::CreatedJournal;
+    shell.run(&restored, retry_copy_event(&shell))?;
+    assert!(restored.view().error.is_some());
+    assert_eq!(restored.view().state.upload_intents.len(), 1);
+    assert!(restored.view().state.pending_uploads.is_empty());
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (1, 0, 0)
+    );
+    shell.upload_fault = UploadFault::None;
+    shell.run(
+        &restored,
+        Event::Refresh {
+            permission: false,
+            now: 40.0,
+        },
+    )?;
+    let state = shell.journal.as_ref().ok_or("no journal")?;
+    assert_eq!(state.upload_intents.len(), 1);
+    assert!(state.pending_uploads.is_empty());
+    let restarted = restored_upload(&shell)?;
+    shell.run(&restarted, retry_copy_event(&shell))?;
+    assert!(
+        restarted.view().error.is_none(),
+        "{:?}",
+        restarted.view().error
+    );
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (1, 1, 0)
+    );
     Ok(())
 }

@@ -8,6 +8,8 @@ private struct UploadRecoveryABI {
     let owner = "22222222-2222-4222-8222-222222222222"
     var state: SavedLibrary
     var trace: [String] = []
+    var failCreatedJournal = false
+    var origin = JSONValue.null
 
     init(state: SavedLibrary) throws {
         bridge = try CoreBridge()
@@ -25,6 +27,8 @@ private struct UploadRecoveryABI {
                     operation,
                     failRead: failRead
                 )
+            } else if try shouldFailPersistence(operation) {
+                (.null, .string("created journal failed"))
             } else {
                 try (nativeReply(operation), .null)
             }
@@ -39,6 +43,7 @@ private struct UploadRecoveryABI {
 
     private mutating func nativeReply(_ operation: ShellOperation) throws -> JSONValue {
         switch operation.type {
+        case "randomId": return .string("33333333-3333-4333-8333-333333333333")
         case "readState": return try .from(state)
         case "persist": state = try #require(operation.data).decode(SavedLibrary.self)
             return .null
@@ -56,6 +61,18 @@ private struct UploadRecoveryABI {
                 sha1: String(repeating: "a", count: 40),
                 signature: uploadSignature()
             ))
+        case "cleanup": return .null
+        default: return try confirmationReply(operation)
+        }
+    }
+
+    private func shouldFailPersistence(_ operation: ShellOperation) throws -> Bool {
+        guard operation.type == "persist", failCreatedJournal else { return false }
+        return try !#require(operation.data).decode(SavedLibrary.self).pendingUploads.isEmpty
+    }
+
+    private func confirmationReply(_ operation: ShellOperation) throws -> JSONValue {
+        switch operation.type {
         case "confirmUploadResume":
             let prompt = try #require(operation.data?["prompt"]).decode(UploadResumePrompt.self)
             #expect(prompt.key.assetID == id && prompt.source.key.assetID == "source")
@@ -64,7 +81,10 @@ private struct UploadRecoveryABI {
             let prompt = try #require(operation.data?["prompt"]).decode(UploadForgetPrompt.self)
             #expect(prompt.key.assetID == id && prompt.name == "original.jpg")
             return .bool(true)
-        case "cleanup": return .null
+        case "confirmForgetUploadIntent":
+            let prompt = try #require(operation.data?["prompt"]).decode(UploadIntentForgetPrompt.self)
+            #expect(prompt.token == "33333333-3333-4333-8333-333333333333" && prompt.name == "original.jpg")
+            return .bool(true)
         default: throw SuwopError("Unexpected upload effect: \(operation.type)")
         }
     }
@@ -78,7 +98,19 @@ private struct UploadRecoveryABI {
             body = try .from(Version(major: 3, minor: 2, patch: 4))
         } else if http.url.hasSuffix("users/me") {
             body = .object(["id": .string(owner)])
+        } else if http.url.hasSuffix("assets/bulk-upload-check") {
+            let token = try #require(state.uploadIntents.first).token
+            let row: [String: JSONValue] = [
+                "id": .string(token), "action": .string("reject"), "reason": .string("duplicate"),
+                "assetId": .string(id), "isTrashed": .bool(false),
+            ]
+            body = .object(["results": .array([.object(row)])])
+        } else if http.url.contains("metadata/suwop.upload-origin.v1") {
+            body = .object(["key": .string("suwop.upload-origin.v1"), "value": origin])
         } else if http.method == "POST" {
+            let data = try #require(http.fields["metadata"]).data(using: .utf8)
+            let markers = try Wire.decoder().decode([JSONValue].self, from: #require(data))
+            origin = try #require(markers.first)["value"]
             body = .object(["id": .string(id), "status": .string("created")])
         } else if http.downloadPath == nil {
             if failRead {
@@ -181,4 +213,65 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     let view = try restarted.bridge.call(2).decode(ViewModel.self)
     #expect(!view.busy && view.error != nil)
     #expect(view.state.receipts.first?.phase == .copying)
+}
+
+@Test func preUploadIntentSurvivesFailedCreatedSaveAndReconcilesAcrossABI() throws {
+    var first = try UploadRecoveryABI(state: SavedLibrary(
+        appleScope: "library",
+        connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
+        schemaVersion: 2
+    ))
+    let initialize: [String: JSONValue] = ["type": .string("initialize"), "scope": .string("library")]
+    let copy: [String: JSONValue] = try [
+        "type": .string("copy"), "keys": .from([uploadFixture().key]),
+        "intent": .string("move"), "id": .string("receipt"), "now": .number(20),
+    ]
+    try first.run(initialize)
+    first.failCreatedJournal = true
+    try first.run(copy)
+    #expect(first.state.uploadIntents.count == 1)
+    #expect(first.state.pendingUploads.isEmpty)
+    #expect(first.trace.filter { $0 == "POST https://photos.example/api/assets" }.count == 1)
+    #expect(!first.trace.contains { $0.hasPrefix("PUT ") })
+    var restarted = try UploadRecoveryABI(state: first.state)
+    restarted.origin = first.origin
+    try restarted.run(initialize)
+    try restarted.run(copy)
+    #expect(restarted.trace.contains("POST https://photos.example/api/assets/bulk-upload-check"))
+    #expect(restarted.trace
+        .contains("GET https://photos.example/api/assets/\(first.id)/metadata/suwop.upload-origin.v1"))
+    #expect(!restarted.trace.contains("POST https://photos.example/api/assets"))
+    #expect(!restarted.trace.contains { $0.hasPrefix("PUT ") })
+    #expect(restarted.trace.contains("confirmUploadResume"))
+    #expect(restarted.state.uploadIntents.isEmpty)
+    #expect(restarted.state.pendingUploads.count == 1)
+    let view = try restarted.bridge.call(2).decode(ViewModel.self)
+    #expect(!view.busy && view.error != nil)
+}
+
+@Test func forgettingAnUnknownUploadIntentTouchesOnlyLocalStateAcrossABI() throws {
+    var driver = try UploadRecoveryABI(state: SavedLibrary(
+        appleScope: "library",
+        connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
+        schemaVersion: 2
+    ))
+    try driver.run(["type": .string("initialize"), "scope": .string("library")])
+    driver.failCreatedJournal = true
+    try driver.run([
+        "type": .string("copy"), "keys": .from([uploadFixture().key]),
+        "intent": .string("move"), "id": .string("receipt"), "now": .number(20),
+    ])
+    let intent = try #require(driver.state.uploadIntents.first)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let receipts = try encoder.encode(driver.state.receipts)
+    let snapshots = try encoder.encode(driver.state.snapshots)
+    driver.trace = []
+    try driver.run([
+        "type": .string("forgetUploadIntent"), "scope": .string(intent.scope), "token": .string(intent.token),
+    ])
+    #expect(driver.trace == ["confirmForgetUploadIntent", "persist"])
+    #expect(driver.state.uploadIntents.isEmpty && driver.state.pendingUploads.isEmpty)
+    #expect(try encoder.encode(driver.state.receipts) == receipts)
+    #expect(try encoder.encode(driver.state.snapshots) == snapshots)
 }

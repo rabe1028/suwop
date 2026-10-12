@@ -68,49 +68,27 @@ impl Runtime<'_> {
         if !matches.is_empty() {
             return Err("作成済みコピーの記録が重複しています。書込みを停止しました。".into());
         }
-        let (id, created) = session
-            .create_upload(self.ctx, file, source, now, live_id)
-            .await?;
-        if !created {
-            return Ok(id);
-        }
-        if self
-            .state
-            .pending_uploads
-            .iter()
-            .any(|p| p.key.scope == session.scope && p.key.asset_id == id)
-        {
-            return Err(
-                "作成済みコピーの ID が既存の記録と重複しています。書込みを停止しました。".into(),
-            );
-        }
-        let pending = PendingUpload {
-            key: AssetKey {
-                provider: Provider::Immich,
-                scope: session.scope.clone(),
-                asset_id: id.clone(),
-            },
-            source: source.clone(),
-            resource: file.resource.clone(),
-            signature: file.signature.clone(),
-            live_id: live_id.map(str::to_owned),
-            phase: UploadPhase::MetadataPending,
-        };
-        // Persist confirmed creation before the first potentially failing GET.
-        self.state.pending_uploads.push(pending.clone());
-        self.persist().await?;
+        self.begin_upload(session, file, source, now, live_id).await
+    }
+
+    pub(super) async fn complete_created_upload(
+        &mut self,
+        session: &Session,
+        file: &TransferFile,
+        pending: &PendingUpload,
+    ) -> Result<String, String> {
         let plan = session
-            .prepare_upload_metadata(self.ctx, &id, source)
+            .prepare_upload_metadata(self.ctx, &pending.key.asset_id, &pending.source)
             .await?;
         verify_uploaded_identity(session, file, &plan)?;
         if plan.asset.live_photo_video_id != pending.live_id {
             return Err("新しいコピーの Live Photo の関連づけを確認できません。".into());
         }
-        self.commit_upload_metadata(session, &pending, plan).await?;
-        Ok(id)
+        self.commit_upload_metadata(session, pending, plan).await?;
+        Ok(pending.key.asset_id.clone())
     }
 
-    async fn resume_upload(
+    pub(super) async fn resume_upload(
         &mut self,
         session: &Session,
         file: &TransferFile,
@@ -237,8 +215,13 @@ impl Runtime<'_> {
     }
 
     async fn finish_pending_upload(&mut self, key: &AssetKey) -> Result<(), String> {
+        let previous = self.state.pending_uploads.clone();
         self.state.pending_uploads.retain(|p| p.key != *key);
-        self.persist().await
+        if let Err(error) = self.persist().await {
+            self.state.pending_uploads = previous;
+            return Err(error);
+        }
+        Ok(())
     }
 }
 

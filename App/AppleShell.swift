@@ -33,6 +33,9 @@ import SuwopShell
         if !["persist", "cleanup", "removeCredential", "appleEditClose"].contains(operation.type) {
             try Task.checkCancellation()
         }
+        if operation.type == "randomId" {
+            return .string(UUID().uuidString)
+        }
         if operation.type == "wait" {
             let milliseconds = try data["milliseconds"].decode(UInt32.self)
             try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
@@ -43,6 +46,10 @@ import SuwopShell
         }
         if operation.type == "confirmForgetUpload" {
             return try await .from(confirmation.forgetUpload(data["prompt"].decode(UploadForgetPrompt.self)))
+        }
+        if operation.type == "confirmForgetUploadIntent" {
+            return try await .from(confirmation
+                .forgetUploadIntent(data["prompt"].decode(UploadIntentForgetPrompt.self)))
         }
         return try await dispatch(operation, data: data)
     }

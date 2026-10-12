@@ -42,6 +42,8 @@ make apple-build       # universal Rust library、iOS Simulator / Mac のビル�
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
 ```
 
+空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
+
 Rust 1.95.0、SwiftLint 0.65.1、SwiftFormat 0.63.1、Ruff 0.17.0、ShellCheck 0.11.0、actionlint 1.7.12 を固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。

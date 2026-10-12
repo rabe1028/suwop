@@ -17,7 +17,7 @@ pub enum UploadPhase {
     MetadataStarted,
 }
 
-/// Only a confirmed created response grants ownership of the post-upload phase.
+/// A confirmed creation or a reconciled upload-time marker identifies this copy.
 /// No temporary path or credential is persisted; every resume re-exports bytes.
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -80,6 +80,17 @@ impl Session {
         now: f64,
         live_id: Option<&str>,
     ) -> Result<(String, bool), String> {
+        let request = self.upload_request(file, metadata, now, live_id)?;
+        self.submit_upload(ctx, request).await
+    }
+
+    pub(crate) fn upload_request(
+        &self,
+        file: &TransferFile,
+        metadata: &StoredAsset,
+        now: f64,
+        live_id: Option<&str>,
+    ) -> Result<super::HttpRequest, String> {
         let captured = upload_date(metadata.captured_at.unwrap_or(now))?;
         let modified = upload_date(metadata.modified_at.or(metadata.captured_at).unwrap_or(now))?;
         let mut request = self.request("assets", "POST", None);
@@ -109,6 +120,14 @@ impl Session {
                 .headers
                 .insert("x-immich-checksum".into(), checksum.clone());
         }
+        Ok(request)
+    }
+
+    pub(super) async fn submit_upload(
+        &self,
+        ctx: &Context,
+        request: super::HttpRequest,
+    ) -> Result<(String, bool), String> {
         let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
         check_status(response.status)?;
         let status = response.body["status"]

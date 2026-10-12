@@ -32,6 +32,7 @@ struct Protocol {
     image_render_plan: suwop_core::editing::ImageRenderPlan,
     upload_resume_prompt: suwop_core::immich::UploadResumePrompt,
     upload_forget_prompt: suwop_core::immich::UploadForgetPrompt,
+    upload_intent_forget_prompt: suwop_core::immich::UploadIntentForgetPrompt,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

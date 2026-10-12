@@ -39,6 +39,19 @@ import SuwopShell
         )
     }
 
+    func forgetUploadIntent(_ prompt: UploadIntentForgetPrompt) async throws -> Bool {
+        try await confirm(
+            title: "アップロード開始記録を解除しますか？",
+            message: """
+            Immich · \(prompt.name)
+            保存先: \(prompt.scope)
+            アップロードの結果を確認するための記録だけを、このアプリから解除します。写真と転送履歴は残します。
+            すでに保存済みの写真は変更も削除もしません。改めてコピーした場合も、既存の写真の情報は上書きしません。
+            """,
+            action: "開始記録を解除"
+        )
+    }
+
     private func confirm(title: String, message: String, action: String) async throws -> Bool {
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()

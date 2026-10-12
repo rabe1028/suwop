@@ -202,6 +202,18 @@ import SwiftUI
         view?.state.pendingUploads ?? []
     }
 
+    var uploadIntents: [UploadIntent] {
+        view?.state.uploadIntents ?? []
+    }
+
+    func forgetUploadIntent(_ upload: UploadIntent) {
+        send([
+            "type": .string("forgetUploadIntent"),
+            "scope": .string(upload.scope),
+            "token": .string(upload.token),
+        ])
+    }
+
     func forgetUploadRecord(_ upload: PendingUpload) {
         do {
             try send(["type": .string("forgetUploadRecord"), "key": .from(upload.key)])

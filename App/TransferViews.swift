@@ -186,6 +186,13 @@ struct TransfersView: View {
                     Text("コピーが終わっても元は残します。移動の完了は下の確認ボタンから行ってください。中断した削除を自動再試行することはありません。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if !model.uploadIntents.isEmpty {
+                    Section("結果を確認するアップロード") {
+                        ForEach(Array(model.uploadIntents.enumerated()), id: \.offset) { _, upload in
+                            UploadIntentRecoveryRow(model: model, upload: upload)
+                        }
+                    }
+                }
                 if !model.pendingUploads.isEmpty {
                     Section("未完了コピーの再開記録") {
                         ForEach(Array(model.pendingUploads.enumerated()), id: \.offset) { _, upload in
@@ -223,7 +230,7 @@ struct TransfersView: View {
                 }
             }
             .overlay {
-                if model.receipts.isEmpty, model.pendingUploads.isEmpty {
+                if model.receipts.isEmpty, model.pendingUploads.isEmpty, model.uploadIntents.isEmpty {
                     ContentUnavailableView("転送履歴はまだありません", systemImage: "arrow.left.arrow.right")
                 }
             }
@@ -273,6 +280,21 @@ private struct UploadRecoveryRow: View {
             Text("コピー先を削除した場合や、続行をやめる場合に解除できます。写真と転送履歴は残します。")
                 .font(.caption)
             Button("再開記録を解除", role: .destructive) { model.forgetUploadRecord(upload) }
+                .disabled(model.isBusy)
+        }
+    }
+}
+
+private struct UploadIntentRecoveryRow: View {
+    @ObservedObject var model: LibraryModel
+    let upload: UploadIntent
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(upload.source.name).font(.headline)
+            Text(upload.scope).font(.caption).foregroundStyle(.secondary)
+            Text("同じコピー操作から保存済みの原本を照合します。結果が確認できない場合や、続行をやめる場合に開始記録を解除できます。写真と転送履歴は残します。")
+                .font(.caption)
+            Button("開始記録を解除", role: .destructive) { model.forgetUploadIntent(upload) }
                 .disabled(model.isBusy)
         }
     }

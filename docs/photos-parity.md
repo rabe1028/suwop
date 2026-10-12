@@ -21,7 +21,23 @@
 | 権限変更、通信断、再開、性能、アクセシビリティ | 一部の core / cancellation テスト | 拒否 / 限定 / フル、VoiceOver / 大文字、端末と大量写真、断線・再起動 |
 | 署名・配布、iCloud 同期 | 未確認 | 実機のインストール、同じ Apple account の native 保存結果 |
 
-各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。次にアルバム・共有・編集・ゴミ箱と動画再生を広げる。
+各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。
+
+## 現在の段階と残操作（2026-10-12 再監査）
+
+main は `97df205e6dd47464b9126d2cce060b7bbc2e8db9`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+
+| 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
+| --- | --- | --- |
+| 日時を保った新規コピーと中断後の再開 | PR #11 の既存HEAD `75779a2` は全3 CI job通過。POST前の開始記録・固有ID照合・開始記録解除は作業ツリーに追加し、差分を保存。追加版は未push／未merge | 最終作業ツリーの全gate、最終HEADの実Immich／Apple CI、確認画面と中断・再起動のnative操作 |
+| Apple静止画の原本へ戻す | `codex/revert-original` の `47a23d7` に実装済み。ローカルcheckとAppleコンポーネントの証拠はそのブランチの履歴に記録。現在の開始記録追加版はまだ継承していない | PR #11マージ後のrebase、生成DTO・全gate・最終HEAD CI、実PhotoKitの保存→復元→再起動と競合確認 |
+| 編集後の共有、取り込み、複製 | ユーザー向けの編集後共有・外部ファイル取り込み・複製イベントは未実装。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
+| 通常の削除、非表示／再表示、復元 | 公開Eventには独立したTrash／Hide／Recoverがない。AppleTrashは現在Moveの完了からだけ要求する | 一括選択と現在の権限・ID確認、明示確認と結果不明の扱い、両保存先の状態・nativeゴミ箱／非表示との一致。公開PhotoKit APIの制約も実装前に検証 |
+| 明るさ・色・フィルターと編集のコピー／貼り付け | 現行Rust編集モデルは整数の切り抜き・向きが中心。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Rustに編集操作・履歴・保存検証を追加し、native画素／形式／メモリと保存・取り消し・元へ戻すを確認 |
+| 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
+
+操作差分は検証環境と同じiOS 26の公式ガイドで再確認した。[編集と複数写真への編集のコピー](https://support.apple.com/guide/iphone/edit-photos-and-videos-iphb08064d57/26/ios/26)、[削除・非表示・復元](https://support.apple.com/guide/iphone/delete-or-hide-photos-and-videos-iphb4defbde9/26/ios/26)、[アルバムの並びとフォルダー](https://support.apple.com/guide/iphone/create-and-work-with-photo-albums-iphc0fc668ab/26/ios/26)を到達条件に含める。日常操作の残りと、実機／iCloud／音声／性能／VoiceOver／署名・配布の検証を、現在のテスト通過で完了に置き換えない。
+
 
 ## 閲覧・お気に入りの検証（2026-10-12）
 
@@ -153,3 +169,14 @@
 - 記録解除のHEAD `a5e76da7e1a556e127d85fc458b88da4676fa419` の [CI](https://github.com/rabe1028/suwop/actions/runs/38197260251) は全3 jobを通過し、aggregate Apple buildも確認できた。追加レビューの1ms境界の不一致を修正し、アップロードの要否・メタデータの読戻し・Move検証に有限かつinclusiveな同じ日時比較を使う。±1msの日時更新省略、±2msの調整、非有限なreadbackの拒否を追加し、`make check` はRust 139 tests／Swift 34 testsと全品質gateを通過。比較修正後の最終HEADのCIは別に確認する。
 - 境界修正の `58511566610381b453c16468b75c634ec579ae4b` の [CI](https://github.com/rabe1028/suwop/actions/runs/38198244161) はcore／appleが通過し、統合jobはコンテナ取得のレジストリ制限でテスト前に停止。追加レビューに対応して、PUT前の記録保存失敗ではメモリ内の元のphaseへ戻す。未送信なのに結果不明として扱ったり、別の保存操作で誤ったphaseを永続化したりしない。一覧更新の保存を挟んだ後、同じセッション／再起動後の明示的な確認から1回だけPUTへ進める回帰テストを追加。`make check` はRust 140 tests／Swift 34 testsと全品質gateを通過。追加ケースの初回はディスク不足でテスト前に停止し、worktreeの通常のCargo／Swift clean後の全チェックで確認した。最終HEADの全CIは別に確認する。
 - 保存失敗修正の `5c09723b90e47108571a56c13b316572230600b5` の [CI](https://github.com/rabe1028/suwop/actions/runs/38199226364) は全3 jobを通過。追加レビューでアップロード時のsafe_nameと原本照合の名前が不一致だったため、新規／再開の照合に実際に送信した安全な名前を使う。sourceの名前、種類とSHA-1、再開時の原本SHA-256・バイト長・revisionの検証は保持する。multipartの名前を実要求から返すfixtureで、スラッシュ・バックスラッシュ・引用符・CR/LF・空文字と末尾スラッシュの6ケースの新規／再開を確認し、`make check` はRust 141 tests／Swift 34 testsと全品質gateを通過。名前修正後の最終HEAD CIは別に確認する。
+
+- POST 前に開始記録と固有 ID を保存し、Immich の新規作成時の custom metadata にだけ識別子を添付する。作成 ID の保存失敗や応答消失後はチェックサムと識別子を読み取りで照合してから、作成済み原本の再検証と確認画面へ進む。識別子のない既存重複、ゴミ箱内、欠落・曖昧な応答では書込みを止め、不明な POST の再送はしない。転送画面から開始記録だけを明示的に解除できる。2.0 / 3.2.4 の公式作成・照合・metadata APIを確認し、実通信の検証対象は3.2.4。
+
+- POST 前の開始記録・読み取り照合・失敗時の状態復元を追加した `make check` は Rust 148 tests／Swift 36 tests と全品質 gate が通過。生成時の一時容量を抑えるため、ローカル検証は Rust のサイズ最適化・単一 codegen unit・debug 情報なしで行った。全ターゲットの Apple ビルドと、最終 HEAD の実 Immich CI は別に確認する。
+
+- 開始記録追加後の Apple Rust 5ターゲットをコンパイルし、XCFrameworkを生成。ローカルの一括 `make apple-build` は5番目のターゲットで容量不足により停止したため、残りのターゲットと組み立て工程を同じソースで実行した。Swiftの開始記録解除の不要な try/catch を除き、strict SwiftLint と iOS Simulator / universal macOS の両アプリの再ビルドが通過。PhotoKitの実操作の証拠には数えない。
+- 容量が厳しい環境向けに `SUWOP_CLEAN_CHECK=1` で各Rust工程間のキャッシュをcleanするオプションを追加した。通常の全チェックと生成済みSwift用ライブラリを保持する。最終作業ツリーの再検証は継続中で、繰り返す No space left on device により未完了。最終コミット・push・CI・マージは未実施。
+
+- 空き容量回復後の最終ソースで通常の `make check` が Rust 148 tests／Swift 36 tests と全品質gateを通過。`make apple-build` も一括コマンドでRust 5ターゲット・XCFramework・iOS Simulator／universal macOS両アプリを通過した。アーカイブは削除していない。ローカル `make integration` は再確認でもDocker socket不在で開始できず、最終HEADのhosted実Immich CIを必要とする。Macは現在もロックされ、native確認・PhotoKit保存の画面操作は未検証。
+
+- `SUWOP_CLEAN_CHECK=1 make check` の実行経路も、Clippy／生成物確認／全Rustテスト／Swift用ライブラリ生成を順に完了し、各工程の完了後にRustキャッシュをcleanして通過。Rust 148 tests／Swift 36 testsは通常経路と同じで、生成済みSwiftライブラリを残した実ABIテストまで確認した。通常経路ではキャッシュを保持する。
