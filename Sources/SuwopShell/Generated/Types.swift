@@ -237,6 +237,34 @@ public struct Coordinates: Codable, Sendable {
     }
 }
 
+public struct CurrentImageExport: Codable, Sendable {
+    public var asset: StoredAsset
+    public var freshAsset: StoredAsset
+    public var image: CurrentImageFacts
+    public var path: String
+    public init(asset: StoredAsset, freshAsset: StoredAsset, image: CurrentImageFacts, path: String) {
+        self.asset = asset
+        self.freshAsset = freshAsset
+        self.image = image
+        self.path = path
+    }
+}
+
+public struct CurrentImageFacts: Codable, Sendable {
+    public var contentType: String
+    public var frames: Int64
+    public var height: Int64
+    public var orientation: Int64
+    public var width: Int64
+    public init(contentType: String, frames: Int64, height: Int64, orientation: Int64, width: Int64) {
+        self.contentType = contentType
+        self.frames = frames
+        self.height = height
+        self.orientation = orientation
+        self.width = width
+    }
+}
+
 public struct EditCommand: Codable, Sendable {
     public var crop: PixelCrop?
     public var kind: EditCommandKind

@@ -52,6 +52,9 @@ import SuwopShell
             return try await .from(confirmation
                 .forgetUploadIntent(data["prompt"].decode(UploadIntentForgetPrompt.self)))
         }
+        if operation.type == "inspectCurrentImage" {
+            return try .from(CurrentImageInspector.facts(requiredString(data, "path")))
+        }
         return try await dispatch(operation, data: data)
     }
 
@@ -72,7 +75,7 @@ import SuwopShell
                 operation.type,
                 data: data
             )
-        case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite",
+        case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite", "appleCurrentImage",
              "appleMetadata": return try await photoEffect(
                 operation.type,
                 data: data
@@ -122,6 +125,12 @@ import SuwopShell
     }
 
     private func photoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        if type == "appleCurrentImage" {
+            let asset = try data["asset"].decode(StoredAsset.self)
+            return try await .from(appleStore(scope: asset.key.scope).currentImage(
+                asset, to: URL(fileURLWithPath: requiredString(data, "directory"))
+            ))
+        }
         if type == "appleMetadata" {
             return try await metadataEffect(data)
         }

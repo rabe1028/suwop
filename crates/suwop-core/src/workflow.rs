@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod current_sharing;
 mod editing;
 mod favorites;
 mod media;
@@ -61,7 +62,7 @@ pub async fn run(
             | Event::EditImage { .. }
             | Event::RevertImage { .. }
     );
-    let sharing = matches!(event, Event::Share { .. });
+    let sharing = matches!(event, Event::Share { .. } | Event::ShareCurrentImage { .. });
     let playback = matches!(event, Event::Play { .. });
     let reverting = matches!(event, Event::RevertImage { .. });
     let editing = matches!(event, Event::EditImage { .. } | Event::RevertImage { .. });
@@ -181,6 +182,7 @@ impl Runtime<'_> {
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,
             Event::RevertImage { key, id } => self.revert_image(&key, &id).await,
             Event::Share { keys, id } => self.share(&keys, &id).await,
+            Event::ShareCurrentImage { key, id } => self.share_current_image(&key, &id).await,
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,
             Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,

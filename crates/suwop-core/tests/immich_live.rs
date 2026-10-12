@@ -476,6 +476,18 @@ async fn exercise_edited_preview(
         before.record(&session.scope, None, None).captured_at
     );
     assert_eq!(after.is_edited, Some(true));
+    let current = directory.join("current-edited.jpg");
+    assert!(
+        session
+            .download_current_image(
+                ctx,
+                &after.record(&session.scope, None, None),
+                &current.to_string_lossy()
+            )
+            .await
+            .is_err()
+    );
+    assert!(!current.exists());
     let files = session.files(ctx, &id).await?;
     assert!(
         suwop_core::domain::allow_deletion(&[after.record(&session.scope, None, Some(&files))])
