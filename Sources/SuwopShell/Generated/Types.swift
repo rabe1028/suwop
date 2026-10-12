@@ -265,6 +265,41 @@ public struct CurrentImageFacts: Codable, Sendable {
     }
 }
 
+public struct CurrentImageMetadata: Codable, Sendable {
+    public var dateTimeOriginal: String?
+    public var latitude: Double?
+    public var longitude: Double?
+    public var subsecTimeOriginal: String?
+    public init(dateTimeOriginal: String? = nil, latitude: Double? = nil, longitude: Double? = nil, subsecTimeOriginal: String? = nil) {
+        self.dateTimeOriginal = dateTimeOriginal
+        self.latitude = latitude
+        self.longitude = longitude
+        self.subsecTimeOriginal = subsecTimeOriginal
+    }
+}
+
+public struct CurrentImageRenderPlan: Codable, Sendable {
+    public var dimensions: PixelSize
+    public var metadata: CurrentImageMetadata
+    public var orientation: Int64
+    public var transform: ImageTransform
+    public init(dimensions: PixelSize, metadata: CurrentImageMetadata, orientation: Int64, transform: ImageTransform) {
+        self.dimensions = dimensions
+        self.metadata = metadata
+        self.orientation = orientation
+        self.transform = transform
+    }
+}
+
+public struct CurrentImageRenderResult: Codable, Sendable {
+    public var image: CurrentImageFacts
+    public var metadata: CurrentImageMetadata
+    public init(image: CurrentImageFacts, metadata: CurrentImageMetadata) {
+        self.image = image
+        self.metadata = metadata
+    }
+}
+
 public struct EditCommand: Codable, Sendable {
     public var crop: PixelCrop?
     public var kind: EditCommandKind

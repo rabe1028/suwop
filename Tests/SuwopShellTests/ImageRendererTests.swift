@@ -246,4 +246,115 @@
             }
         }
     }
+
+    @Test func currentPngRenderingKeepsMetadataGeometryColorAndOriginalBytes() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let space = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let source = try fixture(directory, colorSpace: space)
+        let original = try Data(contentsOf: source)
+        let metadata = [
+            CurrentImageMetadata(
+                dateTimeOriginal: "2026:10:13 01:02:03",
+                latitude: -33.5,
+                longitude: 151,
+                subsecTimeOriginal: "125"
+            ),
+            CurrentImageMetadata(),
+        ]
+        for (index, values) in metadata.enumerated() {
+            let destination = directory.appendingPathComponent("current-\(index).png")
+            let result = try NativeImageRenderer.renderCurrent(
+                source.path,
+                plan: CurrentImageRenderPlan(
+                    dimensions: PixelSize(height: 2, width: 3),
+                    metadata: values,
+                    orientation: 1,
+                    transform: ImageTransform(
+                        clockwiseQuarterTurns: 1,
+                        crop: PixelCrop(height: 1, width: 2, x: 1, y: 1),
+                        flipHorizontal: false
+                    )
+                ),
+                to: destination
+            )
+            #expect(result.image.width == 1 && result.image.height == 2 && result.image.orientation == 1)
+            #expect(result.image.contentType == "public.png")
+            #expect(result.metadata.dateTimeOriginal == values.dateTimeOriginal)
+            #expect(result.metadata.subsecTimeOriginal == values.subsecTimeOriginal)
+            #expect(result.metadata.latitude == values.latitude && result.metadata.longitude == values.longitude)
+            let data = try Data(contentsOf: destination)
+            try assertPixels(pixels(data), [magenta, yellow])
+            let rendered = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+            let raster = try #require(CGImageSourceCreateImageAtIndex(rendered, 0, nil))
+            #expect(raster.colorSpace?.name == space.name)
+        }
+        #expect(try Data(contentsOf: source) == original)
+    }
+
+    @Test func currentPngRenderingPreservesTransparencyWhenMirroring() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let space = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+        let data = Data([255, 0, 0, 0, 0, 255, 0, 128, 0, 0, 255, 255])
+        let provider = try #require(CGDataProvider(data: data as CFData))
+        let image = try #require(CGImage(
+            width: 3,
+            height: 1,
+            bitsPerComponent: 8,
+            bitsPerPixel: 32,
+            bytesPerRow: 12,
+            space: space,
+            bitmapInfo: CGBitmapInfo(rawValue: CGImageAlphaInfo.last.rawValue),
+            provider: provider,
+            decode: nil,
+            shouldInterpolate: false,
+            intent: .defaultIntent
+        ))
+        let source = directory.appendingPathComponent("alpha.png")
+        let writer = try #require(CGImageDestinationCreateWithURL(
+            source as CFURL,
+            UTType.png.identifier as CFString,
+            1,
+            nil
+        ))
+        CGImageDestinationAddImage(writer, image, nil)
+        #expect(CGImageDestinationFinalize(writer))
+        let original = try Data(contentsOf: source)
+        #expect(try NativeImageRenderer.facts(source.path).hasAlpha)
+        let destination = directory.appendingPathComponent("current-alpha.png")
+        _ = try NativeImageRenderer.renderCurrent(
+            source.path,
+            plan: CurrentImageRenderPlan(
+                dimensions: PixelSize(height: 1, width: 3),
+                metadata: CurrentImageMetadata(),
+                orientation: 1,
+                transform: ImageTransform(
+                    clockwiseQuarterTurns: 0,
+                    crop: PixelCrop(height: 1, width: 3, x: 0, y: 0),
+                    flipHorizontal: true
+                )
+            ),
+            to: destination
+        )
+        let output = try #require(CGImageSourceCreateWithURL(destination as CFURL, nil))
+        let raster = try #require(CGImageSourceCreateImageAtIndex(output, 0, nil))
+        var rgba = [UInt8](repeating: 0, count: 12)
+        try rgba.withUnsafeMutableBytes { bytes in
+            let context = try #require(CGContext(
+                data: bytes.baseAddress,
+                width: 3,
+                height: 1,
+                bitsPerComponent: 8,
+                bytesPerRow: 12,
+                space: space,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            ))
+            context.draw(raster, in: CGRect(x: 0, y: 0, width: 3, height: 1))
+        }
+        #expect([rgba[3], rgba[7], rgba[11]] == [255, 128, 0])
+        #expect(try Data(contentsOf: source) == original)
+    }
 #endif

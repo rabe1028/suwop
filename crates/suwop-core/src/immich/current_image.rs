@@ -1,36 +1,63 @@
-use super::Session;
+use super::{Asset, Session};
 use crate::{app::Context, domain::StoredAsset, sharing::verify_current_asset};
 
+#[derive(Debug, Clone)]
+pub struct RemoteCurrentImageInput {
+    pub asset: Asset,
+    pub edits: Option<serde_json::Value>,
+}
+
 impl Session {
-    pub async fn download_current_image(
+    pub async fn current_image_input(
         &self,
         ctx: &Context,
         expected: &StoredAsset,
         path: &str,
+    ) -> Result<RemoteCurrentImageInput, String> {
+        let asset = self.asset(ctx, &expected.key.asset_id).await?;
+        verify_current_asset(expected, &asset.record(&self.scope, None, None))?;
+        if asset.media_type != "IMAGE" || asset.live_photo_video_id.is_some() || asset.is_offline {
+            return Err("現在の静止画の原本を確認できません。".into());
+        }
+        let edits = match asset.is_edited {
+            Some(false) => None,
+            Some(true) if self.version.major == 3 => Some(
+                self.json(ctx, &format!("assets/{}/edits", asset.id), "GET", None)
+                    .await?,
+            ),
+            _ => return Err("このImmich版の現在の編集を確認できません。".into()),
+        };
+        // Render from the verified original plus this exact edit series. Never
+        // use an asynchronously generated fullsize file as a freshness proof.
+        self.download(ctx, &asset.id, path).await?;
+        Ok(RemoteCurrentImageInput { asset, edits })
+    }
+
+    pub async fn verify_current_image_input(
+        &self,
+        ctx: &Context,
+        input: &RemoteCurrentImageInput,
     ) -> Result<StoredAsset, String> {
-        let before = self.asset(ctx, &expected.key.asset_id).await?;
-        let record = before.record(&self.scope, None, None);
-        verify_current_asset(expected, &record)?;
-        if before.media_type != "IMAGE" || before.live_photo_video_id.is_some() || before.is_offline
-        {
-            return Err("この保存先の現在の静止画を取得できません。".into());
-        }
-        match before.is_edited {
-            Some(false) => self.download(ctx, &before.id, path).await?,
-            // A stable edited file ID does not bind the generated image to the
-            // latest edits. Immich can retain a previous render while its next
-            // editor job is pending. Never share it as the current edit result.
-            Some(true) => {
-                return Err("Immichの最新の編集と生成画像の対応を確認できません。編集後の共有は準備中です。".into());
+        if let Some(edits) = &input.edits {
+            let fresh: serde_json::Value = self
+                .json(
+                    ctx,
+                    &format!("assets/{}/edits", input.asset.id),
+                    "GET",
+                    None,
+                )
+                .await?;
+            if *edits != fresh {
+                return Err("書き出し中に現在の編集系列が変わりました。共有していません。".into());
             }
-            None => return Err("この保存先の編集状態を確認できません。".into()),
         }
-        let fresh = self.asset(ctx, &before.id).await?;
-        if fresh.is_edited != before.is_edited
-            || fresh.live_photo_video_id != before.live_photo_video_id
+        let fresh = self.asset(ctx, &input.asset.id).await?;
+        if fresh.is_edited != input.asset.is_edited
+            || fresh.live_photo_video_id != input.asset.live_photo_video_id
         {
-            return Err("取得中にこの保存先の編集状態が変わりました。".into());
+            return Err("書き出し中に編集状態が変わりました。共有していません。".into());
         }
+        let record = input.asset.record(&self.scope, None, None);
         let fresh = fresh.record(&self.scope, None, None);
         verify_current_asset(&record, &fresh)?;
         Ok(fresh)

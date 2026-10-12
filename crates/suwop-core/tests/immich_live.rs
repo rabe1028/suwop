@@ -476,18 +476,24 @@ async fn exercise_edited_preview(
         before.record(&session.scope, None, None).captured_at
     );
     assert_eq!(after.is_edited, Some(true));
-    let current = directory.join("current-edited.jpg");
-    assert!(
-        session
-            .download_current_image(
-                ctx,
-                &after.record(&session.scope, None, None),
-                &current.to_string_lossy()
-            )
-            .await
-            .is_err()
+    let current = directory.join("current-original.png");
+    let input = session
+        .current_image_input(
+            ctx,
+            &after.record(&session.scope, None, None),
+            &current.to_string_lossy(),
+        )
+        .await?;
+    assert_eq!(
+        read_immich_transform(
+            dimensions,
+            &id,
+            input.edits.clone().ok_or("missing current edits")?
+        )?,
+        transform
     );
-    assert!(!current.exists());
+    session.verify_current_image_input(ctx, &input).await?;
+    assert_eq!(std::fs::read(&current).map_err(|e| e.to_string())?, bytes);
     let files = session.files(ctx, &id).await?;
     assert!(
         suwop_core::domain::allow_deletion(&[after.record(&session.scope, None, Some(&files))])

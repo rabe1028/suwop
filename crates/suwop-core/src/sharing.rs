@@ -5,10 +5,12 @@ use crate::domain::{
     normalize_sha1,
 };
 mod current;
+mod rendering;
 pub use current::{
     CurrentImageExport, CurrentImageFacts, current_image_asset, current_image_name,
     verify_current_asset, verify_current_image,
 };
+pub use rendering::{CurrentImageMetadata, CurrentImageRenderPlan, CurrentImageRenderResult};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum OriginalIdentity {

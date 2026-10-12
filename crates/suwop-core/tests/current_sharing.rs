@@ -6,8 +6,12 @@ use suwop_core::{
         AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
         ScanAccess, StoredAsset,
     },
+    editing::{ImageEncodingFacts, PixelSize},
     immich::{Asset, HttpResponse, Session, Version},
-    sharing::{CurrentImageExport, CurrentImageFacts, current_image_asset},
+    sharing::{
+        CurrentImageExport, CurrentImageFacts, CurrentImageRenderPlan, CurrentImageRenderResult,
+        current_image_asset,
+    },
     workflow::HashResult,
 };
 
@@ -96,6 +100,12 @@ enum Fault {
     UnknownEdited,
     Unedited,
     WrongOriginal,
+    ChangedEdits,
+    UnsupportedEdits,
+    WrongRender,
+    WrongMetadata,
+    OversizedRender,
+    HdrRender,
 }
 struct Shell {
     asset: StoredAsset,
@@ -103,6 +113,8 @@ struct Shell {
     trace: Vec<String>,
     files: Vec<String>,
     hashes: usize,
+    rendered: bool,
+    edit_reads: usize,
 }
 impl Shell {
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
@@ -146,37 +158,29 @@ impl Shell {
             ShellOperation::InspectCurrentImage { .. } => {
                 serde_json::to_value(facts()).map_err(|e| e.to_string())
             }
-            ShellOperation::HashFile { .. } => {
-                self.hashes += 1;
-                self.trace.push("hash".into());
-                serde_json::to_value(HashResult {
-                    sha1: if self.asset.key.provider == Provider::Immich {
-                        if matches!(self.fault, Fault::WrongOriginal) {
-                            "2"
-                        } else {
-                            "1"
+            ShellOperation::InspectImageEncoding { .. } => {
+                self.trace.push("inspect-encoding".into());
+                serde_json::to_value(ImageEncodingFacts {
+                    raw_dimensions: if matches!(self.fault, Fault::OversizedRender) {
+                        PixelSize {
+                            width: 4001,
+                            height: 4000,
                         }
-                        .repeat(40)
                     } else {
-                        "a".repeat(40)
+                        PixelSize {
+                            width: 4,
+                            height: 3,
+                        }
                     },
-                    signature: FileSignature {
-                        sha256: if self.hashes == 2 && matches!(self.fault, Fault::CopyChanged) {
-                            "b".repeat(64)
-                        } else {
-                            "a".repeat(64)
-                        },
-                        bytes: if matches!(self.fault, Fault::Empty) {
-                            0
-                        } else if self.asset.key.provider == Provider::Immich {
-                            12
-                        } else {
-                            8
-                        },
-                    },
+                    orientation: 1,
+                    has_color_space: true,
+                    has_alpha: false,
+                    hdr: matches!(self.fault, Fault::HdrRender),
                 })
                 .map_err(|e| e.to_string())
             }
+            ShellOperation::RenderCurrentImage { plan, .. } => self.render(plan),
+            ShellOperation::HashFile { path } => self.hash(&path),
             ShellOperation::CopyFile { .. } => {
                 self.trace.push("copy".into());
                 Ok(Value::Null)
@@ -198,6 +202,64 @@ impl Shell {
             _ => Err("unexpected write or effect".into()),
         }
     }
+    fn hash(&mut self, path: &str) -> Result<Value, String> {
+        self.hashes += 1;
+        self.trace.push("hash".into());
+        let original = self.asset.key.provider == Provider::Immich
+            && (!self.rendered || path.contains("current-original"));
+        serde_json::to_value(HashResult {
+            sha1: if original {
+                if matches!(self.fault, Fault::WrongOriginal) {
+                    "2"
+                } else {
+                    "1"
+                }
+            } else {
+                "a"
+            }
+            .repeat(40),
+            signature: FileSignature {
+                sha256: if self.hashes == 2 && matches!(self.fault, Fault::CopyChanged) {
+                    "b"
+                } else {
+                    "a"
+                }
+                .repeat(64),
+                bytes: if matches!(self.fault, Fault::Empty) {
+                    0
+                } else if original {
+                    12
+                } else {
+                    8
+                },
+            },
+        })
+        .map_err(|e| e.to_string())
+    }
+    fn render(&mut self, plan: CurrentImageRenderPlan) -> Result<Value, String> {
+        self.trace.push("render".into());
+        self.rendered = true;
+        assert_eq!(
+            plan.transform.output_size(plan.dimensions)?,
+            PixelSize {
+                width: 1,
+                height: 2
+            }
+        );
+        let mut image = facts();
+        image.width = if matches!(self.fault, Fault::WrongRender) {
+            2
+        } else {
+            1
+        };
+        image.height = 2;
+        let mut metadata = plan.metadata;
+        if matches!(self.fault, Fault::WrongMetadata) {
+            metadata.date_time_original = None;
+        }
+        serde_json::to_value(CurrentImageRenderResult { image, metadata })
+            .map_err(|e| e.to_string())
+    }
     fn http(&mut self, request: suwop_core::immich::HttpRequest) -> Result<Value, String> {
         self.trace
             .push(format!("{} {}", request.method, request.url));
@@ -206,6 +268,12 @@ impl Shell {
         }
         let body = if request.download_path.is_some() {
             Value::Null
+        } else if request.url.ends_with("/edits") {
+            self.edit_reads += 1;
+            json!({"assetId":ID,"edits":[
+                {"id":FILE,"action":if matches!(self.fault, Fault::UnsupportedEdits) {"brightness"} else {"crop"},"parameters":{"x":0,"y":0,"width":2,"height":1}},
+                {"id":OWNER,"action":"rotate","parameters":{"angle":if self.edit_reads == 2 && matches!(self.fault, Fault::ChangedEdits) {180} else {90}}}
+            ]})
         } else if request.url.contains("asset-files?") {
             // Looks valid and remains stable while a newer editor job is
             // pending: file identity alone is not current-render provenance.
@@ -273,6 +341,8 @@ fn shell(asset: StoredAsset, fault: Fault) -> Shell {
         trace: vec![],
         files: vec![],
         hashes: 0,
+        rendered: false,
+        edit_reads: 0,
     }
 }
 
@@ -350,20 +420,50 @@ fn current_export_rejects_foreign_ambiguous_and_nonstill_sources_before_io() {
     assert!(current_image_asset(&state(limited).snapshots, "apple", None, &original.key).is_ok());
 }
 #[test]
-fn edited_remote_sharing_rejects_a_stable_but_unversioned_fullsize_file() -> Result<(), String> {
+fn edited_remote_sharing_renders_the_latest_series_without_reading_cached_fullsize_files()
+-> Result<(), String> {
     let remote: Asset = serde_json::from_value(native_remote()).map_err(|e| e.to_string())?;
     let mut shell = shell(remote.record("remote", None, None), Fault::None);
     let core = shell.run(true)?;
-    assert!(core.view().error.is_some());
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
     assert!(!shell.trace.iter().any(|r| r.contains("asset-files")));
     assert!(
-        !shell
+        shell
             .trace
             .iter()
-            .any(|r| r.contains("/original") || r.contains("thumbnail"))
+            .any(|r| r.contains("/original?edited=false"))
     );
-    assert!(shell.files.is_empty());
-    assert!(!shell.trace.contains(&"share".into()));
+    assert!(!shell.trace.iter().any(|r| r.contains("thumbnail")));
+    assert!(shell.trace.contains(&"render".into()));
+    assert_eq!(shell.edit_reads, 2);
+    assert_eq!(shell.files, ["original-current.png"]);
+    assert!(shell.trace.contains(&"share".into()));
+    assert_eq!(
+        serde_json::to_value(core.view().state).map_err(|e| e.to_string())?,
+        serde_json::to_value(state(shell.asset.clone())).map_err(|e| e.to_string())?
+    );
+    Ok(())
+}
+
+#[test]
+fn changed_unsupported_unrenderable_or_inconsistent_edits_never_reach_sharing() -> Result<(), String>
+{
+    for fault in [
+        Fault::ChangedEdits,
+        Fault::UnsupportedEdits,
+        Fault::WrongRender,
+        Fault::WrongMetadata,
+        Fault::OversizedRender,
+        Fault::HdrRender,
+    ] {
+        let remote: Asset = serde_json::from_value(native_remote()).map_err(|e| e.to_string())?;
+        let mut shell = shell(remote.record("remote", None, None), fault);
+        let core = shell.run(true)?;
+        assert!(core.view().error.is_some());
+        assert!(!shell.trace.contains(&"share".into()));
+        assert!(!shell.trace.iter().any(|r| r.contains("asset-files")));
+        assert_eq!(shell.trace.last().map(String::as_str), Some("cleanup"));
+    }
     Ok(())
 }
 #[test]

@@ -85,6 +85,26 @@
             format == .heic ? UTType.heic.identifier : UTType.jpeg.identifier
         }
 
+        public static func renderCurrent(
+            _ path: String, plan: CurrentImageRenderPlan, to destination: URL
+        ) throws -> CurrentImageRenderResult {
+            let (image, colorSpace) = try transformed(
+                path, dimensions: plan.dimensions, orientation: plan.orientation, transform: plan.transform
+            )
+            let context = CIContext(options: [.cacheIntermediates: false])
+            guard let output = context.createCGImage(image, from: image.extent, format: .RGBA8, colorSpace: colorSpace),
+                  let writer = CGImageDestinationCreateWithURL(
+                      destination as CFURL, UTType.png.identifier as CFString, 1, nil
+                  )
+            else { throw SuwopError("現在の画像のPNGを出力できません。") }
+            CGImageDestinationAddImage(writer, output, ImageFileMetadata.properties(plan.metadata) as CFDictionary)
+            guard CGImageDestinationFinalize(writer) else { throw SuwopError("現在のPNGの出力が完了しませんでした。") }
+            return try CurrentImageRenderResult(
+                image: CurrentImageInspector.facts(destination.path),
+                metadata: ImageFileMetadata.read(destination.path)
+            )
+        }
+
         private static func transformed(
             _ path: String, dimensions: PixelSize, orientation: Int64, transform: ImageTransform
         ) throws -> (CIImage, CGColorSpace) {

@@ -3,7 +3,7 @@ use crate::{
     app::{ShellOperation, io},
     domain::{AssetKey, Provider},
     sharing::{
-        CurrentImageExport, CurrentImageFacts, ShareFile, current_image_asset, current_image_name,
+        CurrentImageExport, ShareFile, current_image_asset, current_image_name,
         verify_current_image,
     },
 };
@@ -36,22 +36,7 @@ impl Runtime<'_> {
             )
             .await?
         } else {
-            let path = format!("{directory}/current-image");
-            let session = self.session.as_ref().ok_or("Immichに接続してください。")?;
-            let fresh = session
-                .download_current_image(self.ctx, &expected, &path)
-                .await?;
-            let image: CurrentImageFacts = io(
-                self.ctx,
-                ShellOperation::InspectCurrentImage { path: path.clone() },
-            )
-            .await?;
-            CurrentImageExport {
-                asset: expected.clone(),
-                fresh_asset: fresh,
-                path,
-                image,
-            }
+            self.remote_current_image(&expected, &directory).await?
         };
         verify_current_image(&expected, &export, &directory)?;
         let before: HashResult = io(
@@ -63,19 +48,6 @@ impl Runtime<'_> {
         .await?;
         if !before.signature.valid() {
             return Err("現在の画像のバイト列を確認できません。".into());
-        }
-        if key.provider == Provider::Immich {
-            let originals: Vec<_> = expected.originals().collect();
-            let [original] = originals.as_slice() else {
-                return Err("共有する原本の構成を確認できません。".into());
-            };
-            if original.sha1.as_deref() != Some(before.sha1.as_str())
-                || original
-                    .bytes
-                    .is_some_and(|bytes| bytes != before.signature.bytes)
-            {
-                return Err("取得した現在の画像がImmichの未編集原本と一致しません。".into());
-            }
         }
         let name = current_image_name(&expected, &export.image)?;
         let path = format!("{}/{name}", self.directory("share-current-ready")?);
