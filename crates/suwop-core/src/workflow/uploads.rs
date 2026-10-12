@@ -254,7 +254,9 @@ fn verify_uploaded_identity(
         file.resource.role
     };
     if record.originals().next().is_none_or(|r| {
-        r.name != file.resource.name || r.role != role || r.sha1 != file.resource.sha1
+        r.name != crate::immich::safe_name(&file.resource.name)
+            || r.role != role
+            || r.sha1 != file.resource.sha1
     }) {
         return Err("アップロードされた原本の名前・種類・チェックサムが一致しません。".into());
     }

@@ -45,6 +45,7 @@ struct Shell {
     journal: Option<SavedLibrary>,
     capture_date: String,
     http_requests: usize,
+    uploaded_name: String,
 }
 impl Shell {
     fn new() -> Self {
@@ -99,6 +100,7 @@ impl Shell {
             journal: None,
             capture_date: "1970-01-01T00:00:10Z".into(),
             http_requests: 0,
+            uploaded_name: "test.jpg".into(),
         }
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
@@ -209,6 +211,8 @@ impl Shell {
         self.http_requests += 1;
         let body = if request.method == "POST" && request.url.ends_with("/assets") {
             self.writes += 1;
+            self.uploaded_name
+                .clone_from(&request.files.first().ok_or("no uploaded file")?.filename);
             json!({"id":ID,"status":if matches!(self.upload_fault, UploadFault::Duplicate) {"duplicate"} else {"created"}})
         } else if request.method == "PUT" {
             self.metadata_writes += 1;
@@ -249,7 +253,7 @@ impl Shell {
             } else {
                 SHA1.into()
             };
-            json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":"test.jpg","checksum":checksum,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":date,"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
+            json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":self.uploaded_name,"checksum":checksum,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":date,"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
         };
         serde_json::to_value(HttpResponse {
             status: 200,
@@ -545,6 +549,49 @@ fn failed_pre_put_save_keeps_pending_phase_through_refresh_and_explicit_retry() 
             (shell.writes, shell.metadata_writes, shell.deleted),
             (1, 1, 0)
         );
+    }
+    Ok(())
+}
+
+#[test]
+fn created_and_resumed_uploads_verify_the_filename_actually_sent() -> Result<(), String> {
+    for (name, sent) in [
+        ("folder/photo.jpg", "photo.jpg"),
+        ("photo\\name.jpg", "photo_name.jpg"),
+        ("photo\"name.jpg", "photo_name.jpg"),
+        ("photo\r\nname.jpg", "photo__name.jpg"),
+        ("", "original"),
+        ("folder/", "original"),
+    ] {
+        for resume in [false, true] {
+            let mut shell = Shell::new();
+            shell.source.assets[0].name = name.into();
+            shell.source.assets[0].resources[0].name = name.into();
+            shell.source.files[0].resource.name = name.into();
+            shell.source.assets[0].captured_at = Some(20.0);
+            if resume {
+                shell.upload_fault = UploadFault::Read;
+            }
+            let first = core();
+            shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+            let current = if resume {
+                assert!(first.view().error.is_some());
+                shell.upload_fault = UploadFault::None;
+                let restored = restored_upload(&shell)?;
+                shell.run(&restored, retry_copy_event(&shell))?;
+                restored
+            } else {
+                first
+            };
+            assert!(current.view().error.is_none(), "{:?}", current.view().error);
+            assert_eq!(shell.uploaded_name, sent);
+            assert_eq!(shell.source.files[0].resource.name, name);
+            assert!(current.view().state.pending_uploads.is_empty());
+            assert_eq!(
+                (shell.writes, shell.metadata_writes, shell.deleted),
+                (1, 1, 0)
+            );
+        }
     }
     Ok(())
 }
