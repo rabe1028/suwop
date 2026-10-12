@@ -197,6 +197,9 @@ impl Runtime<'_> {
         if key.provider == Provider::Immich {
             self.ensure_session().await?;
         }
+        if !edit.keys.is_empty() {
+            self.check_keys(&edit.keys)?;
+        }
         if key.scope != self.album_scope(key.provider)? {
             return Err("アルバムの保存先が変わっています。".into());
         }

@@ -8,6 +8,7 @@ import SwiftUI
     @Published var errorMessage: String?
     @Published var showSettings = false
     @Published var showTransfers = false
+    @Published var showTrash = false
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
     private var shell: AppleShell?
@@ -20,6 +21,7 @@ import SwiftUI
     private var started = false
     private var pendingRefresh = false
     private var pendingAlbumsRefresh = false
+    private var pendingTrashRefresh = false
     private var albumsRequested = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
 
@@ -334,6 +336,9 @@ import SwiftUI
                 } else if pendingAlbumsRefresh, view?.state.schemaVersion == 2 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 2 {
+                    pendingTrashRefresh = false
+                    refreshTrash()
                 }
             }
             do {
@@ -393,6 +398,22 @@ import SwiftUI
 }
 
 extension LibraryModel {
+    var trashSnapshot: TrashSnapshot? {
+        view?.state.trash
+    }
+
+    var pendingTrashOperations: [TrashOperation] {
+        view?.state.pendingTrash ?? []
+    }
+
+    func refreshTrash() {
+        if isBusy {
+            pendingTrashRefresh = true
+        } else {
+            send(["type": .string("refreshTrash"), "now": .number(Date().timeIntervalSince1970)])
+        }
+    }
+
     func start() {
         guard !started else { return }
         started = true

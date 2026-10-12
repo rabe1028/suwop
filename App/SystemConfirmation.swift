@@ -64,19 +64,45 @@ import SuwopShell
         )
     }
 
-    private func confirm(title: String, message: String, action: String) async throws -> Bool {
+    func changeTrash(_ prompt: TrashPrompt) async throws -> Bool {
+        let names = prompt.names.prefix(5).joined(separator: "\n")
+        let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
+        let policy = prompt.retentionDays.map {
+            "現在の保持設定は\($0)日です。期間経過やサーバー設定の変更で復元できなくなる場合があります。"
+        } ?? "同じ Immich のライブラリへ戻します。"
+        return try await confirm(
+            title: prompt.action == .trash ? "Immich のゴミ箱に移しますか？" : "Immich の写真を復元しますか？",
+            message: """
+            \(prompt.names.count) 件 · \(prompt.address)
+            \(names)\(remaining)
+            \(policy)
+            Apple Photos 側の写真は変更しません。
+            """,
+            action: prompt.action == .trash ? "ゴミ箱に移す" : "復元",
+            destructive: prompt.action == .trash
+        )
+    }
+
+    private func confirm(
+        title: String,
+        message: String,
+        action: String,
+        destructive: Bool = true
+    ) async throws -> Bool {
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 waiting = continuation
-                do { try open(title: title, message: message, action: action) } catch { finish(error: error) }
+                do { try open(title: title, message: message, action: action, destructive: destructive) } catch {
+                    finish(error: error)
+                }
             }
         } onCancel: { Task { @MainActor [weak self] in self?.cancel() } }
     }
 
-    private func open(title: String, message: String, action: String) throws {
+    private func open(title: String, message: String, action: String, destructive: Bool) throws {
         #if os(iOS)
             guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
@@ -89,7 +115,7 @@ import SuwopShell
             alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.finish() })
             alert.preferredAction = alert.actions.first
             alert
-                .addAction(UIAlertAction(title: action, style: .destructive) { [weak self] _ in
+                .addAction(UIAlertAction(title: action, style: destructive ? .destructive : .default) { [weak self] _ in
                     self?.finish(confirmed: true)
                 })
             self.alert = alert
@@ -100,7 +126,7 @@ import SuwopShell
             let alert = NSAlert()
             alert.messageText = title
             alert.informativeText = message
-            alert.alertStyle = .warning
+            alert.alertStyle = destructive ? .warning : .informational
             alert.addButton(withTitle: "キャンセル")
             alert.addButton(withTitle: action)
             self.alert = alert

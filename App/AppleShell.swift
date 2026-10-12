@@ -45,6 +45,9 @@ import SuwopShell
         if operation.type == "confirmUploadResume" {
             return try await .from(confirmation.resumeUpload(data["prompt"].decode(UploadResumePrompt.self)))
         }
+        if operation.type == "confirmTrash" {
+            return try await .from(confirmation.changeTrash(data["prompt"].decode(TrashPrompt.self)))
+        }
         if operation.type == "confirmForgetUpload" {
             return try await .from(confirmation.forgetUpload(data["prompt"].decode(UploadForgetPrompt.self)))
         }

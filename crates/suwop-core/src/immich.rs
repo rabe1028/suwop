@@ -13,6 +13,7 @@ pub use uploads::{
 };
 mod current_image;
 pub use current_image::RemoteCurrentImageInput;
+mod trash;
 mod upload_intents;
 pub use upload_intents::{UploadIntent, UploadIntentForgetPrompt};
 
@@ -165,9 +166,8 @@ impl Session {
             .map_err(|e| format!("Immich の応答形式が不正です: {e}"))
     }
     pub async fn asset(&self, ctx: &Context, id: &str) -> Result<Asset, String> {
-        valid_id(id)?;
-        let a: Asset = self.json(ctx, &format!("assets/{id}"), "GET", None).await?;
-        if a.id != id || a.owner_id != self.user_id || a.is_trashed {
+        let a = self.owned_asset(ctx, id).await?;
+        if a.is_trashed {
             return Err("写真の所有者または状態が変わりました。".into());
         }
         Ok(a)

@@ -7,4 +7,5 @@ pub mod immich;
 pub mod media;
 pub mod metadata;
 pub mod sharing;
+pub mod trash;
 pub mod workflow;

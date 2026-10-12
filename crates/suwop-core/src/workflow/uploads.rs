@@ -38,6 +38,7 @@ impl Runtime<'_> {
         now: f64,
         live_id: Option<&str>,
     ) -> Result<String, String> {
+        self.check_transfer_trash(std::slice::from_ref(source))?;
         let matches: Vec<_> = self
             .state
             .pending_uploads
@@ -185,6 +186,7 @@ impl Runtime<'_> {
         pending: &PendingUpload,
         plan: UploadMetadataPlan,
     ) -> Result<(), String> {
+        self.check_keys(std::slice::from_ref(&pending.key))?;
         let entry = self
             .state
             .pending_uploads

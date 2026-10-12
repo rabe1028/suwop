@@ -59,6 +59,45 @@ import XCTest
         ])).decode([EffectRequest].self)
     }
 
+    static func trashModel(pending: Bool) throws -> LibraryModel {
+        let key = AssetKey(provider: .immich, scope: "remote", assetID: "11111111-1111-4111-8111-111111111111")
+        let identity = TrashIdentity(
+            checksum: String(repeating: "1", count: 40),
+            createdAt: "2025-07-01T00:00:00Z",
+            key: key,
+            mediaType: "IMAGE",
+            modifiedAt: "2025-07-01T00:00:00Z",
+            name: "夏の思い出.JPG"
+        )
+        let photo = StoredAsset(
+            key: key,
+            name: identity.name,
+            capturedAt: Date(timeIntervalSince1970: 1_751_328_000),
+            revision: "1"
+        )
+        let operation = TrashOperation(
+            action: .trash,
+            assets: [identity],
+            id: "33333333-3333-4333-8333-333333333333",
+            scope: "remote"
+        )
+        let state = SavedLibrary(
+            appleScope: "vrt",
+            pendingTrash: pending ? [operation] : [],
+            schemaVersion: 2,
+            trash: TrashSnapshot(items: [TrashItem(asset: photo, identity: identity)], scope: "remote", verified: true)
+        )
+        let bridge = try CoreBridge()
+        let read = try XCTUnwrap(bridge.call(0, input: .object([
+            "type": .string("initialize"), "scope": .string("vrt"),
+        ])).decode([EffectRequest].self).first)
+        let persist = try XCTUnwrap(resolve(bridge, request: read, value: .from(state)).first)
+        XCTAssertTrue(try resolve(bridge, request: persist, value: .null).isEmpty)
+        let view = try bridge.call(2).decode(ViewModel.self)
+        XCTAssertFalse(try XCTUnwrap(view.state.trash).verified)
+        return LibraryModel(snapshotView: view, images: [:])
+    }
+
     private static func assets() -> [StoredAsset] {
         let roles: [ResourceRole] = [.image, .video, .rawImage, .image, .image, .image]
         return roles.enumerated().map { index, role in

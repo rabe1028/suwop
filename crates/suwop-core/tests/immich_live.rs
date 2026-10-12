@@ -5,7 +5,8 @@ use std::{collections::BTreeMap, io::Read, path::Path, time::Duration};
 use suwop_core::{
     app::{Context, Effect, Event, SavedLibrary, ShellOperation, ShellResponse},
     domain::{
-        AssetKey, FileSignature, PhotoResource, Provider, ResourceRole, StoredAsset, TransferFile,
+        AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
+        ScanAccess, StoredAsset, TransferFile,
     },
     immich::{self, HttpRequest, HttpResponse, Session, UploadPart},
 };
@@ -54,6 +55,8 @@ fn real_immich_upload_gps_list_download_stack_sidecar_and_trash() -> Result<(), 
                     std::thread::sleep(Duration::from_millis(u64::from(milliseconds)));
                     Ok(Value::Null)
                 }
+                ShellOperation::Persist(_) => Ok(Value::Null),
+                ShellOperation::ConfirmTrash { .. } => Ok(json!(true)),
                 _ => Err("unexpected non-HTTP effect".into()),
             };
             let response = match result {
@@ -169,8 +172,93 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
             .iter()
             .any(|b| b.contains("sidecar"))
     );
-    session.trash(ctx, &ids).await?;
-    wait_for(ctx, &session, &ids, false).await
+    exercise_trash(ctx, &session, &ids).await
+}
+
+async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Result<(), String> {
+    use suwop_core::trash::TrashAction;
+    assert!(session.trash_retention(ctx).await? > 0);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| e.to_string())?
+        .as_secs_f64();
+    let assets = session.list(ctx, now).await?;
+    let state = SavedLibrary {
+        schema_version: 2,
+        apple_scope: "unused-test-library".into(),
+        snapshots: vec![LibrarySnapshot {
+            provider: Provider::Immich,
+            scope: session.scope.clone(),
+            access: ScanAccess::Full,
+            assets: assets
+                .iter()
+                .map(|asset| asset.record(&session.scope, None, None))
+                .collect(),
+            scanned_at: Some(now),
+        }],
+        ..SavedLibrary::default()
+    };
+    let keys: Vec<_> = ids
+        .iter()
+        .map(|id| AssetKey {
+            provider: Provider::Immich,
+            scope: session.scope.clone(),
+            asset_id: id.clone(),
+        })
+        .collect();
+    let trashed = suwop_core::workflow::run(
+        ctx,
+        Event::ChangeTrash {
+            keys: keys.clone(),
+            action: TrashAction::Trash,
+            id: "10000000-0000-4000-8000-000000000001".into(),
+        },
+        state,
+        Some(session.clone()),
+    )
+    .await;
+    if let Some(error) = trashed.error {
+        return Err(error);
+    }
+    assert!(trashed.state.pending_trash.is_empty());
+    wait_for(ctx, session, ids, false).await?;
+    let listed = suwop_core::workflow::run(
+        ctx,
+        Event::RefreshTrash { now: now + 300.0 },
+        trashed.state,
+        Some(session.clone()),
+    )
+    .await;
+    if let Some(error) = listed.error {
+        return Err(error);
+    }
+    let deleted = listed.state.trash.as_ref().ok_or("trash list missing")?;
+    assert!(
+        deleted.verified
+            && ids.iter().all(|id| deleted
+                .items
+                .iter()
+                .any(|item| item.identity.key.asset_id == *id))
+    );
+    let restored = suwop_core::workflow::run(
+        ctx,
+        Event::ChangeTrash {
+            keys,
+            action: TrashAction::Restore,
+            id: "10000000-0000-4000-8000-000000000002".into(),
+        },
+        listed.state,
+        Some(session.clone()),
+    )
+    .await;
+    if let Some(error) = restored.error {
+        return Err(error);
+    }
+    assert!(restored.state.pending_trash.is_empty());
+    wait_for(ctx, session, ids, true).await?;
+    // Keep the fixture cleanup behavior, after proving the user-facing round trip.
+    session.trash(ctx, ids).await?;
+    wait_for(ctx, session, ids, false).await
 }
 
 async fn wait_for(
