@@ -45,6 +45,9 @@ pub enum ShellOperation {
     ConfirmUploadResume {
         prompt: crate::immich::UploadResumePrompt,
     },
+    ConfirmForgetUpload {
+        prompt: crate::immich::UploadForgetPrompt,
+    },
     Persist(SavedLibrary),
     ReadCredential {
         account: String,
@@ -200,6 +203,9 @@ pub enum Event {
         intent: TransferIntent,
         id: String,
         now: f64,
+    },
+    ForgetUploadRecord {
+        key: crate::domain::AssetKey,
     },
     CompleteMove {
         id: String,

@@ -8,7 +8,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use url::Url;
 pub mod albums;
 mod uploads;
-pub use uploads::{PendingUpload, UploadMetadataPlan, UploadPhase, UploadResumePrompt};
+pub use uploads::{
+    PendingUpload, UploadForgetPrompt, UploadMetadataPlan, UploadPhase, UploadResumePrompt,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Version {

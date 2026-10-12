@@ -164,6 +164,7 @@ impl Runtime<'_> {
                 Ok("接続を解除しました。転送履歴は保持しています。".into())
             }
             Event::Index { id } => self.index(&id).await,
+            Event::ForgetUploadRecord { key } => self.forget_upload_record(&key).await,
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,

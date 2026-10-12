@@ -41,6 +41,9 @@ import SuwopShell
         if operation.type == "confirmUploadResume" {
             return try await .from(confirmation.resumeUpload(data["prompt"].decode(UploadResumePrompt.self)))
         }
+        if operation.type == "confirmForgetUpload" {
+            return try await .from(confirmation.forgetUpload(data["prompt"].decode(UploadForgetPrompt.self)))
+        }
         return try await dispatch(operation, data: data)
     }
 

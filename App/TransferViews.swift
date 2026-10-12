@@ -186,6 +186,13 @@ struct TransfersView: View {
                     Text("コピーが終わっても元は残します。移動の完了は下の確認ボタンから行ってください。中断した削除を自動再試行することはありません。")
                         .font(.caption).foregroundStyle(.secondary)
                 }
+                if !model.pendingUploads.isEmpty {
+                    Section("未完了コピーの再開記録") {
+                        ForEach(Array(model.pendingUploads.enumerated()), id: \.offset) { _, upload in
+                            UploadRecoveryRow(model: model, upload: upload)
+                        }
+                    }
+                }
                 ForEach(model.receipts.sorted { $0.createdAt > $1.createdAt }) { receipt in
                     Section {
                         Text(receipt.source.first?.name ?? "写真").font(.headline)
@@ -216,7 +223,7 @@ struct TransfersView: View {
                 }
             }
             .overlay {
-                if model.receipts.isEmpty {
+                if model.receipts.isEmpty, model.pendingUploads.isEmpty {
                     ContentUnavailableView("転送履歴はまだありません", systemImage: "arrow.left.arrow.right")
                 }
             }
@@ -252,6 +259,21 @@ struct TransfersView: View {
         case .deletingSource: "削除処理の結果を要確認"
         case .moved: "移動完了"
         case .deletionUncertain: "削除結果が未確定"
+        }
+    }
+}
+
+private struct UploadRecoveryRow: View {
+    @ObservedObject var model: LibraryModel
+    let upload: PendingUpload
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(upload.source.name).font(.headline)
+            Text(upload.key.scope).font(.caption).foregroundStyle(.secondary)
+            Text("コピー先を削除した場合や、続行をやめる場合に解除できます。写真と転送履歴は残します。")
+                .font(.caption)
+            Button("再開記録を解除", role: .destructive) { model.forgetUploadRecord(upload) }
+                .disabled(model.isBusy)
         }
     }
 }

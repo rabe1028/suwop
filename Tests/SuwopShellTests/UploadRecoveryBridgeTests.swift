@@ -60,6 +60,10 @@ private struct UploadRecoveryABI {
             let prompt = try #require(operation.data?["prompt"]).decode(UploadResumePrompt.self)
             #expect(prompt.key.assetID == id && prompt.source.key.assetID == "source")
             return .bool(false)
+        case "confirmForgetUpload":
+            let prompt = try #require(operation.data?["prompt"]).decode(UploadForgetPrompt.self)
+            #expect(prompt.key.assetID == id && prompt.name == "original.jpg")
+            return .bool(true)
         case "cleanup": return .null
         default: throw SuwopError("Unexpected upload effect: \(operation.type)")
         }
@@ -84,6 +88,34 @@ private struct UploadRecoveryABI {
         }
         return try (.from(HttpResponse(body: body, path: http.downloadPath, status: 200)), error)
     }
+}
+
+@Test func forgettingAnUploadJournalUsesOnlyConfirmationAndLocalPersistenceAcrossABI() throws {
+    var driver = try UploadRecoveryABI(state: SavedLibrary(
+        appleScope: "library",
+        connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
+        schemaVersion: 2
+    ))
+    try driver.run(["type": .string("initialize"), "scope": .string("library")])
+    try driver.run([
+        "type": .string("copy"), "keys": .from([uploadFixture().key]),
+        "intent": .string("move"), "id": .string("receipt"), "now": .number(20),
+    ], failRead: true)
+    let pending = try #require(driver.state.pendingUploads.first)
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    let snapshots = try encoder.encode(driver.state.snapshots)
+    let receipts = try encoder.encode(driver.state.receipts)
+    driver.trace = []
+    try driver.run([
+        "type": .string("forgetUploadRecord"), "key": .from(pending.key),
+    ])
+    #expect(driver.trace == ["confirmForgetUpload", "persist"])
+    #expect(driver.state.pendingUploads.isEmpty)
+    #expect(try encoder.encode(driver.state.snapshots) == snapshots)
+    #expect(try encoder.encode(driver.state.receipts) == receipts)
+    let view = try driver.bridge.call(2).decode(ViewModel.self)
+    #expect(!view.busy && view.error == nil)
 }
 
 private func uploadFixture() -> StoredAsset {

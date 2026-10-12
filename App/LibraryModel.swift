@@ -198,6 +198,18 @@ import SwiftUI
         view?.state.receipts ?? []
     }
 
+    var pendingUploads: [PendingUpload] {
+        view?.state.pendingUploads ?? []
+    }
+
+    func forgetUploadRecord(_ upload: PendingUpload) {
+        do {
+            try send(["type": .string("forgetUploadRecord"), "key": .from(upload.key)])
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     var connection: ConnectionSettings? {
         view?.state.connection
     }

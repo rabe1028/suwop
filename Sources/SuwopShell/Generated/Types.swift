@@ -753,6 +753,15 @@ public struct UnifiedPhoto: Codable, Sendable {
     }
 }
 
+public struct UploadForgetPrompt: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public init(key: AssetKey, name: String) {
+        self.key = key
+        self.name = name
+    }
+}
+
 public struct UploadPart: Codable, Sendable {
     public var field: String
     public var filename: String

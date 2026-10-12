@@ -38,6 +38,13 @@ pub struct UploadResumePrompt {
     pub source: StoredAsset,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct UploadForgetPrompt {
+    pub key: AssetKey,
+    pub name: String,
+}
+
 #[derive(Debug)]
 pub struct UploadMetadataPlan {
     pub asset: Asset,

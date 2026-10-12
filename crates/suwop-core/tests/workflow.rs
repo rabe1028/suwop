@@ -27,6 +27,7 @@ enum UploadFault {
     ConfirmChanged,
     Duplicate,
     WrongIdentity,
+    ForgetJournal,
 }
 struct Shell {
     source: TransferBundle,
@@ -43,6 +44,7 @@ struct Shell {
     confirm: Option<bool>,
     journal: Option<SavedLibrary>,
     capture_date: String,
+    http_requests: usize,
 }
 impl Shell {
     fn new() -> Self {
@@ -96,6 +98,7 @@ impl Shell {
             confirm: Some(true),
             journal: None,
             capture_date: "1970-01-01T00:00:10Z".into(),
+            http_requests: 0,
         }
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
@@ -122,33 +125,7 @@ impl Shell {
                 scanned_at: Some(10.0),
             })
             .map_err(|e| e.to_string()),
-            ShellOperation::Persist(state) => {
-                self.order.push("persist");
-                if state
-                    .receipts
-                    .last()
-                    .is_some_and(|r| Some(r.phase) == self.fail_phase)
-                {
-                    return Err("journal failed".into());
-                }
-                if state
-                    .pending_uploads
-                    .iter()
-                    .any(|p| match self.upload_fault {
-                        UploadFault::CreatedJournal => {
-                            p.phase == suwop_core::immich::UploadPhase::MetadataPending
-                        }
-                        UploadFault::StartedJournal => {
-                            p.phase == suwop_core::immich::UploadPhase::MetadataStarted
-                        }
-                        _ => false,
-                    })
-                {
-                    return Err("upload journal failed".into());
-                }
-                self.journal = Some(state);
-                Ok(Value::Null)
-            }
+            ShellOperation::Persist(state) => self.persist(state),
             ShellOperation::Wait { .. } => {
                 if matches!(self.upload_fault, UploadFault::Wait) {
                     Err("cancelled".into())
@@ -161,6 +138,10 @@ impl Shell {
                 if matches!(self.upload_fault, UploadFault::ConfirmChanged) {
                     self.capture_date = "1970-01-01T00:00:11Z".into();
                 }
+                self.confirm.map(Value::Bool).ok_or("cancelled".into())
+            }
+            ShellOperation::ConfirmForgetUpload { .. } => {
+                self.order.push("confirm-forget");
                 self.confirm.map(Value::Bool).ok_or("cancelled".into())
             }
             ShellOperation::AppleTrash { .. } => {
@@ -188,7 +169,44 @@ impl Shell {
             _ => Err("unexpected effect".into()),
         }
     }
+    fn persist(&mut self, state: SavedLibrary) -> Result<Value, String> {
+        self.order.push("persist");
+        if matches!(self.upload_fault, UploadFault::ForgetJournal)
+            && state.pending_uploads.is_empty()
+            && self
+                .journal
+                .as_ref()
+                .is_some_and(|s| !s.pending_uploads.is_empty())
+        {
+            return Err("forget journal failed".into());
+        }
+        if state
+            .receipts
+            .last()
+            .is_some_and(|r| Some(r.phase) == self.fail_phase)
+        {
+            return Err("journal failed".into());
+        }
+        if state
+            .pending_uploads
+            .iter()
+            .any(|p| match self.upload_fault {
+                UploadFault::CreatedJournal => {
+                    p.phase == suwop_core::immich::UploadPhase::MetadataPending
+                }
+                UploadFault::StartedJournal => {
+                    p.phase == suwop_core::immich::UploadPhase::MetadataStarted
+                }
+                _ => false,
+            })
+        {
+            return Err("upload journal failed".into());
+        }
+        self.journal = Some(state);
+        Ok(Value::Null)
+    }
     fn http(&mut self, request: suwop_core::immich::HttpRequest) -> Result<Value, String> {
+        self.http_requests += 1;
         let body = if request.method == "POST" && request.url.ends_with("/assets") {
             self.writes += 1;
             json!({"id":ID,"status":if matches!(self.upload_fault, UploadFault::Duplicate) {"duplicate"} else {"created"}})
@@ -725,5 +743,143 @@ fn a_different_destination_scope_cannot_resume_another_accounts_pending_copy() -
         restored.view().state.pending_uploads[0].key.scope,
         "another-server#another-owner"
     );
+    Ok(())
+}
+
+fn forget_event(core: &Core<Suwop>) -> Result<Event, String> {
+    let key = core
+        .view()
+        .state
+        .pending_uploads
+        .first()
+        .ok_or("no pending upload")?
+        .key
+        .clone();
+    Ok(Event::ForgetUploadRecord { key })
+}
+
+#[test]
+fn explicit_forget_retains_photos_receipts_and_never_sends_http() -> Result<(), String> {
+    for fault in [UploadFault::Read, UploadFault::PutLostUnapplied] {
+        let mut shell = Shell::new();
+        shell.source.assets[0].captured_at = Some(20.0);
+        shell.upload_fault = fault;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        let before = first.view().state;
+        let requests = shell.http_requests;
+        shell.run(&first, forget_event(&first)?)?;
+        let after = first.view().state;
+        assert!(first.view().error.is_none());
+        assert!(after.pending_uploads.is_empty());
+        assert_eq!(shell.http_requests, requests);
+        assert_eq!(
+            serde_json::to_value(before.receipts).map_err(|e| e.to_string())?,
+            serde_json::to_value(after.receipts).map_err(|e| e.to_string())?
+        );
+        assert_eq!(
+            serde_json::to_value(before.snapshots).map_err(|e| e.to_string())?,
+            serde_json::to_value(after.snapshots).map_err(|e| e.to_string())?
+        );
+        assert_eq!(shell.deleted, 0);
+        // Only the next explicit Copy may POST again. A duplicate still cannot
+        // authorize metadata writes, even after a metadataStarted record is gone.
+        let writes = shell.metadata_writes;
+        shell.upload_fault = UploadFault::Duplicate;
+        shell.run(&first, retry_copy_event(&shell))?;
+        assert_eq!(shell.writes, 2);
+        assert_eq!(shell.metadata_writes, writes);
+        assert_eq!(shell.deleted, 0);
+    }
+    Ok(())
+}
+
+#[test]
+fn forget_cancel_or_lost_confirmation_preserves_the_pending_record() -> Result<(), String> {
+    for confirm in [Some(false), None] {
+        let mut shell = Shell::new();
+        shell.upload_fault = UploadFault::Read;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        let before = first.view().state.pending_uploads;
+        let requests = shell.http_requests;
+        shell.confirm = confirm;
+        shell.run(&first, forget_event(&first)?)?;
+        assert_eq!(shell.http_requests, requests);
+        assert_eq!(
+            serde_json::to_value(before).map_err(|e| e.to_string())?,
+            serde_json::to_value(first.view().state.pending_uploads).map_err(|e| e.to_string())?
+        );
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 0, 0)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn forgetting_duplicate_local_ids_does_not_clear_other_scopes() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.upload_fault = UploadFault::Read;
+    shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+    let mut state = shell.journal.clone().ok_or("no journal")?;
+    let mut foreign = state.pending_uploads[0].clone();
+    foreign.key.scope = "another-account".into();
+    state.pending_uploads.push(state.pending_uploads[0].clone());
+    state.pending_uploads.push(foreign);
+    let first = core_from_state(state);
+    let requests = shell.http_requests;
+    shell.run(&first, forget_event(&first)?)?;
+    assert_eq!(shell.http_requests, requests);
+    assert_eq!(first.view().state.pending_uploads.len(), 1);
+    assert_eq!(
+        first.view().state.pending_uploads[0].key.scope,
+        "another-account"
+    );
+    Ok(())
+}
+
+#[test]
+fn a_failed_forget_save_restores_the_in_memory_pending_record() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.upload_fault = UploadFault::Read;
+    let first = core();
+    shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+    shell.upload_fault = UploadFault::ForgetJournal;
+    let requests = shell.http_requests;
+    shell.run(&first, forget_event(&first)?)?;
+    assert!(first.view().error.is_some());
+    assert_eq!(first.view().state.pending_uploads.len(), 1);
+    assert_eq!(
+        shell
+            .journal
+            .as_ref()
+            .ok_or("no journal")?
+            .pending_uploads
+            .len(),
+        1
+    );
+    assert_eq!(shell.http_requests, requests);
+    Ok(())
+}
+
+#[test]
+fn an_unknown_forget_key_never_prompts_or_touches_io() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let first = core();
+    shell.run(
+        &first,
+        Event::ForgetUploadRecord {
+            key: AssetKey {
+                provider: Provider::Immich,
+                scope: "unknown".into(),
+                asset_id: ID.into(),
+            },
+        },
+    )?;
+    assert!(first.view().error.is_some());
+    assert_eq!(shell.http_requests, 0);
+    assert!(!shell.order.contains(&"confirm-forget"));
     Ok(())
 }

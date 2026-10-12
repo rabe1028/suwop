@@ -6,6 +6,30 @@ use crate::{
 };
 
 impl Runtime<'_> {
+    pub(super) async fn forget_upload_record(&mut self, key: &AssetKey) -> Result<String, String> {
+        let record = self
+            .state
+            .pending_uploads
+            .iter()
+            .find(|p| p.key == *key && key.provider == Provider::Immich)
+            .ok_or("解除する未完了コピーの記録がありません。")?;
+        let prompt = crate::immich::UploadForgetPrompt {
+            key: key.clone(),
+            name: record.source.name.clone(),
+        };
+        let confirmed: bool = io(self.ctx, ShellOperation::ConfirmForgetUpload { prompt }).await?;
+        if !confirmed {
+            return Ok("再開記録の解除をキャンセルしました。".into());
+        }
+        let previous = self.state.pending_uploads.clone();
+        self.state.pending_uploads.retain(|p| p.key != *key);
+        if let Err(error) = self.persist().await {
+            self.state.pending_uploads = previous;
+            return Err(error);
+        }
+        Ok("このコピーの再開記録を解除しました。写真と転送履歴は変更していません。元の写真からコピーを選ぶと新しく確認します。".into())
+    }
+
     pub(super) async fn upload_file(
         &mut self,
         session: &Session,
