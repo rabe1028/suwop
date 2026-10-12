@@ -14,6 +14,7 @@ mod editing;
 mod favorites;
 mod media;
 mod metadata;
+mod reversion;
 mod sharing;
 mod upload_intents;
 mod uploads;
@@ -27,6 +28,7 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 struct Runtime<'a> {
+    reversion_started: bool,
     preferred_preview: Option<AssetKey>,
     ctx: &'a Context,
     state: SavedLibrary,
@@ -42,6 +44,7 @@ pub async fn run(
     session: Option<Session>,
 ) -> Outcome {
     let mut runtime = Runtime {
+        reversion_started: false,
         preferred_preview: None,
         ctx,
         state,
@@ -56,10 +59,12 @@ pub async fn run(
             | Event::CreateAlbum { .. }
             | Event::EditAlbum { .. }
             | Event::EditImage { .. }
+            | Event::RevertImage { .. }
     );
     let sharing = matches!(event, Event::Share { .. });
     let playback = matches!(event, Event::Play { .. });
-    let editing = matches!(event, Event::EditImage { .. });
+    let reverting = matches!(event, Event::RevertImage { .. });
+    let editing = matches!(event, Event::EditImage { .. } | Event::RevertImage { .. });
     let mut result = runtime.execute(event).await;
     if let Some(token) = runtime.editing_token.take() {
         let close: Result<Value, _> = io(ctx, ShellOperation::AppleEditClose { token }).await;
@@ -94,6 +99,8 @@ pub async fn run(
                 "共有処理で問題が発生しました。写真と転送履歴は変更していません。"
             } else if playback {
                 "再生処理で問題が発生しました。写真と転送履歴は変更していません。"
+            } else if reverting && !runtime.reversion_started {
+                "原本への復元を開始できませんでした。写真は変更していません。"
             } else if metadata_change {
                 "変更が保存済みの場合があります。一覧を更新して確認してください。"
             } else {
@@ -172,6 +179,7 @@ impl Runtime<'_> {
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,
+            Event::RevertImage { key, id } => self.revert_image(&key, &id).await,
             Event::Share { keys, id } => self.share(&keys, &id).await,
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,

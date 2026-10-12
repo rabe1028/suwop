@@ -163,6 +163,17 @@ public struct AppleImportPlan: Codable, Sendable {
     }
 }
 
+public struct AppleReversionFacts: Codable, Sendable {
+    public var asset: StoredAsset
+    public var canEdit: Bool
+    public var hasAdjustments: Bool
+    public init(asset: StoredAsset, canEdit: Bool, hasAdjustments: Bool) {
+        self.asset = asset
+        self.canEdit = canEdit
+        self.hasAdjustments = hasAdjustments
+    }
+}
+
 public struct AssetKey: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -610,6 +621,15 @@ public enum ResourceRole: String, Codable, CaseIterable, Sendable {
     case `video`
     case `liveVideo`
     case `auxiliary`
+}
+
+public struct ReversionPrompt: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public init(key: AssetKey, name: String) {
+        self.key = key
+        self.name = name
+    }
 }
 
 public struct SavedLibrary: Codable, Sendable {

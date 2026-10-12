@@ -8,7 +8,7 @@
 - `workflow.rs`: 接続、走査、照合、コピー、移動、履歴保存、旧形式の移行。
 - `sharing.rs` / `workflow/sharing.rs`: 共有元の選択、原本の検証、共有ファイルの名前と作業領域の寿命。
 - `metadata.rs` / `workflow/metadata.rs`: 保存先ごとの日時・位置情報、入力・権限の検証、保存結果の再取得。
-- `editing/` / `workflow/editing.rs`: 整数の編集幾何、開始状態と履歴、保存先・調整データ・保存結果の検証、native session と作業領域の寿命。
+- `editing/` / `workflow/editing.rs` / `workflow/reversion.rs`: 整数の編集幾何、開始状態と履歴、保存先・調整データ・保存結果の検証、編集の破棄確認、native session と作業領域の寿命。
 - `immich.rs`: URL／origin 検証、API、ページング、multipart の仕様、レスポンス解釈。
 - `crates/suwop-ffi`: Crux の JSON FFI と C ABI、ファイルをストリームでハッシュするネイティブ入出力。
 - `Sources/SuwopShell`: FFI actor、JSON、生成された DTO、表示用の補助値。
@@ -16,6 +16,7 @@
 - `App/ApplePhotos.swift`: PhotoKit の観測とリソース入出力。削除直前にも Rust に観測結果を渡す。
 - `App/ApplePhotosMetadata.swift`: Rust が指定した変更だけを PhotoKit の変更キューで実行し、全 ID の最新の結果を返す。
 - `App/ApplePhotoEditing.swift` / `ContentInputRequest.swift`: PhotoKit 編集入力と出力を保持し、保存直前の観測を Rust に渡し、保存後の実データを読み直す。
+- `App/ApplePhotoReversion.swift` / `SystemReversion.swift`: Rust が指定する1件の編集破棄を確認し、PhotoKit の復元 API と native 事実の再読込を実行する。
 - `Sources/SuwopShell/NativeImageRenderer.swift`: Rust が作った描画計画を Core Image / ImageIO で実行し、ネイティブの画像情報と符号化バイトを返す。
 - `App/SystemImageEditing.swift` / `ImageEditorModel.swift`: Rust の編集履歴を表示し、プレビューの完了と画面終了を待つ。
 - `App/Credentials.swift` / `HTTPExecutor.swift`: Keychain と汎用 HTTP の入出力。
@@ -101,3 +102,11 @@ Immich v3.2.4 を実通信テストに使用します。3.2 以降は filter / o
 日付検索と日付順の並べ替えも Rust が選んだコピーの日時を使い、日時不明を別コピーの値で補わない。Swift の日／月／年のグループ分けと情報画面の見出しは同じ選択済み DTO の日時を表示する。`PhotoViewerCursor` は直前の Rust のグループのキーを保持する表示用カーソルで、片方が削除された後も残ったコピーを参照する。照合や表示元の選択は行わない。
 
 アップロードの応答消失や作成 ID の保存失敗後は、同じコピー操作から `assets/bulk-upload-check` と custom metadata の GET を使って読み取りで照合する。保存先・転送元全記録・リソース・SHA-256 とバイト長・Live の関連づけが一致した開始記録の固有 ID だけを受け付ける。作成した ID を記録してから、既存の原本再ダウンロードと native 確認を行う。チェックサムが同じでも固有 ID がない／異なる既存写真や、ゴミ箱内・照合の欠落／重複・読取失敗ではメタデータを書かない。サーバーが新しいアップロードを許可した場合も、不明な POST は自動再送せず、開始記録の明示的な解除を案内する。開始記録の解除も native 確認とローカル保存だけを使い、保存失敗では記録を戻す。custom metadata の識別子は完了後もサーバーに残し、追加の削除書込みを行わない。
+
+## 原本への復元
+
+Rust の `RevertImage` は、現在の Apple scope・フルアクセス・一意な snapshot と asset ID・原本構成を検証する。編集／復元の候補は一覧全体で1回作る索引を使い、実レコードとの一致を求める。Native の編集能力と調整データの有無を読み、実際の保存先と名前を持つ `ConfirmReversion` を提示する。確認のキャンセル・失敗では原本をダウンロードせず書き込まない。
+
+確認後に原本を export してハッシュを取り、確認した revision とメタデータを再検証する。`AppleRevert` は変更キュー内でも Rust に最新の観測を渡し、[PhotoKit の revertAssetContentToOriginal](https://developer.apple.com/documentation/photos/phassetchangerequest/revertassetcontenttooriginal()) を1回実行する。事前の resource export は iCloud の原本を端末に取得するためにも必要。画素のデコードや再符号化をせず、他アプリの調整データを解釈できるとも扱わない。確認は他アプリの編集を含むすべての画像編集の破棄を明示する。
+
+保存後は native resource と content editing input の調整データがないことを読み、全原本を再 export する。Rust が RAW／JPEG を含む各原本の種別・名前・SHA-256・バイト長と、撮影日時・位置・お気に入りを検証してから記録し、復元したコピーを表示元にする。別のコピーや転送履歴は変更しない。確認後の並行編集は破棄せず停止する。書込み前の失敗と、開始後の結果不明を区別し、結果不明・原本不一致・永続化失敗では Apple の書込み権限を一覧更新まで無効化する。自動再試行は行わず、作業領域の cleanup 失敗も表示する。動画／Live Photo、Immich の復元、実 PhotoKit・端末・iCloud の動作確認は継続作業。

@@ -12,7 +12,7 @@
 | 全画面、前後移動、ズーム、動画、Live Photo | 静止画プレビュー・前後移動・ズーム、動画 / Live の原本再生を実装。Simulator で静止画、動画の再生・一時停止・巻き戻し、自作 Live Photo の復元・再生を確認 | 実機撮影 / Immich の Live、編集後の再生、音声、iPad / Mac、回転、取得停止、エラー・iCloud |
 | お気に入り、非表示、日時・位置・説明の変更 | お気に入り、保存先ごとの日時・座標変更を実装。お気に入りは Simulator の PhotoKit 保存・再起動後の再読込・解除を確認。日時・座標の native 保存は検証中 | 日時・座標の native / Immich 保存、実機 / iCloud、取り消し、地図・地名検索。非表示・説明 |
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
-| 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | Apple 静止画の切り抜き・90度回転・反転・編集履歴と保存を実装。Rust / 実FFI / Core Imageの画素・色空間テストを通過。PhotoKitの保存操作は未検証 | native 保存・再起動・既存編集の保持、Immich編集、HDR・透過、明るさ・色・フィルター、原本へ戻す |
+| 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | Apple 静止画の切り抜き・90度回転・反転・編集履歴と保存、確認後の原本への復元を実装。Rust / 実FFI / Core Imageの画素・色空間テストを通過。PhotoKitの保存操作は未検証 | native 保存・再起動・既存編集の保持、Immich編集、HDR・透過、明るさ・色・フィルター、原本へ戻す |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
 | 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、単独 / 複数選択の native 画面とキャンセル・片付けを確認。編集後の共有・取り込み・複製は継続作業 | 動画の共有、受信先での保存、強制終了後の片付け |
 | ゴミ箱、削除確認、復元、削除結果不明 | 移動後のゴミ箱のみ | native ゴミ箱との一致、結果不明の再実行を防ぐ、両側の保護 |
@@ -25,12 +25,12 @@
 
 ## 現在の段階と残操作（2026-10-12 再監査）
 
-main は `97df205e6dd47464b9126d2cce060b7bbc2e8db9`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+main は `9c55d445cf3516aa64ef48d1a2c8da13f68049cf`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
 
 | 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
 | --- | --- | --- |
-| 日時を保った新規コピーと中断後の再開 | PR #11 の既存HEAD `75779a2` は全3 CI job通過。POST前の開始記録・固有ID照合・開始記録解除は作業ツリーに追加し、差分を保存。追加版は未push／未merge | 最終作業ツリーの全gate、最終HEADの実Immich／Apple CI、確認画面と中断・再起動のnative操作 |
-| Apple静止画の原本へ戻す | `codex/revert-original` の `47a23d7` に実装済み。ローカルcheckとAppleコンポーネントの証拠はそのブランチの履歴に記録。現在の開始記録追加版はまだ継承していない | PR #11マージ後のrebase、生成DTO・全gate・最終HEAD CI、実PhotoKitの保存→復元→再起動と競合確認 |
+| 日時を保った新規コピーと中断後の再開 | PR #11 の最終HEAD `e280879` は全3 CI job通過。POST前の開始記録・固有ID照合・開始記録解除を含めてマージ済み | main CI、確認画面と中断・再起動のnative操作 |
+| Apple静止画の原本へ戻す | `codex/revert-original` でPR #11のmainへ載せ直し、開始記録追加版と組み合わせたRust 154／Swift 38 testsが通過 | 最終Apple build・最終HEAD CI、実PhotoKitの保存→復元→再起動と競合確認 |
 | 編集後の共有、取り込み、複製 | ユーザー向けの編集後共有・外部ファイル取り込み・複製イベントは未実装。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
 | 通常の削除、非表示／再表示、復元 | 公開Eventには独立したTrash／Hide／Recoverがない。AppleTrashは現在Moveの完了からだけ要求する | 一括選択と現在の権限・ID確認、明示確認と結果不明の扱い、両保存先の状態・nativeゴミ箱／非表示との一致。公開PhotoKit APIの制約も実装前に検証 |
 | 明るさ・色・フィルターと編集のコピー／貼り付け | 現行Rust編集モデルは整数の切り抜き・向きが中心。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Rustに編集操作・履歴・保存検証を追加し、native画素／形式／メモリと保存・取り消し・元へ戻すを確認 |
@@ -180,3 +180,20 @@ main は `97df205e6dd47464b9126d2cce060b7bbc2e8db9`。閲覧・検索・お気�
 - 空き容量回復後の最終ソースで通常の `make check` が Rust 148 tests／Swift 36 tests と全品質gateを通過。`make apple-build` も一括コマンドでRust 5ターゲット・XCFramework・iOS Simulator／universal macOS両アプリを通過した。アーカイブは削除していない。ローカル `make integration` は再確認でもDocker socket不在で開始できず、最終HEADのhosted実Immich CIを必要とする。Macは現在もロックされ、native確認・PhotoKit保存の画面操作は未検証。
 
 - `SUWOP_CLEAN_CHECK=1 make check` の実行経路も、Clippy／生成物確認／全Rustテスト／Swift用ライブラリ生成を順に完了し、各工程の完了後にRustキャッシュをcleanして通過。Rust 148 tests／Swift 36 testsは通常経路と同じで、生成済みSwiftライブラリを残した実ABIテストまで確認した。通常経路ではキャッシュを保持する。
+
+## 保存先を指定した原本への復元
+
+- Apple Photos の静止画を1件選び、native の編集能力と調整データを確認してから保存先・名前とすべての画像編集の破棄を提示する。キャンセル・確認失敗では原本のダウンロードや書込みを行わない。他アプリの編集も破棄すること、iCloud の同期を明示する。
+- 確認後の原本 export と native 変更キューで同じ revision・元の構成・メタデータを再検証する。PhotoKit の復元 API を1回だけ呼び、調整データのない readback と原本の再 export を検証する。画素の再符号化を行わず、16MP の描画上限とは別の経路を使う。高画素・HDR・透過・RAW の実 PhotoKit 動作は未検証。
+- RAW／JPEG を含む元のリソースの組・SHA-256・バイト長・名前、撮影日時・座標・お気に入りを保持する。別の保存先のコピーと転送履歴は変更しない。検証後のコピーを表示元にする。動画・Live PhotoとImmichの復元は未対応。
+- 確認前／後の競合、フルアクセスなし、重複 ID／snapshot、欠落した原本、原本・位置の不一致、復元後に残る編集、失われた応答、永続化失敗、cleanup失敗を回帰テストで検証する。結果不明時は一覧更新まで Apple の書込みを止め、自動再試行しない。
+- 日付コピー・安全な再開・再開記録解除と組み合わせた `make check` は Rust 143 tests / Swift 36 tests と全品質gateを通過。実 FFI でも確認・書込み・原本再読込・永続化・cleanup 順を検証した。Apple builds、最終 HEAD CI、実 PhotoKit での保存・復元・再起動・他アプリの編集との往復、端末／iCloudは別の確認対象。Macのロックによりnative操作は未完了。
+- 同じコードの `make apple-build` はRust全5 target・XCFramework・iOS Simulator／macOS universal app buildsを通過。これはnativeで編集を保存して戻す操作の証拠には数えない。追加の日時許容差修正を含む最終HEADは別途検証する。
+- 1ms境界の共通比較を含む最終ローカル `make check` はRust 145 tests／Swift 36 testsと全品質gateを通過。初回はディスク不足で停止し、作業用worktreeのCargo／Swift clean後の再実行で通過した。DTOとnative adapterは直前のAppleビルドから変更していない。最終HEAD CIのAppleコンパイルと実操作は別に確認する。
+- PUT前の保存失敗修正も含むローカル `make check` はRust 146 tests／Swift 36 testsと全品質gateを通過。復元の変更を含むDTO・native adapterのAppleビルドは上記で確認済み。最新HEADでの全targetコンパイルと実PhotoKit操作は別途確認する。
+- ファイル名照合修正も含むローカル `make check` はRust 147 tests／Swift 36 testsと全品質gateを通過。新規コピーと再開時の送信名の検証を継承し、復元前後の原本の名前・役割・バイト列の厳密な照合は維持する。最終HEAD CIとnative操作は別に確認する。
+
+- [PR #11](https://github.com/rabe1028/suwop/pull/11) final HEAD `e280879a4b5f190852ad87ad3de41b7981efaf34` passed all three jobs in [CI](https://github.com/rabe1028/suwop/actions/runs/38222027294). All eight review threads were resolved before merge. Main `9c55d445cf3516aa64ef48d1a2c8da13f68049cf` matches verified tree `1becc063978425bc25393589fdf1ef7c08f27825`; its separate [main CI](https://github.com/rabe1028/suwop/actions/runs/38258154143) also passed core, actual Immich and Apple jobs.
+- Reversion was rebased onto this main with both upload-intent and reversion confirmation DTOs preserved and regenerated from Rust. The combined `make check` passed 154 Rust / 38 Swift tests and all gates. Reversion's final Apple build, pushed-HEAD CI and actual PhotoKit interaction are separate evidence.
+
+- On merged PR #11/main, reversion's aggregate `make apple-build` passed all five Rust Apple targets, XCFramework generation and both iOS Simulator / universal macOS app builds. This validates the composed native confirmation DTOs and thin PhotoKit adapter; it does not establish actual PhotoKit save/revert, restart, foreign-editor, device or iCloud acceptance.

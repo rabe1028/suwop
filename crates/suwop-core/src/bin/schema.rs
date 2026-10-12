@@ -33,6 +33,9 @@ struct Protocol {
     upload_resume_prompt: suwop_core::immich::UploadResumePrompt,
     upload_forget_prompt: suwop_core::immich::UploadForgetPrompt,
     upload_intent_forget_prompt: suwop_core::immich::UploadIntentForgetPrompt,
+
+    apple_reversion_facts: suwop_core::editing::AppleReversionFacts,
+    reversion_prompt: suwop_core::editing::ReversionPrompt,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

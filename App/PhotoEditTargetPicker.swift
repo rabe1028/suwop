@@ -3,6 +3,7 @@ import SwiftUI
 
 struct PhotoEditTargetPicker: View {
     let targets: [EditingTarget]
+    var reverting = false
     let choose: @MainActor (EditingTarget) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -21,11 +22,11 @@ struct PhotoEditTargetPicker: View {
                             }.padding(.vertical, 4)
                         }.disabled(target.disabledReason != nil)
                     }
-                } header: { Text("編集する写真の保存先") } footer: {
-                    Text("選んだ写真に反映します。原本は保持されます。")
+                } header: { Text(reverting ? "原本へ戻す写真の保存先" : "編集する写真の保存先") } footer: {
+                    Text(reverting ? "選んだ写真の保存済み画像編集を破棄します。次の画面で確認してから実行します。" : "選んだ写真に反映します。原本は保持されます。")
                 }
             }
-            .navigationTitle("写真を編集")
+            .navigationTitle(reverting ? "原本へ戻す" : "写真を編集")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() } }
             }

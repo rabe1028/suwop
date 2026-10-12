@@ -9,6 +9,7 @@ struct PhotoViewer: View {
     @State private var confirmingShare = false
     @State private var choosingEdit = false
     @State private var pendingEdit: EditingTarget?
+    @State private var reverting = false
     @Environment(\.dismiss) private var dismiss
     private let collection: AlbumKey?
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
@@ -74,12 +75,16 @@ struct PhotoViewer: View {
                         if let photo {
                             cursor.point(to: target.key, in: photo)
                         }
-                        model.editImage(target)
+                        if reverting {
+                            model.revertImage(target)
+                        } else {
+                            model.editImage(target)
+                        }
                     }
                 },
                 content: {
                     if let photo {
-                        PhotoEditTargetPicker(targets: model.editingTargets(photo)) { target in
+                        PhotoEditTargetPicker(targets: model.editingTargets(photo), reverting: reverting) { target in
                             pendingEdit = target
                             choosingEdit = false
                         }
@@ -150,7 +155,16 @@ struct PhotoViewer: View {
                 }
                 Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
                     .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
-                Button { choosingEdit = true } label: { Image(systemName: "slider.horizontal.3") }
+                Menu {
+                    Button("写真を編集", systemImage: "slider.horizontal.3") {
+                        reverting = false
+                        choosingEdit = true
+                    }
+                    Button("原本へ戻す", systemImage: "arrow.uturn.backward") {
+                        reverting = true
+                        choosingEdit = true
+                    }
+                } label: { Image(systemName: "slider.horizontal.3") }
                     .disabled(model.isBusy).accessibilityLabel("写真を編集")
                 Button { model.favorite([photo], value: !photo.isFavorite) } label: {
                     Image(systemName: photo.isFavorite ? "heart.fill" : "heart")

@@ -116,6 +116,15 @@ pub enum ShellOperation {
     AppleEditClose {
         token: String,
     },
+    AppleReversionInspect {
+        asset: crate::domain::StoredAsset,
+    },
+    ConfirmReversion {
+        prompt: crate::editing::ReversionPrompt,
+    },
+    AppleRevert {
+        asset: crate::domain::StoredAsset,
+    },
     AppleAlbums {
         scope: String,
     },
@@ -154,6 +163,10 @@ pub enum Event {
         key: crate::domain::AssetKey,
     },
     EditImage {
+        key: crate::domain::AssetKey,
+        id: String,
+    },
+    RevertImage {
         key: crate::domain::AssetKey,
         id: String,
     },
@@ -379,20 +392,13 @@ impl crux_core::App for Suwop {
             })
             .collect();
         let displayed_dates = displayed_dates(&preview_choices);
+        let editing_access =
+            crate::editing::EditingAccess::new(&model.state.snapshots, &model.state.apple_scope);
         ViewModel {
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
-                .map(|p| {
-                    (
-                        crate::browser::photo_id(p),
-                        crate::editing::targets(
-                            p,
-                            &model.state.snapshots,
-                            &model.state.apple_scope,
-                        ),
-                    )
-                })
+                .map(|p| (crate::browser::photo_id(p), editing_access.targets(p)))
                 .collect(),
             metadata_targets: photos
                 .iter()

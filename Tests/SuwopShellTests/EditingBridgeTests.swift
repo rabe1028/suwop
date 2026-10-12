@@ -2,7 +2,7 @@ import Foundation
 import SuwopShell
 import Testing
 
-private struct EditingABI {
+struct EditingABI {
     let bridge: CoreBridge
     init() throws {
         bridge = try CoreBridge()
@@ -47,7 +47,7 @@ private struct EditingABI {
 }
 
 private let editingID = "11111111-1111-4111-8111-111111111111"
-private func editingAsset() -> StoredAsset {
+func editingAsset() -> StoredAsset {
     let resource = PhotoResource(
         id: "0", name: "photo.jpg", role: .image, sha1: String(repeating: "a", count: 40), bytes: 12
     )
@@ -63,7 +63,7 @@ private func editingAsset() -> StoredAsset {
     )
 }
 
-private func editingBundle(_ asset: StoredAsset, directory: String) throws -> TransferBundle {
+func editingBundle(_ asset: StoredAsset, directory: String) throws -> TransferBundle {
     let file = try TransferFile(
         resource: #require(asset.resources.first),
         path: directory + "/photo.jpg",
