@@ -5,7 +5,7 @@ use crate::{
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
 #[derive(Deserialize)]
 struct Config {
@@ -49,7 +49,8 @@ impl Session {
         if !now.is_finite() || super::date_string(now).is_empty() {
             return Err("一覧の日時が不正です。".into());
         }
-        let mut items = BTreeMap::new();
+        let mut items = Vec::new();
+        let mut ids = BTreeSet::new();
         let mut seen = BTreeSet::new();
         let mut cursor: Option<String> = None;
         for _ in 0..10_000 {
@@ -82,24 +83,19 @@ impl Session {
                 super::valid_id(&asset.id)?;
                 let identity = TrashIdentity::from_asset(&self.scope, &asset)?;
                 let record = asset.record(&self.scope, None, None);
-                if items
-                    .insert(
-                        asset.id.clone(),
-                        TrashItem {
-                            asset: record,
-                            identity,
-                        },
-                    )
-                    .is_some()
-                {
+                if !ids.insert(asset.id.clone()) {
                     return Err("ゴミ箱一覧に重複した写真があります。".into());
                 }
+                items.push(TrashItem {
+                    asset: record,
+                    identity,
+                });
             }
             let next = envelope
                 .get("nextCursor")
                 .ok_or("ゴミ箱のページ情報がありません。")?;
             if next.is_null() {
-                return Ok(items.into_values().collect());
+                return Ok(items);
             }
             let token = next
                 .as_str()

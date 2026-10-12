@@ -471,18 +471,22 @@ fn unreadable_or_opposite_result_never_clears_the_pending_record() -> Result<(),
 #[test]
 fn trash_list_is_complete_skips_partners_and_rejects_repeated_cursors_or_active_rows()
 -> Result<(), String> {
-    for invalid in 0..4 {
+    for invalid in 0..5 {
         let core = core(state(false)?);
         let mut shell = Shell::new(true);
         match invalid {
             0 => (),
             1 => shell.photo["isTrashed"] = json!(false),
             2 => shell.photo["ownerId"] = json!("other"),
-            _ => {
+            3 => {
                 shell.pages = vec![
                     json!({"assets":{"items":[],"nextCursor":"repeat"}}),
                     json!({"assets":{"items":[],"nextCursor":"repeat"}}),
                 ];
+            }
+            _ => {
+                shell.pages =
+                    vec![json!({"assets":{"items":[native(true),native(true)],"nextCursor":null}})];
             }
         }
         shell.run(
@@ -534,6 +538,44 @@ fn partner_only_pages_do_not_hide_owned_trash_on_later_pages() -> Result<(), Str
     assert_eq!(
         shell.requests[1].body.as_ref().ok_or("missing search")?["cursor"],
         "owned-next"
+    );
+    assert_eq!(shell.writes, 0);
+    Ok(())
+}
+
+#[test]
+fn trash_preserves_server_date_order_across_pages_instead_of_uuid_order() -> Result<(), String> {
+    const NEWEST: &str = "99999999-9999-4999-8999-999999999999";
+    const OLDEST: &str = "44444444-4444-4444-8444-444444444444";
+    let core = core(state(false)?);
+    let mut shell = Shell::new(true);
+    let mut newest = native(true);
+    newest["id"] = json!(NEWEST);
+    newest["fileCreatedAt"] = json!("2026-01-01T00:00:00Z");
+    let mut oldest = native(true);
+    oldest["id"] = json!(OLDEST);
+    oldest["fileCreatedAt"] = json!("2024-01-01T00:00:00Z");
+    shell.pages = vec![
+        json!({"assets":{"items":[newest,native(true)],"nextCursor":"oldest"}}),
+        json!({"assets":{"items":[oldest],"nextCursor":null}}),
+    ];
+    shell.run(
+        &core,
+        Event::RefreshTrash {
+            now: 1_800_000_000.0,
+        },
+    )?;
+    let view = core.view();
+    assert_eq!(view.error, None);
+    let snapshot = view.state.trash.as_ref().ok_or("missing list")?;
+    assert!(snapshot.verified);
+    assert_eq!(
+        snapshot
+            .items
+            .iter()
+            .map(|item| item.identity.key.asset_id.as_str())
+            .collect::<Vec<_>>(),
+        [NEWEST, PHOTO, OLDEST]
     );
     assert_eq!(shell.writes, 0);
     Ok(())
