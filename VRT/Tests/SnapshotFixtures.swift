@@ -4,6 +4,47 @@ import UIKit
 import XCTest
 
 @MainActor enum SnapshotFixtures {
+    static func editor(adjusted: Bool = false) async throws -> ImageEditorModel {
+        let source = FileManager.default.temporaryDirectory.appendingPathComponent("editor-\(UUID().uuidString).png")
+        try XCTUnwrap(image(index: 0).pngData()).write(to: source)
+        let size = PixelSize(height: 360, width: 360)
+        let initial = ImageTransform(
+            clockwiseQuarterTurns: 0,
+            color: ColorAdjustments(brightness: 0, contrast: 0, exposure: 0, filter: .original, saturation: 0),
+            crop: PixelCrop(height: 360, width: 360, x: 0, y: 0),
+            flipHorizontal: false
+        )
+        let model = try ImageEditorModel(ImageEditPresentation(
+            base: .original,
+            draft: ImageEditDraft(cursor: 0, dimensions: size, history: [initial], initial: initial),
+            name: "夏の写真.JPG",
+            orientation: 1,
+            outputFormat: .jpeg,
+            path: source.path
+        ))
+        if adjusted {
+            model.apply(.setColor, color: ColorAdjustments(
+                brightness: 10, contrast: 15, exposure: -50, filter: .sepia, saturation: -25
+            ))
+        } else {
+            model.render()
+        }
+        for _ in 0 ..< 200 {
+            if !model.isRendering {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertTrue(model.previewReady, model.error ?? "Editor preview did not complete")
+        _ = try XCTUnwrap(model.image)
+        return model
+    }
+
+    static func closeEditor(_ model: ImageEditorModel) async throws {
+        await model.stop()
+        try FileManager.default.removeItem(atPath: model.presentation.path)
+    }
+
     static func model(populated: Bool = true) throws -> LibraryModel {
         let assets = populated ? assets() : []
         let album = StoredAlbum(

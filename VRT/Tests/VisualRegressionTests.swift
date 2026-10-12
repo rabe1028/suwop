@@ -44,10 +44,29 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("trash-empty", view: TrashView(model: empty))
         try await capture("trash-cached", view: TrashView(model: SnapshotFixtures.trashModel(pending: false)))
         try await capture("trash-pending", view: TrashView(model: SnapshotFixtures.trashModel(pending: true)))
+        let editor = try await SnapshotFixtures.editor()
+        try await capture("editor", view: ImageEditorView(model: editor, finish: { _ in }), dark: true)
+        try await capture(
+            "editor-large-text",
+            view: ImageEditorView(model: editor, finish: { _ in }),
+            dark: true,
+            largeText: true
+        )
+        try await capture(
+            "editor-large-text-bottom",
+            view: ImageEditorView(model: editor, finish: { _ in }),
+            dark: true,
+            largeText: true,
+            scrollToBottom: true
+        )
+        try await SnapshotFixtures.closeEditor(editor)
+        let adjusted = try await SnapshotFixtures.editor(adjusted: true)
+        try await capture("editor-adjusted", view: ImageEditorView(model: adjusted, finish: { _ in }), dark: true)
+        try await SnapshotFixtures.closeEditor(adjusted)
     }
 
     @MainActor private func capture(
-        _ name: String, view: some View, dark: Bool = false, largeText: Bool = false
+        _ name: String, view: some View, dark: Bool = false, largeText: Bool = false, scrollToBottom: Bool = false
     ) async throws {
         let root = view
             .environment(\.colorScheme, dark ? .dark : .light)
@@ -72,6 +91,13 @@ final class VisualRegressionTests: XCTestCase {
         // Allow SwiftUI's immediate fixture-image tasks and navigation layout to complete.
         try await Task.sleep(for: .milliseconds(600))
         controller.view.layoutIfNeeded()
+        if scrollToBottom {
+            let scroll = try XCTUnwrap(scrollView(in: controller.view))
+            XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
+            scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
+            try await Task.sleep(for: .milliseconds(100))
+            controller.view.layoutIfNeeded()
+        }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3
         format.opaque = true
@@ -79,5 +105,12 @@ final class VisualRegressionTests: XCTestCase {
             XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
         }
         try SnapshotComparison.verify(image, named: name)
+    }
+
+    @MainActor private func scrollView(in view: UIView) -> UIScrollView? {
+        if let scroll = view as? UIScrollView {
+            return scroll
+        }
+        return view.subviews.compactMap { scrollView(in: $0) }.first
     }
 }

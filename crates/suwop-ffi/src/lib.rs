@@ -180,6 +180,9 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             dimensions.validate()?;
             return Ok(Value::Null);
         }
+        12 => {
+            return color_plan(input);
+        }
         _ => {}
     }
     let registry = cores()
@@ -210,6 +213,12 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
         _ => return Err("Unknown bridge action".into()),
     }
     serde_json::from_slice(&output).map_err(|e| e.to_string())
+}
+
+fn color_plan(input: &str) -> Result<Value, String> {
+    let color: suwop_core::editing::ColorAdjustments =
+        serde_json::from_str(input).map_err(|e| e.to_string())?;
+    serde_json::to_value(color.native_plan()?).map_err(|e| e.to_string())
 }
 fn thumbnail_request(input: &str) -> Result<Value, String> {
     #[derive(serde::Deserialize)]

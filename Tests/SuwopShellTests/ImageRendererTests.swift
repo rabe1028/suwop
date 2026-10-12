@@ -6,6 +6,13 @@
     import Testing
     import UniformTypeIdentifiers
 
+    private let neutralColor = ColorAdjustments(
+        brightness: 0,
+        contrast: 0,
+        exposure: 0,
+        filter: .original,
+        saturation: 0
+    )
     private let red: [UInt8] = [255, 0, 0]
     private let green: [UInt8] = [0, 255, 0]
     private let blue: [UInt8] = [0, 0, 255]
@@ -92,6 +99,7 @@
                     orientation: 1,
                     transform: ImageTransform(
                         clockwiseQuarterTurns: Int64(turns),
+                        color: neutralColor,
                         crop: PixelCrop(height: 2, width: 3, x: 0, y: 0),
                         flipHorizontal: flip
                     )
@@ -126,6 +134,7 @@
                 orientation: Int64(orientation),
                 transform: ImageTransform(
                     clockwiseQuarterTurns: 0,
+                    color: neutralColor,
                     crop: PixelCrop(
                         height: dimensions.height,
                         width: dimensions.width,
@@ -143,6 +152,7 @@
             orientation: 1,
             transform: ImageTransform(
                 clockwiseQuarterTurns: 1,
+                color: neutralColor,
                 crop: PixelCrop(height: 1, width: 2, x: 1, y: 1),
                 flipHorizontal: false
             )
@@ -166,6 +176,7 @@
             outputFormat: .jpeg,
             transform: ImageTransform(
                 clockwiseQuarterTurns: 1,
+                color: neutralColor,
                 crop: PixelCrop(height: 2, width: 3, x: 0, y: 0),
                 flipHorizontal: true
             )
@@ -195,6 +206,7 @@
                 outputFormat: format,
                 transform: ImageTransform(
                     clockwiseQuarterTurns: 0,
+                    color: neutralColor,
                     crop: PixelCrop(height: 3, width: 2, x: 0, y: 0),
                     flipHorizontal: false
                 )
@@ -236,6 +248,7 @@
                     orientation: 1,
                     transform: ImageTransform(
                         clockwiseQuarterTurns: 0,
+                        color: neutralColor,
                         crop: PixelCrop(height: 1, width: 1, x: 0, y: 0),
                         flipHorizontal: false
                     )
@@ -273,6 +286,7 @@
                     orientation: 1,
                     transform: ImageTransform(
                         clockwiseQuarterTurns: 1,
+                        color: neutralColor,
                         crop: PixelCrop(height: 1, width: 2, x: 1, y: 1),
                         flipHorizontal: false
                     )
@@ -333,6 +347,7 @@
                 orientation: 1,
                 transform: ImageTransform(
                     clockwiseQuarterTurns: 0,
+                    color: neutralColor,
                     crop: PixelCrop(height: 1, width: 3, x: 0, y: 0),
                     flipHorizontal: true
                 )
@@ -355,6 +370,85 @@
             context.draw(raster, in: CGRect(x: 0, y: 0, width: 3, height: 1))
         }
         #expect([rgba[3], rgba[7], rgba[11]] == [255, 128, 0])
+        #expect(try Data(contentsOf: source) == original)
+    }
+
+    @Test func nativeColorControlsExecuteRustParametersAndKeepOriginalPixelsOnDisk() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let source = try fixture(directory)
+        let original = try Data(contentsOf: source)
+        let initial = [red, green, blue, cyan, magenta, yellow]
+        func preview(_ color: ColorAdjustments) throws -> [[UInt8]] {
+            try pixels(NativeImageRenderer.preview(
+                source.path,
+                dimensions: PixelSize(height: 2, width: 3),
+                orientation: 1,
+                transform: ImageTransform(
+                    clockwiseQuarterTurns: 0,
+                    color: color,
+                    crop: PixelCrop(height: 2, width: 3, x: 0, y: 0),
+                    flipHorizontal: false
+                )
+            ))
+        }
+        func total(_ values: [[UInt8]]) -> Int {
+            values.flatMap(\.self).reduce(0) { $0 + Int($1) }
+        }
+        try assertPixels(preview(neutralColor), initial)
+        var color = neutralColor
+        color.exposure = -100
+        #expect(try total(preview(color)) < total(initial))
+        color = neutralColor
+        color.brightness = 10
+        #expect(try total(preview(color)) > total(initial))
+        color = neutralColor
+        color.contrast = -50
+        #expect(try preview(color) != initial)
+        for filter in [ImageColorFilter.mono, .noir, .original] {
+            color = neutralColor
+            color.filter = filter
+            if filter == .original {
+                color.saturation = -100
+            }
+            for pixel in try preview(color) {
+                #expect(abs(Int(pixel[0]) - Int(pixel[1])) <= 1)
+                #expect(abs(Int(pixel[1]) - Int(pixel[2])) <= 1)
+            }
+        }
+        color = neutralColor
+        color.filter = .sepia
+        let sepia = try preview(color)
+        #expect(sepia != initial)
+        #expect(sepia.allSatisfy { $0[0] >= $0[2] })
+        color.exposure = 201
+        #expect(throws: (any Error).self) { try preview(color) }
+        #expect(try Data(contentsOf: source) == original)
+    }
+
+    @Test func colorEditingKeepsDisplayP3AndCombinesWithIntegerGeometry() throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let space = try #require(CGColorSpace(name: CGColorSpace.displayP3))
+        let source = try fixture(directory, colorSpace: space)
+        let original = try Data(contentsOf: source)
+        let output = try NativeImageRenderer.preview(
+            source.path,
+            dimensions: PixelSize(height: 2, width: 3),
+            orientation: 1,
+            transform: ImageTransform(
+                clockwiseQuarterTurns: 1,
+                color: ColorAdjustments(brightness: 15, contrast: 0, exposure: 0, filter: .mono, saturation: 0),
+                crop: PixelCrop(height: 1, width: 2, x: 1, y: 1),
+                flipHorizontal: true
+            )
+        )
+        let encoded = try #require(CGImageSourceCreateWithData(output as CFData, nil))
+        let image = try #require(CGImageSourceCreateImageAtIndex(encoded, 0, nil))
+        #expect(image.width == 1 && image.height == 2)
+        #expect(image.colorSpace?.name == CGColorSpace.displayP3)
         #expect(try Data(contentsOf: source) == original)
     }
 #endif

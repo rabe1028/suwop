@@ -23,6 +23,10 @@ SCREENS = {
     "trash-empty",
     "trash-cached",
     "trash-pending",
+    "editor",
+    "editor-large-text",
+    "editor-large-text-bottom",
+    "editor-adjusted",
 }
 
 

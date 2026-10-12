@@ -6,7 +6,7 @@ use crate::domain::{Provider, ResourceRole, StoredAsset};
 use super::{ImageEditDraft, ImageTransform, PixelSize};
 
 const IDENTIFIER: &str = "jp.rabe1028.suwop.image-geometry";
-const VERSION: &str = "1";
+const VERSION: &str = "2";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -44,13 +44,20 @@ impl GeometryAdjustment {
 #[must_use]
 pub fn decode_original_adjustment(payload: &AppleAdjustment) -> Option<GeometryAdjustment> {
     if payload.format_identifier != IDENTIFIER
-        || payload.format_version != VERSION
+        || !["1", VERSION].contains(&payload.format_version.as_str())
         || payload.data.len() > 32_768
     {
         return None;
     }
     let bytes = STANDARD.decode(&payload.data).ok()?;
     let adjustment: GeometryAdjustment = serde_json::from_slice(&bytes).ok()?;
+    // Version 1 never supported color. A payload claiming v1 with color data
+    // must not be silently accepted by an older geometry-only implementation.
+    if payload.format_version == "1"
+        && adjustment.transform.color != super::ColorAdjustments::default()
+    {
+        return None;
+    }
     (adjustment.base == AdjustmentBase::Original
         && adjustment.transform.validate(adjustment.dimensions).is_ok())
     .then_some(adjustment)

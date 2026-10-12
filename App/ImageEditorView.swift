@@ -6,51 +6,30 @@ struct ImageEditorView: View {
     let finish: @MainActor (ImageEditDraft?) -> Void
     @State private var cropping = false
     @State private var selection: CGRect?
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     var body: some View {
         NavigationStack {
-            VStack(spacing: 16) {
-                if let image = model.image {
-                    ImageCropSurface(
-                        image: image,
-                        dimensions: model.state.outputSize,
-                        cropping: cropping,
-                        selection: $selection
-                    )
-                } else {
-                    Spacer()
-                    ProgressView("写真を読み込んでいます")
-                    Spacer()
+            editorContent.scrolledForAccessibility(dynamicTypeSize.isAccessibilitySize)
+                .navigationTitle("写真を編集").navigationBarTitleDisplayModeIfAvailable()
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("キャンセル") { finish(nil) }.accessibilityIdentifier("cancelPhotoEdit")
+                    }
+                    ToolbarItem(placement: .confirmationAction) {
+                        Button("保存") { finish(model.state.draft) }
+                            .disabled(!model.state.canSave || !model.previewReady || model
+                                .isRendering || selection != nil || model.hasUncommittedColor)
+                            .accessibilityIdentifier("savePhotoEdit")
+                    }
                 }
-                if cropping {
-                    Text("写真の上をドラッグして、残す範囲を選びます").font(.caption)
-                    Button("この範囲で切り抜く") { crop() }
-                        .disabled(selection == nil || model.isRendering)
-                        .accessibilityIdentifier("applyPhotoCrop")
-                }
-                Text("\(model.state.outputSize.width) × \(model.state.outputSize.height)")
-                    .font(.caption).foregroundStyle(.secondary)
-                controls.disabled(model.isRendering || model.image == nil)
-                if model.isRendering {
-                    ProgressView("プレビューを更新しています").font(.caption)
-                }
-                Text("\(model.presentation.name) · Apple Photosに保存します").font(.caption).foregroundStyle(.secondary)
-            }
-            .padding().background(.black).foregroundStyle(.white)
-            .navigationTitle("写真を編集").navigationBarTitleDisplayModeIfAvailable()
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("キャンセル") { finish(nil) }.accessibilityIdentifier("cancelPhotoEdit")
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { finish(model.state.draft) }
-                        .disabled(!model.state.canSave || !model.previewReady || model.isRendering || selection != nil)
-                        .accessibilityIdentifier("savePhotoEdit")
-                }
-            }
         }
         .preferredColorScheme(.dark)
-        .task { model.render() }
+        .task {
+            if !model.previewReady {
+                model.render()
+            }
+        }
         .alert("編集できませんでした", isPresented: Binding(get: { model.error != nil }, set: {
             if !$0 {
                 model.error = nil
@@ -58,9 +37,46 @@ struct ImageEditorView: View {
         })) { Button("閉じる", role: .cancel) { model.error = nil } } message: { Text(model.error ?? "") }
     }
 
+    private var editorContent: some View {
+        VStack(spacing: 16) {
+            if let image = model.image {
+                ImageCropSurface(
+                    image: image,
+                    dimensions: model.state.outputSize,
+                    cropping: cropping,
+                    selection: $selection
+                )
+                .frame(
+                    minHeight: dynamicTypeSize.isAccessibilitySize ? 180 : 0,
+                    maxHeight: dynamicTypeSize.isAccessibilitySize ? 180 : .infinity
+                )
+            } else {
+                Spacer()
+                ProgressView("写真を読み込んでいます")
+                Spacer()
+            }
+            if cropping {
+                Text("写真の上をドラッグして、残す範囲を選びます").font(.caption)
+                Button("この範囲で切り抜く") { crop() }
+                    .disabled(selection == nil || model.isRendering)
+                    .accessibilityIdentifier("applyPhotoCrop")
+            }
+            Text("\(model.state.outputSize.width) × \(model.state.outputSize.height)")
+                .font(.caption).foregroundStyle(.secondary)
+            controls.disabled(model.isRendering || model.image == nil)
+            ImageColorControls(model: model)
+                .disabled(model.isRendering || model.image == nil || cropping)
+            if model.isRendering {
+                ProgressView("プレビューを更新しています").font(.caption)
+            }
+            Text("\(model.presentation.name) · Apple Photosに保存します").font(.caption).foregroundStyle(.secondary)
+        }
+        .padding().background(.black).foregroundStyle(.white)
+    }
+
     private var controls: some View {
         VStack(spacing: 16) {
-            HStack(spacing: 32) {
+            HStack(spacing: 16) {
                 Button { apply(.rotateClockwise) } label: { Image(systemName: "rotate.right") }
                     .accessibilityLabel("時計回りに90度回転")
                 Button { apply(.mirrorHorizontal) } label: {
@@ -75,11 +91,18 @@ struct ImageEditorView: View {
                     .accessibilityLabel(cropping ? "範囲選択を終了" : "切り抜く範囲を選ぶ")
                     .foregroundStyle(cropping ? .yellow : .white)
             }
-            HStack(spacing: 28) {
+            HStack(spacing: 16) {
                 Button { apply(.undo) } label: { Image(systemName: "arrow.uturn.backward") }
                     .disabled(!model.state.canUndo).accessibilityLabel("編集を取り消す")
+                    .accessibilityIdentifier("undoPhotoEdit")
                 Button { apply(.redo) } label: { Image(systemName: "arrow.uturn.forward") }
                     .disabled(!model.state.canRedo).accessibilityLabel("編集をやり直す")
+                    .accessibilityIdentifier("redoPhotoEdit")
+                if !dynamicTypeSize.isAccessibilitySize {
+                    Button("開始時に戻す") { apply(.resetDraft) }.disabled(!model.state.canSave)
+                }
+            }
+            if dynamicTypeSize.isAccessibilitySize {
                 Button("開始時に戻す") { apply(.resetDraft) }.disabled(!model.state.canSave)
             }
         }.font(.title3)
@@ -156,6 +179,14 @@ private struct ImageCropSurface: View {
 }
 
 private extension View {
+    @ViewBuilder func scrolledForAccessibility(_ enabled: Bool) -> some View {
+        if enabled {
+            ScrollView { self }
+        } else {
+            self
+        }
+    }
+
     @ViewBuilder func navigationBarTitleDisplayModeIfAvailable() -> some View {
         #if os(iOS)
             navigationBarTitleDisplayMode(.inline)

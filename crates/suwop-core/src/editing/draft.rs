@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use super::{ImageTransform, PixelCrop, PixelSize};
+use super::{ColorAdjustments, ImageTransform, PixelCrop, PixelSize};
 
 const HISTORY_LIMIT: usize = 512;
 
@@ -11,6 +11,7 @@ pub enum EditCommandKind {
     MirrorHorizontal,
     MirrorVertical,
     Crop,
+    SetColor,
     Undo,
     Redo,
     ResetDraft,
@@ -20,6 +21,7 @@ pub enum EditCommandKind {
 pub struct EditCommand {
     pub kind: EditCommandKind,
     pub crop: Option<PixelCrop>,
+    pub color: Option<ColorAdjustments>,
 }
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -38,6 +40,7 @@ pub struct ImageEditState {
     pub can_undo: bool,
     pub can_redo: bool,
     pub can_save: bool,
+    pub color_controls: Vec<super::ColorControlSpec>,
 }
 impl ImageEditDraft {
     pub fn view(&self) -> Result<ImageEditState, String> {
@@ -49,6 +52,7 @@ impl ImageEditDraft {
             can_undo: self.cursor > 0,
             can_redo: self.cursor + 1 < self.history.len(),
             can_save: transform != self.initial,
+            color_controls: super::color::controls(),
         })
     }
     pub fn new(dimensions: PixelSize, initial: ImageTransform) -> Result<Self, String> {
@@ -86,7 +90,9 @@ impl ImageEditDraft {
     }
     pub fn apply(&self, command: EditCommand) -> Result<Self, String> {
         self.validate()?;
-        if (command.kind == EditCommandKind::Crop) != command.crop.is_some() {
+        if (command.kind == EditCommandKind::Crop) != command.crop.is_some()
+            || (command.kind == EditCommandKind::SetColor) != command.color.is_some()
+        {
             return Err("切り抜きの指定を確認できません。".into());
         }
         let mut next = self.clone();
@@ -118,10 +124,18 @@ impl ImageEditDraft {
                         command.crop.ok_or("切り抜く範囲を指定してください。")?,
                     )?,
                     EditCommandKind::ResetDraft => self.initial,
+                    EditCommandKind::SetColor => {
+                        let color = command.color.ok_or("明るさ・色を指定してください。")?;
+                        color.validate()?;
+                        ImageTransform { color, ..current }
+                    }
                     EditCommandKind::Undo | EditCommandKind::Redo => {
                         return Err("不正な編集です。".into());
                     }
                 };
+                if changed == current {
+                    return Ok(next);
+                }
                 next.history.truncate(next.cursor + 1);
                 if next.history.len() >= HISTORY_LIMIT {
                     return Err("編集回数の上限です。一度保存してください。".into());

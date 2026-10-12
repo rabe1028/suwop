@@ -537,6 +537,7 @@ async fn exercise_edited_preview(
         },
         clockwise_quarter_turns: 1,
         flip_horizontal: false,
+        color: suwop_core::editing::ColorAdjustments::default(),
     };
     let _: Value = session
         .json(

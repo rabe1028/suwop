@@ -217,6 +217,39 @@ public struct BrowserView: Codable, Sendable {
     }
 }
 
+public struct ColorAdjustments: Codable, Sendable {
+    public var brightness: Int64
+    public var contrast: Int64
+    public var exposure: Int64
+    public var filter: ImageColorFilter
+    public var saturation: Int64
+    public init(brightness: Int64, contrast: Int64, exposure: Int64, filter: ImageColorFilter, saturation: Int64) {
+        self.brightness = brightness
+        self.contrast = contrast
+        self.exposure = exposure
+        self.filter = filter
+        self.saturation = saturation
+    }
+}
+
+public enum ColorControlKind: String, Codable, CaseIterable, Sendable {
+    case `exposure`
+    case `brightness`
+    case `contrast`
+    case `saturation`
+}
+
+public struct ColorControlSpec: Codable, Sendable {
+    public var kind: ColorControlKind
+    public var maximum: Int64
+    public var minimum: Int64
+    public init(kind: ColorControlKind, maximum: Int64, minimum: Int64) {
+        self.kind = kind
+        self.maximum = maximum
+        self.minimum = minimum
+    }
+}
+
 public struct ConnectionSettings: Codable, Sendable {
     public var address: String
     public var allowHTTP: Bool
@@ -301,9 +334,11 @@ public struct CurrentImageRenderResult: Codable, Sendable {
 }
 
 public struct EditCommand: Codable, Sendable {
+    public var color: ColorAdjustments?
     public var crop: PixelCrop?
     public var kind: EditCommandKind
-    public init(crop: PixelCrop? = nil, kind: EditCommandKind) {
+    public init(color: ColorAdjustments? = nil, crop: PixelCrop? = nil, kind: EditCommandKind) {
+        self.color = color
         self.crop = crop
         self.kind = kind
     }
@@ -314,6 +349,7 @@ public enum EditCommandKind: String, Codable, CaseIterable, Sendable {
     case `mirrorHorizontal`
     case `mirrorVertical`
     case `crop`
+    case `setColor`
     case `undo`
     case `redo`
     case `resetDraft`
@@ -396,6 +432,13 @@ public struct HttpResponse: Codable, Sendable {
     }
 }
 
+public enum ImageColorFilter: String, Codable, CaseIterable, Sendable {
+    case `original`
+    case `mono`
+    case `noir`
+    case `sepia`
+}
+
 public struct ImageEditDraft: Codable, Sendable {
     public var cursor: Int64
     public var dimensions: PixelSize
@@ -430,13 +473,15 @@ public struct ImageEditState: Codable, Sendable {
     public var canRedo: Bool
     public var canSave: Bool
     public var canUndo: Bool
+    public var colorControls: [ColorControlSpec]
     public var draft: ImageEditDraft
     public var outputSize: PixelSize
     public var transform: ImageTransform
-    public init(canRedo: Bool, canSave: Bool, canUndo: Bool, draft: ImageEditDraft, outputSize: PixelSize, transform: ImageTransform) {
+    public init(canRedo: Bool, canSave: Bool, canUndo: Bool, colorControls: [ColorControlSpec] = [], draft: ImageEditDraft, outputSize: PixelSize, transform: ImageTransform) {
         self.canRedo = canRedo
         self.canSave = canSave
         self.canUndo = canUndo
+        self.colorControls = colorControls
         self.draft = draft
         self.outputSize = outputSize
         self.transform = transform
@@ -475,10 +520,12 @@ public struct ImageRenderPlan: Codable, Sendable {
 
 public struct ImageTransform: Codable, Sendable {
     public var clockwiseQuarterTurns: Int64
+    public var color: ColorAdjustments
     public var crop: PixelCrop
     public var flipHorizontal: Bool
-    public init(clockwiseQuarterTurns: Int64, crop: PixelCrop, flipHorizontal: Bool) {
+    public init(clockwiseQuarterTurns: Int64, color: ColorAdjustments, crop: PixelCrop, flipHorizontal: Bool) {
         self.clockwiseQuarterTurns = clockwiseQuarterTurns
+        self.color = color
         self.crop = crop
         self.flipHorizontal = flipHorizontal
     }
@@ -553,6 +600,21 @@ public struct MetadataTarget: Codable, Sendable {
         self.location = location
         self.locationsVary = locationsVary
         self.provider = provider
+    }
+}
+
+public struct NativeColorPlan: Codable, Sendable {
+    public var brightness: Double
+    public var contrast: Double
+    public var exposureEv: Double
+    public var filter: ImageColorFilter
+    public var saturation: Double
+    public init(brightness: Double, contrast: Double, exposureEv: Double, filter: ImageColorFilter, saturation: Double) {
+        self.brightness = brightness
+        self.contrast = contrast
+        self.exposureEv = exposureEv
+        self.filter = filter
+        self.saturation = saturation
     }
 }
 
