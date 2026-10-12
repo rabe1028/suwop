@@ -3,6 +3,17 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 mkdir -p Generated
+if [[ "${1:-}" == "--simulator" ]]; then
+    # VRT needs only the current Apple Silicon simulator slice; retain Cargo's build cache.
+    export SDKROOT
+    SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
+    rustup target add aarch64-apple-ios-sim
+    cargo build --locked -p suwop-ffi --target aarch64-apple-ios-sim
+    rm -rf Generated/RustCore.xcframework
+    xcodebuild -create-xcframework -library target/aarch64-apple-ios-sim/debug/libsuwop_ffi.a \
+        -headers Sources/CSuwop/include -output Generated/RustCore.xcframework
+    exit 0
+fi
 if [[ "${1:-}" == "--host" ]]; then
     export SDKROOT
     SDKROOT="$(xcrun --sdk macosx --show-sdk-path)"

@@ -4,7 +4,7 @@ ifeq ($(shell uname -s),Darwin)
 export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
 endif
 
-.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration
+.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record
 setup:
 	bash scripts/install-tools.sh
 	bash scripts/install-hooks.sh
@@ -22,7 +22,7 @@ lint-common:
 	bash scripts/check-generated.sh
 
 lint-swift:
-	env swiftformat App Sources Tests --lint --config .swiftformat
+	env swiftformat App Sources Tests VRT --lint --config .swiftformat
 	env swiftlint lint --strict --quiet
 
 lint: lint-common
@@ -32,7 +32,7 @@ format:
 	env cargo fmt --all
 	env ruff check --fix scripts
 	env ruff format scripts
-	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests --config .swiftformat; fi
+	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests VRT --config .swiftformat; fi
 
 test:
 	bash scripts/test-tools.sh
@@ -66,3 +66,12 @@ apple-build: apple-core
 
 integration:
 	bash scripts/immich-integration-test.sh
+
+setup-vrt:
+	bash scripts/install-simslim.sh
+
+vrt:
+	bash scripts/vrt.sh
+
+vrt-record:
+	bash scripts/vrt.sh --record

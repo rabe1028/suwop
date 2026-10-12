@@ -1,0 +1,100 @@
+import SuwopShell
+@testable import SuwopVRTHost
+import UIKit
+import XCTest
+
+@MainActor enum SnapshotFixtures {
+    static func model(populated: Bool = true) throws -> LibraryModel {
+        let assets = populated ? assets() : []
+        let album = StoredAlbum(
+            key: AlbumKey(provider: .apple, scope: "vrt", albumID: "summer"),
+            members: assets.map(\.key),
+            permissions: AlbumPermissions(add: true, delete: true, remove: true, rename: true),
+            title: "夏の思い出"
+        )
+        let state = SavedLibrary(
+            albums: populated ? [AlbumSnapshot(access: .full, albums: [album], provider: .apple, scope: "vrt")] : [],
+            appleScope: "vrt",
+            schemaVersion: 2,
+            snapshots: [LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full)]
+        )
+        let bridge = try CoreBridge()
+        let read = try XCTUnwrap(bridge.call(
+            0,
+            input: .object(["type": .string("initialize"), "scope": .string("vrt")])
+        ).decode([EffectRequest].self).first)
+        XCTAssertEqual(read.effect["Io"]?.type, "readState")
+        let persist = try XCTUnwrap(resolve(bridge, request: read, value: .from(state)).first)
+        XCTAssertEqual(persist.effect["Io"]?.type, "persist")
+        XCTAssertTrue(try resolve(bridge, request: persist, value: .null).isEmpty)
+        let scan = try XCTUnwrap(bridge.call(0, input: .object([
+            "type": .string("refresh"), "permission": .bool(false), "now": .number(1_751_846_400),
+        ])).decode([EffectRequest].self).first)
+        XCTAssertEqual(scan.effect["Io"]?.type, "appleScan")
+        let saved = try XCTUnwrap(resolve(
+            bridge,
+            request: scan,
+            value: .from(LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full))
+        ).first)
+        XCTAssertEqual(saved.effect["Io"]?.type, "persist")
+        XCTAssertTrue(try resolve(bridge, request: saved, value: .null).isEmpty)
+        let view = try bridge.call(2).decode(ViewModel.self)
+        XCTAssertNil(view.error)
+        XCTAssertEqual(view.photos.count, assets.count)
+        XCTAssertEqual(view.previewSources.count, assets.count)
+        let images = Dictionary(uniqueKeysWithValues: assets.enumerated().map { index, asset in
+            (asset.key, image(index: index))
+        })
+        return LibraryModel(snapshotView: view, images: images)
+    }
+
+    private static func resolve(
+        _ bridge: CoreBridge,
+        request: EffectRequest,
+        value: JSONValue
+    ) throws -> [EffectRequest] {
+        try bridge.call(1, input: .object([
+            "id": .number(Double(request.id)),
+            "response": .object(["value": value, "error": .null]),
+        ])).decode([EffectRequest].self)
+    }
+
+    private static func assets() -> [StoredAsset] {
+        let roles: [ResourceRole] = [.image, .video, .rawImage, .image, .image, .image]
+        return roles.enumerated().map { index, role in
+            StoredAsset(
+                key: AssetKey(provider: .apple, scope: "vrt", assetID: "photo-\(index)"),
+                name: index == 1 ? "海辺の動画.MOV" : "夏の写真-\(index).JPG",
+                capturedAt: Date(timeIntervalSince1970: 1_751_328_000 + Double(index) * 86400),
+                revision: "fixture-1",
+                resources: [
+                    PhotoResource(
+                        id: "original-\(index)",
+                        name: "original-\(index)",
+                        role: role,
+                        sha1: String(repeating: String(index), count: 40),
+                        bytes: 2_500_000
+                    ),
+                ],
+                isFavorite: index == 0,
+                latitude: index == 0 ? 35.681 : nil,
+                longitude: index == 0 ? 139.767 : nil
+            )
+        }
+    }
+
+    private static func image(index: Int) -> UIImage {
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 1
+        format.opaque = true
+        let colors: [UIColor] = [.systemTeal, .systemOrange, .systemIndigo, .systemGreen, .systemPink, .systemBlue]
+        return UIGraphicsImageRenderer(size: CGSize(width: 360, height: 360), format: format).image { context in
+            colors[index].setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 360, height: 360))
+            UIColor.white.withAlphaComponent(0.8).setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 200, y: 35, width: 90, height: 90))
+            UIColor.black.withAlphaComponent(0.3).setFill()
+            context.fill(CGRect(x: 0, y: 240, width: 360, height: 120))
+        }
+    }
+}

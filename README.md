@@ -40,6 +40,8 @@ make format            # Rust / Swift / Python の整形
 make check             # 厳格な Lint、生成物差分、Rust と実 FFI のテスト
 make apple-build       # universal Rust library、iOS Simulator / Mac のビルド
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
+make setup-vrt         # SHA-256 検証付き simslim 0.12.2 をローカルに導入
+make vrt               # 一台の軽量 Simulator で SwiftUI 11 画面の画素差分を比較
 ```
 
 空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
@@ -47,6 +49,9 @@ make integration       # 分離した Docker Immich v3.2.4 に対する実通信
 Rust 1.95.0、SwiftLint 0.65.1、SwiftFormat 0.63.1、Ruff 0.17.0、ShellCheck 0.11.0、actionlint 1.7.12 を固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。
+
+VRT は Apple Silicon / Xcode 26.4.1 / iOS 26.4.1 を固定し、専用 Simulator とビルド成果物を再利用します。
+実写真や通信を使わず、明暗・大きな文字も含めて表示を比較します。差分確認と明示的な基準画像更新は [VRT](docs/vrt.md) を参照してください。
 
 Docker テストは `suwop-rust-test` という専用プロジェクトと localhost:2289 を使い、終了時にそのコンテナと volume を削除します。実際のアップロード、日時・タイムゾーン・位置情報・お気に入りの反映、一覧、原本ダウンロード、スタック、XMP sidecar、ゴミ箱への移動を確認します。調査用に残す場合は `KEEP_IMMICH_TEST_ENV=1 make integration` を使います。プロジェクト名とポートは `IMMICH_TEST_PROJECT` / `IMMICH_TEST_PORT` で変更できます。
 

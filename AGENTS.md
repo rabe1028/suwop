@@ -15,3 +15,5 @@
   verification. Legacy or Copy receipts never authorize deletion. Persist the
   deletion phase before native deletion; uncertain deletion is never retried.
 - Report local checks, hosted CI and actual PhotoKit/device acceptance separately.
+- SwiftUI changes also require `make vrt` using the environment in `VRT/environment.json`.
+  Review visual differences before explicit `make vrt-record`; CI must never update baselines.

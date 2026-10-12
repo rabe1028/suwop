@@ -1,0 +1,6 @@
+{
+  "name": "suwop-vrt",
+  "description": "Deterministic SwiftUI snapshots without live PhotoKit or network I/O",
+  "except": [],
+  "keep": []
+}
