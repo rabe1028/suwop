@@ -355,6 +355,60 @@ fn restore_verifies_state_and_keeps_original_metadata() -> Result<(), String> {
 }
 
 #[test]
+fn refreshed_trash_removes_only_known_deleted_immich_copies_and_preserves_receipts()
+-> Result<(), String> {
+    const UNRELATED: &str = "44444444-4444-4444-8444-444444444444";
+    let mut before = state(false)?;
+    before.receipts.push(TransferReceipt {
+        id: "old-copy".into(),
+        created_at: 1.0,
+        phase: TransferPhase::Copied,
+        intent: TransferIntent::Copy,
+        source: before.snapshots[1].assets.clone(),
+        destination: before.snapshots[0].assets.clone(),
+        destination_provider: Provider::Apple,
+        destination_scope: "apple".into(),
+        signatures: BTreeSet::new(),
+    });
+    let mut other = native(false);
+    other["id"] = json!(UNRELATED);
+    other["checksum"] = json!("2".repeat(40));
+    before.snapshots[1]
+        .assets
+        .push(asset(&other)?.record("remote", None, None));
+    before.snapshots.push(LibrarySnapshot {
+        provider: Provider::Immich,
+        scope: "other-account".into(),
+        access: ScanAccess::Full,
+        assets: vec![asset(&native(false))?.record("other-account", None, None)],
+        scanned_at: Some(10.0),
+    });
+    let expected = serde_json::to_value(&before).map_err(|error| error.to_string())?;
+    let core = core(before);
+    let mut shell = Shell::new(true);
+    shell.run(
+        &core,
+        Event::RefreshTrash {
+            now: 1_800_000_000.0,
+        },
+    )?;
+    let view = core.view();
+    assert_eq!(view.error, None);
+    let actual = serde_json::to_value(&view.state).map_err(|error| error.to_string())?;
+    assert_eq!(actual["snapshots"][0], expected["snapshots"][0]);
+    assert_eq!(actual["snapshots"][2], expected["snapshots"][2]);
+    assert_eq!(actual["receipts"], expected["receipts"]);
+    assert_eq!(view.state.snapshots[1].assets.len(), 1);
+    assert_eq!(view.state.snapshots[1].assets[0].key.asset_id, UNRELATED);
+    assert!(view.state.trash.as_ref().ok_or("missing trash")?.verified);
+    assert_eq!(shell.writes, 0);
+    let saved = shell.journal.ok_or("missing saved state")?;
+    assert_eq!(saved.snapshots[1].assets.len(), 1);
+    assert_eq!(saved.snapshots[1].assets[0].key.asset_id, UNRELATED);
+    Ok(())
+}
+
+#[test]
 fn cancelled_foreign_changed_and_disabled_trash_never_write() -> Result<(), String> {
     for mode in 0..7 {
         let core = core(state(false)?);

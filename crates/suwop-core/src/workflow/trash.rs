@@ -15,6 +15,14 @@ impl Runtime<'_> {
         self.ensure_session().await?;
         let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
         let items = session.list_trash(self.ctx, now).await?;
+        let deleted: BTreeSet<_> = items.iter().map(|item| &item.identity.key).collect();
+        for snapshot in &mut self.state.snapshots {
+            if snapshot.provider == Provider::Immich && snapshot.scope == session.scope {
+                snapshot
+                    .assets
+                    .retain(|asset| !deleted.contains(&asset.key));
+            }
+        }
         self.state.trash = Some(TrashSnapshot {
             scope: session.scope.clone(),
             items,
