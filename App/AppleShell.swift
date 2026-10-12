@@ -10,6 +10,7 @@ import SuwopShell
     private let playback = SystemPlayback()
     private let imageEditing = SystemImageEditing()
     private let photoEditing = ApplePhotoEditing()
+    private let confirmation = SystemConfirmation()
     init() throws {
         root = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -36,6 +37,9 @@ import SuwopShell
             let milliseconds = try data["milliseconds"].decode(UInt32.self)
             try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
             return .null
+        }
+        if operation.type == "confirmUploadResume" {
+            return try await .from(confirmation.resumeUpload(data["prompt"].decode(UploadResumePrompt.self)))
         }
         return try await dispatch(operation, data: data)
     }

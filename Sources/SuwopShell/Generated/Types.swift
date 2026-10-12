@@ -482,6 +482,23 @@ public struct MetadataTarget: Codable, Sendable {
     }
 }
 
+public struct PendingUpload: Codable, Sendable {
+    public var key: AssetKey
+    public var liveId: String?
+    public var phase: UploadPhase
+    public var resource: PhotoResource
+    public var signature: FileSignature
+    public var source: StoredAsset
+    public init(key: AssetKey, liveId: String? = nil, phase: UploadPhase, resource: PhotoResource, signature: FileSignature, source: StoredAsset) {
+        self.key = key
+        self.liveId = liveId
+        self.phase = phase
+        self.resource = resource
+        self.signature = signature
+        self.source = source
+    }
+}
+
 public enum PhotoFilter: String, Codable, CaseIterable, Sendable {
     case `all`
     case `favorites`
@@ -599,13 +616,15 @@ public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var appleScope: String
     public var connection: ConnectionSettings?
+    public var pendingUploads: [PendingUpload]
     public var receipts: [TransferReceipt]
     public var schemaVersion: Int64
     public var snapshots: [LibrarySnapshot]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
+        self.pendingUploads = pendingUploads
         self.receipts = receipts
         self.schemaVersion = schemaVersion
         self.snapshots = snapshots
@@ -742,6 +761,22 @@ public struct UploadPart: Codable, Sendable {
         self.field = field
         self.filename = filename
         self.path = path
+    }
+}
+
+public enum UploadPhase: String, Codable, CaseIterable, Sendable {
+    case `metadataPending`
+    case `metadataStarted`
+}
+
+public struct UploadResumePrompt: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public var source: StoredAsset
+    public init(key: AssetKey, name: String, source: StoredAsset) {
+        self.key = key
+        self.name = name
+        self.source = source
     }
 }
 

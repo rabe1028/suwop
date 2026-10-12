@@ -31,6 +31,8 @@ pub struct SavedLibrary {
     pub receipts: Vec<TransferReceipt>,
     #[serde(default)]
     pub albums: Vec<crate::albums::AlbumSnapshot>,
+    #[serde(default)]
+    pub pending_uploads: Vec<crate::immich::PendingUpload>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -39,6 +41,9 @@ pub enum ShellOperation {
     ReadState,
     Wait {
         milliseconds: u32,
+    },
+    ConfirmUploadResume {
+        prompt: crate::immich::UploadResumePrompt,
     },
     Persist(SavedLibrary),
     ReadCredential {

@@ -15,6 +15,7 @@ mod favorites;
 mod media;
 mod metadata;
 mod sharing;
+mod uploads;
 
 #[derive(Debug)]
 pub struct Outcome {
@@ -545,7 +546,7 @@ impl Runtime<'_> {
         Ok(bundle)
     }
     async fn import(
-        &self,
+        &mut self,
         bundle: &TransferBundle,
         provider: Provider,
         now: f64,
@@ -557,7 +558,7 @@ impl Runtime<'_> {
             )
             .await;
         }
-        let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
+        let session = self.session.clone().ok_or("Immich に接続してください。")?;
         let mut seen = BTreeSet::new();
         let files: Vec<_> = bundle
             .files
@@ -580,7 +581,10 @@ impl Runtime<'_> {
             return Err("複数の Live Photo を一つの転送として扱えません。".into());
         }
         let live_id = match live.first() {
-            Some(file) => Some(session.upload(self.ctx, file, metadata, now, None).await?),
+            Some(file) => Some(
+                self.upload_file(&session, file, metadata, now, None)
+                    .await?,
+            ),
             None => None,
         };
         let mut keys = BTreeSet::new();
@@ -593,8 +597,8 @@ impl Runtime<'_> {
             } else {
                 None
             };
-            let id = session
-                .upload(self.ctx, file, metadata, now, attach)
+            let id = self
+                .upload_file(&session, file, metadata, now, attach)
                 .await?;
             if attach.is_some()
                 && session

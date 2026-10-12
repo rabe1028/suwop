@@ -233,6 +233,7 @@ fn an_unknown_library_date_does_not_invent_an_exif_adjustment() -> Result<(), St
         3,
         vec![
             response(201, json!({"id":ID,"status":"created"})),
+            extracted_date(Some("2020-01-01T00:00:00Z")),
             response(200, Value::Null),
         ],
     )?;
@@ -242,7 +243,7 @@ fn an_unknown_library_date_does_not_invent_an_exif_adjustment() -> Result<(), St
         "2024-11-03T06:36:40Z"
     );
     assert!(
-        run.requests[1]
+        run.requests[2]
             .body
             .as_ref()
             .ok_or("missing metadata update")?

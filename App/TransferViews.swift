@@ -209,7 +209,7 @@ struct TransfersView: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                         if receipt.phase == .copying {
-                            Text("転送・検証が未完了です。元データは自動削除しません。両方を更新して、保存済みファイルを確認してください。")
+                            Text("転送・検証が未完了です。元データは自動削除しません。両方を更新して、保存済みファイルを確認してください。同じコピー操作を選ぶと続行できるか確認します。")
                                 .font(.caption).foregroundStyle(.orange)
                         }
                     }

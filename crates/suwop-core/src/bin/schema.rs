@@ -30,6 +30,7 @@ struct Protocol {
     apple_edit_result: suwop_core::editing::AppleEditResult,
     image_edit_presentation: suwop_core::editing::ImageEditPresentation,
     image_render_plan: suwop_core::editing::ImageRenderPlan,
+    upload_resume_prompt: suwop_core::immich::UploadResumePrompt,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);
