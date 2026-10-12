@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 mod apple;
 mod draft;
 mod remote;
+mod reversion;
 mod targets;
 mod verification;
 pub use apple::{
@@ -15,7 +16,8 @@ pub use apple::{
 };
 pub use draft::{EditCommand, EditCommandKind, ImageEditDraft, ImageEditState};
 pub use remote::read_immich_transform;
-pub use targets::{EditingTarget, targets};
+pub use reversion::{AppleReversionFacts, ReversionPrompt, verify_reversion_input};
+pub use targets::{EditingAccess, EditingTarget, targets};
 pub use verification::verify_edited_originals;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]

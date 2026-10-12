@@ -52,6 +52,18 @@ import SuwopShell
         )
     }
 
+    func revertImage(_ prompt: ReversionPrompt) async throws -> Bool {
+        try await confirm(
+            title: "この保存先の写真を原本へ戻しますか？",
+            message: """
+            \(prompt.key.provider.title) · \(prompt.name)
+            この写真に保存されたすべての画像編集を破棄します。他のアプリで行った編集も含みます。
+            日時・位置情報・お気に入りは保持します。iCloud 写真が有効なら他の端末にも反映されます。
+            """,
+            action: "原本へ戻す"
+        )
+    }
+
     private func confirm(title: String, message: String, action: String) async throws -> Bool {
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()

@@ -11,6 +11,7 @@ import SuwopShell
     private let imageEditing = SystemImageEditing()
     private let photoEditing = ApplePhotoEditing()
     private let confirmation = SystemConfirmation()
+    private let photoReversion = ApplePhotoReversion()
     init() throws {
         root = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -85,7 +86,8 @@ import SuwopShell
                 "path"
             ))))
         case "http": return try await .from(http.execute(data.decode(HttpRequest.self)))
-        case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage":
+        case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage",
+             "appleReversionInspect", "appleRevert", "confirmReversion":
             return try await editingEffect(operation.type, data: data)
         default: throw SuwopError("未知の入出力要求です: \(operation.type)")
         }
@@ -109,6 +111,12 @@ import SuwopShell
             return .null
         case "editImage":
             return try await .from(imageEditing.present(data["presentation"].decode(ImageEditPresentation.self)))
+        case "appleReversionInspect":
+            return try .from(photoReversion.inspect(data["asset"].decode(StoredAsset.self)))
+        case "appleRevert":
+            return try await .from(photoReversion.revert(data["asset"].decode(StoredAsset.self)))
+        case "confirmReversion":
+            return try await .from(confirmation.revertImage(data["prompt"].decode(ReversionPrompt.self)))
         default: throw SuwopError("未知の写真編集入出力です。")
         }
     }

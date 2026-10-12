@@ -167,6 +167,12 @@ import SwiftUI
         } catch { errorMessage = error.localizedDescription }
     }
 
+    func revertImage(_ target: EditingTarget) {
+        do {
+            try send(["type": .string("revertImage"), "key": .from(target.key), "id": .string(UUID().uuidString)])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
         do {
             try send([
