@@ -19,14 +19,14 @@
 | 保存先確認・照合・Copy / Move | Rust / FFI / Immich テスト、PR #2 CI | 実 PhotoKit の RAW / Live / 編集済み / iCloud / バースト / 限定権限 |
 | 場所、人物、分類、思い出、重複整理 | 未実装 | 検索・分類の実結果。公開 API で扱えない Photos 専用機能は差分と代替を明記 |
 | 権限変更、通信断、再開、性能、アクセシビリティ | 一部の core / cancellation テスト | 拒否 / 限定 / フル、VoiceOver / 大文字、端末と大量写真、断線・再起動 |
-| 表示の退行検出 | simslim の専用 Simulator と実 Rust ABI の固定データで SwiftUI 14 画面を VRT 比較。明暗・大文字・選択・ビューア・情報・アルバム・設定・転送画面を確認し、一画素の故意の変更で失敗検出を確認 | [固定環境での VRT](vrt.md) を維持。iPad / Mac、編集・動画・Live の画面と操作、実写真・VoiceOver は別途確認 |
+| 表示の退行検出 | simslim の専用 Simulator と実 Rust ABI の固定データで SwiftUI 18 画面を VRT 比較。明暗・大文字・選択・ビューア・情報・アルバム・設定・転送画面を確認し、一画素の故意の変更で失敗検出を確認 | [固定環境での VRT](vrt.md) を維持。iPad / Mac、編集・動画・Live の画面と操作、実写真・VoiceOver は別途確認 |
 | 署名・配布、iCloud 同期 | 未確認 | 実機のインストール、同じ Apple account の native 保存結果 |
 
 各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。
 
-## 現在の段階と残操作（2026-10-12 再監査）
+## 現在の段階と残操作（2026-10-13 再監査）
 
-main は `dc81e958225ac4da62b6dbb1216dec6aba56649b`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開・静止画の原本への復元・Appleの現在の画像共有がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+この色編集の作業を開始した main は `133e7cca6003c01914637c0357f2059cd2c383c5`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開・原本への復元・現在の静止画共有・Immichのゴミ箱と復元・14画面VRTがマージ済み。[マージ後CI](https://github.com/rabe1028/suwop/actions/runs/38305687592)の4 jobは通過。端末操作・PhotoKit保存・iCloudの未検証項目は表に残す。
 
 | 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
 | --- | --- | --- |
@@ -34,7 +34,7 @@ main は `dc81e958225ac4da62b6dbb1216dec6aba56649b`。閲覧・検索・お気�
 | Apple静止画の原本へ戻す | PR #12 の最終HEAD `dc8eb58` とマージ後main CIは全3 job通過。Rust 154／Swift 38 testsとApple build通過 | 実PhotoKitの保存→復元→再起動と競合確認 |
 | 編集後の共有、取り込み、複製 | PR #13 / #14 で、選んだAppleの現在の静止画と、Immichの検証済み原本・対応する幾何編集系列からの現在のPNG共有をマージ済み。動画／Liveの現在の内容、複数選択、外部ファイル取り込み・複製は継続。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
 | 通常の削除、非表示／再表示、復元 | Immich の独立した `RefreshTrash` / `ChangeTrash` / `ResolveTrash`、確認後の保持設定・対象再検証、送信前の記録、結果不明の書込停止を実装。同じ原本のAppleコピーからの転送も送信前に止める。AppleTrashは現在Moveの完了からだけ要求する。非表示は未実装 | 最終HEADの実API CIとnative操作。Apple側の通常削除・復元案内の判断、非表示・再表示、一括選択と現在の権限・ID確認、両保存先の状態との一致 |
-| 明るさ・色・フィルターと編集のコピー／貼り付け | 現行Rust編集モデルは整数の切り抜き・向きが中心。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Rustに編集操作・履歴・保存検証を追加し、native画素／形式／メモリと保存・取り消し・元へ戻すを確認 |
+| 明るさ・色・フィルターと編集のコピー／貼り付け | Apple静止画の露出・明るさ・コントラスト・彩度、3フィルターをRustの履歴・保存モデルに追加。[色編集](color-editing.md)。編集のコピー／貼り付け、16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Native画素・色空間・保存・取り消し・元へ戻すの検証。実PhotoKit保存と再起動、最終HEAD CI |
 | 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
 
 操作差分は検証環境と同じiOS 26の公式ガイドで再確認した。[編集と複数写真への編集のコピー](https://support.apple.com/guide/iphone/edit-photos-and-videos-iphb08064d57/26/ios/26)、[削除・非表示・復元](https://support.apple.com/guide/iphone/delete-or-hide-photos-and-videos-iphb4defbde9/26/ios/26)、[アルバムの並びとフォルダー](https://support.apple.com/guide/iphone/create-and-work-with-photo-albums-iphc0fc668ab/26/ios/26)を到達条件に含める。日常操作の残りと、実機／iCloud／音声／性能／VoiceOver／署名・配布の検証を、現在のテスト通過で完了に置き換えない。

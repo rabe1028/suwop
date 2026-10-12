@@ -69,6 +69,7 @@ fn rotate() -> EditCommand {
     EditCommand {
         kind: EditCommandKind::RotateClockwise,
         crop: None,
+        color: None,
     }
 }
 
@@ -93,7 +94,7 @@ fn only_known_original_adjustments_can_be_rendered_from_originals() -> Result<()
         ("another.app", "1", payload.data.clone()),
         (
             payload.format_identifier.as_str(),
-            "2",
+            "3",
             payload.data.clone(),
         ),
         (
@@ -143,6 +144,7 @@ fn native_edit_preserves_orientation_and_existing_geometry_and_uses_supported_de
         },
         clockwise_quarter_turns: 1,
         flip_horizontal: true,
+        color: suwop_core::editing::ColorAdjustments::default(),
     };
     let adjustment = GeometryAdjustment {
         dimensions: SIZE,

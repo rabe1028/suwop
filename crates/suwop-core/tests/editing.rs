@@ -12,7 +12,11 @@ const ID: &str = "11111111-1111-4111-8111-111111111111";
 const EDIT1: &str = "22222222-2222-4222-8222-222222222222";
 const EDIT2: &str = "33333333-3333-4333-8333-333333333333";
 fn command(kind: EditCommandKind) -> EditCommand {
-    EditCommand { kind, crop: None }
+    EditCommand {
+        kind,
+        crop: None,
+        color: None,
+    }
 }
 fn crop(x: u32, y: u32, width: u32, height: u32) -> PixelCrop {
     PixelCrop {
@@ -41,6 +45,7 @@ fn crop_windows_map_back_to_the_original_in_all_eight_orientations() -> Result<(
             crop: PixelCrop::full(SIZE),
             clockwise_quarter_turns: u8::try_from(index % 4).map_err(|e| e.to_string())?,
             flip_horizontal: index >= 4,
+            color: suwop_core::editing::ColorAdjustments::default(),
         };
         let changed = transform.crop_output(SIZE, crop(0, 1, 2, 1))?;
         assert_eq!(changed.crop, expected);
@@ -263,7 +268,8 @@ fn malformed_history_or_commands_cannot_modify_a_valid_draft() -> Result<(), Str
         draft
             .apply(EditCommand {
                 kind: EditCommandKind::RotateClockwise,
-                crop: Some(crop(0, 0, 1, 1))
+                crop: Some(crop(0, 0, 1, 1)),
+                color: None,
             })
             .is_err()
     );

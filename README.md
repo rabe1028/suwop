@@ -41,7 +41,7 @@ make check             # 厳格な Lint、生成物差分、Rust と実 FFI の�
 make apple-build       # universal Rust library、iOS Simulator / Mac のビルド
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
 make setup-vrt         # SHA-256 検証付き simslim 0.12.2 をローカルに導入
-make vrt               # 一台の軽量 Simulator で SwiftUI 14 画面の画素差分を比較
+make vrt               # 一台の軽量 Simulator で SwiftUI 18 画面の画素差分を比較
 ```
 
 空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。

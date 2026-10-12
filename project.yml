@@ -96,6 +96,18 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt.tests
         SWIFT_OPTIMIZATION_LEVEL: '-O'
+  SuwopVRTUI:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [VRT/UITests]
+    dependencies:
+      - target: SuwopVRTHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt.ui
+        TEST_TARGET_NAME: SuwopVRTHost
 schemes:
   SuwopiOS:
     build:
@@ -110,9 +122,10 @@ schemes:
       targets:
         SuwopVRTHost: all
         SuwopVRT: [test]
+        SuwopVRTUI: [test]
     test:
       gatherCoverageData: false
-      targets: [SuwopVRT]
+      targets: [SuwopVRT, SuwopVRTUI]
       environmentVariables:
         SUWOP_VRT_RECORD: '$(SUWOP_VRT_RECORD)'
         SUWOP_VRT_BASELINES: '$(SUWOP_VRT_BASELINES)'

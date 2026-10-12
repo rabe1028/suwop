@@ -5,6 +5,7 @@ included:
   - Tests/SuwopShellTests
   - VRT/Host
   - VRT/Tests
+  - VRT/UITests
 excluded:
   - Sources/SuwopShell/Generated
 opt_in_rules:

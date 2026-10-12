@@ -9,6 +9,9 @@ import SwiftUI
     @Published private(set) var isRendering = false
     @Published private(set) var previewReady = false
     @Published var error: String?
+    @Published private(set) var hasUncommittedColor = false
+    private var pendingColorInputs: Set<String> = []
+    private var closed = false
     private var work: Task<Void, Never>?
 
     init(_ presentation: ImageEditPresentation) throws {
@@ -17,18 +20,18 @@ import SwiftUI
             .decode(ImageEditState.self)
     }
 
-    func apply(_ kind: EditCommandKind, crop: PixelCrop? = nil) {
-        guard !isRendering else { return }
+    func apply(_ kind: EditCommandKind, crop: PixelCrop? = nil, color: ColorAdjustments? = nil) {
+        guard !closed, !isRendering else { return }
         do {
             state = try CoreBridge.utility(8, input: .from(EditDraftRequest(
-                command: EditCommand(crop: crop, kind: kind), draft: state.draft
+                command: EditCommand(color: color, crop: crop, kind: kind), draft: state.draft
             ))).decode(ImageEditState.self)
             render()
         } catch { self.error = error.localizedDescription }
     }
 
     func render() {
-        guard !isRendering else { return }
+        guard !closed, !isRendering else { return }
         isRendering = true
         previewReady = false
         let path = presentation.path, dimensions = state.draft.dimensions
@@ -58,11 +61,23 @@ import SwiftUI
         }
     }
 
+    func colorInput(_ control: ColorControlKind, pending: Bool) {
+        if pending {
+            pendingColorInputs.insert(control.rawValue)
+        } else {
+            pendingColorInputs.remove(control.rawValue)
+        }
+        hasUncommittedColor = !pendingColorInputs.isEmpty
+    }
+
     func stop() async {
+        closed = true
         work?.cancel()
         await work?.value
         work = nil
         image = nil
         previewReady = false
+        pendingColorInputs.removeAll()
+        hasUncommittedColor = false
     }
 }

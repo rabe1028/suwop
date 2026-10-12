@@ -13,6 +13,27 @@ use suwop_core::{
 };
 
 const ID: &str = "11111111-1111-4111-8111-111111111111";
+fn changed_draft(
+    draft: &suwop_core::editing::ImageEditDraft,
+) -> Result<suwop_core::editing::ImageEditDraft, String> {
+    draft
+        .apply(EditCommand {
+            kind: EditCommandKind::RotateClockwise,
+            crop: None,
+            color: None,
+        })?
+        .apply(EditCommand {
+            kind: EditCommandKind::SetColor,
+            crop: None,
+            color: Some(suwop_core::editing::ColorAdjustments {
+                brightness: 10,
+                saturation: -25,
+                filter: suwop_core::editing::ImageColorFilter::Sepia,
+                ..suwop_core::editing::ColorAdjustments::default()
+            }),
+        })
+}
+
 fn asset() -> StoredAsset {
     StoredAsset {
         key: AssetKey {
@@ -164,10 +185,7 @@ impl Native {
                 if matches!(self.fault, Fault::Cancel) {
                     return Ok(Value::Null);
                 }
-                let mut draft = presentation.draft.apply(EditCommand {
-                    kind: EditCommandKind::RotateClockwise,
-                    crop: None,
-                })?;
+                let mut draft = changed_draft(&presentation.draft)?;
                 if matches!(self.fault, Fault::BadDraft) {
                     draft.dimensions.width += 1;
                 }
@@ -185,7 +203,7 @@ impl Native {
                     return Err("lost save response".into());
                 }
                 if matches!(self.fault, Fault::WrongAdjustment) {
-                    adjustment.format_version = "2".into();
+                    adjustment.format_version = "3".into();
                 }
                 let mut image = Self::facts();
                 image.raw_dimensions = plan.transform.output_size(plan.dimensions)?;

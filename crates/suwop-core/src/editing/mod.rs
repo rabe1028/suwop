@@ -1,9 +1,10 @@
-//! Integer geometry in the EXIF-oriented original image, shared by native and
-//! remote renderers. Cropping always precedes the canonical orientation.
+//! Integer geometry and SDR color controls in the EXIF-oriented original image.
+//! Cropping precedes the canonical orientation; color rendering follows it.
 
 use serde::{Deserialize, Serialize};
 
 mod apple;
+mod color;
 mod draft;
 mod remote;
 mod reversion;
@@ -13,6 +14,9 @@ pub use apple::{
     AdjustmentBase, AppleAdjustment, AppleEditInput, GeometryAdjustment, ImageEditPresentation,
     ImageEncodingFacts, ImageRenderPlan, RenderFormat, decode_original_adjustment,
     prepare_apple_edit, verify_edit_source,
+};
+pub use color::{
+    ColorAdjustments, ColorControlKind, ColorControlSpec, ImageColorFilter, NativeColorPlan,
 };
 pub use draft::{EditCommand, EditCommandKind, ImageEditDraft, ImageEditState};
 pub use remote::read_immich_transform;
@@ -106,6 +110,8 @@ pub struct ImageTransform {
     pub crop: PixelCrop,
     pub clockwise_quarter_turns: u8,
     pub flip_horizontal: bool,
+    #[serde(default)]
+    pub color: ColorAdjustments,
 }
 impl ImageTransform {
     pub fn original(size: PixelSize) -> Result<Self, String> {
@@ -114,9 +120,11 @@ impl ImageTransform {
             crop: PixelCrop::full(size),
             clockwise_quarter_turns: 0,
             flip_horizontal: false,
+            color: ColorAdjustments::default(),
         })
     }
     pub fn validate(self, size: PixelSize) -> Result<(), String> {
+        self.color.validate()?;
         self.crop.validate(size)?;
         if self.clockwise_quarter_turns > 3 {
             return Err("回転は90度単位で指定してください。".into());
@@ -199,6 +207,9 @@ impl ImageTransform {
     /// result means original geometry; removal uses a separate explicit flow.
     pub fn immich_actions(self, size: PixelSize) -> Result<Vec<serde_json::Value>, String> {
         self.validate(size)?;
+        if self.color != ColorAdjustments::default() {
+            return Err("Immichへの明るさ・色・フィルターの保存には未対応です。".into());
+        }
         let mut actions = Vec::new();
         if self.crop != PixelCrop::full(size) {
             actions.push(serde_json::json!({"action":"crop","parameters":self.crop}));

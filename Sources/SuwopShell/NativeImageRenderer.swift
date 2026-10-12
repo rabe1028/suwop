@@ -137,7 +137,7 @@
             if transform.flipHorizontal {
                 image = normalized(image.transformed(by: CGAffineTransform(scaleX: -1, y: 1)))
             }
-            return (image, colorSpace)
+            return try (NativeColorRenderer.apply(image, color: transform.color), colorSpace)
         }
 
         private static func normalized(_ image: CIImage) -> CIImage {

@@ -109,6 +109,7 @@ private func editingPresentation(_ abi: EditingABI) throws -> (EffectRequest, Im
     let size = PixelSize(height: 4, width: 6)
     let initial = ImageTransform(
         clockwiseQuarterTurns: 1,
+        color: ColorAdjustments(brightness: 0, contrast: 0, exposure: 0, filter: .original, saturation: 0),
         crop: PixelCrop(height: 2, width: 4, x: 1, y: 1),
         flipHorizontal: true
     )
@@ -145,15 +146,21 @@ private func editingPresentation(_ abi: EditingABI) throws -> (EffectRequest, Im
     #expect(view.state.snapshots.first?.assets.first?.revision == "before")
 }
 
-@Test func verifiedGeometrySaveReadsBackOriginalsAndAdjustmentAcrossABI() throws {
+@Test func verifiedGeometryAndColorSaveReadsBackOriginalsAndAdjustmentAcrossABI() throws {
     let abi = try EditingABI()
     let (editor, presentation) = try editingPresentation(abi)
-    let edited = try CoreBridge.utility(8, input: .from(EditDraftRequest(
+    let rotated = try CoreBridge.utility(8, input: .from(EditDraftRequest(
         command: EditCommand(kind: .rotateClockwise), draft: presentation.draft
+    ))).decode(ImageEditState.self)
+    let color = ColorAdjustments(brightness: 10, contrast: 5, exposure: -50, filter: .sepia, saturation: -25)
+    let edited = try CoreBridge.utility(8, input: .from(EditDraftRequest(
+        command: EditCommand(color: color, kind: .setColor), draft: rotated.draft
     ))).decode(ImageEditState.self)
     let save = try abi.next(editor, value: .from(edited.draft), type: "appleEditSave")
     let plan = try #require(save.effect["Io"]?.data?["plan"]).decode(ImageRenderPlan.self)
     #expect(plan.orientation == 6 && plan.dimensions.width == 6 && plan.dimensions.height == 4)
+    #expect(plan.transform.color.filter == .sepia && plan.transform.color.exposure == -50)
+    #expect(plan.adjustment.formatVersion == "2")
     #expect(try CoreBridge.utility(9, input: .from(plan.adjustment)).decode(Bool.self))
     var fresh = editingAsset()
     fresh.revision = "edited"
