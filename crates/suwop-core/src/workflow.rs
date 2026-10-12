@@ -15,6 +15,8 @@ mod favorites;
 mod media;
 mod metadata;
 mod sharing;
+mod upload_intents;
+mod uploads;
 
 #[derive(Debug)]
 pub struct Outcome {
@@ -163,6 +165,10 @@ impl Runtime<'_> {
                 Ok("接続を解除しました。転送履歴は保持しています。".into())
             }
             Event::Index { id } => self.index(&id).await,
+            Event::ForgetUploadRecord { key } => self.forget_upload_record(&key).await,
+            Event::ForgetUploadIntent { scope, token } => {
+                self.forget_upload_intent(&scope, &token).await
+            }
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,
@@ -545,7 +551,7 @@ impl Runtime<'_> {
         Ok(bundle)
     }
     async fn import(
-        &self,
+        &mut self,
         bundle: &TransferBundle,
         provider: Provider,
         now: f64,
@@ -557,7 +563,7 @@ impl Runtime<'_> {
             )
             .await;
         }
-        let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
+        let session = self.session.clone().ok_or("Immich に接続してください。")?;
         let mut seen = BTreeSet::new();
         let files: Vec<_> = bundle
             .files
@@ -580,7 +586,10 @@ impl Runtime<'_> {
             return Err("複数の Live Photo を一つの転送として扱えません。".into());
         }
         let live_id = match live.first() {
-            Some(file) => Some(session.upload(self.ctx, file, metadata, now, None).await?),
+            Some(file) => Some(
+                self.upload_file(&session, file, metadata, now, None)
+                    .await?,
+            ),
             None => None,
         };
         let mut keys = BTreeSet::new();
@@ -593,8 +602,8 @@ impl Runtime<'_> {
             } else {
                 None
             };
-            let id = session
-                .upload(self.ctx, file, metadata, now, attach)
+            let id = self
+                .upload_file(&session, file, metadata, now, attach)
                 .await?;
             if attach.is_some()
                 && session

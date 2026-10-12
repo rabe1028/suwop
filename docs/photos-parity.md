@@ -21,7 +21,23 @@
 | 権限変更、通信断、再開、性能、アクセシビリティ | 一部の core / cancellation テスト | 拒否 / 限定 / フル、VoiceOver / 大文字、端末と大量写真、断線・再起動 |
 | 署名・配布、iCloud 同期 | 未確認 | 実機のインストール、同じ Apple account の native 保存結果 |
 
-各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。次にアルバム・共有・編集・ゴミ箱と動画再生を広げる。
+各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。
+
+## 現在の段階と残操作（2026-10-12 再監査）
+
+main は `97df205e6dd47464b9126d2cce060b7bbc2e8db9`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+
+| 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
+| --- | --- | --- |
+| 日時を保った新規コピーと中断後の再開 | PR #11 の既存HEAD `75779a2` は全3 CI job通過。POST前の開始記録・固有ID照合・開始記録解除は作業ツリーに追加し、差分を保存。追加版は未push／未merge | 最終作業ツリーの全gate、最終HEADの実Immich／Apple CI、確認画面と中断・再起動のnative操作 |
+| Apple静止画の原本へ戻す | `codex/revert-original` の `47a23d7` に実装済み。ローカルcheckとAppleコンポーネントの証拠はそのブランチの履歴に記録。現在の開始記録追加版はまだ継承していない | PR #11マージ後のrebase、生成DTO・全gate・最終HEAD CI、実PhotoKitの保存→復元→再起動と競合確認 |
+| 編集後の共有、取り込み、複製 | ユーザー向けの編集後共有・外部ファイル取り込み・複製イベントは未実装。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
+| 通常の削除、非表示／再表示、復元 | 公開Eventには独立したTrash／Hide／Recoverがない。AppleTrashは現在Moveの完了からだけ要求する | 一括選択と現在の権限・ID確認、明示確認と結果不明の扱い、両保存先の状態・nativeゴミ箱／非表示との一致。公開PhotoKit APIの制約も実装前に検証 |
+| 明るさ・色・フィルターと編集のコピー／貼り付け | 現行Rust編集モデルは整数の切り抜き・向きが中心。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Rustに編集操作・履歴・保存検証を追加し、native画素／形式／メモリと保存・取り消し・元へ戻すを確認 |
+| 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
+
+操作差分は検証環境と同じiOS 26の公式ガイドで再確認した。[編集と複数写真への編集のコピー](https://support.apple.com/guide/iphone/edit-photos-and-videos-iphb08064d57/26/ios/26)、[削除・非表示・復元](https://support.apple.com/guide/iphone/delete-or-hide-photos-and-videos-iphb4defbde9/26/ios/26)、[アルバムの並びとフォルダー](https://support.apple.com/guide/iphone/create-and-work-with-photo-albums-iphc0fc668ab/26/ios/26)を到達条件に含める。日常操作の残りと、実機／iCloud／音声／性能／VoiceOver／署名・配布の検証を、現在のテスト通過で完了に置き換えない。
+
 
 ## 閲覧・お気に入りの検証（2026-10-12）
 
@@ -128,3 +144,39 @@
 - 保存先切替のnative画面、実サーバーの編集直後の待機表示、キャッシュの実操作・性能・VoiceOverは別の確認対象。Macのロックによりnative操作は未完了。Immich編集の書込みUIはまだ公開していない。
 - 初回 HEAD `f97d8be50e1f2e3fc37c79342f776e679eeb855e` の [CI](https://github.com/rabe1028/suwop/actions/runs/38186039904) で core と実Immich v3.2.4の編集済みプレビュー検証が通過。レビューで、選択したコピーの削除後も別のコピーが残る場合の閲覧と、日付検索・並べ替え・日／月／年のグリッドが表示元の撮影日を使う処理を修正した。日付不明を別コピーの値で補わない。Swiftの表示カーソルはRustから受け取ったグループのキーだけを保持し、照合や表示元の選択は行わない。
 - レビュー修正後の `make check` は Rust 114 tests / Swift 32 tests と全品質gateを通過。どちらのコピーを除いても生存するコピーを表示すること、グループの分割・統合、別写真・別accountへ戻らないこと、表示元による日付検索・新しい順／古い順・日付不明・アクセス不可の扱いを確認。修正後の `make apple-build` も全5 targetと両universal app buildsを通過。情報画面の見出しも同じ日時を使い、Swiftの統合写真の最大日時を選ぶ補助処理を除いた。最終HEAD CIは別に確認する。
+
+## ライブラリで調整した撮影日時のコピー
+
+- Apple Photos の creationDate を変更しても原本の EXIF は元の日時を持つ。Rust が新規作成された Immich コピーだけに、ライブラリ上の既知の絶対日時を `dateTimeOriginal` に設定する。UTC 表現で小数秒を保持し、ファイルの変更日時とは別に扱う。日時が不明なら EXIF 日時の変更を送らず、既存の重複写真のメタデータは変更しない。
+- Apple ライブラリの元のタイムゾーンは取得できず、Immich側の時計表示の再現は保証しない。絶対時刻の照合許容差は1ms。原本の EXIF 日時・タイムゾーンのバイト列は保持する。sourceのタイムゾーンを明示的に追跡してコピーする機能は継続課題。
+- 1年から9999年の有限な日時だけを受け付け、日時が不正ならアップロード前に拒否する。アップロード結果が未確定、メタデータ設定が失敗した場合も書込みを自動で再試行しない。別のコピーの独立したメタデータを守るため、既存の重複先と日時が異なれば従来通り Move の検証は失敗して元を残す。
+- 1970年より前の小数秒を含む日時の検索は、秒を切り捨てて日付へ変換し、整数への変換で翌日にずらさない。表示元の日時と端末のタイムゾーンを使う方針は保持する。
+- `make check` は Rust 120 tests / Swift 32 tests と全品質gateを通過。2系 / 3系の新規コピーのUTC日時・小数秒・ファイル日時・GPS / お気に入り、重複時の書込み抑止、日時不明、不正値の書込み前拒否、不明な応答の非再試行、1970年境界の日付検索を確認した。
+- 実Immich用に、EXIF日時 `2020:01:02 03:04:05.125+09:00` を持つ4×3のPNGを2つ追加した。ExifToolで両fixtureを検証し、片方のArtist tagだけを変えて重複を避ける。原本EXIFが優先される対照例と、2024年のライブラリ日時を持つ新規コピーを比較し、プレビュー生成とメタデータ再抽出のキュー終了後に日時を読み直す。原本のバイト列と、重複した写真の日時・名前・checksum・お気に入りの保持も検証する。
+- 原本のSHA-1 headerとSHA-256もfixtureの実バイト列から作り、サーバーのchecksumと一致を確認する。ローカル `make integration` はDocker socket不在でテスト前に停止。追加fixtureでの実通信と最終HEAD CIは別に確認する。
+- `make apple-build` は全5 Rust targetのコンパイルを通過後、universal library生成がディスク不足で停止。今回のビルド用一時成果物とmacOSビルド成果物を通常のcleanで整理し、同じコードの再実行でRust全5 target、XCFramework、iOS Simulator / macOS universal app buildsを通過した。PhotoKitから実際に調整した写真をコピーする画面操作は未検証。
+- 表示元の [PR #10](https://github.com/rabe1028/suwop/pull/10) は修正後の [最終HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38187295514) が `41ecb1e4dd7adbe14a52553a0c47f65c46fd2f2d` で全3 jobを通過しマージ。main `97df205e6dd47464b9126d2cce060b7bbc2e8db9` と検証済み tree `2236e6774c78819337b36c878aa40e1e2619734f` の一致を確認した。[main CI](https://github.com/rabe1028/suwop/actions/runs/38188055368)も全3 jobを通過した。
+
+- 日時が一致する通常の原本にも sidecar を生成する指摘を受け、`created` 後は EXIF 日時の抽出を読取りで待ち、一致する日時更新を省く。未完了時は Rust が250msの Wait を最大120回要求し、Swift がキャンセル可能な待機だけを実行する。読取りの停止・失敗・回数上限では追加のメタデータを書き込まない。調整が必要な日時と従来の位置情報設定で生じる sidecar の保護は維持する。
+- 日時の一致、抽出待ち、キャンセル・読取り失敗・回数上限の回帰テストを追加し、Rust 123 tests / Swift 32 tests と全品質gateをローカルで通過。Apple向けもRust全5 target、XCFramework、iOS Simulator / macOS universal app buildsを通過した。3つ目の EXIF PNG はライブラリの撮影日時が元の EXIF と同じケースで、実サーバーに sidecar が作られず削除ブロッカーが付かないことを再抽出の前後で確認する。追加ケースの実通信・最終 HEAD CIは別に確認する。
+- `091a7d0710271a92a8a6510f7c618c1c7d6f40e9` の [CI](https://github.com/rabe1028/suwop/actions/runs/38191693778) は全3 jobを通過し、3つ目の EXIF fixture の sidecar 不在と削除ブロッカー不在も実Immichで確認した。この HEAD は以下の再開修正を含まない。
+- 追加レビューの抽出失敗後の復旧について、新規作成 ID をメタデータ読取り前に永続化する修正を追加。同じコピー操作の再実行では同一 source／原本／保存先だけを再検証し、PUT 未送信なら確認画面を経て続行する。原本ダウンロードの SHA-256・バイト長、名前・種類・SHA-1、コピー先の revision、アカウントと Live 関連 ID を検証する。POST・PUT の書込みは自動再試行しない。
+- 送信前の `metadataStarted` 記録からは、原本と意図したメタデータが既に一致する場合だけ読取りで回復する。読取り失敗・キャンセル・回数上限と再起動、確認の停止・失敗、原本不一致、確認中の変更、結果不明の反映済み／未反映、記録保存失敗、ID重複、source変更と別accountを回帰テストで確認した。`make check` は Rust 132 tests / Swift 33 tests と全品質gateを通過。実 FFI でも作成済み ID の記録と再起動後の確認キャンセルで POST／PUT が発生しないことを確認した。再開修正後の Rust 全5 Apple target と XCFramework はコンパイルを通過。native 確認画面の macOS キャンセル処理を現行 NSWindow API に修正し、同じ Rust ライブラリで iOS Simulator／macOS universal app builds を再実行して通過した。最終 HEAD CI、実通信の停止／再開と native 確認画面は別に確認する。
+- 再開修正の `b36ea31b4ca5a4eb93c7f744ef6aa647643a6c65` の [CI](https://github.com/rabe1028/suwop/actions/runs/38194709861) は全3 jobを通過。Apple全5 target・両app buildsと実Immichの3つの日時fixtureも通過した。このHEADは以下の記録解除操作を含まない。
+- コピー先を手動で削除した場合や続行をやめる場合のため、転送画面に再開記録の明示的な解除を追加。native確認後、対象キーのローカル記録だけを解除し、写真・転送履歴・別scopeの記録を保持する。HTTP、認証、原本取得や写真の変更・削除を要求しない。キャンセル・確認応答不明・保存失敗では記録を保持する。再開記録の重複は同一キーだけを解除できる。400 / 404や読取りの失敗から写真が消えたと推測して自動解除しない。
+- 記録解除を含む `make check` は Rust 137 tests / Swift 34 tests と全品質gateを通過。実FFIで確認と保存以外のeffectを要求せず、写真一覧・転送履歴を保持することも確認。初回の実行はディスク不足で停止し、作業用worktreeの通常のCargo／Swift clean後に再実行して通過した。native確認画面の操作・ネットワーク中断からの実際の復旧は未検証。
+- 記録解除を含むRust全5 Apple targetとXCFrameworkをコンパイル。SwiftUIの行が誤った処理中プロパティを参照していたため修正し、行を小さなViewへ分割した。Rustを変更せず両app buildsを再実行し、iOS SimulatorとmacOS universal app buildsを通過。全体の `make apple-build` の通過は最終HEADのCIで別に確認する。
+- 記録解除のHEAD `a5e76da7e1a556e127d85fc458b88da4676fa419` の [CI](https://github.com/rabe1028/suwop/actions/runs/38197260251) は全3 jobを通過し、aggregate Apple buildも確認できた。追加レビューの1ms境界の不一致を修正し、アップロードの要否・メタデータの読戻し・Move検証に有限かつinclusiveな同じ日時比較を使う。±1msの日時更新省略、±2msの調整、非有限なreadbackの拒否を追加し、`make check` はRust 139 tests／Swift 34 testsと全品質gateを通過。比較修正後の最終HEADのCIは別に確認する。
+- 境界修正の `58511566610381b453c16468b75c634ec579ae4b` の [CI](https://github.com/rabe1028/suwop/actions/runs/38198244161) はcore／appleが通過し、統合jobはコンテナ取得のレジストリ制限でテスト前に停止。追加レビューに対応して、PUT前の記録保存失敗ではメモリ内の元のphaseへ戻す。未送信なのに結果不明として扱ったり、別の保存操作で誤ったphaseを永続化したりしない。一覧更新の保存を挟んだ後、同じセッション／再起動後の明示的な確認から1回だけPUTへ進める回帰テストを追加。`make check` はRust 140 tests／Swift 34 testsと全品質gateを通過。追加ケースの初回はディスク不足でテスト前に停止し、worktreeの通常のCargo／Swift clean後の全チェックで確認した。最終HEADの全CIは別に確認する。
+- 保存失敗修正の `5c09723b90e47108571a56c13b316572230600b5` の [CI](https://github.com/rabe1028/suwop/actions/runs/38199226364) は全3 jobを通過。追加レビューでアップロード時のsafe_nameと原本照合の名前が不一致だったため、新規／再開の照合に実際に送信した安全な名前を使う。sourceの名前、種類とSHA-1、再開時の原本SHA-256・バイト長・revisionの検証は保持する。multipartの名前を実要求から返すfixtureで、スラッシュ・バックスラッシュ・引用符・CR/LF・空文字と末尾スラッシュの6ケースの新規／再開を確認し、`make check` はRust 141 tests／Swift 34 testsと全品質gateを通過。名前修正後の最終HEAD CIは別に確認する。
+
+- POST 前に開始記録と固有 ID を保存し、Immich の新規作成時の custom metadata にだけ識別子を添付する。作成 ID の保存失敗や応答消失後はチェックサムと識別子を読み取りで照合してから、作成済み原本の再検証と確認画面へ進む。識別子のない既存重複、ゴミ箱内、欠落・曖昧な応答では書込みを止め、不明な POST の再送はしない。転送画面から開始記録だけを明示的に解除できる。2.0 / 3.2.4 の公式作成・照合・metadata APIを確認し、実通信の検証対象は3.2.4。
+
+- POST 前の開始記録・読み取り照合・失敗時の状態復元を追加した `make check` は Rust 148 tests／Swift 36 tests と全品質 gate が通過。生成時の一時容量を抑えるため、ローカル検証は Rust のサイズ最適化・単一 codegen unit・debug 情報なしで行った。全ターゲットの Apple ビルドと、最終 HEAD の実 Immich CI は別に確認する。
+
+- 開始記録追加後の Apple Rust 5ターゲットをコンパイルし、XCFrameworkを生成。ローカルの一括 `make apple-build` は5番目のターゲットで容量不足により停止したため、残りのターゲットと組み立て工程を同じソースで実行した。Swiftの開始記録解除の不要な try/catch を除き、strict SwiftLint と iOS Simulator / universal macOS の両アプリの再ビルドが通過。PhotoKitの実操作の証拠には数えない。
+- 容量が厳しい環境向けに `SUWOP_CLEAN_CHECK=1` で各Rust工程間のキャッシュをcleanするオプションを追加した。通常の全チェックと生成済みSwift用ライブラリを保持する。最終作業ツリーの再検証は継続中で、繰り返す No space left on device により未完了。最終コミット・push・CI・マージは未実施。
+
+- 空き容量回復後の最終ソースで通常の `make check` が Rust 148 tests／Swift 36 tests と全品質gateを通過。`make apple-build` も一括コマンドでRust 5ターゲット・XCFramework・iOS Simulator／universal macOS両アプリを通過した。アーカイブは削除していない。ローカル `make integration` は再確認でもDocker socket不在で開始できず、最終HEADのhosted実Immich CIを必要とする。Macは現在もロックされ、native確認・PhotoKit保存の画面操作は未検証。
+
+- `SUWOP_CLEAN_CHECK=1 make check` の実行経路も、Clippy／生成物確認／全Rustテスト／Swift用ライブラリ生成を順に完了し、各工程の完了後にRustキャッシュをcleanして通過。Rust 148 tests／Swift 36 testsは通常経路と同じで、生成済みSwiftライブラリを残した実ABIテストまで確認した。通常経路ではキャッシュを保持する。

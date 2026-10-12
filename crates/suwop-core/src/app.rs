@@ -31,12 +31,29 @@ pub struct SavedLibrary {
     pub receipts: Vec<TransferReceipt>,
     #[serde(default)]
     pub albums: Vec<crate::albums::AlbumSnapshot>,
+    #[serde(default)]
+    pub pending_uploads: Vec<crate::immich::PendingUpload>,
+    #[serde(default)]
+    pub upload_intents: Vec<crate::immich::UploadIntent>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
     ReadState,
+    RandomId,
+    Wait {
+        milliseconds: u32,
+    },
+    ConfirmUploadResume {
+        prompt: crate::immich::UploadResumePrompt,
+    },
+    ConfirmForgetUpload {
+        prompt: crate::immich::UploadForgetPrompt,
+    },
+    ConfirmForgetUploadIntent {
+        prompt: crate::immich::UploadIntentForgetPrompt,
+    },
     Persist(SavedLibrary),
     ReadCredential {
         account: String,
@@ -192,6 +209,13 @@ pub enum Event {
         intent: TransferIntent,
         id: String,
         now: f64,
+    },
+    ForgetUploadRecord {
+        key: crate::domain::AssetKey,
+    },
+    ForgetUploadIntent {
+        scope: String,
+        token: String,
     },
     CompleteMove {
         id: String,

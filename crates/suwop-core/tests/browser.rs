@@ -66,6 +66,25 @@ fn sort_keeps_unknown_dates_last_and_is_stable() {
         ]
     );
 }
+
+#[test]
+fn subsecond_dates_before_the_unix_epoch_search_the_correct_calendar_day() {
+    let photos = vec![
+        photo("before", Some(-0.25), ResourceRole::Image, false),
+        photo("after", Some(0.25), ResourceRole::Image, false),
+    ];
+    for (query, index) in [("1969-12-31", 0), ("1970-01-01", 1)] {
+        let view = browse(
+            &photos,
+            &BrowserOptions {
+                query: query.into(),
+                time_zone: Some("UTC".into()),
+                ..BrowserOptions::default()
+            },
+        );
+        assert_eq!(view.photo_ids, vec![photo_id(&photos[index])]);
+    }
+}
 #[test]
 fn search_and_filters_combine_without_changing_collection_counts() {
     let mut photos = vec![

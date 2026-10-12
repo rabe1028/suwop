@@ -50,6 +50,10 @@ fn real_immich_upload_gps_list_download_stack_sidecar_and_trash() -> Result<(), 
             let Effect::Io(mut request) = effect;
             let result = match request.operation {
                 ShellOperation::Http(ref http) => execute(&agent, http),
+                ShellOperation::Wait { milliseconds } => {
+                    std::thread::sleep(Duration::from_millis(u64::from(milliseconds)));
+                    Ok(Value::Null)
+                }
                 _ => Err("unexpected non-HTTP effect".into()),
             };
             let response = match result {
@@ -139,6 +143,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     exercise_metadata(ctx, &session, &ids[..2]).await?;
     exercise_albums(ctx, &session, &ids[..2]).await?;
     ids.push(exercise_edited_preview(ctx, &session, directory, now).await?);
+    ids.extend(exercise_adjusted_dates(ctx, &session, directory, now).await?);
     let _: Value = session
         .json(
             ctx,
@@ -189,6 +194,213 @@ async fn wait_for(
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("search index did not reach the expected state".into())
+}
+
+async fn exercise_adjusted_dates(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+    now: f64,
+) -> Result<Vec<String>, String> {
+    let embedded = 1_577_901_845.125;
+    let adjusted = 1_730_615_400.125;
+    let mut ids = Vec::new();
+    for (index, bytes) in [
+        include_bytes!("fixtures/control-date.png").as_slice(),
+        include_bytes!("fixtures/adjusted-date.png").as_slice(),
+        include_bytes!("fixtures/matching-date.png").as_slice(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let file = date_fixture(directory, index, bytes)?;
+        let mut metadata = fixture_metadata(file.resource.clone(), index, now);
+        metadata.captured_at = match index {
+            1 => Some(adjusted),
+            2 => Some(embedded),
+            _ => None,
+        };
+        metadata.modified_at = None;
+        metadata.latitude = None;
+        metadata.longitude = None;
+        metadata.is_favorite = true;
+        let expected = metadata.captured_at.unwrap_or(embedded);
+        let origin = date_fixture_origin(session, &file, &metadata, index);
+        let id = create_marked_date_fixture(ctx, session, &file, &origin, now).await?;
+        let preview = directory.join(format!("date-{index}-preview.jpg"));
+        wait_preview(ctx, session, &id, &preview, 4.0 / 3.0).await?;
+        wait_metadata_queues(ctx, session).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index != 1).await?;
+        if index == 2 {
+            verify_ordinary_copy(ctx, session, &id).await?;
+        }
+        // Rendering follows initial metadata extraction. Request another read,
+        // drain its queues, then verify the library adjustment still wins.
+        let _: Value = session
+            .json(
+                ctx,
+                "assets/jobs",
+                "POST",
+                Some(json!({
+                    "assetIds":[id], "name":"refresh-metadata",
+                })),
+            )
+            .await?;
+        wait_metadata_queues(ctx, session).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index != 1).await?;
+        if index == 2 {
+            verify_ordinary_copy(ctx, session, &id).await?;
+        }
+        let before_duplicate = session.asset(ctx, &id).await?;
+        assert_eq!(
+            before_duplicate
+                .record(&session.scope, None, None)
+                .resources[0]
+                .sha1,
+            file.resource.sha1
+        );
+        let captured = before_duplicate
+            .record(&session.scope, None, None)
+            .captured_at
+            .ok_or("missing EXIF capture instant")?;
+        assert!(
+            (captured - expected).abs() < 0.001,
+            "embedded EXIF replaced the library capture instant"
+        );
+        assert!(
+            before_duplicate
+                .exif_info
+                .as_ref()
+                .and_then(|exif| exif.date_time_original.as_ref())
+                .is_some()
+        );
+        assert_eq!(before_duplicate.original_file_name, metadata.name);
+        assert!(before_duplicate.is_favorite && !before_duplicate.is_trashed);
+        metadata.captured_at = Some(adjusted + 86_400.0);
+        metadata.is_favorite = false;
+        verify_duplicate_keeps_origin(ctx, session, &file, &origin, &metadata, now).await?;
+        let after_duplicate = session.asset(ctx, &id).await?;
+        assert_eq!(after_duplicate.checksum, before_duplicate.checksum);
+        assert_eq!(
+            after_duplicate.original_file_name,
+            before_duplicate.original_file_name
+        );
+        assert_eq!(after_duplicate.is_favorite, before_duplicate.is_favorite);
+        assert_eq!(
+            after_duplicate
+                .record(&session.scope, None, None)
+                .captured_at,
+            Some(expected)
+        );
+        let original = directory.join(format!("date-{index}-original.png"));
+        session
+            .download(ctx, &id, &original.to_string_lossy())
+            .await?;
+        assert_eq!(std::fs::read(original).map_err(|e| e.to_string())?, bytes);
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+async fn verify_ordinary_copy(ctx: &Context, session: &Session, id: &str) -> Result<(), String> {
+    let files = session.files(ctx, id).await?;
+    assert!(!files.iter().any(|file| file.kind == "sidecar"));
+    let asset = session.asset(ctx, id).await?;
+    let record = asset.record(&session.scope, None, Some(&files));
+    assert!(
+        record.deletion_blockers.is_empty(),
+        "a matching-date ordinary copy must remain eligible for a later move"
+    );
+    Ok(())
+}
+
+async fn verify_timeline_dates(
+    ctx: &Context,
+    session: &Session,
+    id: &str,
+    expected: f64,
+    embedded_zone: bool,
+) -> Result<(), String> {
+    let asset: Value = session
+        .json(ctx, &format!("assets/{id}"), "GET", None)
+        .await?;
+    // The embedded control is +09:00; the known library adjustment is explicitly
+    // an absolute UTC date. localDateTime encodes local wall time with a Z suffix.
+    for (field, expected) in [
+        ("fileCreatedAt", expected),
+        (
+            "localDateTime",
+            expected + if embedded_zone { 32_400.0 } else { 0.0 },
+        ),
+    ] {
+        let value = asset[field].as_str().ok_or("missing timeline date")?;
+        let date = chrono::DateTime::parse_from_rfc3339(value).map_err(|e| e.to_string())?;
+        #[allow(clippy::cast_precision_loss)]
+        let seconds = date.timestamp_millis() as f64 / 1000.0;
+        assert!(
+            (seconds - expected).abs() < 0.001,
+            "{field}: expected {expected}, received {value}"
+        );
+    }
+    Ok(())
+}
+
+fn date_fixture(directory: &Path, index: usize, bytes: &[u8]) -> Result<TransferFile, String> {
+    use sha1::Digest;
+    let input = directory.join(format!("date-{index}.png"));
+    std::fs::write(&input, bytes).map_err(|e| e.to_string())?;
+    Ok(TransferFile {
+        resource: PhotoResource {
+            id: "original".into(),
+            name: format!("date-{index}.png"),
+            role: ResourceRole::Image,
+            sha1: Some(suwop_core::domain::hex(&sha1::Sha1::digest(bytes))),
+            bytes: Some(bytes.len() as u64),
+        },
+        path: input.to_string_lossy().into_owned(),
+        signature: FileSignature {
+            sha256: suwop_core::domain::hex(&sha2::Sha256::digest(bytes)),
+            bytes: bytes.len() as u64,
+        },
+    })
+}
+
+/// Harness-only admin reads. A queued metadata refresh returning HTTP 204 does
+/// not prove it ran; observe both extraction and its sidecar follow-up queues.
+async fn wait_metadata_queues(ctx: &Context, session: &Session) -> Result<(), String> {
+    let mut idle_rounds = 0;
+    for _ in 0..120 {
+        let mut idle = true;
+        for name in ["metadataExtraction", "sidecar"] {
+            let queue: Value = session
+                .json(ctx, &format!("queues/{name}"), "GET", None)
+                .await?;
+            if queue["name"] != name || queue["isPaused"] != false {
+                return Err(format!("metadata queue {name} is unavailable or paused"));
+            }
+            let statistics = &queue["statistics"];
+            if statistics["failed"]
+                .as_u64()
+                .ok_or("missing failed job count")?
+                != 0
+            {
+                return Err(format!("metadata queue {name} contains failed jobs"));
+            }
+            for field in ["active", "waiting", "delayed", "paused"] {
+                idle &= statistics[field]
+                    .as_u64()
+                    .ok_or("missing queue job count")?
+                    == 0;
+            }
+        }
+        idle_rounds = if idle { idle_rounds + 1 } else { 0 };
+        // A sidecar job can enqueue extraction between the two queue reads.
+        if idle_rounds == 2 {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err("metadata and sidecar queues did not finish processing".into())
 }
 
 async fn exercise_edited_preview(
@@ -535,5 +747,69 @@ fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAs
         inventory_complete: true,
         is_offline: false,
         deletion_blockers: vec![],
+    }
+}
+
+async fn create_marked_date_fixture(
+    ctx: &Context,
+    session: &Session,
+    file: &TransferFile,
+    origin: &suwop_core::immich::UploadIntent,
+    now: f64,
+) -> Result<String, String> {
+    let (id, created) = session
+        .create_intended_upload(ctx, file, origin, now)
+        .await?;
+    assert!(created);
+    assert_eq!(session.reconcile_upload_intent(ctx, origin).await?, id);
+    let plan = session
+        .prepare_upload_metadata(ctx, &id, &origin.source)
+        .await?;
+    session.apply_upload_metadata(ctx, &id, plan.body).await?;
+    Ok(id)
+}
+
+async fn verify_duplicate_keeps_origin(
+    ctx: &Context,
+    session: &Session,
+    file: &TransferFile,
+    origin: &suwop_core::immich::UploadIntent,
+    metadata: &StoredAsset,
+    now: f64,
+) -> Result<(), String> {
+    let id = session.reconcile_upload_intent(ctx, origin).await?;
+    let mut other_origin = origin.clone();
+    other_origin.token = origin
+        .token
+        .replace("44444444-4444-4444-8444", "55555555-5555-4555-8555");
+    other_origin.source = metadata.clone();
+    let (duplicate, created) = session
+        .create_intended_upload(ctx, file, &other_origin, now)
+        .await?;
+    assert!(!created);
+    assert_eq!(duplicate, id);
+    assert!(
+        session
+            .reconcile_upload_intent(ctx, &other_origin)
+            .await
+            .is_err()
+    );
+    assert_eq!(session.reconcile_upload_intent(ctx, origin).await?, id);
+    Ok(())
+}
+
+fn date_fixture_origin(
+    session: &Session,
+    file: &TransferFile,
+    metadata: &StoredAsset,
+    index: usize,
+) -> suwop_core::immich::UploadIntent {
+    suwop_core::immich::UploadIntent {
+        scope: session.scope.clone(),
+        token: format!("44444444-4444-4444-8444-{index:012}"),
+        source: metadata.clone(),
+        resource: file.resource.clone(),
+        signature: file.signature.clone(),
+        live_id: None,
     }
 }

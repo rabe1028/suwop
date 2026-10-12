@@ -18,6 +18,7 @@ lint-common:
 	env shellcheck scripts/*.sh .githooks/*
 	env actionlint
 	python3 scripts/check-architecture.py
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	bash scripts/check-generated.sh
 
 lint-swift:
@@ -37,9 +38,16 @@ test:
 	bash scripts/test-tools.sh
 	bash scripts/test-hooks.sh
 	env cargo test --locked --workspace --all-features
-	@if [ "$$(uname -s)" = Darwin ]; then bash scripts/build-rust-apple.sh --host && swift test -Xswiftc -warnings-as-errors; fi
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
+	@if [ "$$(uname -s)" = Darwin ]; then \
+		bash scripts/build-rust-apple.sh --host && \
+		{ if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi; } && \
+		swift test -Xswiftc -warnings-as-errors; \
+	fi
 
-check: lint test
+check: lint
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
+	$(MAKE) test
 
 generate-types:
 	cargo run --locked --quiet -p suwop-core --bin schema > /tmp/suwop-schema.json

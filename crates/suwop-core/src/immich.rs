@@ -1,14 +1,18 @@
 use crate::{
     app::{Context, ShellOperation, io},
-    domain::{
-        AssetKey, PhotoResource, Provider, ResourceRole, StoredAsset, TransferFile, normalize_sha1,
-    },
+    domain::{AssetKey, PhotoResource, Provider, ResourceRole, StoredAsset, normalize_sha1},
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::{BTreeMap, BTreeSet};
 use url::Url;
 pub mod albums;
+mod uploads;
+pub use uploads::{
+    PendingUpload, UploadForgetPrompt, UploadMetadataPlan, UploadPhase, UploadResumePrompt,
+};
+mod upload_intents;
+pub use upload_intents::{UploadIntent, UploadIntentForgetPrompt};
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Version {
@@ -302,72 +306,6 @@ impl Session {
         let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
         check_status(response.status)
     }
-    pub async fn upload(
-        &self,
-        ctx: &Context,
-        file: &TransferFile,
-        metadata: &StoredAsset,
-        now: f64,
-        live_id: Option<&str>,
-    ) -> Result<String, String> {
-        let mut request = self.request("assets", "POST", None);
-        request.fields = BTreeMap::from([
-            (
-                "fileCreatedAt".into(),
-                date_string(metadata.captured_at.unwrap_or(now)),
-            ),
-            (
-                "fileModifiedAt".into(),
-                date_string(metadata.modified_at.or(metadata.captured_at).unwrap_or(now)),
-            ),
-            ("isFavorite".into(), metadata.is_favorite.to_string()),
-        ]);
-        if self.version.major < 3 {
-            request.fields.insert("deviceId".into(), "suwop".into());
-            request.fields.insert(
-                "deviceAssetId".into(),
-                file.resource.sha1.clone().ok_or("原本未照合です。")?,
-            );
-        }
-        if let Some(id) = live_id {
-            valid_id(id)?;
-            request.fields.insert("livePhotoVideoId".into(), id.into());
-        }
-        request.files.push(UploadPart {
-            field: "assetData".into(),
-            path: file.path.clone(),
-            filename: safe_name(&file.resource.name),
-        });
-        if let Some(checksum) = &file.resource.sha1 {
-            request
-                .headers
-                .insert("x-immich-checksum".into(), checksum.clone());
-        }
-        let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
-        check_status(response.status)?;
-        let status = response.body["status"]
-            .as_str()
-            .ok_or("アップロード結果が不明です。")?;
-        if !["created", "duplicate"].contains(&status.to_ascii_lowercase().as_str()) {
-            return Err("アップロードが確定しません。".into());
-        }
-        let id = response.body["id"]
-            .as_str()
-            .ok_or("写真 ID がありません。")?;
-        valid_id(id)?;
-        // Do not mutate a pre-existing duplicate's independent metadata.
-        if status.eq_ignore_ascii_case("created") {
-            let mut body = json!({"isFavorite":metadata.is_favorite});
-            if let (Some(lat), Some(lon)) = (metadata.latitude, metadata.longitude) {
-                body["latitude"] = json!(lat);
-                body["longitude"] = json!(lon);
-            }
-            let _: Value = self
-                .json(ctx, &format!("assets/{id}"), "PUT", Some(body))
-                .await?;
-        }
-        Ok(id.into())
-    }
     pub async fn trash(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
         if ids.is_empty() {
             return Err("削除対象がありません。".into());
@@ -445,6 +383,12 @@ pub fn date_string(seconds: f64) -> String {
     chrono::DateTime::from_timestamp(whole as i64, nanos).map_or_else(String::new, |d| {
         d.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
     })
+}
+fn upload_date(seconds: f64) -> Result<String, String> {
+    if !seconds.is_finite() || !(-62_135_596_800.0..253_402_300_800.0).contains(&seconds) {
+        return Err("転送元の日時を確認できません。アップロードを開始していません。".into());
+    }
+    Ok(date_string(seconds))
 }
 fn parse_date(value: &str) -> Option<f64> {
     chrono::DateTime::parse_from_rfc3339(value).ok().map(|d| {

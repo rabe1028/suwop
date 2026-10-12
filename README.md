@@ -42,6 +42,8 @@ make apple-build       # universal Rust library、iOS Simulator / Mac のビル�
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
 ```
 
+空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
+
 Rust 1.95.0、SwiftLint 0.65.1、SwiftFormat 0.63.1、Ruff 0.17.0、ShellCheck 0.11.0、actionlint 1.7.12 を固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。
@@ -53,6 +55,10 @@ Docker テストは `suwop-rust-test` という専用プロジェクトと local
 「両方」「Apple のみ」「Immich のみ」「一部だけ両方」「未照合」を区別します。RAW + JPEG は別原本として数え、JPEG だけの一致を完全保存とは判定しません。
 
 移動はコピー、転送先の原本検証、別画面での確認、両側の再検証、元のゴミ箱への移動、という順序です。削除前には原本を読み直し、SHA-256 とバイト長、revision、位置情報を確認します。コピーの履歴を後から移動に使うことはできません。旧形式の履歴はコピーとして移行します。
+
+Immich に新しく作成したコピーには、ライブラリ上の撮影日時を反映します。日時の抽出を待って既存の値と比較し、一致する日時の更新は省きます。必要のない XMP sidecar を日時変更だけで作りません。原本ファイルの EXIF と異なる日時を Apple Photos で設定した場合も、既知の絶対日時を UTC で渡します。原本のバイト列は変更しません。重複として返された既存の Immich 写真には、日時やお気に入りを上書きしません。撮影日時が不明な場合は EXIF 日時を変更せず、不正な日時はアップロード前に拒否します。
+
+このコピー処理では Apple ライブラリの元のタイムゾーンを取得できないため、Immich側のタイムゾーン別の時計表示の再現は保証しません。日時の照合許容差は1ミリ秒です。原本ファイル内の元の EXIF 日時・タイムゾーンは保持します。
 
 Live Photo、編集・補助データ付き、バースト、External Library、XMP sidecar、独立した写真の同一バイト列重複などはコピーのみです。保存種別や sidecar が未確認の場合も削除しません。移動準備中の位置情報は Immich に反映し、転送先で一致を確認できない場合は元を残します。完全削除 API は使用しません。
 
