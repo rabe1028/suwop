@@ -123,7 +123,7 @@ pub struct ImageEditPresentation {
     pub base: AdjustmentBase,
     pub output_format: RenderFormat,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ImageRenderPlan {
     pub dimensions: PixelSize,

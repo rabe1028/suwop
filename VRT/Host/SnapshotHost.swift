@@ -6,6 +6,8 @@ import SwiftUI
         WindowGroup {
             if CommandLine.arguments.contains("--editor-fixture") {
                 InteractiveEditorHost()
+            } else if CommandLine.arguments.contains("--copy-fixture") {
+                InteractiveCopyHost()
             } else {
                 Color.clear
             }

@@ -333,6 +333,19 @@ public struct CurrentImageRenderResult: Codable, Sendable {
     }
 }
 
+public struct EditClipboard: Codable, Sendable {
+    public var dimensions: PixelSize
+    public var options: EditCopyOptions
+    public var sourceName: String
+    public var transform: ImageTransform
+    public init(dimensions: PixelSize, options: EditCopyOptions, sourceName: String, transform: ImageTransform) {
+        self.dimensions = dimensions
+        self.options = options
+        self.sourceName = sourceName
+        self.transform = transform
+    }
+}
+
 public struct EditCommand: Codable, Sendable {
     public var color: ColorAdjustments?
     public var crop: PixelCrop?
@@ -353,6 +366,17 @@ public enum EditCommandKind: String, Codable, CaseIterable, Sendable {
     case `undo`
     case `redo`
     case `resetDraft`
+}
+
+public struct EditCopyOptions: Codable, Sendable {
+    public var adjustments: Bool
+    public var filter: Bool
+    public var geometry: Bool
+    public init(adjustments: Bool, filter: Bool, geometry: Bool) {
+        self.adjustments = adjustments
+        self.filter = filter
+        self.geometry = geometry
+    }
 }
 
 public struct EditDraftRequest: Codable, Sendable {
@@ -618,6 +642,34 @@ public struct NativeColorPlan: Codable, Sendable {
     }
 }
 
+public struct PasteEditsPrompt: Codable, Sendable {
+    public var names: [String]
+    public var options: EditCopyOptions
+    public var sourceName: String
+    public var unchangedCount: Int64
+    public init(names: [String] = [], options: EditCopyOptions, sourceName: String, unchangedCount: Int64) {
+        self.names = names
+        self.options = options
+        self.sourceName = sourceName
+        self.unchangedCount = unchangedCount
+    }
+}
+
+public struct PendingEditPaste: Codable, Sendable {
+    public var before: TransferBundle
+    public var initialAdjustment: AppleAdjustment?
+    public var key: AssetKey
+    public var name: String
+    public var plan: ImageRenderPlan
+    public init(before: TransferBundle, initialAdjustment: AppleAdjustment? = nil, key: AssetKey, name: String, plan: ImageRenderPlan) {
+        self.before = before
+        self.initialAdjustment = initialAdjustment
+        self.key = key
+        self.name = name
+        self.plan = plan
+    }
+}
+
 public struct PendingUpload: Codable, Sendable {
     public var key: AssetKey
     public var liveId: String?
@@ -761,6 +813,8 @@ public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var appleScope: String
     public var connection: ConnectionSettings?
+    public var editClipboard: EditClipboard?
+    public var pendingEditPastes: [PendingEditPaste]
     public var pendingTrash: [TrashOperation]
     public var pendingUploads: [PendingUpload]
     public var receipts: [TransferReceipt]
@@ -768,10 +822,12 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
+        self.editClipboard = editClipboard
+        self.pendingEditPastes = pendingEditPastes
         self.pendingTrash = pendingTrash
         self.pendingUploads = pendingUploads
         self.receipts = receipts

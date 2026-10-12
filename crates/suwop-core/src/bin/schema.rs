@@ -31,6 +31,7 @@ struct Protocol {
     image_edit_presentation: suwop_core::editing::ImageEditPresentation,
     image_render_plan: suwop_core::editing::ImageRenderPlan,
     native_color_plan: suwop_core::editing::NativeColorPlan,
+    paste_edits_prompt: suwop_core::editing::PasteEditsPrompt,
     upload_resume_prompt: suwop_core::immich::UploadResumePrompt,
     upload_forget_prompt: suwop_core::immich::UploadForgetPrompt,
     upload_intent_forget_prompt: suwop_core::immich::UploadIntentForgetPrompt,

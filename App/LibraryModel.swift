@@ -9,6 +9,7 @@ import SwiftUI
     @Published var showSettings = false
     @Published var showTransfers = false
     @Published var showTrash = false
+    @Published var showEditPasteRecords = false
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
     private var shell: AppleShell?
@@ -53,6 +54,14 @@ import SwiftUI
 
     var photos: [UnifiedPhoto] {
         view?.photos ?? []
+    }
+
+    var editClipboard: EditClipboard? {
+        view?.state.editClipboard
+    }
+
+    var pendingEditPastes: [PendingEditPaste] {
+        view?.state.pendingEditPastes ?? []
     }
 
     var visiblePhotos: [UnifiedPhoto] {
@@ -176,18 +185,6 @@ import SwiftUI
 
     func editingTargets(_ photo: UnifiedPhoto) -> [EditingTarget] {
         view?.editingTargets[photo.id] ?? []
-    }
-
-    func editImage(_ target: EditingTarget) {
-        do {
-            try send(["type": .string("editImage"), "key": .from(target.key), "id": .string(UUID().uuidString)])
-        } catch { errorMessage = error.localizedDescription }
-    }
-
-    func revertImage(_ target: EditingTarget) {
-        do {
-            try send(["type": .string("revertImage"), "key": .from(target.key), "id": .string(UUID().uuidString)])
-        } catch { errorMessage = error.localizedDescription }
     }
 
     func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {

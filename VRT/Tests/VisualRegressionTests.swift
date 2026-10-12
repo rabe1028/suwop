@@ -63,6 +63,17 @@ final class VisualRegressionTests: XCTestCase {
         let adjusted = try await SnapshotFixtures.editor(adjusted: true)
         try await capture("editor-adjusted", view: ImageEditorView(model: adjusted, finish: { _ in }), dark: true)
         try await SnapshotFixtures.closeEditor(adjusted)
+        let copy = PhotoEditCopyView(targets: model.editingTargets(photo), finish: { _, _ in })
+        try await capture("edit-copy", view: copy)
+        try await capture("edit-copy-dark", view: copy, dark: true)
+        try await capture("edit-copy-large-text", view: copy, largeText: true)
+        let clipboard = try await SnapshotFixtures.editClipboardModel()
+        try await capture("edit-paste-pending", view: EditPasteRecordsView(model: clipboard))
+        try await capture(
+            "edit-paste-pending-large-text",
+            view: EditPasteRecordsView(model: clipboard),
+            largeText: true
+        )
     }
 
     @MainActor private func capture(
