@@ -1,0 +1,254 @@
+use crux_core::Command;
+use serde_json::{Value, json};
+use std::collections::VecDeque;
+use suwop_core::{
+    app::{Effect, Event, SavedLibrary, ShellOperation, ShellResponse},
+    domain::{
+        AssetKey, FileSignature, PhotoResource, Provider, ResourceRole, StoredAsset, TransferFile,
+    },
+    immich::{HttpRequest, HttpResponse, Session, Version},
+};
+
+const ID: &str = "11111111-1111-4111-8111-111111111111";
+
+fn metadata() -> StoredAsset {
+    StoredAsset {
+        key: AssetKey {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            asset_id: "photo".into(),
+        },
+        name: "photo.png".into(),
+        captured_at: Some(1_730_615_400.125),
+        modified_at: Some(1_730_615_500.25),
+        revision: "adjusted".into(),
+        resources: vec![PhotoResource {
+            id: "original".into(),
+            name: "photo.png".into(),
+            role: ResourceRole::Image,
+            sha1: Some("a".repeat(40)),
+            bytes: Some(233),
+        }],
+        is_favorite: true,
+        latitude: Some(0.0),
+        longitude: Some(0.0),
+        inventory_complete: true,
+        is_offline: false,
+        deletion_blockers: vec![],
+    }
+}
+
+fn response(status: u16, body: Value) -> HttpResponse {
+    HttpResponse {
+        status,
+        body,
+        path: None,
+    }
+}
+
+struct UploadRun {
+    requests: Vec<HttpRequest>,
+    result: Result<String, String>,
+}
+
+fn upload(
+    metadata: StoredAsset,
+    major: u32,
+    responses: Vec<HttpResponse>,
+) -> Result<UploadRun, String> {
+    let mut command = Command::<Effect, Event>::new(move |ctx| async move {
+        let session = Session {
+            endpoint: "https://photos.example/proxy/api".into(),
+            key: "fixture".into(),
+            user_id: "owner".into(),
+            scope: "remote".into(),
+            version: Version {
+                major,
+                minor: 2,
+                patch: 4,
+            },
+        };
+        let file = TransferFile {
+            resource: metadata.resources[0].clone(),
+            path: "/tmp/fixture.png".into(),
+            signature: FileSignature {
+                sha256: "a".repeat(64),
+                bytes: 233,
+            },
+        };
+        let result = session
+            .upload(&ctx, &file, &metadata, 1_730_615_800.0, None)
+            .await;
+        ctx.send_event(Event::Finished {
+            state: SavedLibrary::default(),
+            session: None,
+            status: result.as_ref().ok().cloned().unwrap_or_default(),
+            error: result.err(),
+            preview_to_select: None,
+        });
+    });
+    let mut responses: VecDeque<_> = responses.into();
+    let mut requests = Vec::new();
+    loop {
+        let effects: Vec<_> = command.effects().collect();
+        if effects.is_empty() {
+            break;
+        }
+        for effect in effects {
+            let Effect::Io(mut request) = effect;
+            let ShellOperation::Http(http) = &request.operation else {
+                return Err("unexpected native effect".into());
+            };
+            requests.push(http.clone());
+            let value = serde_json::to_value(responses.pop_front().ok_or("unexpected HTTP retry")?)
+                .map_err(|e| e.to_string())?;
+            request
+                .resolve(ShellResponse {
+                    value: Some(value),
+                    error: None,
+                })
+                .map_err(|e| e.to_string())?;
+        }
+    }
+    let result = match command.events().last().ok_or("upload did not finish")? {
+        Event::Finished {
+            status,
+            error: None,
+            ..
+        } => Ok(status),
+        Event::Finished {
+            error: Some(error), ..
+        } => Err(error),
+        _ => return Err("unexpected upload result".into()),
+    };
+    assert!(responses.is_empty());
+    Ok(UploadRun { requests, result })
+}
+
+#[test]
+fn a_new_copy_locks_the_adjusted_capture_instant_without_changing_file_timestamps()
+-> Result<(), String> {
+    for major in [2, 3] {
+        let run = upload(
+            metadata(),
+            major,
+            vec![
+                response(201, json!({"id":ID,"status":"created"})),
+                response(200, Value::Null),
+            ],
+        )?;
+        assert_eq!(run.result?, ID);
+        assert_eq!(run.requests.len(), 2);
+        let post = &run.requests[0];
+        assert_eq!(post.method, "POST");
+        assert_eq!(post.url, "https://photos.example/proxy/api/assets");
+        assert_eq!(post.fields["fileCreatedAt"], "2024-11-03T06:30:00.125Z");
+        assert_eq!(post.fields["fileModifiedAt"], "2024-11-03T06:31:40.250Z");
+        assert_eq!(post.files[0].path, "/tmp/fixture.png");
+        assert_eq!(post.headers["x-immich-checksum"], "a".repeat(40));
+        let put = &run.requests[1];
+        assert_eq!(put.method, "PUT");
+        assert_eq!(
+            put.url,
+            format!("https://photos.example/proxy/api/assets/{ID}")
+        );
+        assert_eq!(
+            put.body,
+            Some(json!({
+                "dateTimeOriginal":"2024-11-03T06:30:00.125Z","isFavorite":true,
+                "latitude":0.0,"longitude":0.0,
+            }))
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn duplicate_copies_do_not_overwrite_independent_capture_dates_or_other_metadata()
+-> Result<(), String> {
+    let run = upload(
+        metadata(),
+        3,
+        vec![response(200, json!({"id":ID,"status":"duplicate"}))],
+    )?;
+    assert_eq!(run.result?, ID);
+    assert_eq!(run.requests.len(), 1);
+    assert_eq!(run.requests[0].method, "POST");
+    Ok(())
+}
+
+#[test]
+fn an_unknown_library_date_does_not_invent_an_exif_adjustment() -> Result<(), String> {
+    let mut unknown = metadata();
+    unknown.captured_at = None;
+    unknown.modified_at = None;
+    let run = upload(
+        unknown,
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            response(200, Value::Null),
+        ],
+    )?;
+    assert!(run.result.is_ok());
+    assert_eq!(
+        run.requests[0].fields["fileCreatedAt"],
+        "2024-11-03T06:36:40Z"
+    );
+    assert!(
+        run.requests[1]
+            .body
+            .as_ref()
+            .ok_or("missing metadata update")?
+            .get("dateTimeOriginal")
+            .is_none()
+    );
+    Ok(())
+}
+
+#[test]
+fn invalid_source_dates_refuse_the_upload_before_any_remote_write() -> Result<(), String> {
+    for date in [
+        f64::NAN,
+        f64::INFINITY,
+        -62_135_596_801.0,
+        253_402_300_800.0,
+    ] {
+        for modified in [false, true] {
+            let mut source = metadata();
+            if modified {
+                source.modified_at = Some(date);
+            } else {
+                source.captured_at = Some(date);
+            }
+            let run = upload(source, 3, vec![])?;
+            assert!(run.result.is_err());
+            assert!(run.requests.is_empty());
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn an_unknown_upload_or_metadata_result_never_retries_a_write() -> Result<(), String> {
+    for status in ["pending", ""] {
+        let run = upload(
+            metadata(),
+            3,
+            vec![response(200, json!({"id":ID,"status":status}))],
+        )?;
+        assert!(run.result.is_err());
+        assert_eq!(run.requests.len(), 1);
+    }
+    let run = upload(
+        metadata(),
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            response(503, Value::Null),
+        ],
+    )?;
+    assert!(run.result.is_err());
+    assert_eq!(run.requests.len(), 2);
+    Ok(())
+}

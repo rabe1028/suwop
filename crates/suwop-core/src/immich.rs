@@ -310,16 +310,12 @@ impl Session {
         now: f64,
         live_id: Option<&str>,
     ) -> Result<String, String> {
+        let captured = upload_date(metadata.captured_at.unwrap_or(now))?;
+        let modified = upload_date(metadata.modified_at.or(metadata.captured_at).unwrap_or(now))?;
         let mut request = self.request("assets", "POST", None);
         request.fields = BTreeMap::from([
-            (
-                "fileCreatedAt".into(),
-                date_string(metadata.captured_at.unwrap_or(now)),
-            ),
-            (
-                "fileModifiedAt".into(),
-                date_string(metadata.modified_at.or(metadata.captured_at).unwrap_or(now)),
-            ),
+            ("fileCreatedAt".into(), captured.clone()),
+            ("fileModifiedAt".into(), modified),
             ("isFavorite".into(), metadata.is_favorite.to_string()),
         ]);
         if self.version.major < 3 {
@@ -358,6 +354,13 @@ impl Session {
         // Do not mutate a pre-existing duplicate's independent metadata.
         if status.eq_ignore_ascii_case("created") {
             let mut body = json!({"isFavorite":metadata.is_favorite});
+            // Upload timestamps are file facts; metadata extraction can prefer
+            // the original's embedded EXIF date over an Apple library adjustment.
+            // Lock a known library capture instant on this newly created copy.
+            // Unknown library dates leave embedded EXIF unchanged.
+            if metadata.captured_at.is_some() {
+                body["dateTimeOriginal"] = json!(captured);
+            }
             if let (Some(lat), Some(lon)) = (metadata.latitude, metadata.longitude) {
                 body["latitude"] = json!(lat);
                 body["longitude"] = json!(lon);
@@ -445,6 +448,12 @@ pub fn date_string(seconds: f64) -> String {
     chrono::DateTime::from_timestamp(whole as i64, nanos).map_or_else(String::new, |d| {
         d.to_rfc3339_opts(chrono::SecondsFormat::AutoSi, true)
     })
+}
+fn upload_date(seconds: f64) -> Result<String, String> {
+    if !seconds.is_finite() || !(-62_135_596_800.0..253_402_300_800.0).contains(&seconds) {
+        return Err("転送元の日時を確認できません。アップロードを開始していません。".into());
+    }
+    Ok(date_string(seconds))
 }
 fn parse_date(value: &str) -> Option<f64> {
     chrono::DateTime::parse_from_rfc3339(value).ok().map(|d| {

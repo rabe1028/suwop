@@ -139,6 +139,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     exercise_metadata(ctx, &session, &ids[..2]).await?;
     exercise_albums(ctx, &session, &ids[..2]).await?;
     ids.push(exercise_edited_preview(ctx, &session, directory, now).await?);
+    ids.extend(exercise_adjusted_dates(ctx, &session, directory, now).await?);
     let _: Value = session
         .json(
             ctx,
@@ -189,6 +190,156 @@ async fn wait_for(
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("search index did not reach the expected state".into())
+}
+
+async fn exercise_adjusted_dates(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+    now: f64,
+) -> Result<Vec<String>, String> {
+    let embedded = 1_577_901_845.125;
+    let adjusted = 1_730_615_400.125;
+    let mut ids = Vec::new();
+    for (index, bytes) in [
+        include_bytes!("fixtures/control-date.png").as_slice(),
+        include_bytes!("fixtures/adjusted-date.png").as_slice(),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let file = date_fixture(directory, index, bytes)?;
+        let mut metadata = fixture_metadata(file.resource.clone(), index, now);
+        metadata.captured_at = (index == 1).then_some(adjusted);
+        metadata.modified_at = None;
+        metadata.latitude = None;
+        metadata.longitude = None;
+        metadata.is_favorite = true;
+        let expected = metadata.captured_at.unwrap_or(embedded);
+        let id = session.upload(ctx, &file, &metadata, now, None).await?;
+        let preview = directory.join(format!("date-{index}-preview.jpg"));
+        wait_preview(ctx, session, &id, &preview, 4.0 / 3.0).await?;
+        // Rendering follows initial metadata extraction. Request another read,
+        // drain its queues, then verify the library adjustment still wins.
+        let _: Value = session
+            .json(
+                ctx,
+                "assets/jobs",
+                "POST",
+                Some(json!({
+                    "assetIds":[id], "name":"refresh-metadata",
+                })),
+            )
+            .await?;
+        wait_metadata_queues(ctx, session).await?;
+        let before_duplicate = session.asset(ctx, &id).await?;
+        assert_eq!(
+            before_duplicate
+                .record(&session.scope, None, None)
+                .resources[0]
+                .sha1,
+            file.resource.sha1
+        );
+        let captured = before_duplicate
+            .record(&session.scope, None, None)
+            .captured_at
+            .ok_or("missing EXIF capture instant")?;
+        assert!(
+            (captured - expected).abs() < 0.001,
+            "embedded EXIF replaced the library capture instant"
+        );
+        assert!(
+            before_duplicate
+                .exif_info
+                .as_ref()
+                .and_then(|exif| exif.date_time_original.as_ref())
+                .is_some()
+        );
+        assert_eq!(before_duplicate.original_file_name, metadata.name);
+        assert!(before_duplicate.is_favorite && !before_duplicate.is_trashed);
+        metadata.captured_at = Some(adjusted + 86_400.0);
+        metadata.is_favorite = false;
+        let duplicate = session.upload(ctx, &file, &metadata, now, None).await?;
+        assert_eq!(duplicate, id);
+        let after_duplicate = session.asset(ctx, &id).await?;
+        assert_eq!(after_duplicate.checksum, before_duplicate.checksum);
+        assert_eq!(
+            after_duplicate.original_file_name,
+            before_duplicate.original_file_name
+        );
+        assert_eq!(after_duplicate.is_favorite, before_duplicate.is_favorite);
+        assert_eq!(
+            after_duplicate
+                .record(&session.scope, None, None)
+                .captured_at,
+            Some(expected)
+        );
+        let original = directory.join(format!("date-{index}-original.png"));
+        session
+            .download(ctx, &id, &original.to_string_lossy())
+            .await?;
+        assert_eq!(std::fs::read(original).map_err(|e| e.to_string())?, bytes);
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+fn date_fixture(directory: &Path, index: usize, bytes: &[u8]) -> Result<TransferFile, String> {
+    use sha1::Digest;
+    let input = directory.join(format!("date-{index}.png"));
+    std::fs::write(&input, bytes).map_err(|e| e.to_string())?;
+    Ok(TransferFile {
+        resource: PhotoResource {
+            id: "original".into(),
+            name: format!("date-{index}.png"),
+            role: ResourceRole::Image,
+            sha1: Some(suwop_core::domain::hex(&sha1::Sha1::digest(bytes))),
+            bytes: Some(bytes.len() as u64),
+        },
+        path: input.to_string_lossy().into_owned(),
+        signature: FileSignature {
+            sha256: suwop_core::domain::hex(&sha2::Sha256::digest(bytes)),
+            bytes: bytes.len() as u64,
+        },
+    })
+}
+
+/// Harness-only admin reads. A queued metadata refresh returning HTTP 204 does
+/// not prove it ran; observe both extraction and its sidecar follow-up queues.
+async fn wait_metadata_queues(ctx: &Context, session: &Session) -> Result<(), String> {
+    let mut idle_rounds = 0;
+    for _ in 0..120 {
+        let mut idle = true;
+        for name in ["metadataExtraction", "sidecar"] {
+            let queue: Value = session
+                .json(ctx, &format!("queues/{name}"), "GET", None)
+                .await?;
+            if queue["name"] != name || queue["isPaused"] != false {
+                return Err(format!("metadata queue {name} is unavailable or paused"));
+            }
+            let statistics = &queue["statistics"];
+            if statistics["failed"]
+                .as_u64()
+                .ok_or("missing failed job count")?
+                != 0
+            {
+                return Err(format!("metadata queue {name} contains failed jobs"));
+            }
+            for field in ["active", "waiting", "delayed", "paused"] {
+                idle &= statistics[field]
+                    .as_u64()
+                    .ok_or("missing queue job count")?
+                    == 0;
+            }
+        }
+        idle_rounds = if idle { idle_rounds + 1 } else { 0 };
+        // A sidecar job can enqueue extraction between the two queue reads.
+        if idle_rounds == 2 {
+            return Ok(());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err("metadata and sidecar queues did not finish processing".into())
 }
 
 async fn exercise_edited_preview(

@@ -104,7 +104,7 @@ fn matches_query(
     if let Some(seconds) = captured_at {
         // Date search also supports year and month without downloading originals.
         #[allow(clippy::cast_possible_truncation)]
-        if let Some(date) = DateTime::<Utc>::from_timestamp(seconds as i64, 0) {
+        if let Some(date) = DateTime::<Utc>::from_timestamp(seconds.floor() as i64, 0) {
             haystack.push_str(
                 &date
                     .with_timezone(&time_zone)

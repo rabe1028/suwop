@@ -128,3 +128,15 @@
 - 保存先切替のnative画面、実サーバーの編集直後の待機表示、キャッシュの実操作・性能・VoiceOverは別の確認対象。Macのロックによりnative操作は未完了。Immich編集の書込みUIはまだ公開していない。
 - 初回 HEAD `f97d8be50e1f2e3fc37c79342f776e679eeb855e` の [CI](https://github.com/rabe1028/suwop/actions/runs/38186039904) で core と実Immich v3.2.4の編集済みプレビュー検証が通過。レビューで、選択したコピーの削除後も別のコピーが残る場合の閲覧と、日付検索・並べ替え・日／月／年のグリッドが表示元の撮影日を使う処理を修正した。日付不明を別コピーの値で補わない。Swiftの表示カーソルはRustから受け取ったグループのキーだけを保持し、照合や表示元の選択は行わない。
 - レビュー修正後の `make check` は Rust 114 tests / Swift 32 tests と全品質gateを通過。どちらのコピーを除いても生存するコピーを表示すること、グループの分割・統合、別写真・別accountへ戻らないこと、表示元による日付検索・新しい順／古い順・日付不明・アクセス不可の扱いを確認。修正後の `make apple-build` も全5 targetと両universal app buildsを通過。情報画面の見出しも同じ日時を使い、Swiftの統合写真の最大日時を選ぶ補助処理を除いた。最終HEAD CIは別に確認する。
+
+## ライブラリで調整した撮影日時のコピー
+
+- Apple Photos の creationDate を変更しても原本の EXIF は元の日時を持つ。Rust が新規作成された Immich コピーだけに、ライブラリ上の既知の絶対日時を `dateTimeOriginal` に設定する。UTC 表現で小数秒を保持し、ファイルの変更日時とは別に扱う。日時が不明なら EXIF 日時の変更を送らず、既存の重複写真のメタデータは変更しない。
+- Apple ライブラリの元のタイムゾーンは取得できず、Immich側の時計表示の再現は保証しない。絶対時刻の照合許容差は1ms。原本の EXIF 日時・タイムゾーンのバイト列は保持する。sourceのタイムゾーンを明示的に追跡してコピーする機能は継続課題。
+- 1年から9999年の有限な日時だけを受け付け、日時が不正ならアップロード前に拒否する。アップロード結果が未確定、メタデータ設定が失敗した場合も書込みを自動で再試行しない。別のコピーの独立したメタデータを守るため、既存の重複先と日時が異なれば従来通り Move の検証は失敗して元を残す。
+- 1970年より前の小数秒を含む日時の検索は、秒を切り捨てて日付へ変換し、整数への変換で翌日にずらさない。表示元の日時と端末のタイムゾーンを使う方針は保持する。
+- `make check` は Rust 120 tests / Swift 32 tests と全品質gateを通過。2系 / 3系の新規コピーのUTC日時・小数秒・ファイル日時・GPS / お気に入り、重複時の書込み抑止、日時不明、不正値の書込み前拒否、不明な応答の非再試行、1970年境界の日付検索を確認した。
+- 実Immich用に、EXIF日時 `2020:01:02 03:04:05.125+09:00` を持つ4×3のPNGを2つ追加した。ExifToolで両fixtureを検証し、片方のArtist tagだけを変えて重複を避ける。原本EXIFが優先される対照例と、2024年のライブラリ日時を持つ新規コピーを比較し、プレビュー生成とメタデータ再抽出のキュー終了後に日時を読み直す。原本のバイト列と、重複した写真の日時・名前・checksum・お気に入りの保持も検証する。
+- 原本のSHA-1 headerとSHA-256もfixtureの実バイト列から作り、サーバーのchecksumと一致を確認する。ローカル `make integration` はDocker socket不在でテスト前に停止。追加fixtureでの実通信と最終HEAD CIは別に確認する。
+- `make apple-build` は全5 Rust targetのコンパイルを通過後、universal library生成がディスク不足で停止。今回のビルド用一時成果物とmacOSビルド成果物を通常のcleanで整理し、同じコードの再実行でRust全5 target、XCFramework、iOS Simulator / macOS universal app buildsを通過した。PhotoKitから実際に調整した写真をコピーする画面操作は未検証。
+- 表示元の [PR #10](https://github.com/rabe1028/suwop/pull/10) は修正後の [最終HEAD CI](https://github.com/rabe1028/suwop/actions/runs/38187295514) が `41ecb1e4dd7adbe14a52553a0c47f65c46fd2f2d` で全3 jobを通過しマージ。main `97df205e6dd47464b9126d2cce060b7bbc2e8db9` と検証済み tree `2236e6774c78819337b36c878aa40e1e2619734f` の一致を確認した。[main CI](https://github.com/rabe1028/suwop/actions/runs/38188055368)は別に追跡する。
