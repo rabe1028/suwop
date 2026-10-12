@@ -37,6 +37,9 @@ pub struct SavedLibrary {
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
     ReadState,
+    Wait {
+        milliseconds: u32,
+    },
     Persist(SavedLibrary),
     ReadCredential {
         account: String,

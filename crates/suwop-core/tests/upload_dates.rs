@@ -48,6 +48,7 @@ fn response(status: u16, body: Value) -> HttpResponse {
 
 struct UploadRun {
     requests: Vec<HttpRequest>,
+    waits: usize,
     result: Result<String, String>,
 }
 
@@ -55,6 +56,15 @@ fn upload(
     metadata: StoredAsset,
     major: u32,
     responses: Vec<HttpResponse>,
+) -> Result<UploadRun, String> {
+    upload_with_wait(metadata, major, responses, false)
+}
+
+fn upload_with_wait(
+    metadata: StoredAsset,
+    major: u32,
+    responses: Vec<HttpResponse>,
+    cancel_wait: bool,
 ) -> Result<UploadRun, String> {
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
         let session = Session {
@@ -89,6 +99,7 @@ fn upload(
     });
     let mut responses: VecDeque<_> = responses.into();
     let mut requests = Vec::new();
+    let mut waits = 0;
     loop {
         let effects: Vec<_> = command.effects().collect();
         if effects.is_empty() {
@@ -96,12 +107,28 @@ fn upload(
         }
         for effect in effects {
             let Effect::Io(mut request) = effect;
-            let ShellOperation::Http(http) = &request.operation else {
-                return Err("unexpected native effect".into());
+            let value = match &request.operation {
+                ShellOperation::Http(http) => {
+                    requests.push(http.clone());
+                    serde_json::to_value(responses.pop_front().ok_or("unexpected HTTP retry")?)
+                        .map_err(|e| e.to_string())?
+                }
+                ShellOperation::Wait { milliseconds } => {
+                    assert_eq!(*milliseconds, 250);
+                    waits += 1;
+                    if cancel_wait {
+                        request
+                            .resolve(ShellResponse {
+                                value: None,
+                                error: Some("cancelled".into()),
+                            })
+                            .map_err(|e| e.to_string())?;
+                        continue;
+                    }
+                    Value::Null
+                }
+                _ => return Err("unexpected native effect".into()),
             };
-            requests.push(http.clone());
-            let value = serde_json::to_value(responses.pop_front().ok_or("unexpected HTTP retry")?)
-                .map_err(|e| e.to_string())?;
             request
                 .resolve(ShellResponse {
                     value: Some(value),
@@ -122,7 +149,24 @@ fn upload(
         _ => return Err("unexpected upload result".into()),
     };
     assert!(responses.is_empty());
-    Ok(UploadRun { requests, result })
+    Ok(UploadRun {
+        requests,
+        waits,
+        result,
+    })
+}
+
+fn extracted_date(date: Option<&str>) -> HttpResponse {
+    response(
+        200,
+        json!({
+            "id":ID,"ownerId":"owner","type":"IMAGE","originalFileName":"photo.png",
+            "checksum":"a".repeat(40),"fileCreatedAt":"2024-11-03T06:30:00.125Z",
+            "fileModifiedAt":"2024-11-03T06:31:40.250Z","updatedAt":"2024-11-03T06:31:40Z",
+            "isFavorite":true,"isOffline":false,"isTrashed":false,
+            "exifInfo":{"dateTimeOriginal":date}
+        }),
+    )
 }
 
 #[test]
@@ -134,11 +178,12 @@ fn a_new_copy_locks_the_adjusted_capture_instant_without_changing_file_timestamp
             major,
             vec![
                 response(201, json!({"id":ID,"status":"created"})),
+                extracted_date(Some("2020-01-01T00:00:00Z")),
                 response(200, Value::Null),
             ],
         )?;
         assert_eq!(run.result?, ID);
-        assert_eq!(run.requests.len(), 2);
+        assert_eq!(run.requests.len(), 3);
         let post = &run.requests[0];
         assert_eq!(post.method, "POST");
         assert_eq!(post.url, "https://photos.example/proxy/api/assets");
@@ -146,7 +191,8 @@ fn a_new_copy_locks_the_adjusted_capture_instant_without_changing_file_timestamp
         assert_eq!(post.fields["fileModifiedAt"], "2024-11-03T06:31:40.250Z");
         assert_eq!(post.files[0].path, "/tmp/fixture.png");
         assert_eq!(post.headers["x-immich-checksum"], "a".repeat(40));
-        let put = &run.requests[1];
+        assert_eq!(run.requests[1].method, "GET");
+        let put = &run.requests[2];
         assert_eq!(put.method, "PUT");
         assert_eq!(
             put.url,
@@ -245,10 +291,89 @@ fn an_unknown_upload_or_metadata_result_never_retries_a_write() -> Result<(), St
         3,
         vec![
             response(201, json!({"id":ID,"status":"created"})),
+            extracted_date(Some("2020-01-01T00:00:00Z")),
             response(503, Value::Null),
         ],
     )?;
     assert!(run.result.is_err());
-    assert_eq!(run.requests.len(), 2);
+    assert_eq!(run.requests.len(), 3);
+    Ok(())
+}
+
+#[test]
+fn matching_dates_do_not_generate_an_unnecessary_exif_sidecar() -> Result<(), String> {
+    let mut source = metadata();
+    source.latitude = None;
+    source.longitude = None;
+    let run = upload(
+        source,
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            extracted_date(Some("2024-11-03T06:30:00.125Z")),
+            response(200, Value::Null),
+        ],
+    )?;
+    assert!(run.result.is_ok());
+    assert_eq!(run.requests[2].body, Some(json!({"isFavorite":true})));
+    assert_eq!(run.waits, 0);
+    Ok(())
+}
+
+#[test]
+fn extraction_waits_read_only_then_applies_one_adjustment() -> Result<(), String> {
+    let run = upload(
+        metadata(),
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            extracted_date(None),
+            extracted_date(Some("2020-01-01T00:00:00Z")),
+            response(200, Value::Null),
+        ],
+    )?;
+    assert!(run.result.is_ok());
+    assert_eq!(run.waits, 1);
+    assert_eq!(
+        run.requests
+            .iter()
+            .map(|r| r.method.as_str())
+            .collect::<Vec<_>>(),
+        ["POST", "GET", "GET", "PUT"]
+    );
+    Ok(())
+}
+
+#[test]
+fn cancelled_failed_or_timed_out_extraction_never_attempts_metadata_writes() -> Result<(), String> {
+    let cancelled = upload_with_wait(
+        metadata(),
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            extracted_date(None),
+        ],
+        true,
+    )?;
+    let failed = upload(
+        metadata(),
+        3,
+        vec![
+            response(201, json!({"id":ID,"status":"created"})),
+            response(503, Value::Null),
+        ],
+    )?;
+    let mut responses = vec![response(201, json!({"id":ID,"status":"created"}))];
+    responses.extend((0..=120).map(|_| extracted_date(None)));
+    let expired = upload(metadata(), 3, responses)?;
+    assert_eq!(expired.waits, 120);
+    for run in [cancelled, failed, expired] {
+        assert!(run.result.is_err());
+        assert_eq!(
+            run.requests.iter().filter(|r| r.method == "POST").count(),
+            1
+        );
+        assert!(!run.requests.iter().any(|r| r.method == "PUT"));
+    }
     Ok(())
 }

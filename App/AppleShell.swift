@@ -32,6 +32,11 @@ import SuwopShell
         if !["persist", "cleanup", "removeCredential", "appleEditClose"].contains(operation.type) {
             try Task.checkCancellation()
         }
+        if operation.type == "wait" {
+            let milliseconds = try data["milliseconds"].decode(UInt32.self)
+            try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
+            return .null
+        }
         return try await dispatch(operation, data: data)
     }
 

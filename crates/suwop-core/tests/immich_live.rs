@@ -50,6 +50,10 @@ fn real_immich_upload_gps_list_download_stack_sidecar_and_trash() -> Result<(), 
             let Effect::Io(mut request) = effect;
             let result = match request.operation {
                 ShellOperation::Http(ref http) => execute(&agent, http),
+                ShellOperation::Wait { milliseconds } => {
+                    std::thread::sleep(Duration::from_millis(u64::from(milliseconds)));
+                    Ok(Value::Null)
+                }
                 _ => Err("unexpected non-HTTP effect".into()),
             };
             let response = match result {
@@ -204,13 +208,18 @@ async fn exercise_adjusted_dates(
     for (index, bytes) in [
         include_bytes!("fixtures/control-date.png").as_slice(),
         include_bytes!("fixtures/adjusted-date.png").as_slice(),
+        include_bytes!("fixtures/matching-date.png").as_slice(),
     ]
     .into_iter()
     .enumerate()
     {
         let file = date_fixture(directory, index, bytes)?;
         let mut metadata = fixture_metadata(file.resource.clone(), index, now);
-        metadata.captured_at = (index == 1).then_some(adjusted);
+        metadata.captured_at = match index {
+            1 => Some(adjusted),
+            2 => Some(embedded),
+            _ => None,
+        };
         metadata.modified_at = None;
         metadata.latitude = None;
         metadata.longitude = None;
@@ -220,7 +229,10 @@ async fn exercise_adjusted_dates(
         let preview = directory.join(format!("date-{index}-preview.jpg"));
         wait_preview(ctx, session, &id, &preview, 4.0 / 3.0).await?;
         wait_metadata_queues(ctx, session).await?;
-        verify_timeline_dates(ctx, session, &id, expected, index == 0).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index != 1).await?;
+        if index == 2 {
+            verify_ordinary_copy(ctx, session, &id).await?;
+        }
         // Rendering follows initial metadata extraction. Request another read,
         // drain its queues, then verify the library adjustment still wins.
         let _: Value = session
@@ -234,7 +246,10 @@ async fn exercise_adjusted_dates(
             )
             .await?;
         wait_metadata_queues(ctx, session).await?;
-        verify_timeline_dates(ctx, session, &id, expected, index == 0).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index != 1).await?;
+        if index == 2 {
+            verify_ordinary_copy(ctx, session, &id).await?;
+        }
         let before_duplicate = session.asset(ctx, &id).await?;
         assert_eq!(
             before_duplicate
@@ -285,6 +300,18 @@ async fn exercise_adjusted_dates(
         ids.push(id);
     }
     Ok(ids)
+}
+
+async fn verify_ordinary_copy(ctx: &Context, session: &Session, id: &str) -> Result<(), String> {
+    let files = session.files(ctx, id).await?;
+    assert!(!files.iter().any(|file| file.kind == "sidecar"));
+    let asset = session.asset(ctx, id).await?;
+    let record = asset.record(&session.scope, None, Some(&files));
+    assert!(
+        record.deletion_blockers.is_empty(),
+        "a matching-date ordinary copy must remain eligible for a later move"
+    );
+    Ok(())
 }
 
 async fn verify_timeline_dates(

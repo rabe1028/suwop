@@ -149,7 +149,7 @@ impl Shell {
                 } else if request.download_path.is_some() {
                     Value::Null
                 } else {
-                    json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":"test.jpg","checksum":SHA1,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
+                    json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":"test.jpg","checksum":SHA1,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":"1970-01-01T00:00:10Z","fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
                 };
                 serde_json::to_value(HttpResponse {
                     status: 200,

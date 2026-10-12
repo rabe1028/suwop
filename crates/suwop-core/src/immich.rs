@@ -356,10 +356,14 @@ impl Session {
             let mut body = json!({"isFavorite":metadata.is_favorite});
             // Upload timestamps are file facts; metadata extraction can prefer
             // the original's embedded EXIF date over an Apple library adjustment.
-            // Lock a known library capture instant on this newly created copy.
-            // Unknown library dates leave embedded EXIF unchanged.
-            if metadata.captured_at.is_some() {
-                body["dateTimeOriginal"] = json!(captured);
+            // Wait for extraction before comparing. A missing EXIF date while
+            // processing does not prove an adjustment is needed. Avoid creating
+            // an XMP sidecar for dates that already match the uploaded original.
+            if let Some(expected) = metadata.captured_at {
+                let extracted = self.extracted_capture_date(ctx, id).await?;
+                if (extracted - expected).abs() >= 0.001 {
+                    body["dateTimeOriginal"] = json!(captured);
+                }
             }
             if let (Some(lat), Some(lon)) = (metadata.latitude, metadata.longitude) {
                 body["latitude"] = json!(lat);
@@ -370,6 +374,24 @@ impl Session {
                 .await?;
         }
         Ok(id.into())
+    }
+    async fn extracted_capture_date(&self, ctx: &Context, id: &str) -> Result<f64, String> {
+        for attempt in 0..=120 {
+            let asset = self.asset(ctx, id).await?;
+            if let Some(date) = asset
+                .exif_info
+                .as_ref()
+                .and_then(|exif| exif.date_time_original.as_deref())
+                .and_then(parse_date)
+            {
+                return Ok(date);
+            }
+            if attempt == 120 {
+                break;
+            }
+            let _: Value = io(ctx, ShellOperation::Wait { milliseconds: 250 }).await?;
+        }
+        Err("新しいコピーの撮影日時の抽出を確認できません。コピーは作成済みの可能性があります。元の写真は残しています。".into())
     }
     pub async fn trash(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
         if ids.is_empty() {
