@@ -98,7 +98,8 @@ struct PhotoViewer: View {
                 }
             } message: {
                 Text("""
-                現在の静止画はApple Photosの現在の画像、またはImmichの未編集画像です。Immichの編集後の共有は準備中です。
+                Apple Photosは現在の画像、Immichの編集後は対応する切り抜き・90度回転・反転をPNGで共有します。
+                Immichの編集後は1,600万画素以内のSDR画像に対応します。撮影日時・位置も含みます。
                 動画とLive Photoは原本を選んでください。原本は位置情報などのメタデータ、Live Photoの動画、RAWを含みます。
                 """)
             }

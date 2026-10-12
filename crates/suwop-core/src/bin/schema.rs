@@ -38,6 +38,8 @@ struct Protocol {
     reversion_prompt: suwop_core::editing::ReversionPrompt,
     current_image_export: suwop_core::sharing::CurrentImageExport,
     current_image_facts: suwop_core::sharing::CurrentImageFacts,
+    current_image_render_plan: suwop_core::sharing::CurrentImageRenderPlan,
+    current_image_render_result: suwop_core::sharing::CurrentImageRenderResult,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let schema = schemars::schema_for!(Protocol);

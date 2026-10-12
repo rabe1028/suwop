@@ -12,6 +12,7 @@ pub use uploads::{
     PendingUpload, UploadForgetPrompt, UploadMetadataPlan, UploadPhase, UploadResumePrompt,
 };
 mod current_image;
+pub use current_image::RemoteCurrentImageInput;
 mod upload_intents;
 pub use upload_intents::{UploadIntent, UploadIntentForgetPrompt};
 

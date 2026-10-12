@@ -55,6 +55,16 @@ import SuwopShell
         if operation.type == "inspectCurrentImage" {
             return try .from(CurrentImageInspector.facts(requiredString(data, "path")))
         }
+        if operation.type == "inspectImageEncoding" {
+            return try await .from(CurrentImageRendering.inspect(requiredString(data, "path")))
+        }
+        if operation.type == "renderCurrentImage" {
+            return try await .from(CurrentImageRendering.render(
+                requiredString(data, "path"),
+                plan: data["plan"].decode(CurrentImageRenderPlan.self),
+                destination: requiredString(data, "destination")
+            ))
+        }
         return try await dispatch(operation, data: data)
     }
 

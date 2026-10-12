@@ -147,6 +147,7 @@ struct ConnectionView: View {
                         "API キーには写真の検索・表示・原本取得、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロードとメタデータ更新の権限も必要です。"
                     )
                     Text("Immich からの移動には削除と assetFile.read の権限も必要です。assetFile.read がない場合はコピーのみです。")
+                    Text("Immichの編集後の画像を共有するには、原本取得に加えて編集系列の参照権限が必要です。画像と撮影日時・位置をPNGへ書き出します。")
                     Text("API キーは Keychain、照合結果と転送記録はアプリ内に保存します。RAW・JPEG・動画は原本のまま転送します。")
                     Text("Live Photo、編集・補助データ付き、バースト、Immich External Library はコピーのみです。永久削除は行いません。")
                 }.font(.caption).foregroundStyle(.secondary)

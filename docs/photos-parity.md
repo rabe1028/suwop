@@ -25,7 +25,7 @@
 
 ## 現在の段階と残操作（2026-10-12 再監査）
 
-main は `1c9d3480c57da52739959efd3f1877530af926ed`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開・静止画の原本への復元がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+main は `92b987f2c20cfbe19b82fc99a3a29f2ba297ee17`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開・静止画の原本への復元・Appleの現在の画像共有がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
 
 | 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
 | --- | --- | --- |
@@ -207,4 +207,12 @@ main は `1c9d3480c57da52739959efd3f1877530af926ed`。閲覧・検索・お気�
 - Immichは未編集と確認できた写真だけを取得し、保存されたSHA-1とバイト長も照合する。編集済み・編集状態不明では共有を停止する。編集を保存してから生成jobをqueueする[Immich v3.2.4の実装](https://github.com/immich-app/immich/blob/v3.2.4/server/src/services/asset.service.ts#L582)では、古い編集済みfullsizeファイルが残り得る。ファイルID・編集フラグ・更新日時だけを、最新の編集との対応の証拠には数えない。最新の編集系列を読み直して原本から書き出す方式を残タスクとして扱い、原本や古い生成画像へすり替えない。
 - Rustが画像形式・サイズ・向き・単一frame・作業領域内のパス・安全な名前を検証し、共有用コピーのSHA-256・SHA-1・バイト長を照合する。システム共有の完了／キャンセルまでファイルを保持し、cleanup失敗も表示する。写真・転送履歴を書き換えるeffectを要求しない。Swiftに新しいImmich routeを置く変更も実装境界gateで拒否する。
 - `make check` はRust 160 tests／Swift 40 testsと全品質gateを通過。実FFIで取得・ハッシュ・コピー・共有・キャンセル・片付けの順と原本／履歴の保持を検証。16MPを超えるPNGを画素展開せず検査し、ファイルのバイト列を保持し、向きの不一致を拒否するnative metadata testも通過。
-- 実Immichのintegration fixtureは切り抜き・回転後の編集済み共有を拒否し、共有用ファイルを取得せず原本PNGのバイト列を保持することを検証する。生成済みファイルの世代確認を追加監査したため、最初のCIの全サイズ取得成功を最新編集の保証とは数えず実装を修正した。修正後の `make check` はRust 160／Swift 40 testsと全品質gateを通過。世代不明な生成ファイルの拒否、未編集原本のハッシュ照合とWebPの共有フローを含む。修正後の `make apple-build` は全5 target・XCFramework・両app buildsを通過。最終HEAD CIは別に確認する。local integrationはDocker socket不在でテスト前に停止。native共有画面と受信先の保存・実機／iCloud／HDR／RAWは別途確認する。
+- PR #13では、世代を確認できない編集済み共有を拒否する構成でRust 160／Swift 40 testsと全品質gate・全Apple buildを通過。[最終HEAD `2444e56` のCI](https://github.com/rabe1028/suwop/actions/runs/38271968656)は全3 job通過し、レビュー2件を解消してマージした。main `92b987f2c20cfbe19b82fc99a3a29f2ba297ee17`は検証済みtree `6a3991cc549728a46ff39d83e331049ecd10e9b8`と一致し、[別のmain CI](https://github.com/rabe1028/suwop/actions/runs/38273302918)も全3 job通過。local integrationはDocker socket不在でテスト前に停止。native共有画面と受信先の保存・実機／iCloud／HDR／RAWは別途確認する。
+
+## Immichの最新の編集系列からPNGを書き出す
+
+- `codex/render-current-immich`で、最新の編集系列を取得し、検証した原本に適用する読取り専用の書き出しを実装。古い生成済みfullsize／previewは使用しない。書き出し後に同じ編集ID・順序・パラメーターと写真の状態を読み直し、変更があれば共有を停止する。Immichの原本と編集系列は変更しない。
+- RustがSHA-1とバイト長、EXIFで向きを補正した整数の切り抜き・90度回転・反転、日時と座標、出力のサイズ・向き・メタデータを検証する。Swiftは原本のNative情報を読み、Rustの描画計画に従ってPNGを生成する。キャンセルではNative workerの終了を待ち、処理中のファイルをcleanupで消さない。
+- JPEGの再圧縮による追加劣化を避けるPNG出力で、Display P3・8bit透過、撮影日時と小数秒・UTCオフセット・GPSを保持する。未知の系列、HDR、色空間不明、1,600万画素を超える描画、メタデータ不一致を拒否する。Appleの現在の画像と未編集原本のバイト列をそのまま共有する経路には描画上限を追加しない。
+- `make check`はRust 165／Swift 42 testsと全品質gateを通過。実Nativeの画素・Display P3・透過の反転・日時と位置の読み戻し・元バイト保持を確認。Rustは最新系列の変更、非対応操作、誤った出力・メタデータ、HDR・上限・不正日時・部分座標を拒否する。実Immichのfixtureも最新系列と原本の取得・再検証を使う経路へ更新した。
+- `make apple-build`はRust全5 target・XCFramework・iOS Simulator／macOS universal app buildsを通過。最終HEAD CIの実通信、実際の共有画面と受信先の保存・実機／iCloud／高解像度／HDRは別に確認する。

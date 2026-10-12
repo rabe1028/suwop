@@ -96,6 +96,14 @@ pub enum ShellOperation {
     InspectCurrentImage {
         path: String,
     },
+    InspectImageEncoding {
+        path: String,
+    },
+    RenderCurrentImage {
+        path: String,
+        destination: String,
+        plan: crate::sharing::CurrentImageRenderPlan,
+    },
     AppleImport(crate::domain::AppleImportPlan),
     AppleTrash {
         assets: Vec<crate::domain::StoredAsset>,

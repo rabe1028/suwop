@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod current_rendering;
 mod current_sharing;
 mod editing;
 mod favorites;
