@@ -143,7 +143,7 @@ impl Session {
                 .and_then(|e| e.date_time_original.as_deref())
                 .and_then(parse_date)
                 .ok_or("撮影日時の抽出を確認できません。")?;
-            if (extracted - expected).abs() >= 0.001 {
+            if !crate::domain::same_capture_date(extracted, expected) {
                 body["dateTimeOriginal"] = json!(upload_date(expected)?);
             }
         }

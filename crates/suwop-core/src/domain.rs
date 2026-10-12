@@ -458,6 +458,12 @@ pub fn verify_source(saved: &TransferReceipt, fresh: &mut TransferBundle) -> Res
     }
     Ok(())
 }
+/// Capture instants share an inclusive one-millisecond tolerance throughout
+/// upload planning, metadata readback and move verification.
+pub(crate) fn same_capture_date(actual: f64, expected: f64) -> bool {
+    actual.is_finite() && expected.is_finite() && (actual - expected).abs() <= 0.001
+}
+
 pub fn verify_destination(saved: &TransferReceipt, fresh: &TransferBundle) -> Result<(), String> {
     fresh.validate()?;
     let expected: BTreeSet<_> = saved.destination.iter().map(|a| &a.key).collect();
@@ -476,9 +482,7 @@ pub fn verify_destination(saved: &TransferReceipt, fresh: &TransferBundle) -> Re
         if fresh.assets.iter().any(|a| {
             a.is_favorite != source.is_favorite
                 || !match (source.captured_at, a.captured_at) {
-                    (Some(date), Some(target)) => {
-                        date.is_finite() && target.is_finite() && (date - target).abs() <= 0.001
-                    }
+                    (Some(date), Some(target)) => same_capture_date(date, target),
                     (None, None) => true,
                     _ => false,
                 }

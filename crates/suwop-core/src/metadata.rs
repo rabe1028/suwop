@@ -220,14 +220,10 @@ pub fn verify(
 
 fn matches_change(asset: &StoredAsset, change: &MetadataChange) -> bool {
     match change.action {
-        MetadataAction::SetCapturedAt => {
-            asset
-                .captured_at
-                .zip(change.captured_at)
-                .is_some_and(|(actual, expected)| {
-                    actual.is_finite() && expected.is_finite() && (actual - expected).abs() < 0.001
-                })
-        }
+        MetadataAction::SetCapturedAt => asset
+            .captured_at
+            .zip(change.captured_at)
+            .is_some_and(|(actual, expected)| crate::domain::same_capture_date(actual, expected)),
         MetadataAction::SetLocation | MetadataAction::RemoveLocation => {
             let mut expected = asset.clone();
             expected.latitude = change.location.as_ref().map(|p| p.latitude);

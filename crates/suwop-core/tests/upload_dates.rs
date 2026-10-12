@@ -322,6 +322,69 @@ fn matching_dates_do_not_generate_an_unnecessary_exif_sidecar() -> Result<(), St
 }
 
 #[test]
+fn one_millisecond_offsets_do_not_request_exif_writes_but_larger_offsets_do() -> Result<(), String>
+{
+    for major in [2, 3] {
+        for (offset, adjustment) in [
+            (0.0, false),
+            (0.0005, false),
+            (0.001, false),
+            (-0.001, false),
+            (0.002, true),
+            (-0.002, true),
+        ] {
+            let mut source = metadata();
+            source.captured_at = Some(offset);
+            source.latitude = None;
+            source.longitude = None;
+            let run = upload(
+                source,
+                major,
+                vec![
+                    response(201, json!({"id":ID,"status":"created"})),
+                    extracted_date(Some("1970-01-01T00:00:00Z")),
+                    response(200, Value::Null),
+                ],
+            )?;
+            assert!(run.result.is_ok());
+            let body = run.requests[2].body.as_ref().ok_or("missing update")?;
+            assert_eq!(body.get("dateTimeOriginal").is_some(), adjustment);
+            assert_eq!(body["isFavorite"], true);
+            assert_eq!(run.waits, 0);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn metadata_readback_uses_the_same_inclusive_capture_tolerance() {
+    let change = suwop_core::metadata::MetadataChange {
+        action: suwop_core::metadata::MetadataAction::SetCapturedAt,
+        captured_at: Some(0.0),
+        time_zone: None,
+        location: None,
+    };
+    for (offset, matching) in [
+        (0.0, true),
+        (0.0005, true),
+        (0.001, true),
+        (-0.001, true),
+        (0.002, false),
+        (-0.002, false),
+        (f64::NAN, false),
+        (f64::INFINITY, false),
+    ] {
+        let mut asset = metadata();
+        asset.captured_at = Some(offset);
+        let key = asset.key.clone();
+        assert_eq!(
+            suwop_core::metadata::verify(&[asset], &[key], &change).is_ok(),
+            matching
+        );
+    }
+}
+
+#[test]
 fn extraction_waits_read_only_then_applies_one_adjustment() -> Result<(), String> {
     let run = upload(
         metadata(),
