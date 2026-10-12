@@ -85,3 +85,5 @@ Immich v3.2.4 を実通信テストに使用します。3.2 以降は filter / o
 - [PhotoKit resources](https://developer.apple.com/documentation/photos/phassetresource)
 
 統合した写真のプレビューの保存先は `media/preview.rs` が選ぶ。現在の snapshot の一意な実レコードと scope / session を索引にし、表示元の選択、選択した保存先が使えない場合の保持、内容とアクセスを含む cache identity は Rust が管理する。Swift はこの identity で画像要求を再開し、選択肢と表示中のコピーの日時を表示する。PhotoKit の編集を検証・保存した後も Rust がそのコピーを表示元に選ぶ。Immich の preview URI と version に応じた edited 指定は `Session::preview_request` が組み立てる。表示元の設定は現段階では起動中の状態に保持する。
+
+日付検索と日付順の並べ替えも Rust が選んだコピーの日時を使い、日時不明を別コピーの値で補わない。Swift の日／月／年のグループ分けと情報画面の見出しは同じ選択済み DTO の日時を表示する。`PhotoViewerCursor` は直前の Rust のグループのキーを保持する表示用カーソルで、片方が削除された後も残ったコピーを参照する。照合や表示元の選択は行わない。

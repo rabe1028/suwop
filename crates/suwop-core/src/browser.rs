@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use crate::domain::{Presence, ResourceRole, UnifiedPhoto};
 
@@ -85,7 +86,12 @@ fn name(photo: &UnifiedPhoto) -> String {
         .first()
         .map_or_else(String::new, |a| a.name.to_lowercase())
 }
-fn matches_query(photo: &UnifiedPhoto, tokens: &[String], time_zone: chrono_tz::Tz) -> bool {
+fn matches_query(
+    photo: &UnifiedPhoto,
+    captured_at: Option<f64>,
+    tokens: &[String],
+    time_zone: chrono_tz::Tz,
+) -> bool {
     let mut haystack = photo
         .assets
         .iter()
@@ -95,7 +101,7 @@ fn matches_query(photo: &UnifiedPhoto, tokens: &[String], time_zone: chrono_tz::
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
-    if let Some(seconds) = date(photo) {
+    if let Some(seconds) = captured_at {
         // Date search also supports year and month without downloading originals.
         #[allow(clippy::cast_possible_truncation)]
         if let Some(date) = DateTime::<Utc>::from_timestamp(seconds as i64, 0) {
@@ -111,6 +117,24 @@ fn matches_query(photo: &UnifiedPhoto, tokens: &[String], time_zone: chrono_tz::
 }
 #[must_use]
 pub fn browse(photos: &[UnifiedPhoto], options: &BrowserOptions) -> BrowserView {
+    let dates = photos.iter().map(|p| (photo_id(p), date(p))).collect();
+    browse_with_dates(photos, options, &dates)
+}
+/// The application passes the selected copy's date, including an explicit
+/// unknown. Never borrow a different copy's date for search or sorting.
+#[must_use]
+pub fn browse_with_dates(
+    photos: &[UnifiedPhoto],
+    options: &BrowserOptions,
+    dates: &BTreeMap<String, Option<f64>>,
+) -> BrowserView {
+    let displayed_date = |photo: &UnifiedPhoto| {
+        dates
+            .get(&photo_id(photo))
+            .copied()
+            .flatten()
+            .filter(|d| d.is_finite())
+    };
     let tokens: Vec<_> = options
         .query
         .split_whitespace()
@@ -133,13 +157,13 @@ pub fn browse(photos: &[UnifiedPhoto], options: &BrowserOptions) -> BrowserView 
                     PhotoFilter::Live => has_role(photo, ResourceRole::LiveVideo),
                     PhotoFilter::Raw => has_role(photo, ResourceRole::RawImage),
                 }
-                && matches_query(photo, &tokens, time_zone)
+                && matches_query(photo, displayed_date(photo), &tokens, time_zone)
         })
         .collect();
     visible.sort_by(|a, b| {
         let order = match options.sort {
             PhotoSort::Name => name(a).cmp(&name(b)),
-            PhotoSort::Newest | PhotoSort::Oldest => match (date(a), date(b)) {
+            PhotoSort::Newest | PhotoSort::Oldest => match (displayed_date(a), displayed_date(b)) {
                 (Some(a), Some(b)) => {
                     if matches!(options.sort, PhotoSort::Newest) {
                         b.total_cmp(&a)

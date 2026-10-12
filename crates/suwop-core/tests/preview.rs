@@ -327,3 +327,70 @@ fn preview_http_contract_keeps_legacy_versions_and_prefers_edits_when_supported(
     assert!(session().preview_request("../missing", true).is_err());
     Ok(())
 }
+
+#[test]
+fn date_search_and_order_follow_the_selected_copy_including_unknown_and_unavailable_dates()
+-> Result<(), String> {
+    use suwop_core::browser::{BrowserOptions, PhotoSort};
+    let mut saved = state();
+    saved.snapshots[0].assets[0].captured_at = Some(1_704_067_200.0); // 2024-01-01 UTC
+    saved.snapshots[0].assets[1].captured_at = Some(1_719_792_000.0); // 2024-07-01 UTC
+    saved.snapshots[1].assets[0].captured_at = Some(1_735_689_600.0); // 2025-01-01 UTC
+    let core = core(saved.clone());
+    let apple = saved.snapshots[0].assets[0].key.clone();
+    let remote = saved.snapshots[1].assets[0].key.clone();
+    let unrelated = saved.snapshots[0].assets[1].key.clone();
+    let ids = |key: &AssetKey| -> Result<String, String> {
+        core.view()
+            .photos
+            .iter()
+            .find(|p| p.assets.iter().any(|a| a.key == *key))
+            .map(photo_id)
+            .ok_or("missing photo".into())
+    };
+    let paired_id = ids(&apple)?;
+    let unrelated_id = ids(&unrelated)?;
+    assert_eq!(
+        core.view().browser.photo_ids,
+        vec![unrelated_id.clone(), paired_id.clone()]
+    );
+    choose(&core, remote.clone());
+    assert_eq!(
+        core.view().browser.photo_ids,
+        vec![paired_id.clone(), unrelated_id.clone()]
+    );
+    let browse = |query: &str, sort| {
+        assert!(
+            core.process_event(Event::Browse {
+                options: BrowserOptions {
+                    query: query.into(),
+                    sort,
+                    time_zone: Some("UTC".into()),
+                    ..BrowserOptions::default()
+                }
+            })
+            .is_empty()
+        );
+    };
+    browse("2024-01-01", PhotoSort::Newest);
+    assert!(core.view().browser.photo_ids.is_empty());
+    browse("2025-01-01", PhotoSort::Newest);
+    assert_eq!(core.view().browser.photo_ids, vec![paired_id.clone()]);
+    saved.snapshots[1].access = ScanAccess::Unavailable;
+    finish(&core, saved.clone());
+    assert_eq!(core.view().browser.photo_ids, vec![paired_id.clone()]);
+    assert!(source(&core, &apple).is_none());
+    browse("", PhotoSort::Oldest);
+    assert_eq!(
+        core.view().browser.photo_ids,
+        vec![unrelated_id.clone(), paired_id.clone()]
+    );
+    saved.snapshots[1].assets[0].captured_at = None;
+    finish(&core, saved);
+    assert_eq!(core.view().browser.photo_ids, vec![unrelated_id, paired_id]);
+    browse("2025-01-01", PhotoSort::Newest);
+    assert!(core.view().browser.photo_ids.is_empty());
+    browse("2024-01-01", PhotoSort::Newest);
+    assert!(core.view().browser.photo_ids.is_empty());
+    Ok(())
+}

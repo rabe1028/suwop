@@ -354,6 +354,7 @@ impl crux_core::App for Suwop {
                 )
             })
             .collect();
+        let displayed_dates = displayed_dates(&preview_choices);
         ViewModel {
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
@@ -392,7 +393,7 @@ impl crux_core::App for Suwop {
                 })
                 .collect(),
             albums: crate::albums::views(&model.state.albums, &photos, &model.state.snapshots),
-            browser: crate::browser::browse(&photos, &model.browser),
+            browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
             pending_apple_count: model
                 .state
@@ -411,6 +412,22 @@ impl crux_core::App for Suwop {
             move_blockers,
         }
     }
+}
+fn displayed_dates(
+    previews: &std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
+) -> std::collections::BTreeMap<String, Option<f64>> {
+    previews
+        .iter()
+        .map(|(id, choices)| {
+            (
+                id.clone(),
+                choices
+                    .iter()
+                    .find(|c| c.selected)
+                    .and_then(|c| c.captured_at),
+            )
+        })
+        .collect()
 }
 fn choose_preview(
     model: &mut Model,

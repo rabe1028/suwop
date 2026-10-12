@@ -16,8 +16,8 @@ enum TimelineGrouping: String, CaseIterable, Identifiable {
         }
     }
 
-    func date(_ photo: UnifiedPhoto) -> Date? {
-        guard let date = photo.capturedAt else { return nil }
+    func date(_ capturedAt: Date?) -> Date? {
+        guard let date = capturedAt else { return nil }
         switch self {
         case .all: return date
         case .days: return Calendar.current.startOfDay(for: date)
@@ -55,7 +55,9 @@ struct PhotoGrid: View {
         if timeline == .all {
             return [PhotoSection(id: "all", photos: model.visiblePhotos)]
         }
-        let grouped = Dictionary(grouping: model.visiblePhotos, by: timeline.date)
+        let grouped = Dictionary(grouping: model.visiblePhotos) {
+            timeline.date(model.displayedSource($0)?.capturedAt)
+        }
         return grouped.keys.sorted { first, second in
             switch (first, second) {
             case let (first?, second?): sort == .oldest ? first < second : first > second

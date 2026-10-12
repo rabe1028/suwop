@@ -12,9 +12,11 @@ struct PhotoInfo: View {
         NavigationStack {
             List {
                 Section {
-                    Text(photo.name).font(.headline)
-                    if let date = photo.capturedAt {
+                    Text(model.displayedSource(photo)?.name ?? photo.name).font(.headline)
+                    if let date = model.displayedSource(photo)?.capturedAt {
                         Text(date, style: .date).foregroundStyle(.secondary)
+                    } else {
+                        Text("撮影日不明").foregroundStyle(.secondary)
                     }
                     Text(photo.presence.title)
                 }

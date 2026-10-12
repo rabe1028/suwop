@@ -126,3 +126,5 @@
 - 実Immichテストに、4×3のPNGを切り抜き・回転し、編集系列を読み直し、編集後のJPEGプレビューの縦横比と変更前後のバイト列を確認し、原本の内容・checksum・名前・日時・お気に入りを保持するケースを追加。HTTP 200だけを編集反映の証拠にしない。編集済みの写真がMoveの削除対象にならないことも確認する。ローカル `make integration` はDocker socket不在でテスト前に停止し、この新しいケースの実通信は最終HEAD CIで別に検証する。
 - `make apple-build` は Rust の Apple 5 target と iOS Simulator / macOS universal app builds を通過。保存先を選び直した後は、全画面の参照先もその asset key に変え、以前のコピーが一覧から消えても選択中のコピーを表示する。
 - 保存先切替のnative画面、実サーバーの編集直後の待機表示、キャッシュの実操作・性能・VoiceOverは別の確認対象。Macのロックによりnative操作は未完了。Immich編集の書込みUIはまだ公開していない。
+- 初回 HEAD `f97d8be50e1f2e3fc37c79342f776e679eeb855e` の [CI](https://github.com/rabe1028/suwop/actions/runs/38186039904) で core と実Immich v3.2.4の編集済みプレビュー検証が通過。レビューで、選択したコピーの削除後も別のコピーが残る場合の閲覧と、日付検索・並べ替え・日／月／年のグリッドが表示元の撮影日を使う処理を修正した。日付不明を別コピーの値で補わない。Swiftの表示カーソルはRustから受け取ったグループのキーだけを保持し、照合や表示元の選択は行わない。
+- レビュー修正後の `make check` は Rust 114 tests / Swift 32 tests と全品質gateを通過。どちらのコピーを除いても生存するコピーを表示すること、グループの分割・統合、別写真・別accountへ戻らないこと、表示元による日付検索・新しい順／古い順・日付不明・アクセス不可の扱いを確認。修正後の `make apple-build` も全5 targetと両universal app buildsを通過。情報画面の見出しも同じ日時を使い、Swiftの統合写真の最大日時を選ぶ補助処理を除いた。最終HEAD CIは別に確認する。
