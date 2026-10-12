@@ -83,6 +83,7 @@ fn state(asset: StoredAsset) -> SavedLibrary {
 enum Fault {
     #[default]
     None,
+    WebP,
     Revision,
     Escape,
     Format,
@@ -92,12 +93,9 @@ enum Fault {
     Cancel,
     Cleanup,
     ExportLost,
-    MissingEdited,
-    DuplicateEdited,
-    WrongEdited,
-    FileChanged,
     UnknownEdited,
     Unedited,
+    WrongOriginal,
 }
 struct Shell {
     asset: StoredAsset,
@@ -105,7 +103,6 @@ struct Shell {
     trace: Vec<String>,
     files: Vec<String>,
     hashes: usize,
-    file_reads: usize,
 }
 impl Shell {
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
@@ -124,6 +121,9 @@ impl Shell {
                     fresh.revision = "changed".into();
                 }
                 let mut image = facts();
+                if matches!(self.fault, Fault::WebP) {
+                    image.content_type = "org.webmproject.webp".into();
+                }
                 if matches!(self.fault, Fault::Format) {
                     image.content_type = "application/unknown".into();
                 }
@@ -150,7 +150,16 @@ impl Shell {
                 self.hashes += 1;
                 self.trace.push("hash".into());
                 serde_json::to_value(HashResult {
-                    sha1: "a".repeat(40),
+                    sha1: if self.asset.key.provider == Provider::Immich {
+                        if matches!(self.fault, Fault::WrongOriginal) {
+                            "2"
+                        } else {
+                            "1"
+                        }
+                        .repeat(40)
+                    } else {
+                        "a".repeat(40)
+                    },
                     signature: FileSignature {
                         sha256: if self.hashes == 2 && matches!(self.fault, Fault::CopyChanged) {
                             "b".repeat(64)
@@ -159,6 +168,8 @@ impl Shell {
                         },
                         bytes: if matches!(self.fault, Fault::Empty) {
                             0
+                        } else if self.asset.key.provider == Provider::Immich {
+                            12
                         } else {
                             8
                         },
@@ -196,18 +207,14 @@ impl Shell {
         let body = if request.download_path.is_some() {
             Value::Null
         } else if request.url.contains("asset-files?") {
-            self.file_reads += 1;
-            let file = json!({"id":FILE,"type":"fullsize","isEdited":!matches!(self.fault, Fault::WrongEdited),"path":"edited.jpg","updatedAt":if self.file_reads == 2 && matches!(self.fault, Fault::FileChanged) {"1970-01-01T00:00:20Z"} else {"1970-01-01T00:00:10Z"}});
-            match self.fault {
-                Fault::MissingEdited => json!([]),
-                Fault::DuplicateEdited => json!([file.clone(), file]),
-                _ => json!([file]),
-            }
+            // Looks valid and remains stable while a newer editor job is
+            // pending: file identity alone is not current-render provenance.
+            json!([{"id":FILE,"type":"fullsize","isEdited":true,"path":"old-render.jpg","updatedAt":"1970-01-01T00:00:10Z"}])
         } else {
             let mut asset = native_remote();
             if matches!(self.fault, Fault::UnknownEdited) {
                 asset["isEdited"] = Value::Null;
-            } else if matches!(self.fault, Fault::Unedited) {
+            } else if matches!(self.fault, Fault::Unedited | Fault::WrongOriginal) {
                 asset["isEdited"] = json!(false);
             }
             asset
@@ -266,14 +273,13 @@ fn shell(asset: StoredAsset, fault: Fault) -> Shell {
         trace: vec![],
         files: vec![],
         hashes: 0,
-        file_reads: 0,
     }
 }
 
 #[test]
 fn current_image_share_keeps_rendered_bytes_and_finishes_before_cleanup_without_mutation()
 -> Result<(), String> {
-    for fault in [Fault::None, Fault::Cancel, Fault::Cleanup] {
+    for fault in [Fault::None, Fault::WebP, Fault::Cancel, Fault::Cleanup] {
         let mut shell = shell(apple(), fault);
         let before = serde_json::to_value(state(shell.asset.clone())).map_err(|e| e.to_string())?;
         let core = shell.run(false)?;
@@ -289,7 +295,14 @@ fn current_image_share_keeps_rendered_bytes_and_finishes_before_cleanup_without_
                 "cleanup"
             ]
         );
-        assert_eq!(shell.files, ["original-current.png"]);
+        assert_eq!(
+            shell.files,
+            [if matches!(fault, Fault::WebP) {
+                "original-current.webp"
+            } else {
+                "original-current.png"
+            }]
+        );
         assert_eq!(
             before,
             serde_json::to_value(core.view().state).map_err(|e| e.to_string())?
@@ -337,21 +350,20 @@ fn current_export_rejects_foreign_ambiguous_and_nonstill_sources_before_io() {
     assert!(current_image_asset(&state(limited).snapshots, "apple", None, &original.key).is_ok());
 }
 #[test]
-fn edited_remote_sharing_uses_only_the_verified_fullsize_file_id() -> Result<(), String> {
+fn edited_remote_sharing_rejects_a_stable_but_unversioned_fullsize_file() -> Result<(), String> {
     let remote: Asset = serde_json::from_value(native_remote()).map_err(|e| e.to_string())?;
     let mut shell = shell(remote.record("remote", None, None), Fault::None);
     let core = shell.run(true)?;
-    assert!(core.view().error.is_none(), "{:?}", core.view().error);
-    assert!(shell.trace.contains(&format!(
-        "GET https://photos.example/api/asset-files/{FILE}/download"
-    )));
+    assert!(core.view().error.is_some());
+    assert!(!shell.trace.iter().any(|r| r.contains("asset-files")));
     assert!(
         !shell
             .trace
             .iter()
             .any(|r| r.contains("/original") || r.contains("thumbnail"))
     );
-    assert_eq!(shell.files, ["original-current.png"]);
+    assert!(shell.files.is_empty());
+    assert!(!shell.trace.contains(&"share".into()));
     Ok(())
 }
 #[test]
@@ -359,33 +371,32 @@ fn unedited_remote_current_sharing_explicitly_reads_the_original() -> Result<(),
     let mut native = native_remote();
     native["isEdited"] = json!(false);
     let remote: Asset = serde_json::from_value(native).map_err(|e| e.to_string())?;
-    let mut shell = shell(remote.record("remote", None, None), Fault::Unedited);
-    let core = shell.run(true)?;
-    assert!(core.view().error.is_none(), "{:?}", core.view().error);
-    assert!(shell.trace.contains(&format!(
-        "GET https://photos.example/api/assets/{ID}/original?edited=false"
-    )));
-    assert!(!shell.trace.iter().any(|r| r.contains("asset-files")));
-    assert!(shell.trace.contains(&"share".into()));
+    for fault in [Fault::Unedited, Fault::WrongOriginal] {
+        let mut shell = shell(remote.record("remote", None, None), fault);
+        let core = shell.run(true)?;
+        assert_eq!(
+            core.view().error.is_none(),
+            matches!(fault, Fault::Unedited)
+        );
+        assert!(shell.trace.contains(&format!(
+            "GET https://photos.example/api/assets/{ID}/original?edited=false"
+        )));
+        assert!(!shell.trace.iter().any(|r| r.contains("asset-files")));
+        assert_eq!(
+            shell.trace.contains(&"share".into()),
+            matches!(fault, Fault::Unedited)
+        );
+    }
     Ok(())
 }
 
 #[test]
-fn pending_missing_ambiguous_changed_and_unknown_remote_edits_never_fall_back_to_originals()
--> Result<(), String> {
-    for fault in [
-        Fault::MissingEdited,
-        Fault::DuplicateEdited,
-        Fault::WrongEdited,
-        Fault::FileChanged,
-        Fault::UnknownEdited,
-    ] {
-        let remote: Asset = serde_json::from_value(native_remote()).map_err(|e| e.to_string())?;
-        let mut shell = shell(remote.record("remote", None, None), fault);
-        let core = shell.run(true)?;
-        assert!(core.view().error.is_some());
-        assert!(!shell.trace.contains(&"share".into()));
-        assert!(!shell.trace.iter().any(|r| r.contains("/original")));
-    }
+fn unknown_remote_edit_state_never_falls_back_to_originals() -> Result<(), String> {
+    let remote: Asset = serde_json::from_value(native_remote()).map_err(|e| e.to_string())?;
+    let mut shell = shell(remote.record("remote", None, None), Fault::UnknownEdited);
+    let core = shell.run(true)?;
+    assert!(core.view().error.is_some());
+    assert!(!shell.trace.contains(&"share".into()));
+    assert!(!shell.trace.iter().any(|r| r.contains("/original")));
     Ok(())
 }

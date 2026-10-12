@@ -115,6 +115,7 @@ pub fn current_image_name(
         "public.heic" | "image/heic" => "heic",
         "public.heif" | "image/heif" => "heif",
         "public.png" | "image/png" => "png",
+        "org.webmproject.webp" | "image/webp" => "webp",
         "public.tiff" | "image/tiff" => "tiff",
         "com.adobe.raw-image" | "image/x-adobe-dng" => "dng",
         _ => {

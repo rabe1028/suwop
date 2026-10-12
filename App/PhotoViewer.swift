@@ -97,7 +97,10 @@ struct PhotoViewer: View {
                     Button("原本を共有") { model.share([photo]) }
                 }
             } message: {
-                Text("現在の静止画は表示中の保存先の編集結果を取得します。動画とLive Photoは原本を選んでください。原本は元の形式で、位置情報などのメタデータ、Live Photoの動画、RAWを含みます。")
+                Text("""
+                現在の静止画はApple Photosの現在の画像、またはImmichの未編集画像です。Immichの編集後の共有は準備中です。
+                動画とLive Photoは原本を選んでください。原本は位置情報などのメタデータ、Live Photoの動画、RAWを含みます。
+                """)
             }
             .alert(
                 "操作を完了できませんでした",

@@ -64,6 +64,19 @@ impl Runtime<'_> {
         if !before.signature.valid() {
             return Err("現在の画像のバイト列を確認できません。".into());
         }
+        if key.provider == Provider::Immich {
+            let originals: Vec<_> = expected.originals().collect();
+            let [original] = originals.as_slice() else {
+                return Err("共有する原本の構成を確認できません。".into());
+            };
+            if original.sha1.as_deref() != Some(before.sha1.as_str())
+                || original
+                    .bytes
+                    .is_some_and(|bytes| bytes != before.signature.bytes)
+            {
+                return Err("取得した現在の画像がImmichの未編集原本と一致しません。".into());
+            }
+        }
         let name = current_image_name(&expected, &export.image)?;
         let path = format!("{}/{name}", self.directory("share-current-ready")?);
         let _: serde_json::Value = io(
