@@ -12,6 +12,7 @@ use std::collections::{BTreeMap, BTreeSet};
 mod albums;
 mod current_rendering;
 mod current_sharing;
+mod edit_paste;
 mod editing;
 mod favorites;
 mod media;
@@ -64,11 +65,22 @@ pub async fn run(
             | Event::EditAlbum { .. }
             | Event::EditImage { .. }
             | Event::RevertImage { .. }
+            | Event::PastePhotoEdits { .. }
+            | Event::PasteSelectedPhotoEdits { .. }
+            | Event::ResolveEditPaste { .. }
     );
     let sharing = matches!(event, Event::Share { .. } | Event::ShareCurrentImage { .. });
     let playback = matches!(event, Event::Play { .. });
     let reverting = matches!(event, Event::RevertImage { .. });
-    let editing = matches!(event, Event::EditImage { .. } | Event::RevertImage { .. });
+    let editing = matches!(
+        event,
+        Event::EditImage { .. }
+            | Event::RevertImage { .. }
+            | Event::CopyPhotoEdits { .. }
+            | Event::PastePhotoEdits { .. }
+            | Event::PasteSelectedPhotoEdits { .. }
+            | Event::ResolveEditPaste { .. }
+    );
     let mut result = runtime.execute(event).await;
     if let Some(token) = runtime.editing_token.take() {
         let close: Result<Value, _> = io(ctx, ShellOperation::AppleEditClose { token }).await;
@@ -116,31 +128,33 @@ pub async fn run(
     }
 }
 impl Runtime<'_> {
+    async fn initialize(&mut self, scope: String) -> Result<String, String> {
+        let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
+        self.state = if raw.is_null() {
+            SavedLibrary {
+                schema_version: 2,
+                apple_scope: scope,
+                ..SavedLibrary::default()
+            }
+        } else {
+            migrate(raw)?
+        };
+        for s in &mut self.state.snapshots {
+            s.access = ScanAccess::Unavailable;
+        }
+        for s in &mut self.state.albums {
+            s.access = ScanAccess::Unavailable;
+        }
+        if let Some(trash) = &mut self.state.trash {
+            trash.verified = false;
+        }
+        self.persist().await?;
+        Ok("写真ライブラリを接続してください。".into())
+    }
+
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
-            Event::Initialize { scope } => {
-                let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
-                self.state = if raw.is_null() {
-                    SavedLibrary {
-                        schema_version: 2,
-                        apple_scope: scope,
-                        ..SavedLibrary::default()
-                    }
-                } else {
-                    migrate(raw)?
-                };
-                for s in &mut self.state.snapshots {
-                    s.access = ScanAccess::Unavailable;
-                }
-                for s in &mut self.state.albums {
-                    s.access = ScanAccess::Unavailable;
-                }
-                if let Some(trash) = &mut self.state.trash {
-                    trash.verified = false;
-                }
-                self.persist().await?;
-                Ok("写真ライブラリを接続してください。".into())
-            }
+            Event::Initialize { scope } => self.initialize(scope).await,
             _ if self.state.schema_version != 2 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
             }
@@ -187,6 +201,15 @@ impl Runtime<'_> {
             Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
             Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
             Event::EditImage { key, id } => self.edit_image(&key, &id).await,
+            Event::CopyPhotoEdits { key, options, id } => {
+                self.copy_photo_edits(&key, options, &id).await
+            }
+            Event::PastePhotoEdits { keys, id } => self.paste_photo_edits(&keys, &id).await,
+            Event::PasteSelectedPhotoEdits { anchors, id } => {
+                let keys = self.selected_paste_keys(&anchors)?;
+                self.paste_photo_edits(&keys, &id).await
+            }
+            Event::ResolveEditPaste { key, id } => self.resolve_edit_paste(&key, &id).await,
             Event::RevertImage { key, id } => self.revert_image(&key, &id).await,
             Event::Share { keys, id } => self.share(&keys, &id).await,
             Event::ShareCurrentImage { key, id } => self.share_current_image(&key, &id).await,
@@ -477,6 +500,16 @@ impl Runtime<'_> {
         }
     }
     fn check_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
+        if self
+            .state
+            .pending_edit_pastes
+            .iter()
+            .any(|pending| keys.contains(&pending.key))
+        {
+            return Err(
+                "編集の貼り付け結果を先に確認してください。書き込みは再送しません。".into(),
+            );
+        }
         if self
             .state
             .pending_trash

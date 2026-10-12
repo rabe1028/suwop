@@ -83,6 +83,29 @@ import SuwopShell
         )
     }
 
+    func pasteEdits(_ prompt: PasteEditsPrompt) async throws -> Bool {
+        let names = prompt.names.prefix(5).joined(separator: "\n")
+        let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 枚" : ""
+        let categories = [
+            prompt.options.adjustments ? "調整値" : nil,
+            prompt.options.filter ? "フィルター" : nil,
+            prompt.options.geometry ? "切り抜き・向き" : nil,
+        ].compactMap(\.self).joined(separator: "、")
+        return try await confirm(
+            title: "\(prompt.names.count) 枚に編集をペーストしますか？",
+            message: """
+            コピー元: \(prompt.sourceName)
+            \(categories)
+            \(names)\(remaining)
+            選んだ項目の既存の編集を置き換えます。原本・日時・位置情報・お気に入りは保持します。
+            同じ編集の\(prompt.unchangedCount)枚は変更しません。途中で失敗した場合、確認できた写真まで反映されます。
+            iCloud 写真が有効なら他の端末にも反映されます。
+            """,
+            action: "編集をペースト",
+            destructive: false
+        )
+    }
+
     private func confirm(
         title: String,
         message: String,

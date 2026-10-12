@@ -45,7 +45,9 @@ import XCTest
         try FileManager.default.removeItem(atPath: model.presentation.path)
     }
 
-    static func model(populated: Bool = true) throws -> LibraryModel {
+    static func model(
+        populated: Bool = true, editClipboard: EditClipboard? = nil, pendingEditPastes: [PendingEditPaste] = []
+    ) throws -> LibraryModel {
         let assets = populated ? assets() : []
         let album = StoredAlbum(
             key: AlbumKey(provider: .apple, scope: "vrt", albumID: "summer"),
@@ -56,6 +58,8 @@ import XCTest
         let state = SavedLibrary(
             albums: populated ? [AlbumSnapshot(access: .full, albums: [album], provider: .apple, scope: "vrt")] : [],
             appleScope: "vrt",
+            editClipboard: editClipboard,
+            pendingEditPastes: pendingEditPastes,
             schemaVersion: 2,
             snapshots: [LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full)]
         )

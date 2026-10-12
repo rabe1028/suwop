@@ -22,6 +22,10 @@ pub struct ConnectionSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
+    #[serde(default)]
+    pub edit_clipboard: Option<crate::editing::EditClipboard>,
+    #[serde(default)]
+    pub pending_edit_pastes: Vec<crate::editing::PendingEditPaste>,
     pub schema_version: u32,
     pub apple_scope: String,
     pub connection: Option<ConnectionSettings>,
@@ -44,6 +48,12 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    ConfirmPasteEdits {
+        prompt: crate::editing::PasteEditsPrompt,
+    },
+    AppleEditInspect {
+        asset: crate::domain::StoredAsset,
+    },
     ReadState,
     RandomId,
     Wait {
@@ -180,6 +190,23 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    CopyPhotoEdits {
+        key: crate::domain::AssetKey,
+        options: crate::editing::EditCopyOptions,
+        id: String,
+    },
+    PastePhotoEdits {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
+    PasteSelectedPhotoEdits {
+        anchors: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
+    ResolveEditPaste {
+        key: crate::domain::AssetKey,
+        id: String,
+    },
     ChoosePreview {
         anchor: crate::domain::AssetKey,
         key: crate::domain::AssetKey,

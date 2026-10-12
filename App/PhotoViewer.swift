@@ -10,6 +10,8 @@ struct PhotoViewer: View {
     @State private var choosingEdit = false
     @State private var pendingEdit: EditingTarget?
     @State private var reverting = false
+    @State private var copyingEdits = false
+    @State private var pendingCopy: (AssetKey, EditCopyOptions)?
     @Environment(\.dismiss) private var dismiss
     private let collection: AlbumKey?
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
@@ -67,6 +69,22 @@ struct PhotoViewer: View {
                     PhotoInfo(photo: photo, model: model)
                 }
             }
+            .sheet(
+                isPresented: $copyingEdits,
+                onDismiss: {
+                    if let pendingCopy {
+                        self.pendingCopy = nil
+                        model.copyPhotoEdits(pendingCopy.0, options: pendingCopy.1)
+                    }
+                },
+                content: {
+                    if let photo {
+                        PhotoEditCopyView(targets: model.editingTargets(photo)) { key, options in
+                            pendingCopy = (key, options)
+                        }
+                    }
+                }
+            )
             .sheet(
                 isPresented: $choosingEdit,
                 onDismiss: {
@@ -163,6 +181,12 @@ struct PhotoViewer: View {
                 Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
                     .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
                 Menu {
+                    Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
+                    Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
+                        if let source = model.displayedSource(photo) {
+                            model.pastePhotoEdits([source.key])
+                        }
+                    }.disabled(model.editClipboard == nil || model.displayedSource(photo)?.key.provider != .apple)
                     Button("写真を編集", systemImage: "slider.horizontal.3") {
                         reverting = false
                         choosingEdit = true

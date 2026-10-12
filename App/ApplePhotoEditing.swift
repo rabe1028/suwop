@@ -100,7 +100,9 @@ import UniformTypeIdentifiers
         return FrozenPhotoOutput(output)
     }
 
-    private func readBack(_ expected: StoredAsset) async throws -> AppleEditResult {
+    func readBack(_ expected: StoredAsset) async throws -> AppleEditResult {
+        try Self.requireAccess()
+        try Task.checkCancellation()
         let native = try ApplePhotosStore.fetch(expected.key.assetID)
         let saved = try Self.describe(native, expected: expected)
         let original = try await ApplePhotosStore.editingInput(expected.key.assetID) { _ in true }

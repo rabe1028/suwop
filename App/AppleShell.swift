@@ -103,7 +103,7 @@ import SuwopShell
             ))))
         case "http": return try await .from(http.execute(data.decode(HttpRequest.self)))
         case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage",
-             "appleReversionInspect", "appleRevert", "confirmReversion":
+             "appleReversionInspect", "appleRevert", "confirmReversion", "confirmPasteEdits", "appleEditInspect":
             return try await editingEffect(operation.type, data: data)
         default: throw SuwopError("未知の入出力要求です: \(operation.type)")
         }
@@ -133,6 +133,10 @@ import SuwopShell
             return try await .from(photoReversion.revert(data["asset"].decode(StoredAsset.self)))
         case "confirmReversion":
             return try await .from(confirmation.revertImage(data["prompt"].decode(ReversionPrompt.self)))
+        case "confirmPasteEdits":
+            return try await .from(confirmation.pasteEdits(data["prompt"].decode(PasteEditsPrompt.self)))
+        case "appleEditInspect":
+            return try await .from(photoEditing.readBack(data["asset"].decode(StoredAsset.self)))
         default: throw SuwopError("未知の写真編集入出力です。")
         }
     }

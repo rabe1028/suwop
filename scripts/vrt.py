@@ -27,6 +27,11 @@ SCREENS = {
     "editor-large-text",
     "editor-large-text-bottom",
     "editor-adjusted",
+    "edit-copy",
+    "edit-copy-dark",
+    "edit-copy-large-text",
+    "edit-paste-pending",
+    "edit-paste-pending-large-text",
 }
 
 

@@ -57,6 +57,7 @@ struct GalleryView: View {
         .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
         .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
         .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
+        .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
         .alert("操作を完了できませんでした", isPresented: Binding(
             get: { model.errorMessage != nil },
             set: {
@@ -171,6 +172,7 @@ struct GalleryView: View {
                 .disabled(model.pendingAppleCount == 0 || model.isBusy)
             Button("転送履歴・移動確認", systemImage: "arrow.left.arrow.right") { model.showTransfers = true }
             Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)
+            Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)
         } label: { Label("表示と操作", systemImage: "ellipsis.circle") }
     }
@@ -185,6 +187,9 @@ struct GalleryView: View {
                         Button("原本ファイルを共有", systemImage: "square.and.arrow.up") { confirmingShare = true }
                         Button("お気に入りに追加", systemImage: "heart") { model.favorite(selection, value: true) }
                         Button("お気に入りから削除", systemImage: "heart.slash") { model.favorite(selection, value: false) }
+                        Button("Apple 側のすべてのコピーに編集をペースト", systemImage: "doc.on.clipboard") {
+                            model.pastePhotoEdits(selection)
+                        }.disabled(model.editClipboard == nil)
                         Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich(selection) }
                             .disabled(!selection.contains { $0.providers.contains(.immich) })
                         Button("選択を解除") { selectedKeys.removeAll() }

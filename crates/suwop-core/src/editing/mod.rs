@@ -4,6 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 mod apple;
+mod clipboard;
 mod color;
 mod draft;
 mod remote;
@@ -15,6 +16,7 @@ pub use apple::{
     ImageEncodingFacts, ImageRenderPlan, RenderFormat, decode_original_adjustment,
     prepare_apple_edit, verify_edit_source,
 };
+pub use clipboard::{EditClipboard, EditCopyOptions, PasteEditsPrompt, PendingEditPaste};
 pub use color::{
     ColorAdjustments, ColorControlKind, ColorControlSpec, ImageColorFilter, NativeColorPlan,
 };
