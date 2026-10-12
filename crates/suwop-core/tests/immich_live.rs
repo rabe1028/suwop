@@ -476,6 +476,9 @@ async fn exercise_edited_preview(
         before.record(&session.scope, None, None).captured_at
     );
     assert_eq!(after.is_edited, Some(true));
+    let current = directory.join("current-edited.jpg");
+    let edited = wait_current_image(ctx, session, &id, &current).await?;
+    assert_ne!(edited, bytes);
     let files = session.files(ctx, &id).await?;
     assert!(
         suwop_core::domain::allow_deletion(&[after.record(&session.scope, None, Some(&files))])
@@ -487,6 +490,38 @@ async fn exercise_edited_preview(
         .await?;
     assert_eq!(std::fs::read(original).map_err(|e| e.to_string())?, bytes);
     Ok(id)
+}
+
+async fn wait_current_image(
+    ctx: &Context,
+    session: &Session,
+    id: &str,
+    path: &Path,
+) -> Result<Vec<u8>, String> {
+    let mut last_error = "edited fullsize image did not become available".to_owned();
+    for _ in 0..80 {
+        let expected = session
+            .asset(ctx, id)
+            .await?
+            .record(&session.scope, None, None);
+        match session
+            .download_current_image(ctx, &expected, &path.to_string_lossy())
+            .await
+        {
+            Ok(_) => {
+                let bytes = std::fs::read(path).map_err(|e| e.to_string())?;
+                if let Some((width, height)) = jpeg_dimensions(&bytes)
+                    && (f64::from(width) / f64::from(height) - 0.5).abs() < 0.02
+                {
+                    return Ok(bytes);
+                }
+                last_error = "current image retained the unedited aspect".into();
+            }
+            Err(error) => last_error = error,
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    Err(last_error)
 }
 
 async fn wait_preview(

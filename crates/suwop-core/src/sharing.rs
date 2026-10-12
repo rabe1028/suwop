@@ -4,6 +4,11 @@ use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt, catalog,
     normalize_sha1,
 };
+mod current;
+pub use current::{
+    CurrentImageExport, CurrentImageFacts, current_image_asset, current_image_name,
+    verify_current_asset, verify_current_image,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 enum OriginalIdentity {

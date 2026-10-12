@@ -9,7 +9,7 @@ FORBIDDEN = {
     "hash algorithms": r"\b(?:CryptoKit|Insecure\.SHA1|SHA256\.hash)\b",
     "Immich routes": (
         r'["\'](?:/assets|assets/|/albums|albums/'
-        r"|search/metadata|server/version|users/me|stacks/)"
+        r"|search/metadata|server/version|users/me|stacks/|asset-files(?:/|\?))"
     ),
 }
 errors = []

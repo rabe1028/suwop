@@ -89,6 +89,13 @@ pub enum ShellOperation {
         keys: Vec<crate::domain::AssetKey>,
         directory: String,
     },
+    AppleCurrentImage {
+        asset: crate::domain::StoredAsset,
+        directory: String,
+    },
+    InspectCurrentImage {
+        path: String,
+    },
     AppleImport(crate::domain::AppleImportPlan),
     AppleTrash {
         assets: Vec<crate::domain::StoredAsset>,
@@ -180,6 +187,10 @@ pub enum Event {
     },
     Share {
         keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
+    ShareCurrentImage {
+        key: crate::domain::AssetKey,
         id: String,
     },
     RefreshAlbums,

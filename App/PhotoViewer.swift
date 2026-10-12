@@ -91,11 +91,14 @@ struct PhotoViewer: View {
                     }
                 }
             )
-            .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
+            .confirmationDialog("共有する内容", isPresented: $confirmingShare, titleVisibility: .visible) {
                 if let photo {
+                    Button("この表示元の現在の静止画を共有") { model.shareCurrentImage(photo) }
                     Button("原本を共有") { model.share([photo]) }
                 }
-            } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
+            } message: {
+                Text("現在の静止画は表示中の保存先の編集結果を取得します。動画とLive Photoは原本を選んでください。原本は元の形式で、位置情報などのメタデータ、Live Photoの動画、RAWを含みます。")
+            }
             .alert(
                 "操作を完了できませんでした",
                 isPresented: Binding(get: { model.errorMessage != nil }, set: {

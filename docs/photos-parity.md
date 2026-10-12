@@ -14,7 +14,7 @@
 | アルバム、作成・名前変更・削除、所属追加・解除 | 通常アルバムを実装。Rust / FFI テスト、Simulator の PhotoKit 作成・名前変更・写真追加 / 解除・再起動後の再取得を通過 | Immich の実 API CI、PhotoKit のアルバム削除、共有・スマートアルバム、並べ替え、実機 |
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | Apple 静止画の切り抜き・90度回転・反転・編集履歴と保存、確認後の原本への復元を実装。Rust / 実FFI / Core Imageの画素・色空間テストを通過。PhotoKitの保存操作は未検証 | native 保存・再起動・既存編集の保持、Immich編集、HDR・透過、明るさ・色・フィルター、原本へ戻す |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
-| 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、単独 / 複数選択の native 画面とキャンセル・片付けを確認。編集後の共有・取り込み・複製は継続作業 | 動画の共有、受信先での保存、強制終了後の片付け |
+| 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、単独 / 複数選択の native 画面とキャンセル・片付けを確認。選んだ表示元の現在の静止画共有を実装、Rust / 実FFI通過 | 現在の静止画のnative共有、動画／Live・複数選択の現在の内容、取り込み・複製、受信先での保存、強制終了後の片付け |
 | ゴミ箱、削除確認、復元、削除結果不明 | 移動後のゴミ箱のみ | native ゴミ箱との一致、結果不明の再実行を防ぐ、両側の保護 |
 | 保存先確認・照合・Copy / Move | Rust / FFI / Immich テスト、PR #2 CI | 実 PhotoKit の RAW / Live / 編集済み / iCloud / バースト / 限定権限 |
 | 場所、人物、分類、思い出、重複整理 | 未実装 | 検索・分類の実結果。公開 API で扱えない Photos 専用機能は差分と代替を明記 |
@@ -25,13 +25,13 @@
 
 ## 現在の段階と残操作（2026-10-12 再監査）
 
-main は `9c55d445cf3516aa64ef48d1a2c8da13f68049cf`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
+main は `1c9d3480c57da52739959efd3f1877530af926ed`。閲覧・検索・お気に入り・通常アルバム・原本共有・原本再生・日時／位置変更・Apple静止画の幾何編集・表示元選択・中断後のコピー再開・静止画の原本への復元がマージ済み。これらのコード・CIと、表に残る端末操作・PhotoKit保存・iCloudの未検証項目は別に扱う。
 
 | 次の操作・差分 | 実装の場所・現在の状態 | 完了まで必要な証拠 |
 | --- | --- | --- |
-| 日時を保った新規コピーと中断後の再開 | PR #11 の最終HEAD `e280879` は全3 CI job通過。POST前の開始記録・固有ID照合・開始記録解除を含めてマージ済み | main CI、確認画面と中断・再起動のnative操作 |
-| Apple静止画の原本へ戻す | `codex/revert-original` でPR #11のmainへ載せ直し、開始記録追加版と組み合わせたRust 154／Swift 38 testsが通過 | 最終Apple build・最終HEAD CI、実PhotoKitの保存→復元→再起動と競合確認 |
-| 編集後の共有、取り込み、複製 | ユーザー向けの編集後共有・外部ファイル取り込み・複製イベントは未実装。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
+| 日時を保った新規コピーと中断後の再開 | PR #11 の最終HEAD `e280879` とマージ後main CIは全3 job通過。POST前の開始記録・固有ID照合・開始記録解除を含めてマージ済み | 確認画面と中断・再起動のnative操作 |
+| Apple静止画の原本へ戻す | PR #12 の最終HEAD `dc8eb58` とマージ後main CIは全3 job通過。Rust 154／Swift 38 testsとApple build通過 | 実PhotoKitの保存→復元→再起動と競合確認 |
+| 編集後の共有、取り込み、複製 | `codex/share-current-content` で選んだ表示元の現在の静止画を共有する操作を実装中。動画／Liveの現在の内容、複数選択、外部ファイル取り込み・複製は継続。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
 | 通常の削除、非表示／再表示、復元 | 公開Eventには独立したTrash／Hide／Recoverがない。AppleTrashは現在Moveの完了からだけ要求する | 一括選択と現在の権限・ID確認、明示確認と結果不明の扱い、両保存先の状態・nativeゴミ箱／非表示との一致。公開PhotoKit APIの制約も実装前に検証 |
 | 明るさ・色・フィルターと編集のコピー／貼り付け | 現行Rust編集モデルは整数の切り抜き・向きが中心。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Rustに編集操作・履歴・保存検証を追加し、native画素／形式／メモリと保存・取り消し・元へ戻すを確認 |
 | 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
@@ -197,3 +197,14 @@ main は `9c55d445cf3516aa64ef48d1a2c8da13f68049cf`。閲覧・検索・お気�
 - Reversion was rebased onto this main with both upload-intent and reversion confirmation DTOs preserved and regenerated from Rust. The combined `make check` passed 154 Rust / 38 Swift tests and all gates. Reversion's final Apple build, pushed-HEAD CI and actual PhotoKit interaction are separate evidence.
 
 - On merged PR #11/main, reversion's aggregate `make apple-build` passed all five Rust Apple targets, XCFramework generation and both iOS Simulator / universal macOS app builds. This validates the composed native confirmation DTOs and thin PhotoKit adapter; it does not establish actual PhotoKit save/revert, restart, foreign-editor, device or iCloud acceptance.
+
+- [PR #12](https://github.com/rabe1028/suwop/pull/12) final HEAD `dc8eb5861dceec915a34963826d6015bf90df672` passed core, actual Immich and Apple jobs in [CI](https://github.com/rabe1028/suwop/actions/runs/38260560253). Merged main `1c9d3480c57da52739959efd3f1877530af926ed` matches verified tree `79a5e094b32d08a910e393c5c43194f5382ca6a7`; its separate [main CI](https://github.com/rabe1028/suwop/actions/runs/38261955498) also passed all three jobs.
+
+## 選んだ表示元の現在の静止画を共有
+
+- 全画面の共有メニューから、表示元の現在の静止画と原本ファイルを選び分ける。Rustが現在のscope・一意なsnapshot／ID・明示された保存先を検証し、別の保存先へ自動で切り替えない。限定権限はアクセスできる静止画の読取りに使える。動画・Live Photoと複数選択の現在の内容は継続作業。
+- Appleのadapterは [現在の全サイズ画像を返すPhotoKit API](https://developer.apple.com/documentation/photos/phimagemanager/requestimagedataandorientation(for:options:resulthandler:)) を使い、取得前後の写真情報をRustへ返す。キャンセル・低品質結果・エラーでは共有しない。ImageIOでコンテナ情報だけを読み、APIの向きと実際のファイルの向きを照合する。画素展開・再圧縮は行わず、編集rendererの16MP上限を適用しない。
+- Immich 3.xの編集済み静止画は、編集フラグを持つ一意なfullsizeファイルIDを選び、そのファイルを直接取得する。取得前後のファイルID・種類・編集状態・更新日時と写真のrevision／メタデータを確認する。原本取得APIやthumbnailの未編集fallbackを編集後の画像として扱わない。未生成・重複・競合・編集状態不明では止める。未編集と確認できた写真は原本を取得する。2.xの編集済み共有は未対応。
+- Rustが画像形式・サイズ・向き・単一frame・作業領域内のパス・安全な名前を検証し、共有用コピーのSHA-256・SHA-1・バイト長を照合する。システム共有の完了／キャンセルまでファイルを保持し、cleanup失敗も表示する。写真・転送履歴を書き換えるeffectを要求しない。Swiftに新しいImmich routeを置く変更も実装境界gateで拒否する。
+- `make check` はRust 160 tests／Swift 40 testsと全品質gateを通過。実FFIで取得・ハッシュ・コピー・共有・キャンセル・片付けの順と原本／履歴の保持を検証。16MPを超えるPNGを画素展開せず検査し、ファイルのバイト列を保持し、向きの不一致を拒否するnative metadata testも通過。
+- 実Immichのintegration fixtureは切り抜き・回転済みの全サイズJPEGをファイルIDで取得し、編集後の縦横比と原本PNGのバイト保持を検証する。local `make integration` はDocker socket不在でテスト前に停止した。`make apple-build` はRust全5 target・XCFramework・iOS Simulator／macOS universal app buildsを通過。最終HEAD CI・native共有画面と受信先の保存・実機／iCloud／HDR／RAWは別途確認する。
