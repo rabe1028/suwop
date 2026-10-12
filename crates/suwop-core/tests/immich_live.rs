@@ -219,6 +219,8 @@ async fn exercise_adjusted_dates(
         let id = session.upload(ctx, &file, &metadata, now, None).await?;
         let preview = directory.join(format!("date-{index}-preview.jpg"));
         wait_preview(ctx, session, &id, &preview, 4.0 / 3.0).await?;
+        wait_metadata_queues(ctx, session).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index == 0).await?;
         // Rendering follows initial metadata extraction. Request another read,
         // drain its queues, then verify the library adjustment still wins.
         let _: Value = session
@@ -232,6 +234,7 @@ async fn exercise_adjusted_dates(
             )
             .await?;
         wait_metadata_queues(ctx, session).await?;
+        verify_timeline_dates(ctx, session, &id, expected, index == 0).await?;
         let before_duplicate = session.asset(ctx, &id).await?;
         assert_eq!(
             before_duplicate
@@ -282,6 +285,37 @@ async fn exercise_adjusted_dates(
         ids.push(id);
     }
     Ok(ids)
+}
+
+async fn verify_timeline_dates(
+    ctx: &Context,
+    session: &Session,
+    id: &str,
+    expected: f64,
+    embedded_zone: bool,
+) -> Result<(), String> {
+    let asset: Value = session
+        .json(ctx, &format!("assets/{id}"), "GET", None)
+        .await?;
+    // The embedded control is +09:00; the known library adjustment is explicitly
+    // an absolute UTC date. localDateTime encodes local wall time with a Z suffix.
+    for (field, expected) in [
+        ("fileCreatedAt", expected),
+        (
+            "localDateTime",
+            expected + if embedded_zone { 32_400.0 } else { 0.0 },
+        ),
+    ] {
+        let value = asset[field].as_str().ok_or("missing timeline date")?;
+        let date = chrono::DateTime::parse_from_rfc3339(value).map_err(|e| e.to_string())?;
+        #[allow(clippy::cast_precision_loss)]
+        let seconds = date.timestamp_millis() as f64 / 1000.0;
+        assert!(
+            (seconds - expected).abs() < 0.001,
+            "{field}: expected {expected}, received {value}"
+        );
+    }
+    Ok(())
 }
 
 fn date_fixture(directory: &Path, index: usize, bytes: &[u8]) -> Result<TransferFile, String> {
