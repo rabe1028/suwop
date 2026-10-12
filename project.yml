@@ -62,6 +62,40 @@ targets:
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+  SuwopVRTHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: VRT/Host
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT'
+        TARGETED_DEVICE_FAMILY: '1'
+    info:
+      path: Generated/VRT-Info.plist
+      properties:
+        CFBundleDevelopmentRegion: ja
+        CFBundleLocalizations: [ja]
+        UILaunchScreen: {}
+  SuwopVRT:
+    type: bundle.unit-test
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [VRT/Tests]
+    dependencies:
+      - target: SuwopVRTHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt.tests
+        SWIFT_OPTIMIZATION_LEVEL: '-O'
 schemes:
   SuwopiOS:
     build:
@@ -71,3 +105,16 @@ schemes:
     build:
       targets:
         SuwopmacOS: all
+  SuwopVRT:
+    build:
+      targets:
+        SuwopVRTHost: all
+        SuwopVRT: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopVRT]
+      environmentVariables:
+        SUWOP_VRT_RECORD: '$(SUWOP_VRT_RECORD)'
+        SUWOP_VRT_BASELINES: '$(SUWOP_VRT_BASELINES)'
+        SUWOP_VRT_ARTIFACTS: '$(SUWOP_VRT_ARTIFACTS)'
+        TZ: UTC

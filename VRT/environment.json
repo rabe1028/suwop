@@ -1,0 +1,9 @@
+{
+  "xcode": "26.4.1",
+  "xcode_build": "17E202",
+  "runtime": "com.apple.CoreSimulator.SimRuntime.iOS-26-4",
+  "runtime_version": "26.4.1",
+  "runtime_build": "23E254a",
+  "device": "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+  "simslim": "0.12.2"
+}

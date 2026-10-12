@@ -23,6 +23,16 @@ import SwiftUI
     private var albumsRequested = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
 
+    #if SUWOP_VRT
+        // Only the dedicated snapshot host compiles this initializer. No native I/O is started.
+        private var snapshotImages: [AssetKey: PlatformImage] = [:]
+        init(snapshotView: ViewModel, images: [AssetKey: PlatformImage]) {
+            view = snapshotView
+            snapshotImages = images
+            started = true
+        }
+    #endif
+
     init() {
         do { runtime = try RustRuntime()
             shell = try AppleShell()
@@ -112,6 +122,11 @@ import SwiftUI
     }
 
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        #if SUWOP_VRT
+            if let key = view?.previewSources[photo.id], let image = snapshotImages[key] {
+                return image
+            }
+        #endif
         guard let shell else { throw SuwopError("入出力が利用できません。") }
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
         return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: true)
@@ -252,33 +267,6 @@ import SwiftUI
         view?.pendingAppleCount ?? 0
     }
 
-    func start() {
-        guard !started else { return }
-        started = true
-        pendingRefresh = true
-        send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
-    }
-
-    func refresh(requestPermission: Bool = false) {
-        send([
-            "type": .string("refresh"),
-            "permission": .bool(requestPermission),
-            "now": .number(Date().timeIntervalSince1970),
-        ])
-    }
-
-    func configure(address: String, apiKey: String, allowHTTP: Bool) {
-        send([
-            "type": .string("configure"),
-            "address": .string(address),
-            "key": .string(apiKey),
-            "allowHTTP": .bool(allowHTTP),
-            "id": .string(UUID().uuidString),
-            "now": .number(Date().timeIntervalSince1970),
-        ])
-        showSettings = false
-    }
-
     func disconnect() {
         send(["type": .string("disconnect")])
     }
@@ -315,6 +303,11 @@ import SwiftUI
 
     func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
+        #if SUWOP_VRT
+            if let image = snapshotImages[key] {
+                return image
+            }
+        #endif
         let cacheKey = previewIdentifier(photo) as NSString
         if let image = thumbnails.object(forKey: cacheKey) {
             return image
@@ -400,6 +393,33 @@ import SwiftUI
 }
 
 extension LibraryModel {
+    func start() {
+        guard !started else { return }
+        started = true
+        pendingRefresh = true
+        send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
+    }
+
+    func refresh(requestPermission: Bool = false) {
+        send([
+            "type": .string("refresh"),
+            "permission": .bool(requestPermission),
+            "now": .number(Date().timeIntervalSince1970),
+        ])
+    }
+
+    func configure(address: String, apiKey: String, allowHTTP: Bool) {
+        send([
+            "type": .string("configure"),
+            "address": .string(address),
+            "key": .string(apiKey),
+            "allowHTTP": .bool(allowHTTP),
+            "id": .string(UUID().uuidString),
+            "now": .number(Date().timeIntervalSince1970),
+        ])
+        showSettings = false
+    }
+
     func shareCurrentImage(_ photo: UnifiedPhoto) {
         guard let source = displayedSource(photo) else {
             errorMessage = "共有する表示元を選択してください。"

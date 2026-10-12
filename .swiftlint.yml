@@ -3,6 +3,8 @@ included:
   - App
   - Sources/SuwopShell
   - Tests/SuwopShellTests
+  - VRT/Host
+  - VRT/Tests
 excluded:
   - Sources/SuwopShell/Generated
 opt_in_rules:

@@ -57,3 +57,34 @@ jobs:
         run: make test
       - name: Build universal Rust libraries, iOS and macOS apps
         run: make apple-build
+
+  vrt:
+    runs-on: macos-26
+    timeout-minutes: 25
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      CARGO_BUILD_JOBS: '2'
+      CARGO_INCREMENTAL: '0'
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Isolate the pinned Rust toolchain
+        run: |
+          suwop_rustup_dir="$(mktemp -d "$RUNNER_TEMP/suwop-vrt-rustup.XXXXXX")"
+          echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
+          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Install XcodeGen and pinned SimSlim
+        run: |
+          brew install xcodegen
+          make setup-vrt
+      - name: Compare native SwiftUI screenshots on one slim Simulator
+        run: make vrt
+      - name: Preserve screenshots, pixel diffs, timing, profile and native test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vrt-${{ github.sha }}
+          path: DerivedData/VRTArtifacts/
+          if-no-files-found: warn
+          retention-days: 14

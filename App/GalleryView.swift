@@ -84,15 +84,7 @@ struct GalleryView: View {
                 }
                 controls
                 if model.photos.isEmpty, !model.isBusy {
-                    ContentUnavailableView {
-                        Label("写真をここから見つけよう", systemImage: "photo.on.rectangle")
-                    } description: {
-                        Text("Apple Photos の写真を表示するか、Immich に接続してください。")
-                    } actions: {
-                        Button("Apple Photos を表示") { model.refresh(requestPermission: true) }
-                            .buttonStyle(.borderedProminent)
-                        Button("Immich に接続") { model.showSettings = true }.buttonStyle(.bordered)
-                    }
+                    emptyLibrary
                 } else {
                     PhotoGrid(
                         model: model,
@@ -123,6 +115,22 @@ struct GalleryView: View {
                     }.accessibilityIdentifier("selectPhotos").disabled(model.photos.isEmpty)
                     optionsMenu
                 }
+            }
+        }
+    }
+
+    private var emptyLibrary: some View {
+        GeometryReader { geometry in
+            ScrollView {
+                ContentUnavailableView {
+                    Label("写真をここから見つけよう", systemImage: "photo.on.rectangle")
+                } description: {
+                    Text("Apple Photos の写真を表示するか、Immich に接続してください。")
+                } actions: {
+                    Button("Apple Photos を表示") { model.refresh(requestPermission: true) }
+                        .buttonStyle(.borderedProminent)
+                    Button("Immich に接続") { model.showSettings = true }.buttonStyle(.bordered)
+                }.frame(minHeight: geometry.size.height)
             }
         }
     }

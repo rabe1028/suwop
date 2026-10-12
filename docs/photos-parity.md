@@ -19,6 +19,7 @@
 | 保存先確認・照合・Copy / Move | Rust / FFI / Immich テスト、PR #2 CI | 実 PhotoKit の RAW / Live / 編集済み / iCloud / バースト / 限定権限 |
 | 場所、人物、分類、思い出、重複整理 | 未実装 | 検索・分類の実結果。公開 API で扱えない Photos 専用機能は差分と代替を明記 |
 | 権限変更、通信断、再開、性能、アクセシビリティ | 一部の core / cancellation テスト | 拒否 / 限定 / フル、VoiceOver / 大文字、端末と大量写真、断線・再起動 |
+| 表示の退行検出 | simslim の専用 Simulator と実 Rust ABI の固定データで SwiftUI 11 画面を VRT 比較。明暗・大文字・選択・ビューア・情報・アルバム・設定・転送画面を確認し、一画素の故意の変更で失敗検出を確認 | [固定環境での VRT](vrt.md) を維持。iPad / Mac、編集・動画・Live の画面と操作、実写真・VoiceOver は別途確認 |
 | 署名・配布、iCloud 同期 | 未確認 | 実機のインストール、同じ Apple account の native 保存結果 |
 
 各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。
