@@ -1068,6 +1068,113 @@ fn unresolved_trash_fences_metadata_resume_on_an_existing_copy() -> Result<(), S
     Ok(())
 }
 
+fn pending_same_original(scope: &str, checksum: &str) -> suwop_core::trash::TrashOperation {
+    suwop_core::trash::TrashOperation {
+        id: "33333333-3333-4333-8333-333333333333".into(),
+        scope: scope.into(),
+        action: suwop_core::trash::TrashAction::Trash,
+        assets: vec![suwop_core::trash::TrashIdentity {
+            key: AssetKey {
+                provider: Provider::Immich,
+                scope: scope.into(),
+                asset_id: "55555555-5555-4555-8555-555555555555".into(),
+            },
+            name: "other-copy.jpg".into(),
+            checksum: checksum.into(),
+            media_type: "IMAGE".into(),
+            created_at: "1970-01-01T00:00:10Z".into(),
+            modified_at: "1970-01-01T00:00:10Z".into(),
+            live_photo_video_id: None,
+        }],
+    }
+}
+
+#[test]
+fn pending_same_original_fences_new_apple_copy_and_move_before_any_journal_or_upload()
+-> Result<(), String> {
+    for intent in [TransferIntent::Copy, TransferIntent::Move] {
+        for action in [
+            suwop_core::trash::TrashAction::Trash,
+            suwop_core::trash::TrashAction::Restore,
+        ] {
+            let mut shell = Shell::new();
+            let mut operation = pending_same_original("immich", SHA1);
+            operation.action = action;
+            let state = SavedLibrary {
+                schema_version: 2,
+                apple_scope: "apple".into(),
+                pending_trash: vec![operation],
+                ..SavedLibrary::default()
+            };
+            // No cached Apple fingerprints: the fence uses the fresh export.
+            let restored = core_from_state(state);
+            shell.run(&restored, copy_event(&shell, intent))?;
+            let view = restored.view();
+            assert!(view.error.is_some());
+            assert_eq!(
+                (
+                    shell.writes,
+                    shell.metadata_writes,
+                    shell.deleted,
+                    shell.http_requests
+                ),
+                (0, 0, 0, 0)
+            );
+            assert!(shell.journal.is_none());
+            assert!(view.state.receipts.is_empty());
+            assert!(view.state.upload_intents.is_empty());
+            assert!(view.state.pending_uploads.is_empty());
+            assert_eq!(view.state.pending_trash.len(), 1);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn unrelated_originals_and_other_accounts_do_not_fence_transfers() -> Result<(), String> {
+    for (scope, checksum) in [("immich", "2".repeat(40)), ("other-account", SHA1.into())] {
+        let mut shell = Shell::new();
+        let restored = core_from_state(SavedLibrary {
+            schema_version: 2,
+            apple_scope: "apple".into(),
+            pending_trash: vec![pending_same_original(scope, &checksum)],
+            ..SavedLibrary::default()
+        });
+        shell.run(&restored, copy_event(&shell, TransferIntent::Copy))?;
+        assert_eq!(restored.view().error, None);
+        assert_eq!(shell.writes, 1);
+        assert_eq!(shell.deleted, 0);
+        assert_eq!(restored.view().state.pending_trash.len(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn pending_same_original_fences_completion_of_an_existing_move() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let first = core();
+    shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+    let mut state = first.view().state;
+    state
+        .pending_trash
+        .push(pending_same_original("immich", SHA1));
+    let restored = core_from_state(state);
+    let original_writes = (shell.writes, shell.metadata_writes, shell.http_requests);
+    shell.run(&restored, move_event())?;
+    assert!(restored.view().error.is_some());
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.http_requests),
+        original_writes
+    );
+    assert_eq!(shell.deleted, 0);
+    assert_eq!(
+        restored.view().state.receipts[0].phase,
+        TransferPhase::Copied
+    );
+    assert_eq!(restored.view().state.pending_trash.len(), 1);
+    Ok(())
+}
+
 #[test]
 fn a_different_destination_scope_cannot_resume_another_accounts_pending_copy() -> Result<(), String>
 {

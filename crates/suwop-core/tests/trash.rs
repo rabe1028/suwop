@@ -469,8 +469,8 @@ fn unreadable_or_opposite_result_never_clears_the_pending_record() -> Result<(),
 }
 
 #[test]
-fn trash_list_is_complete_and_rejects_repeated_cursors_foreign_or_active_rows() -> Result<(), String>
-{
+fn trash_list_is_complete_skips_partners_and_rejects_repeated_cursors_or_active_rows()
+-> Result<(), String> {
     for invalid in 0..4 {
         let core = core(state(false)?);
         let mut shell = Shell::new(true);
@@ -492,15 +492,50 @@ fn trash_list_is_complete_and_rejects_repeated_cursors_foreign_or_active_rows() 
             },
         )?;
         let view = core.view();
-        if invalid == 0 {
+        if invalid == 0 || invalid == 2 {
             assert!(view.state.trash.as_ref().ok_or("missing list")?.verified);
             assert_eq!(view.error, None);
+            assert_eq!(
+                view.state.trash.as_ref().ok_or("missing list")?.items.len(),
+                usize::from(invalid == 0)
+            );
         } else {
             assert!(view.error.is_some());
             assert!(!view.state.trash.as_ref().ok_or("missing cache")?.verified);
         }
         assert_eq!(shell.writes, 0);
     }
+    Ok(())
+}
+
+#[test]
+fn partner_only_pages_do_not_hide_owned_trash_on_later_pages() -> Result<(), String> {
+    let core = core(state(false)?);
+    let mut shell = Shell::new(true);
+    let mut partner = native(true);
+    partner["ownerId"] = json!("other");
+    shell.pages = vec![
+        json!({"assets":{"items":[partner],"nextCursor":"owned-next"}}),
+        json!({"assets":{"items":[native(true)],"nextCursor":null}}),
+    ];
+    shell.run(
+        &core,
+        Event::RefreshTrash {
+            now: 1_800_000_000.0,
+        },
+    )?;
+    let view = core.view();
+    assert_eq!(view.error, None);
+    let snapshot = view.state.trash.as_ref().ok_or("missing list")?;
+    assert!(snapshot.verified);
+    assert_eq!(snapshot.items.len(), 1);
+    assert_eq!(snapshot.items[0].identity.key, key());
+    assert_eq!(shell.requests.len(), 2);
+    assert_eq!(
+        shell.requests[1].body.as_ref().ok_or("missing search")?["cursor"],
+        "owned-next"
+    );
+    assert_eq!(shell.writes, 0);
     Ok(())
 }
 

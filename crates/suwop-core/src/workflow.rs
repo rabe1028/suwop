@@ -19,6 +19,7 @@ mod metadata;
 mod reversion;
 mod sharing;
 mod trash;
+mod trash_fence;
 mod upload_intents;
 mod uploads;
 
@@ -585,6 +586,7 @@ impl Runtime<'_> {
         provider: Provider,
         now: f64,
     ) -> Result<Vec<AssetKey>, String> {
+        self.check_transfer_trash(&bundle.assets)?;
         if provider == Provider::Apple {
             return io(
                 self.ctx,
@@ -670,6 +672,7 @@ impl Runtime<'_> {
         let provider = self.check_keys(keys)?;
         self.workspace(id).await?;
         let mut bundle = self.export(keys, "source").await?;
+        self.check_transfer_trash(&bundle.assets)?;
         bundle.block_duplicates();
         let destination = provider.other();
         let scope = if destination == Provider::Apple {
@@ -714,6 +717,8 @@ impl Runtime<'_> {
         if !receipt.move_blockers().is_empty() {
             return Err(receipt.move_blockers().join(" / "));
         }
+        self.check_transfer_trash(&receipt.source)?;
+        self.check_transfer_trash(&receipt.destination)?;
         self.check_keys(
             &receipt
                 .source

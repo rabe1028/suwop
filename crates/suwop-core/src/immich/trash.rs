@@ -71,8 +71,13 @@ impl Session {
             )
             .map_err(|_| "ゴミ箱一覧を読み取れません。")?;
             for asset in page {
-                if asset.owner_id != self.user_id || !asset.is_trashed {
-                    return Err("ゴミ箱の所有者または状態が一致しません。".into());
+                // Metadata searches also include timeline partners. Only our own
+                // rows are actionable, but partner rows must not end pagination.
+                if asset.owner_id != self.user_id {
+                    continue;
+                }
+                if !asset.is_trashed {
+                    return Err("ゴミ箱の状態が一致しません。".into());
                 }
                 super::valid_id(&asset.id)?;
                 let identity = TrashIdentity::from_asset(&self.scope, &asset)?;
