@@ -504,6 +504,52 @@ fn upload_journal_failure_prevents_metadata_writes() -> Result<(), String> {
 }
 
 #[test]
+fn failed_pre_put_save_keeps_pending_phase_through_refresh_and_explicit_retry() -> Result<(), String>
+{
+    for restart in [false, true] {
+        let mut shell = Shell::new();
+        shell.source.assets[0].captured_at = Some(20.0);
+        shell.upload_fault = UploadFault::StartedJournal;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        assert!(first.view().error.is_some());
+        assert_eq!(shell.metadata_writes, 0);
+        assert_eq!(
+            first.view().state.pending_uploads[0].phase,
+            suwop_core::immich::UploadPhase::MetadataPending
+        );
+        shell.upload_fault = UploadFault::None;
+        // An unrelated successful persistence must keep the unsent phase.
+        shell.run(
+            &first,
+            Event::Refresh {
+                permission: true,
+                now: 25.0,
+            },
+        )?;
+        assert!(first.view().error.is_none(), "{:?}", first.view().error);
+        assert_eq!(
+            shell.journal.as_ref().ok_or("no journal")?.pending_uploads[0].phase,
+            suwop_core::immich::UploadPhase::MetadataPending
+        );
+        let current = if restart {
+            restored_upload(&shell)?
+        } else {
+            first
+        };
+        shell.run(&current, retry_copy_event(&shell))?;
+        assert!(current.view().error.is_none(), "{:?}", current.view().error);
+        assert!(current.view().state.pending_uploads.is_empty());
+        assert!(shell.order.contains(&"confirm-upload"));
+        assert_eq!(
+            (shell.writes, shell.metadata_writes, shell.deleted),
+            (1, 1, 0)
+        );
+    }
+    Ok(())
+}
+
+#[test]
 fn source_changes_cannot_reuse_the_pending_upload_to_mutate_a_duplicate() -> Result<(), String> {
     let mut shell = Shell::new();
     shell.source.assets[0].captured_at = Some(20.0);

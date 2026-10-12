@@ -213,10 +213,23 @@ impl Runtime<'_> {
             .iter_mut()
             .find(|p| p.key == pending.key)
             .ok_or("作成済みコピーの記録がありません。")?;
+        let previous_phase = entry.phase;
         entry.phase = UploadPhase::MetadataStarted;
         // Journal before PUT, including the cancellation gap. Lost PUT responses
         // can only be verified by reads on the next explicit copy operation.
-        self.persist().await?;
+        if let Err(error) = self.persist().await {
+            // No PUT was issued. Keep the in-memory phase truthful so a later
+            // unrelated save cannot turn this into a lost-write recovery.
+            if let Some(entry) = self
+                .state
+                .pending_uploads
+                .iter_mut()
+                .find(|p| p.key == pending.key)
+            {
+                entry.phase = previous_phase;
+            }
+            return Err(error);
+        }
         session
             .apply_upload_metadata(self.ctx, &pending.key.asset_id, plan.body)
             .await?;
