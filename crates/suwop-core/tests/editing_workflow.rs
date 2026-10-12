@@ -299,6 +299,35 @@ fn verified_edit_keeps_unified_originals_metadata_and_fresh_revision() -> Result
     Ok(())
 }
 #[test]
+fn successful_edit_switches_the_preview_from_an_independent_copy_to_the_saved_one()
+-> Result<(), String> {
+    let mut state = core(ScanAccess::Full, "apple").view().state;
+    let mut other = asset();
+    other.key.asset_id = "other-copy".into();
+    state.snapshots[0].assets.push(other.clone());
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state,
+            preview_preferences: vec![other.key.clone()],
+            ..Model::default()
+        },
+    );
+    assert_eq!(
+        core.view().preview_sources.values().next(),
+        Some(&other.key)
+    );
+    Native::new(Fault::None).run(&core)?;
+    assert!(core.view().error.is_none());
+    assert_eq!(
+        core.view().preview_sources.values().next(),
+        Some(&asset().key)
+    );
+    Ok(())
+}
+
+#[test]
 fn cancellation_and_invalid_drafts_never_write_and_close_before_cleanup() -> Result<(), String> {
     for fault in [Fault::Cancel, Fault::BadDraft, Fault::BadInput] {
         let core = core(ScanAccess::Full, "apple");

@@ -43,6 +43,7 @@ fn run(action: Action, bodies: Vec<Value>) -> Result<(Vec<HttpRequest>, Option<S
             Action::Delete => session.delete_album(&ctx, ALBUM).await,
         };
         ctx.send_event(Event::Finished {
+            preview_to_select: None,
             state: SavedLibrary::default(),
             session: None,
             status: String::new(),

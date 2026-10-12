@@ -1,5 +1,9 @@
 use std::collections::BTreeSet;
 
+mod preview;
+pub(crate) use preview::remember_preview;
+pub use preview::{PreviewAccess, PreviewChoice, selected_preview};
+
 use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ResourceRole, ScanAccess, StoredAsset, TransferBundle,
     TransferFile, TransferReceipt, UnifiedPhoto, catalog,
@@ -39,27 +43,6 @@ pub fn kind(photo: &UnifiedPhoto) -> Option<PlaybackKind> {
         .iter()
         .filter_map(asset_kind)
         .min_by_key(|kind| *kind != PlaybackKind::Live)
-}
-
-#[must_use]
-pub fn preview_source(photo: &UnifiedPhoto, snapshots: &[LibrarySnapshot]) -> Option<AssetKey> {
-    photo
-        .assets
-        .iter()
-        .filter(|a| {
-            snapshots.iter().any(|s| {
-                s.access != ScanAccess::Unavailable
-                    && s.provider == a.key.provider
-                    && s.scope == a.key.scope
-            })
-        })
-        .min_by_key(|a| {
-            (
-                std::cmp::Reverse(a.originals().count()),
-                a.key.provider != Provider::Apple,
-            )
-        })
-        .map(|a| a.key.clone())
 }
 
 /// Playback is a read of one catalog photo, including a limited Apple library.

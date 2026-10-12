@@ -3,7 +3,7 @@ import SwiftUI
 
 struct PhotoViewer: View {
     @ObservedObject var model: LibraryModel
-    @State private var key: AssetKey
+    @State private var cursor: PhotoViewerCursor
     @State private var showInfo = false
     @State private var chrome = true
     @State private var confirmingShare = false
@@ -14,11 +14,11 @@ struct PhotoViewer: View {
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
         self.model = model
         self.collection = collection
-        _key = State(initialValue: key)
+        _cursor = State(initialValue: PhotoViewerCursor(anchor: key))
     }
 
     private var photo: UnifiedPhoto? {
-        model.photos.first { $0.assets.contains { $0.key == key } }
+        cursor.photo(in: model.photos)
     }
 
     private var pages: [UnifiedPhoto] {
@@ -34,7 +34,7 @@ struct PhotoViewer: View {
     }
 
     private var index: Int {
-        pages.firstIndex { $0.assets.contains { $0.key == key } } ?? 0
+        pages.firstIndex { $0.id == photo?.id } ?? 0
     }
 
     var body: some View {
@@ -56,6 +56,11 @@ struct PhotoViewer: View {
                 )
             }
         }.background(.black).foregroundStyle(.white).preferredColorScheme(.dark)
+            .onChange(of: photo?.assets.map(\.key), initial: true) {
+                if let photo {
+                    cursor.remember(photo)
+                }
+            }
             .sheet(isPresented: $showInfo) {
                 if let photo {
                     PhotoInfo(photo: photo, model: model)
@@ -66,6 +71,9 @@ struct PhotoViewer: View {
                 onDismiss: {
                     if let target = pendingEdit {
                         pendingEdit = nil
+                        if let photo {
+                            cursor.point(to: target.key, in: photo)
+                        }
                         model.editImage(target)
                     }
                 },
@@ -103,7 +111,8 @@ struct PhotoViewer: View {
             Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("写真を閉じる")
             Spacer()
             VStack(spacing: 2) {
-                Text(photo?.capturedAt?.formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
+                Text(photo.flatMap { model.displayedSource($0)?.capturedAt }?
+                    .formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
                     .font(.subheadline.bold())
                 Text("\(index + 1) / \(pages.count)").font(.caption).foregroundStyle(.secondary)
             }
@@ -114,6 +123,10 @@ struct PhotoViewer: View {
 
     private func actions(_ photo: UnifiedPhoto) -> some View {
         VStack(spacing: 8) {
+            PreviewSourceMenu(choices: model.previewChoices(photo)) { chosen in
+                model.choosePreview(photo, key: chosen) { cursor.point(to: $0, in: photo) }
+            }
+            .disabled(model.isBusy)
             if model.isBusy {
                 HStack {
                     ProgressView(model.status).font(.caption)
@@ -156,7 +169,7 @@ struct PhotoViewer: View {
     private func move(_ step: Int) {
         let next = index + step
         if pages.indices.contains(next), let key = pages[next].assets.first?.key {
-            self.key = key
+            cursor.point(to: key, in: pages[next])
         }
     }
 }
@@ -214,7 +227,8 @@ private struct ZoomablePhoto: View {
                             settledOffset = .zero
                         }
                     }.onTapGesture { toggleChrome() }
-                    .accessibilityLabel(photo.name).accessibilityIdentifier("photoPreview")
+                    .accessibilityLabel(model.displayedSource(photo)?.name ?? photo.name)
+                    .accessibilityIdentifier("photoPreview")
                     .accessibilityAction(named: "拡大・縮小") { scale = scale > 1 ? 1 : 2.5
                         settledScale = scale
                         offset = .zero
@@ -228,9 +242,13 @@ private struct ZoomablePhoto: View {
                     ProgressView("写真を読み込み中…")
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
-        }.task(id: "\(photo.id)|\(model.thumbnailGeneration)|\(retry)") {
+        }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
             error = nil
+            scale = 1
+            settledScale = 1
+            offset = .zero
+            settledOffset = .zero
             do { let loaded = try await model.preview(photo)
                 try Task.checkCancellation()
                 image = loaded

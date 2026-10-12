@@ -53,10 +53,6 @@ public extension UnifiedPhoto {
         assets.first?.name ?? "写真"
     }
 
-    var capturedAt: Date? {
-        assets.compactMap(\.capturedAt).max()
-    }
-
     var resources: [PhotoResource] {
         assets.flatMap(\.resources)
     }

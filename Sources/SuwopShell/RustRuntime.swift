@@ -38,4 +38,10 @@ public actor RustRuntime {
         _ = try update(.object(["type": .string("browse"), "options": .from(options)]))
         return try snapshot()
     }
+
+    public func choosePreview(anchor: AssetKey, key: AssetKey) throws -> RuntimeSnapshot {
+        try Task.checkCancellation()
+        _ = try update(.object(["type": .string("choosePreview"), "anchor": .from(anchor), "key": .from(key)]))
+        return try snapshot()
+    }
 }

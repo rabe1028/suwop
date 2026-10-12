@@ -132,6 +132,10 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    ChoosePreview {
+        anchor: crate::domain::AssetKey,
+        key: crate::domain::AssetKey,
+    },
     EditImage {
         key: crate::domain::AssetKey,
         id: String,
@@ -205,10 +209,12 @@ pub enum Event {
         session: Option<Session>,
         status: String,
         error: Option<String>,
+        preview_to_select: Option<crate::domain::AssetKey>,
     },
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub preview_preferences: Vec<crate::domain::AssetKey>,
     pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
     pub session: Option<Session>,
@@ -221,6 +227,8 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub preview_choices: std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
+    pub remote_version: Option<crate::immich::Version>,
     pub editing_targets: std::collections::BTreeMap<String, Vec<crate::editing::EditingTarget>>,
     pub metadata_targets: std::collections::BTreeMap<String, Vec<crate::metadata::MetadataTarget>>,
     pub preview_sources: std::collections::BTreeMap<String, crate::domain::AssetKey>,
@@ -246,6 +254,10 @@ impl crux_core::App for Suwop {
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
         match event {
+            Event::ChoosePreview { anchor, key } if !model.busy => {
+                model.error = choose_preview(model, &anchor, key).err();
+                Command::done()
+            }
             Event::Browse { options } => {
                 model.browser = options;
                 Command::done()
@@ -263,6 +275,7 @@ impl crux_core::App for Suwop {
                 session,
                 status,
                 error,
+                preview_to_select,
             } => {
                 if model.changed_during_work {
                     invalidate_apple(&mut state);
@@ -273,6 +286,7 @@ impl crux_core::App for Suwop {
                 model.error = error;
                 model.busy = false;
                 model.ready = model.state.schema_version == 2;
+                update_preview_preferences(model, preview_to_select);
                 Command::done()
             }
             Event::AppleChanged => {
@@ -295,6 +309,7 @@ impl crux_core::App for Suwop {
                         session: result.session,
                         status: result.status,
                         error: result.error,
+                        preview_to_select: result.preview_to_select,
                     });
                 })
             }
@@ -325,7 +340,23 @@ impl crux_core::App for Suwop {
             move_blockers.insert(receipt.id.clone(), blockers);
         }
         let photos = catalog(&model.state.snapshots, &model.state.receipts);
+        let preview_access = crate::media::PreviewAccess::new(
+            &model.state.snapshots,
+            &model.state.apple_scope,
+            model.session.as_ref(),
+        );
+        let preview_choices: std::collections::BTreeMap<_, _> = photos
+            .iter()
+            .map(|p| {
+                (
+                    crate::browser::photo_id(p),
+                    preview_access.choices(p, &model.preview_preferences),
+                )
+            })
+            .collect();
+        let displayed_dates = displayed_dates(&preview_choices);
         ViewModel {
+            remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
                 .map(|p| {
@@ -348,13 +379,13 @@ impl crux_core::App for Suwop {
                     )
                 })
                 .collect(),
-            preview_sources: photos
+            preview_sources: preview_choices
                 .iter()
-                .filter_map(|p| {
-                    crate::media::preview_source(p, &model.state.snapshots)
-                        .map(|key| (crate::browser::photo_id(p), key))
+                .filter_map(|(id, choices)| {
+                    crate::media::selected_preview(choices).map(|key| (id.clone(), key))
                 })
                 .collect(),
+            preview_choices,
             media: photos
                 .iter()
                 .filter_map(|p| {
@@ -362,7 +393,7 @@ impl crux_core::App for Suwop {
                 })
                 .collect(),
             albums: crate::albums::views(&model.state.albums, &photos, &model.state.snapshots),
-            browser: crate::browser::browse(&photos, &model.browser),
+            browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
             pending_apple_count: model
                 .state
@@ -380,6 +411,66 @@ impl crux_core::App for Suwop {
             can_transfer,
             move_blockers,
         }
+    }
+}
+fn displayed_dates(
+    previews: &std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
+) -> std::collections::BTreeMap<String, Option<f64>> {
+    previews
+        .iter()
+        .map(|(id, choices)| {
+            (
+                id.clone(),
+                choices
+                    .iter()
+                    .find(|c| c.selected)
+                    .and_then(|c| c.captured_at),
+            )
+        })
+        .collect()
+}
+fn choose_preview(
+    model: &mut Model,
+    anchor: &crate::domain::AssetKey,
+    key: crate::domain::AssetKey,
+) -> Result<(), String> {
+    if !model.ready {
+        return Err("写真ライブラリを読み込んでください。".into());
+    }
+    let photos = catalog(&model.state.snapshots, &model.state.receipts);
+    let photo = photos
+        .iter()
+        .find(|p| p.assets.iter().any(|a| a.key == *anchor))
+        .ok_or("表示する写真を確認できません。一覧を更新してください。")?;
+    let choices = crate::media::PreviewAccess::new(
+        &model.state.snapshots,
+        &model.state.apple_scope,
+        model.session.as_ref(),
+    )
+    .choices(photo, &model.preview_preferences);
+    let choice = choices
+        .iter()
+        .find(|c| c.key == key)
+        .ok_or("この写真に属する表示元を選んでください。")?;
+    if let Some(reason) = &choice.disabled_reason {
+        return Err(reason.clone());
+    }
+    crate::media::remember_preview(&mut model.preview_preferences, photo, key);
+    Ok(())
+}
+fn update_preview_preferences(model: &mut Model, selected: Option<crate::domain::AssetKey>) {
+    let photos = catalog(&model.state.snapshots, &model.state.receipts);
+    model.preview_preferences.retain(|key| {
+        photos
+            .iter()
+            .any(|p| p.assets.iter().any(|a| a.key == *key))
+    });
+    if let Some(key) = selected
+        && let Some(photo) = photos
+            .iter()
+            .find(|p| p.assets.iter().any(|a| a.key == key))
+    {
+        crate::media::remember_preview(&mut model.preview_preferences, photo, key);
     }
 }
 fn invalidate_apple(state: &mut SavedLibrary) {
