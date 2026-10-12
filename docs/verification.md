@@ -4,7 +4,7 @@
 
 `make check` で Rustfmt、Clippy all / pedantic、SwiftFormat、SwiftLint strict、Ruff、ShellCheck、actionlint、実装境界、Swift DTO の再生成差分を確認します。Swift 6 の strict concurrency と warnings-as-errors を Apple ビルドにも適用します。
 
-`make vrt` は固定環境の専用 Simulator に simslim を適用・検証し、実際の Rust ABI から作った固定データで SwiftUI 11 画面を描画します。全画素差分、欠けた基準画像、欠けた画面を CI の別ジョブで検出します。結果と画像は `DerivedData/VRTArtifacts/` に保存します。基準画像の更新には明示的な `make vrt-record` と表示の確認が必要です。[VRT の手順](vrt.md) を参照してください。
+`make vrt` は固定環境の専用 Simulator に simslim を適用・検証し、実際の Rust ABI から作った固定データで SwiftUI 14 画面を描画します。全画素差分、欠けた基準画像、欠けた画面を CI の別ジョブで検出します。結果と画像は `DerivedData/VRTArtifacts/` に保存します。基準画像の更新には明示的な `make vrt-record` と表示の確認が必要です。[VRT の手順](vrt.md) を参照してください。
 
 Rust テストでは同一性、RAW/JPEG の部分一致と多重度、未照合／限定権限、scope、Copy / Move の意図、古い履歴、位置情報、撮影日時の欠落、原本変更、履歴保存失敗、削除結果不明、API ページング／sidecar を確認します。Swift テストは本物の Rust ライブラリをリンクし、Crux の effect 応答、ViewModel、エラー復旧、origin 検証、ハッシュ計算のキャンセルを確認します。原本取得のゲートでは停止要求、登録前の停止、途中ファイルの削除、遅れて到着するコールバック、チャンク順序を確認します。Git hooks の検証では既存ファイル、symlink、独自の hooksPath を保存することと、hooks 内からの実行を確認します。
 

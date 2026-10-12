@@ -20,6 +20,9 @@ SCREENS = {
     "albums",
     "connection",
     "transfers",
+    "trash-empty",
+    "trash-cached",
+    "trash-pending",
 }
 
 

@@ -41,6 +41,9 @@ final class VisualRegressionTests: XCTestCase {
         })
         try await capture("connection", view: ConnectionView(model: empty))
         try await capture("transfers", view: TransfersView(model: empty))
+        try await capture("trash-empty", view: TrashView(model: empty))
+        try await capture("trash-cached", view: TrashView(model: SnapshotFixtures.trashModel(pending: false)))
+        try await capture("trash-pending", view: TrashView(model: SnapshotFixtures.trashModel(pending: true)))
     }
 
     @MainActor private func capture(

@@ -41,7 +41,7 @@ make check             # 厳格な Lint、生成物差分、Rust と実 FFI の�
 make apple-build       # universal Rust library、iOS Simulator / Mac のビルド
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
 make setup-vrt         # SHA-256 検証付き simslim 0.12.2 をローカルに導入
-make vrt               # 一台の軽量 Simulator で SwiftUI 11 画面の画素差分を比較
+make vrt               # 一台の軽量 Simulator で SwiftUI 14 画面の画素差分を比較
 ```
 
 空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
@@ -70,3 +70,6 @@ Live Photo、編集・補助データ付き、バースト、External Library、
 削除結果が不明な場合は `deletionUncertain` として残し、自動で再試行しません。Apple Photos の削除は、iCloud 写真が有効なら他の端末にも同期されます。
 
 詳しい境界は [設計](docs/architecture.md)、残る検証は [検証](docs/verification.md) を参照してください。
+
+Immich 3.2以降では、保存先情報または複数選択から通常のゴミ箱へ移し、コレクションの「最近削除した項目」から復元できます。
+確認前後の検証と送信前の記録保存をRustで行い、通信断後の書き込みは再送しません。[削除・復元の手順と境界](docs/trash.md) を参照してください。

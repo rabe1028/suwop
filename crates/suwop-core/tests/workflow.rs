@@ -1031,6 +1031,44 @@ fn duplicate_pending_ids_cannot_authorize_resume() -> Result<(), String> {
 }
 
 #[test]
+fn unresolved_trash_fences_metadata_resume_on_an_existing_copy() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.upload_fault = UploadFault::Read;
+    shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+    let mut state = shell.journal.clone().ok_or("no journal")?;
+    let upload = state
+        .pending_uploads
+        .first()
+        .ok_or("no upload record")?
+        .clone();
+    state.pending_trash.push(suwop_core::trash::TrashOperation {
+        id: "33333333-3333-4333-8333-333333333333".into(),
+        scope: upload.key.scope.clone(),
+        action: suwop_core::trash::TrashAction::Trash,
+        assets: vec![suwop_core::trash::TrashIdentity {
+            key: upload.key.clone(),
+            name: upload.source.name.clone(),
+            checksum: SHA1.into(),
+            media_type: "IMAGE".into(),
+            created_at: "1970-01-01T00:00:10Z".into(),
+            modified_at: "1970-01-01T00:00:10Z".into(),
+            live_photo_video_id: None,
+        }],
+    });
+    let restored = core_from_state(state);
+    shell.upload_fault = UploadFault::None;
+    shell.run(&restored, retry_copy_event(&shell))?;
+    assert!(restored.view().error.is_some());
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (1, 0, 0)
+    );
+    assert_eq!(restored.view().state.pending_uploads.len(), 1);
+    assert_eq!(restored.view().state.pending_trash.len(), 1);
+    Ok(())
+}
+
+#[test]
 fn a_different_destination_scope_cannot_resume_another_accounts_pending_copy() -> Result<(), String>
 {
     let mut shell = Shell::new();

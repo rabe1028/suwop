@@ -36,6 +36,7 @@ struct Protocol {
 
     apple_reversion_facts: suwop_core::editing::AppleReversionFacts,
     reversion_prompt: suwop_core::editing::ReversionPrompt,
+    trash_prompt: suwop_core::trash::TrashPrompt,
     current_image_export: suwop_core::sharing::CurrentImageExport,
     current_image_facts: suwop_core::sharing::CurrentImageFacts,
     current_image_render_plan: suwop_core::sharing::CurrentImageRenderPlan,

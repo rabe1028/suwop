@@ -18,6 +18,7 @@ mod media;
 mod metadata;
 mod reversion;
 mod sharing;
+mod trash;
 mod upload_intents;
 mod uploads;
 
@@ -133,6 +134,9 @@ impl Runtime<'_> {
                 for s in &mut self.state.albums {
                     s.access = ScanAccess::Unavailable;
                 }
+                if let Some(trash) = &mut self.state.trash {
+                    trash.verified = false;
+                }
                 self.persist().await?;
                 Ok("写真ライブラリを接続してください。".into())
             }
@@ -152,6 +156,7 @@ impl Runtime<'_> {
             } => self.configure(&address, &key, allow_http, id, now).await,
             Event::Disconnect => {
                 let old = self.state.clone();
+                self.state.trash = None;
                 self.state.albums.retain(|s| s.provider != Provider::Immich);
                 self.state.connection = None;
                 self.state
@@ -186,6 +191,9 @@ impl Runtime<'_> {
             Event::ShareCurrentImage { key, id } => self.share_current_image(&key, &id).await,
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,
+            Event::RefreshTrash { now } => self.refresh_trash(now).await,
+            Event::ChangeTrash { keys, action, id } => self.change_trash(&keys, action, &id).await,
+            Event::ResolveTrash { id } => self.resolve_trash(&id).await,
             Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,
             Event::EditAlbum { key, edit } => self.edit_album(&key, &edit).await,
             Event::Copy {
@@ -250,6 +258,7 @@ impl Runtime<'_> {
         .await?;
         let old = self.state.clone();
         self.state.albums.retain(|s| s.provider != Provider::Immich);
+        self.state.trash = None;
         self.state.connection = Some(settings);
         self.state
             .snapshots
@@ -467,6 +476,15 @@ impl Runtime<'_> {
         }
     }
     fn check_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
+        if self
+            .state
+            .pending_trash
+            .iter()
+            .flat_map(|operation| &operation.assets)
+            .any(|asset| keys.contains(&asset.key))
+        {
+            return Err("ゴミ箱の操作結果を先に確認してください。書き込みは再送しません。".into());
+        }
         let first = keys.first().ok_or("写真が選択されていません。")?;
         let scope = match first.provider {
             Provider::Apple => self.state.apple_scope.as_str(),

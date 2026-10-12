@@ -185,6 +185,7 @@ impl Runtime<'_> {
         pending: &PendingUpload,
         plan: UploadMetadataPlan,
     ) -> Result<(), String> {
+        self.check_keys(std::slice::from_ref(&pending.key))?;
         let entry = self
             .state
             .pending_uploads

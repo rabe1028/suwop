@@ -35,6 +35,10 @@ pub struct SavedLibrary {
     pub pending_uploads: Vec<crate::immich::PendingUpload>,
     #[serde(default)]
     pub upload_intents: Vec<crate::immich::UploadIntent>,
+    #[serde(default)]
+    pub trash: Option<crate::trash::TrashSnapshot>,
+    #[serde(default)]
+    pub pending_trash: Vec<crate::trash::TrashOperation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -47,6 +51,9 @@ pub enum ShellOperation {
     },
     ConfirmUploadResume {
         prompt: crate::immich::UploadResumePrompt,
+    },
+    ConfirmTrash {
+        prompt: crate::trash::TrashPrompt,
     },
     ConfirmForgetUpload {
         prompt: crate::immich::UploadForgetPrompt,
@@ -202,6 +209,17 @@ pub enum Event {
         id: String,
     },
     RefreshAlbums,
+    RefreshTrash {
+        now: f64,
+    },
+    ChangeTrash {
+        keys: Vec<crate::domain::AssetKey>,
+        action: crate::trash::TrashAction,
+        id: String,
+    },
+    ResolveTrash {
+        id: String,
+    },
     CreateAlbum {
         provider: Provider,
         title: String,

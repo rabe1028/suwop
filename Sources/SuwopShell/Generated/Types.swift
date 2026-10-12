@@ -699,19 +699,23 @@ public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var appleScope: String
     public var connection: ConnectionSettings?
+    public var pendingTrash: [TrashOperation]
     public var pendingUploads: [PendingUpload]
     public var receipts: [TransferReceipt]
     public var schemaVersion: Int64
     public var snapshots: [LibrarySnapshot]
+    public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
+        self.pendingTrash = pendingTrash
         self.pendingUploads = pendingUploads
         self.receipts = receipts
         self.schemaVersion = schemaVersion
         self.snapshots = snapshots
+        self.trash = trash
         self.uploadIntents = uploadIntents
     }
 }
@@ -826,6 +830,76 @@ public struct TransferReceipt: Codable, Sendable {
         self.phase = phase
         self.signatures = signatures
         self.source = source
+    }
+}
+
+public enum TrashAction: String, Codable, CaseIterable, Sendable {
+    case `trash`
+    case `restore`
+}
+
+public struct TrashIdentity: Codable, Sendable {
+    public var checksum: String
+    public var createdAt: String
+    public var key: AssetKey
+    public var livePhotoVideoId: String?
+    public var mediaType: String
+    public var modifiedAt: String
+    public var name: String
+    public init(checksum: String, createdAt: String, key: AssetKey, livePhotoVideoId: String? = nil, mediaType: String, modifiedAt: String, name: String) {
+        self.checksum = checksum
+        self.createdAt = createdAt
+        self.key = key
+        self.livePhotoVideoId = livePhotoVideoId
+        self.mediaType = mediaType
+        self.modifiedAt = modifiedAt
+        self.name = name
+    }
+}
+
+public struct TrashItem: Codable, Sendable {
+    public var asset: StoredAsset
+    public var identity: TrashIdentity
+    public init(asset: StoredAsset, identity: TrashIdentity) {
+        self.asset = asset
+        self.identity = identity
+    }
+}
+
+public struct TrashOperation: Codable, Sendable {
+    public var action: TrashAction
+    public var assets: [TrashIdentity]
+    public var id: String
+    public var scope: String
+    public init(action: TrashAction, assets: [TrashIdentity] = [], id: String, scope: String) {
+        self.action = action
+        self.assets = assets
+        self.id = id
+        self.scope = scope
+    }
+}
+
+public struct TrashPrompt: Codable, Sendable {
+    public var action: TrashAction
+    public var address: String
+    public var names: [String]
+    public var retentionDays: Int64?
+    public init(action: TrashAction, address: String, names: [String] = [], retentionDays: Int64? = nil) {
+        self.action = action
+        self.address = address
+        self.names = names
+        self.retentionDays = retentionDays
+    }
+}
+
+public struct TrashSnapshot: Codable, Sendable {
+    public var items: [TrashItem]
+    public var scope: String
+    public var verified: Bool
+    public init(items: [TrashItem] = [], scope: String, verified: Bool) {
+        self.items = items
+        self.scope = scope
+        self.verified = verified
     }
 }
 
