@@ -80,11 +80,15 @@ jobs:
           make setup-vrt
       - name: Compare native SwiftUI screenshots on one slim Simulator
         run: make vrt
+      - name: Verify real PhotoKit edits, restart, lost-response reconciliation and reversion
+        run: make apple-native-test
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: vrt-${{ github.sha }}
-          path: DerivedData/VRTArtifacts/
+          path: |
+            DerivedData/VRTArtifacts/
+            DerivedData/PhotoKitArtifacts/
           if-no-files-found: warn
           retention-days: 14

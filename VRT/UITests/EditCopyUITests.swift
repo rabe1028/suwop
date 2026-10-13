@@ -22,11 +22,23 @@ final class EditCopyUITests: XCTestCase {
 
     @MainActor private func toggle(_ element: XCUIElement, expected: String) {
         print("Copy switch: frame=\(element.frame); value=\(String(describing: element.value))")
-        element.coordinate(withNormalizedOffset: CGVector(dx: 0.93, dy: 0.5)).tap()
-        let changed = XCTNSPredicateExpectation(
-            predicate: NSPredicate(format: "value == %@", expected),
-            object: element
-        )
-        XCTAssertEqual(XCTWaiter.wait(for: [changed], timeout: 5), .completed)
+        XCTAssertTrue(element.isHittable)
+        for _ in 0 ..< 2 {
+            // AX includes the form row. Touch the trailing control's center;
+            // a cold launch may ignore a touch near its rounded outer edge.
+            // Observe the value before each attempt to avoid undoing a change.
+            if String(describing: element.value ?? "") == expected {
+                return
+            }
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.88, dy: 0.5)).tap()
+            let changed = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "value == %@", expected),
+                object: element
+            )
+            if XCTWaiter.wait(for: [changed], timeout: 5) == .completed {
+                return
+            }
+        }
+        XCTAssertEqual(String(describing: element.value ?? ""), expected)
     }
 }

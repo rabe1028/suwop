@@ -1,0 +1,6 @@
+{
+  "name": "suwop-photokit-acceptance",
+  "description": "Native PhotoKit on the owned test simulator; keep Photos services only",
+  "except": ["photos"],
+  "keep": []
+}

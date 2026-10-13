@@ -22,7 +22,7 @@ lint-common:
 	bash scripts/check-generated.sh
 
 lint-swift:
-	env swiftformat App Sources Tests VRT --lint --config .swiftformat
+	env swiftformat App Sources Tests VRT NativeAcceptance --lint --config .swiftformat
 	env swiftlint lint --strict --quiet
 
 lint: lint-common
@@ -32,7 +32,7 @@ format:
 	env cargo fmt --all
 	env ruff check --fix scripts
 	env ruff format scripts
-	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests VRT --config .swiftformat; fi
+	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests VRT NativeAcceptance --config .swiftformat; fi
 
 test:
 	bash scripts/test-tools.sh
@@ -75,3 +75,7 @@ vrt:
 
 vrt-record:
 	bash scripts/vrt.sh --record
+
+.PHONY: apple-native-test
+apple-native-test:
+	bash scripts/apple-native-test.sh

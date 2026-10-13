@@ -108,6 +108,39 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt.ui
         TEST_TARGET_NAME: SuwopVRTHost
+  SuwopPhotoKitHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: NativeAcceptance/Host
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance
+        TARGETED_DEVICE_FAMILY: '1'
+    info:
+      path: Generated/PhotoKitAcceptance-Info.plist
+      properties:
+        UILaunchScreen: {}
+        NSPhotoLibraryUsageDescription: 専用 Simulator のテスト用写真で保存・復元を検証します。
+        NSPhotoLibraryAddUsageDescription: 専用 Simulator に検証用の写真を作成します。
+  SuwopPhotoKitTests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [NativeAcceptance/UITests]
+    dependencies:
+      - target: SuwopPhotoKitHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance.tests
+        TEST_TARGET_NAME: SuwopPhotoKitHost
 schemes:
   SuwopiOS:
     build:
@@ -131,3 +164,11 @@ schemes:
         SUWOP_VRT_BASELINES: '$(SUWOP_VRT_BASELINES)'
         SUWOP_VRT_ARTIFACTS: '$(SUWOP_VRT_ARTIFACTS)'
         TZ: UTC
+  SuwopPhotoKit:
+    build:
+      targets:
+        SuwopPhotoKitHost: all
+        SuwopPhotoKitTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopPhotoKitTests]
