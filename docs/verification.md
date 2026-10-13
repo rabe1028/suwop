@@ -10,6 +10,8 @@ Rust テストでは同一性、RAW/JPEG の部分一致と多重度、未照合
 
 `make integration` は隔離した実 Immich v3.2.4 に Rust の Crux effect を接続し、アップロード、調整済み日時・タイムゾーン・GPS、お気に入り・アルバム、一覧、バイト一致のダウンロード、編集後のプレビュー、現在の原本・編集系列の取得と再検証、スタックの全メンバー、sidecar による削除制限、ゴミ箱操作を確認します。PNGの画素・色空間・透過・日時と位置の実書き出しはmacOSのNativeテストで確認します。通常のRustテストでは実Immichの1件を明示的にignoreし、CIの専用ジョブで実行します。
 
+`make apple-native-test` は、専用Simulatorに生成したJPEGで、製品のcore・Appleアダプターを通じた実保存、7回の起動、結果不明の読取りによる確認、キャンセル、原本への復元を検証します。全段階の原本署名・日時・位置・お気に入りと、保存／復元後の現在の寸法・色を確認します。VRTとは別の証拠で、実機／iCloud／RAWなどの受入れは残ります。[手順と範囲](native-photokit.md)を参照してください。
+
 `make apple-build` は iPhone / Simulator / Mac の Rust 静的ライブラリを XCFramework にまとめ、iOS Simulator と macOS のアプリをビルドします。これは PhotoKit 実機動作の確認とは別です。
 
 ## 残タスク: 実機での受け入れ

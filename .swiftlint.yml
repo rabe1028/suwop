@@ -6,6 +6,8 @@ included:
   - VRT/Host
   - VRT/Tests
   - VRT/UITests
+  - NativeAcceptance/Host
+  - NativeAcceptance/UITests
 excluded:
   - Sources/SuwopShell/Generated
 opt_in_rules:
