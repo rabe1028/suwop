@@ -29,6 +29,7 @@ import SwiftUI
     private var albumsRequested = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
     let protection = ProtectedLibrarySession()
+    let immichLocked = ImmichLockedLibrarySession()
 
     #if SUWOP_VRT
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
@@ -54,17 +55,13 @@ import SwiftUI
             self.shell = shell
             self.thumbnailEffect = thumbnailEffect
             protection.executeEffect = executeEffect
+            immichLocked.executeEffect = executeEffect
             self.executeEffect = { operation, context in
                 guard let context else { throw CancellationError() }
                 return try await executeEffect(operation, context)
             }
             started = true
-            protection.configure(
-                runtime: runtime,
-                shell: shell,
-                invalidateImages: { [weak self] in self?.invalidateThumbnails() },
-                publish: { [weak self] in self?.publish($0) }
-            )
+            configurePrivateSessions(runtime: runtime, shell: shell)
         }
 
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage]) {
@@ -84,12 +81,7 @@ import SwiftUI
             }
         } catch { errorMessage = error.localizedDescription }
         if let runtime, let shell {
-            protection.configure(
-                runtime: runtime,
-                shell: shell,
-                invalidateImages: { [weak self] in self?.invalidateThumbnails() },
-                publish: { [weak self] in self?.publish($0) }
-            )
+            configurePrivateSessions(runtime: runtime, shell: shell)
         }
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
@@ -306,6 +298,7 @@ import SwiftUI
     }
 
     func disconnect() {
+        immichLocked.close()
         send(["type": .string("disconnect")])
     }
 
@@ -344,7 +337,7 @@ import SwiftUI
         preservingError: Bool = false,
         completion: (@MainActor (Bool) -> Void)? = nil
     ) {
-        guard work == nil, let runtime, let executeEffect else {
+        guard work == nil, let runtime, executeEffect != nil else {
             completion?(false)
             return
         }
@@ -369,23 +362,9 @@ import SwiftUI
                 }
             }
             do {
-                var requests = try await runtime.update(.object(event))
+                let requests = try await runtime.update(.object(event))
                 try await readView()
-                while !requests.isEmpty {
-                    let request = requests.removeFirst()
-                    guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
-                    let value: JSONValue?
-                    let failure: String?
-                    do { value = try await executeEffect(operation, presentationContext)
-                        failure = nil
-                    } catch is CancellationError { value = nil
-                        failure = "cancelled"
-                    } catch { value = nil
-                        failure = error.localizedDescription
-                    }
-                    requests += try await runtime.resolve(id: request.id, value: value, error: failure)
-                    try await readView()
-                }
+                try await resolveRequests(requests, context: presentationContext)
                 completion?(view?.error == nil)
             } catch {
                 errorMessage = error.localizedDescription
@@ -415,6 +394,7 @@ private extension LibraryModel {
         }
         view = snapshot.view
         protection.receive(snapshot)
+        immichLocked.receive(snapshot)
         if let failure = view?.error {
             errorMessage = failure
         }
@@ -422,6 +402,39 @@ private extension LibraryModel {
 }
 
 private extension LibraryModel {
+    func configurePrivateSessions(runtime: RustRuntime, shell: AppleShell) {
+        protection.configure(
+            runtime: runtime,
+            shell: shell,
+            invalidateImages: { [weak self] in self?.invalidateThumbnails() },
+            publish: { [weak self] in self?.publish($0) }
+        )
+        immichLocked.configure(runtime: runtime, shell: shell) { [weak self] in self?.publish($0) }
+    }
+
+    func resolveRequests(_ initial: [EffectRequest], context: ContentPresentationContext?) async throws {
+        guard let runtime, let executeEffect else { throw SuwopError("入出力が利用できません。") }
+        var requests = initial
+        while !requests.isEmpty {
+            let request = requests.removeFirst()
+            guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
+            let value: JSONValue?
+            let failure: String?
+            do {
+                value = try await executeEffect(operation, context)
+                failure = nil
+            } catch is CancellationError {
+                value = nil
+                failure = "cancelled"
+            } catch {
+                value = nil
+                failure = error.localizedDescription
+            }
+            requests += try await runtime.resolve(id: request.id, value: value, error: failure)
+            try await readView()
+        }
+    }
+
     func invalidateThumbnails() {
         thumbnailGeneration = UUID()
         thumbnails.removeAllObjects()
@@ -450,30 +463,13 @@ private extension LibraryModel {
     private func notifyPhotoChange() {
         pendingRefresh = true
         pendingAlbumsRefresh = albumsRequested
-        guard let runtime, let executeEffect else { return }
+        guard let runtime, executeEffect != nil else { return }
         let context = shell?.beginWorkflow()
         Task {
             do {
-                var requests = try await runtime.update(.object(["type": .string("appleChanged")]))
+                let requests = try await runtime.update(.object(["type": .string("appleChanged")]))
                 try await readView()
-                while !requests.isEmpty {
-                    let request = requests.removeFirst()
-                    guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
-                    let value: JSONValue?
-                    let failure: String?
-                    do {
-                        value = try await executeEffect(operation, context)
-                        failure = nil
-                    } catch is CancellationError {
-                        value = nil
-                        failure = "cancelled"
-                    } catch {
-                        value = nil
-                        failure = error.localizedDescription
-                    }
-                    requests += try await runtime.resolve(id: request.id, value: value, error: failure)
-                    try await readView()
-                }
+                try await resolveRequests(requests, context: context)
                 if work == nil {
                     pendingRefresh = false
                     refresh(preservingError: true)
@@ -540,6 +536,7 @@ extension LibraryModel {
     }
 
     func configure(address: String, apiKey: String, allowHTTP: Bool) {
+        immichLocked.close()
         send([
             "type": .string("configure"),
             "address": .string(address),

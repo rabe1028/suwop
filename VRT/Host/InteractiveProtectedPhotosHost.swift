@@ -1,7 +1,9 @@
+import SuwopShell
 import SwiftUI
 
 @MainActor struct InteractiveProtectedPhotosHost: View {
     @State private var fixture: ProtectedPhotoFixture?
+    @Environment(\.scenePhase) private var phase
     var body: some View {
         Group {
             if let fixture, let model = fixture.model {
@@ -9,6 +11,8 @@ import SwiftUI
             } else {
                 ProgressView("Fixture loading")
             }
+        }.onChange(of: phase) { _, value in
+            updatePhase(value)
         }.task {
             do {
                 let productEntry = CommandLine.arguments.contains("--product-entry")
@@ -18,6 +22,11 @@ import SwiftUI
                 fixture = created
             } catch { print("PROTECTION_FIXTURE_FAILED \(error)") }
         }
+    }
+
+    private func updatePhase(_ value: ScenePhase) {
+        let native: ProtectionScenePhase = value == .active ? .active : value == .inactive ? .inactive : .background
+        fixture?.model?.protection.sceneChanged(sceneID: ProtectedPhotoFixture.sceneID, phase: native)
     }
 }
 

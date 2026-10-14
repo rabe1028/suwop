@@ -714,6 +714,91 @@ public struct ImageTransform: Codable, Sendable {
     }
 }
 
+public struct ImmichLockedEntry: Codable, Sendable {
+    public var asset: StoredAsset
+    public var id: String
+    public init(asset: StoredAsset, id: String) {
+        self.asset = asset
+        self.id = id
+    }
+}
+
+public struct ImmichLockedImageAccess: Codable, Sendable {
+    public var entryID: String
+    public var generation: Int64
+    public var grantID: String
+    public var requestID: String
+    public var sceneID: String
+    public var stagedID: String
+    public init(entryID: String, generation: Int64, grantID: String, requestID: String, sceneID: String, stagedID: String) {
+        self.entryID = entryID
+        self.generation = generation
+        self.grantID = grantID
+        self.requestID = requestID
+        self.sceneID = sceneID
+        self.stagedID = stagedID
+    }
+}
+
+public struct ImmichLockedImageResult: Codable, Sendable {
+    public var requestID: String
+    public var stagedID: String
+    public init(requestID: String, stagedID: String) {
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct ImmichLockedImageTicket: Codable, Sendable {
+    public var entryID: String
+    public var expectedRevision: String
+    public var generation: Int64
+    public var grantID: String
+    public var key: AssetKey
+    public var request: HttpRequest
+    public var requestID: String
+    public var sceneID: String
+    public init(entryID: String, expectedRevision: String, generation: Int64, grantID: String, key: AssetKey, request: HttpRequest, requestID: String, sceneID: String) {
+        self.entryID = entryID
+        self.expectedRevision = expectedRevision
+        self.generation = generation
+        self.grantID = grantID
+        self.key = key
+        self.request = request
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public enum ImmichLockedState: String, Codable, CaseIterable, Sendable {
+    case `locked`
+    case `connecting`
+    case `open`
+}
+
+public struct ImmichLockedView: Codable, Sendable {
+    public var entries: [ImmichLockedEntry]?
+    public var error: String?
+    public var generation: Int64
+    public var grantID: String?
+    public var image: ImmichLockedImageAccess?
+    public var leaseID: Int64
+    public var remoteLockConfirmed: Bool?
+    public var sceneID: String?
+    public var state: ImmichLockedState
+    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState) {
+        self.entries = entries
+        self.error = error
+        self.generation = generation
+        self.grantID = grantID
+        self.image = image
+        self.leaseID = leaseID
+        self.remoteLockConfirmed = remoteLockConfirmed
+        self.sceneID = sceneID
+        self.state = state
+    }
+}
+
 public struct LibrarySnapshot: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -1479,6 +1564,7 @@ public struct ViewModel: Codable, Sendable {
     public var canTransfer: Bool
     public var editingTargets: [String: [EditingTarget]]
     public var error: String?
+    public var immichLockedView: ImmichLockedView
     public var media: [String: PlaybackKind]
     public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
@@ -1491,7 +1577,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichLockedView: ImmichLockedView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -1499,6 +1585,7 @@ public struct ViewModel: Codable, Sendable {
         self.canTransfer = canTransfer
         self.editingTargets = editingTargets
         self.error = error
+        self.immichLockedView = immichLockedView
         self.media = media
         self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers

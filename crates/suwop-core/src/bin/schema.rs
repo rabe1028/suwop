@@ -9,6 +9,8 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    immich_locked_image_result: suwop_core::immich_locked::ImmichLockedImageResult,
+    immich_locked_image_ticket: suwop_core::immich_locked::ImmichLockedImageTicket,
     protected_scene_phase: suwop_core::protection::ProtectionScenePhase,
     protected_auth_result: suwop_core::protection::ProtectedAuthResult,
     protected_image_result: suwop_core::protection::ProtectedImageResult,

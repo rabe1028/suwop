@@ -48,6 +48,7 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("apple-trash-pending", view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()))
         try await captureAppleVisibility()
         try await captureProtectedPhotos()
+        try await captureImmichLocked()
         try await capture(
             "apple-trash-pending-large-text",
             view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()),
@@ -86,6 +87,30 @@ final class VisualRegressionTests: XCTestCase {
         )
     }
 
+    @MainActor private func captureImmichLocked() async throws {
+        for name in ["immich-locked-form", "immich-locked-open", "immich-locked-preview", "immich-locked-large-text"] {
+            let fixture = try ImmichLockedPhotoFixture(protectedSource: true)
+            let model = try await fixture.start()
+            if name != "immich-locked-form" {
+                try await fixture.open()
+            }
+            if name == "immich-locked-preview" {
+                model.immichLocked.requestImage(
+                    entryID: ImmichLockedFixtureData.firstID,
+                    sceneID: ImmichLockedFixtureData.sceneID
+                )
+                try await fixture.settle { model.immichLocked.view(for: ImmichLockedFixtureData.sceneID)?.image != nil }
+            }
+            try await capture(
+                name,
+                view: ImmichLockedPhotosView(session: model.immichLocked, sceneID: ImmichLockedFixtureData.sceneID),
+                largeText: name.hasSuffix("large-text")
+            )
+            model.immichLocked.close()
+            fixture.releaseHeld()
+        }
+    }
+
     @MainActor private func captureProtectedPhotos() async throws {
         // Each mounted screen owns its actual authorization session. Delayed
         // SwiftUI disappearance from one capture cannot close the next grant.
@@ -120,7 +145,9 @@ final class VisualRegressionTests: XCTestCase {
     @MainActor private func capture(
         _ name: String, view: some View, dark: Bool = false, largeText: Bool = false, scrollToBottom: Bool = false
     ) async throws {
+        let raster = RasterMountObservation()
         let root = view
+            .environment(\.immichLockedRasterGeometry) { frame in raster.frame = frame }
             .environment(\.colorScheme, dark ? .dark : .light)
             .preferredColorScheme(dark ? .dark : .light)
             .environment(\.locale, Locale(identifier: "ja_JP"))
@@ -169,13 +196,38 @@ final class VisualRegressionTests: XCTestCase {
                 controller.view.layoutIfNeeded()
             }
         }
+        if name == "immich-locked-preview" {
+            for _ in 0 ..< 200 {
+                if raster.isVisible(in: window) {
+                    break
+                }
+                try await Task.sleep(for: .milliseconds(10))
+                controller.view.layoutIfNeeded()
+            }
+            guard raster.isVisible(in: window) else {
+                try SnapshotComparison.diagnostic(render(window), named: name + "-readiness-timeout")
+                XCTFail("Mounted Image branch must have visible geometry before capture")
+                throw SuwopError("Mounted Image branch did not report visible geometry")
+            }
+        }
+        try SnapshotComparison.verify(render(window), named: name)
+    }
+
+    @MainActor private func render(_ window: UIWindow) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3
         format.opaque = true
-        let image = UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
+        return UIGraphicsImageRenderer(bounds: window.bounds, format: format).image { _ in
             XCTAssertTrue(window.drawHierarchy(in: window.bounds, afterScreenUpdates: true))
         }
-        try SnapshotComparison.verify(image, named: name)
+    }
+
+    @MainActor private final class RasterMountObservation {
+        var frame = CGRect.zero
+
+        func isVisible(in window: UIWindow) -> Bool {
+            !frame.isEmpty && frame.intersects(window.frame)
+        }
     }
 
     @MainActor private func scrollView(in view: UIView) -> UIScrollView? {

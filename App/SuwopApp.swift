@@ -27,7 +27,11 @@ private struct LibrarySceneRoot: View {
                 @unknown default: .background
                 }
                 model.protection.sceneChanged(sceneID: sceneID, phase: value)
+                model.immichLocked.sceneChanged(sceneID: sceneID, phase: value)
             }
-            .onDisappear { model.protection.close(sceneID: sceneID) }
+            .onDisappear {
+                model.protection.close(sceneID: sceneID)
+                model.immichLocked.close(sceneID: sceneID)
+            }
     }
 }

@@ -5,6 +5,7 @@ struct GalleryView: View {
     @ObservedObject var model: LibraryModel
     private let sceneID: String
     @State private var showProtected = false
+    @State private var showImmichLocked = false
     @State private var tab = 0
     @State private var filter: PhotoFilter = .all
     @State private var presence: Presence?
@@ -66,6 +67,7 @@ struct GalleryView: View {
         .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
         .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }
         .sheet(isPresented: $showProtected) { ProtectedPhotosView(session: model.protection, sceneID: sceneID) }
+        .sheet(isPresented: $showImmichLocked) { ImmichLockedPhotosView(session: model.immichLocked, sceneID: sceneID) }
         .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
         .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
         .alert("操作を完了できませんでした", isPresented: Binding(
@@ -187,6 +189,8 @@ struct GalleryView: View {
             }.accessibilityIdentifier("appleVisibilityHistory")
             Button("このアプリで保護した写真", systemImage: "lock") { showProtected = true }
                 .accessibilityIdentifier("protectedPhotosHistory")
+            Button("Immich のロック写真", systemImage: "lock.rectangle") { showImmichLocked = true }
+                .accessibilityIdentifier("immichLockedPhotosHistory")
             Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)
             Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)

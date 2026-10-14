@@ -265,7 +265,10 @@ impl Session {
                 )
                 .map_err(|_| "写真一覧の形式が不正です。")?;
                 for a in items {
-                    if a.owner_id == self.user_id && !a.is_trashed {
+                    if a.owner_id == self.user_id
+                        && !a.is_trashed
+                        && a.visibility.as_deref() != Some("locked")
+                    {
                         assets.insert(a.id.clone(), a);
                     }
                 }

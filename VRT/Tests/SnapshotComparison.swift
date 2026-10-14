@@ -53,6 +53,14 @@ import XCTest
         )
     }
 
+    /// A failed readiness check never compares or records this diagnostic image.
+    static func diagnostic(_ image: UIImage, named name: String) throws {
+        let folder = try XCTUnwrap(ProcessInfo.processInfo.environment["SUWOP_VRT_ARTIFACTS"])
+        let url = URL(fileURLWithPath: folder).appendingPathComponent(name + ".png")
+        try XCTUnwrap(image.pngData()).write(to: url)
+        attach(image, name: name)
+    }
+
     private static func changedPixels(_ reference: [UInt8], _ current: [UInt8]) -> [Int] {
         var offsets: [Int] = []
         for offset in stride(from: 0, to: current.count, by: 4) {

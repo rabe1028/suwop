@@ -244,3 +244,45 @@ fn external_unknown_sidecar_and_missing_live_companion_are_copy_only()
     assert!(!asset.record("scope", None, Some(&[])).inventory_complete);
     Ok(())
 }
+
+#[test]
+fn unexpected_locked_search_members_are_excluded_without_losing_timeline_or_archive()
+-> Result<(), String> {
+    let mut ordinary = asset_json();
+    ordinary["visibility"] = json!("timeline");
+    let mut archived = asset_json();
+    archived["id"] = json!("33333333-3333-4333-8333-333333333333");
+    archived["visibility"] = json!("archive");
+    let mut locked = asset_json();
+    locked["id"] = json!("44444444-4444-4444-8444-444444444444");
+    locked["visibility"] = json!("locked");
+    locked["originalFileName"] = json!("PRIVATE-LOCKED.jpg");
+    let (_, view) = scan(
+        Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+        vec![json!({"assets":{"items":[ordinary,archived,locked],"nextCursor":null}})],
+    )?;
+    let snapshot = view
+        .state
+        .snapshots
+        .iter()
+        .find(|s| s.provider == Provider::Immich)
+        .ok_or("missing remote snapshot")?;
+    assert_eq!(snapshot.assets.len(), 2);
+    assert!(snapshot.assets.iter().any(|a| a.key.asset_id == ID));
+    assert!(
+        snapshot
+            .assets
+            .iter()
+            .any(|a| a.key.asset_id == "33333333-3333-4333-8333-333333333333")
+    );
+    assert!(
+        !serde_json::to_string(&view)
+            .map_err(|e| e.to_string())?
+            .contains("PRIVATE-LOCKED")
+    );
+    Ok(())
+}

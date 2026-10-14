@@ -57,6 +57,14 @@ def main():
 
     login = request("/auth/login", "POST", {"email": EMAIL, "password": PASSWORD})
     token = login["accessToken"]
+    status = request("/auth/status", token=token)
+    if not status.get("pinCode"):
+        request(
+            "/auth/pin-code",
+            "POST",
+            {"pinCode": os.environ.get("IMMICH_TEST_PIN", "123456")},
+            token=token,
+        )
     key = request(
         "/api-keys", "POST", {"name": "Suwop integration test", "permissions": ["all"]}, token=token
     )
