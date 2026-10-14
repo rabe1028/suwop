@@ -7,7 +7,12 @@ use crate::{
 
 impl Runtime<'_> {
     pub(super) async fn play(&mut self, keys: &[AssetKey], id: &str) -> Result<String, String> {
-        let (key, kind) = source(&self.state.snapshots, &self.state.receipts, keys)?;
+        self.check_content_keys(keys)?;
+        let (key, kind) = source(
+            &self.state.presentation_snapshots(),
+            &self.state.receipts,
+            keys,
+        )?;
         if key.provider == Provider::Immich {
             self.ensure_session().await?;
         }
@@ -44,10 +49,12 @@ impl Runtime<'_> {
             paths.push(path);
         }
         self.progress("原本を再生中。閉じると作業ファイルを片付けます。");
+        self.check_content_generation(std::slice::from_ref(&key))?;
         let _: serde_json::Value = io(
             self.ctx,
             ShellOperation::PlayMedia {
                 plan: PlaybackPlan {
+                    source_keys: vec![key],
                     kind,
                     name: bundle.assets[0].name.clone(),
                     files: paths,

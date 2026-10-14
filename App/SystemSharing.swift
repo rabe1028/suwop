@@ -4,6 +4,7 @@ import SuwopShell
     import UIKit
 #else
     import AppKit
+    import os
 #endif
 
 /// Native presentation only. The Rust workflow retains all files until this
@@ -11,6 +12,10 @@ import SuwopShell
 /// a sharing extension can still be reading them.
 @MainActor final class SystemSharing {
     private var active: NativeSharePresentation?
+
+    func invalidateForContentChange() {
+        active?.invalidateForContentChange()
+    }
 
     func present(_ files: [ShareFile]) async throws -> Bool {
         guard active == nil else { throw SuwopError("共有がすでに進行中です。") }
@@ -27,7 +32,24 @@ import SuwopShell
     private var pending: CheckedContinuation<Bool, Error>?
     #if os(macOS)
         private var picker: NSSharingServicePicker?
+        /// SDK picker delegate methods are nonisolated. Record selection before
+        /// they return: the service may receive the files immediately afterwards.
+        private nonisolated let selectedService = OSAllocatedUnfairLock(initialState: false)
     #endif
+
+    func invalidateForContentChange() {
+        #if os(macOS)
+            guard !selectedService.withLock({ $0 }) else { return }
+            // close() reports nil didChoose; only that callback releases files.
+            picker?.close()
+        #else
+            // UIActivityViewController has no public selection-before-handoff
+            // signal. Keep the lease until completionWithItemsHandler, rather
+            // than dismissing an extension or releasing its files early.
+            // https://developer.apple.com/documentation/uikit/uiactivityviewcontroller/completionwithitemshandler-swift.property
+            // Data already handed to another app cannot be withdrawn here.
+        #endif
+    }
 
     func present(_ files: [ShareFile]) async throws -> Bool {
         try Task.checkCancellation()
@@ -60,9 +82,7 @@ import SuwopShell
                     )
                     popover.permittedArrowDirections = []
                 }
-                presenter.present(controller, animated: true) { [weak self] in
-                    controller.presentationController?.delegate = self
-                }
+                presenter.present(controller, animated: true)
             }
         #else
             guard let view = NSApplication.shared.keyWindow?.contentView else {
@@ -92,22 +112,19 @@ import SuwopShell
     }
 }
 
-#if os(iOS)
-    extension NativeSharePresentation: UIAdaptivePresentationControllerDelegate {
-        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            finish(completed: false)
-        }
-    }
-#endif
-
 #if os(macOS)
     extension NativeSharePresentation: NSSharingServicePickerDelegate, NSSharingServiceDelegate {
         nonisolated func sharingServicePicker(
             _ sharingServicePicker: NSSharingServicePicker,
             didChoose service: NSSharingService?
         ) {
-            if service == nil {
-                Task { @MainActor [weak self] in self?.finish(completed: false) }
+            if service != nil {
+                selectedService.withLock { $0 = true }
+            } else {
+                Task { @MainActor [weak self] in
+                    guard let self, !selectedService.withLock({ $0 }) else { return }
+                    finish(completed: false)
+                }
             }
         }
 
@@ -117,7 +134,8 @@ import SuwopShell
             _ sharingServicePicker: NSSharingServicePicker,
             delegateFor sharingService: NSSharingService
         ) -> (any NSSharingServiceDelegate)? {
-            self
+            selectedService.withLock { $0 = true }
+            return self
         }
 
         func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {

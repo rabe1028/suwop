@@ -12,6 +12,16 @@ import SuwopShell
     private let photoEditing = ApplePhotoEditing()
     private let confirmation = SystemConfirmation()
     private let photoReversion = ApplePhotoReversion()
+
+    /// Cancel native presentation leases without cancelling the workflow that
+    /// must still persist outcomes and close native sessions / workspaces.
+    func invalidateContentPresentations() {
+        imageEditing.invalidateForContentChange()
+        playback.invalidateForContentChange()
+        confirmation.invalidateForContentChange()
+        sharing.invalidateForContentChange()
+    }
+
     init() throws {
         root = try FileManager.default.url(
             for: .applicationSupportDirectory,
@@ -124,7 +134,10 @@ import SuwopShell
             try photoEditing.close(requiredString(data, "token"))
             return .null
         case "editImage":
-            return try await .from(imageEditing.present(data["presentation"].decode(ImageEditPresentation.self)))
+            return try await .from(imageEditing.present(
+                data["presentation"].decode(ImageEditPresentation.self),
+                sourceKey: data["key"].decode(AssetKey.self)
+            ))
         case "appleReversionInspect":
             return try .from(photoReversion.inspect(data["asset"].decode(StoredAsset.self)))
         case "appleRevert":

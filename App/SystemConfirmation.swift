@@ -1,3 +1,4 @@
+import Foundation
 import SuwopShell
 #if os(iOS)
     import UIKit
@@ -8,11 +9,27 @@ import SuwopShell
 /// Presents a Rust-requested confirmation and completes exactly once.
 @MainActor final class SystemConfirmation {
     private var waiting: CheckedContinuation<Bool, Error>?
+    private var presentationID: UUID?
+    private var invalidated = false
     #if os(iOS)
         private var alert: UIAlertController?
     #else
         private var alert: NSAlert?
     #endif
+
+    /// Some confirmation DTOs identify only names / counts, so conservatively
+    /// close every active confirmation after Apple content access changes.
+    func invalidateForContentChange() {
+        guard let id = presentationID else { return }
+        invalidated = true
+        #if os(iOS)
+            alert?.title = nil
+            alert?.message = nil
+        #else
+            alert?.window.orderOut(nil)
+        #endif
+        cancel(id: id, error: nil)
+    }
 
     func resumeUpload(_ prompt: UploadResumePrompt) async throws -> Bool {
         try await confirm(
@@ -130,18 +147,22 @@ import SuwopShell
     ) async throws -> Bool {
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()
+        let id = UUID()
+        invalidated = false
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
                 waiting = continuation
-                do { try open(title: title, message: message, action: action, destructive: destructive) } catch {
-                    finish(error: error)
+                presentationID = id
+                do { try open(title: title, message: message, action: action, destructive: destructive, id: id)
+                } catch {
+                    finish(id: id, error: error)
                 }
             }
-        } onCancel: { Task { @MainActor [weak self] in self?.cancel() } }
+        } onCancel: { Task { @MainActor [weak self] in self?.cancel(id: id) } }
     }
 
-    private func open(title: String, message: String, action: String, destructive: Bool) throws {
+    private func open(title: String, message: String, action: String, destructive: Bool, id: UUID) throws {
         #if os(iOS)
             guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
@@ -151,11 +172,11 @@ import SuwopShell
                 presenter = shown
             }
             let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.finish() })
+            alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.finish(id: id) })
             alert.preferredAction = alert.actions.first
             alert
                 .addAction(UIAlertAction(title: action, style: destructive ? .destructive : .default) { [weak self] _ in
-                    self?.finish(confirmed: true)
+                    self?.finish(id: id, confirmed: true)
                 })
             self.alert = alert
             presenter.present(alert, animated: true)
@@ -170,32 +191,36 @@ import SuwopShell
             alert.addButton(withTitle: action)
             self.alert = alert
             alert.beginSheetModal(for: window) { [weak self] response in
-                Task { @MainActor in self?.finish(confirmed: response == .alertSecondButtonReturn) }
+                Task { @MainActor in self?.finish(id: id, confirmed: response == .alertSecondButtonReturn) }
             }
         #endif
     }
 
-    private func cancel() {
-        guard waiting != nil else { return }
+    private func cancel(id: UUID, error: Error? = CancellationError()) {
+        guard waiting != nil, presentationID == id else { return }
         #if os(iOS)
             if let alert {
-                alert.dismiss(animated: true) { [weak self] in self?.finish(error: CancellationError()) }
+                alert.dismiss(animated: false) { [weak self] in self?.finish(id: id, error: error) }
             } else {
-                finish(error: CancellationError())
+                finish(id: id, error: error)
             }
         #else
             if let alert {
                 alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel)
             }
-            finish(error: CancellationError())
+            finish(id: id, error: error)
         #endif
     }
 
-    private func finish(confirmed: Bool = false, error: Error? = nil) {
+    private func finish(id: UUID, confirmed: Bool = false, error: Error? = nil) {
+        guard presentationID == id else { return }
         let pending = waiting
         waiting = nil
+        presentationID = nil
         alert = nil
-        if let error {
+        if invalidated {
+            pending?.resume(returning: false)
+        } else if let error {
             pending?.resume(throwing: error)
         } else {
             pending?.resume(returning: confirmed)

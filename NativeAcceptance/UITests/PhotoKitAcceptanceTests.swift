@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 
 final class PhotoKitAcceptanceTests: XCTestCase {
@@ -16,6 +17,9 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             "trash",
             "trash-lost",
             "trash-inspect",
+            "visibility-hide",
+            "visibility-hidden",
+            "visibility-restore",
         ] {
             app.launchArguments = ["--native-acceptance", phase]
             app.launch()
@@ -34,11 +38,9 @@ final class PhotoKitAcceptanceTests: XCTestCase {
                 predicate: NSPredicate(format: "label != 'RUNNING'"),
                 object: result
             )
-            if ["trash-native-cancel", "trash", "trash-lost"].contains(phase) {
-                guard answerNativeDeletion(app, cancel: phase == "trash-native-cancel") else {
-                    app.terminate()
-                    return
-                }
+            guard answerNativeConfirmation(phase, app: app, result: result) else {
+                app.terminate()
+                return
             }
             XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 120), .completed, phase)
             let screenshot = XCTAttachment(screenshot: app.screenshot())
@@ -48,6 +50,16 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             XCTAssertEqual(result.label, "PASS \(phase)", result.label)
             if result.label == "PASS \(phase)" {
                 print("PHOTOKIT_PASS \(phase)")
+                if phase == "visibility-hide" {
+                    let outcome = app.staticTexts["nativeVisibilityOutcome"].label
+                    XCTAssertEqual(outcome, "applied")
+                    print("PHOTOKIT_VISIBILITY_HIDE \(outcome)")
+                }
+                if phase == "visibility-restore" {
+                    let evidence = app.staticTexts["nativeVisibilityEvidence"].label
+                    XCTAssertTrue(["unhide-readback", "photos-handoff-required"].contains(evidence))
+                    print("PHOTOKIT_VISIBILITY \(evidence)")
+                }
             }
             if result.label != "PASS \(phase)" {
                 app.terminate()
@@ -55,6 +67,59 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             }
             app.terminate()
         }
+    }
+
+    @MainActor private func answerNativeConfirmation(
+        _ phase: String, app: XCUIApplication, result: XCUIElement
+    ) -> Bool {
+        switch phase {
+        case "trash-native-cancel", "trash", "trash-lost":
+            answerNativeDeletion(app, cancel: phase == "trash-native-cancel")
+        case "visibility-hide":
+            answerNativeVisibility(app, hide: true, result: result)
+        case "visibility-restore":
+            answerNativeVisibility(app, hide: false, result: result)
+        default: true
+        }
+    }
+
+    @MainActor private func answerNativeVisibility(
+        _ app: XCUIApplication, hide: Bool, result: XCUIElement
+    ) -> Bool {
+        let labels = hide ? ["Hide", "非表示"] : ["Unhide", "再表示"]
+        let action = NSPredicate(format: "label IN %@", labels)
+        let refusal = NSPredicate(format: "label IN %@", ["Don’t Allow", "Don't Allow", "許可しない"])
+        let title = NSPredicate(format: "label CONTAINS %@", "SuwopPhotoKitHost")
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(120)
+        repeat {
+            for surface in [app, springboard] {
+                let alert = surface.alerts.containing(title).firstMatch
+                guard alert.waitForExistence(timeout: 0.5),
+                      alert.buttons.matching(refusal).firstMatch.exists
+                else { continue }
+                let button = alert.buttons.matching(action).firstMatch
+                guard button.exists else { continue }
+                button.tap()
+                return true
+            }
+            if result.exists, result.label != "RUNNING" {
+                // Protected Hidden assets take the Photos handoff branch without
+                // requesting Unhide. Only the verified phase result can skip a prompt.
+                let evidence = app.staticTexts["nativeVisibilityEvidence"]
+                let restored = !hide && result.label == "PASS visibility-restore"
+                let verified = evidence.exists && ["unhide-readback", "photos-handoff-required"]
+                    .contains(evidence.label)
+                if restored, verified {
+                    return true
+                }
+                break
+            }
+        } while Date() < deadline
+        XCTFail("Missing native visibility confirmation or verified restore result: \(labels)")
+        print(app.debugDescription)
+        print(springboard.debugDescription)
+        return false
     }
 
     @MainActor private func answerNativeDeletion(_ app: XCUIApplication, cancel: Bool) -> Bool {

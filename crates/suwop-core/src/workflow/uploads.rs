@@ -15,7 +15,7 @@ impl Runtime<'_> {
             .ok_or("解除する未完了コピーの記録がありません。")?;
         let prompt = crate::immich::UploadForgetPrompt {
             key: key.clone(),
-            name: record.source.name.clone(),
+            name: crate::privacy::public_asset_name(&self.state, &record.source),
         };
         let confirmed: bool = io(self.ctx, ShellOperation::ConfirmForgetUpload { prompt }).await?;
         if !confirmed {
@@ -38,6 +38,7 @@ impl Runtime<'_> {
         now: f64,
         live_id: Option<&str>,
     ) -> Result<String, String> {
+        self.check_content_generation(std::slice::from_ref(&source.key))?;
         self.check_transfer_trash(std::slice::from_ref(source))?;
         let matches: Vec<_> = self
             .state
@@ -46,7 +47,7 @@ impl Runtime<'_> {
             .filter(|p| {
                 p.key.provider == Provider::Immich
                     && p.key.scope == session.scope
-                    && p.source == *source
+                    && p.source.same_content_evidence(source)
                     && p.resource == file.resource
                     && p.signature == file.signature
                     && p.live_id.as_deref() == live_id
@@ -115,6 +116,7 @@ impl Runtime<'_> {
             self.finish_pending_upload(&pending.key).await?;
             return Ok(pending.key.asset_id.clone());
         }
+        self.check_content_generation(std::slice::from_ref(&pending.source.key))?;
         let confirmed: bool = io(
             self.ctx,
             ShellOperation::ConfirmUploadResume {
@@ -186,6 +188,7 @@ impl Runtime<'_> {
         pending: &PendingUpload,
         plan: UploadMetadataPlan,
     ) -> Result<(), String> {
+        self.check_content_generation(std::slice::from_ref(&pending.source.key))?;
         self.check_keys(std::slice::from_ref(&pending.key))?;
         let entry = self
             .state
@@ -210,6 +213,7 @@ impl Runtime<'_> {
             }
             return Err(error);
         }
+        self.check_content_generation(std::slice::from_ref(&pending.source.key))?;
         session
             .apply_upload_metadata(self.ctx, &pending.key.asset_id, plan.body)
             .await?;

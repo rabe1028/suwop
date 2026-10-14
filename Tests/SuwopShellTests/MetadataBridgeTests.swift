@@ -6,6 +6,7 @@ import Testing
     for saved in [true, false] {
         let bridge = try CoreBridge()
         var asset = StoredAsset(
+            appleVisibility: .visible,
             key: AssetKey(provider: .apple, scope: "library", assetID: "photo"),
             name: "photo.jpg",
             capturedAt: Date(timeIntervalSince1970: 10),
@@ -24,7 +25,7 @@ import Testing
             ])).decode([EffectRequest].self)
         }
         let read = try update(["type": .string("initialize"), "scope": .string("library")])
-        let initial = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 2)))
+        let initial = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 3)))
             .first)
         _ = try resolve(initial, value: .null)
         let scan = try update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)])
@@ -49,18 +50,24 @@ import Testing
         asset.revision = "after"
         let persist = try #require(resolve(write, value: .from(saved ? [asset] : [])).first)
         #expect(persist.effect["Io"]?.type == "persist")
+        let canonical = try #require(persist.effect["Io"]?.data).decode(SavedLibrary.self)
+        #expect(canonical.receipts.isEmpty)
+        #expect(canonical.snapshots.first?.assets.first?.latitude == 1)
+        #expect(canonical.snapshots.first?.assets.first?.longitude == 2)
         _ = try resolve(persist, value: .null)
         let finished = try bridge.call(2).decode(ViewModel.self)
         #expect(!finished.busy)
-        #expect(finished.photos.count == 1)
         #expect(finished.state.receipts.isEmpty)
-        #expect(finished.state.snapshots.first?.assets.first?.latitude == 1)
-        #expect(finished.state.snapshots.first?.assets.first?.longitude == 2)
         if saved {
             #expect(finished.error == nil)
+            #expect(finished.photos.count == 1)
             #expect(finished.state.snapshots.first?.assets.first?.capturedAt == date)
         } else {
             #expect(finished.error != nil)
+            #expect(canonical.snapshots.first?.assets.first?.capturedAt == Date(timeIntervalSince1970: 10))
+            #expect(canonical.snapshots.first?.assets.first?.revision == "before")
+            #expect(finished.photos.isEmpty)
+            #expect(finished.state.snapshots.first?.assets.isEmpty == true)
             #expect(finished.state.snapshots.first?.access == .unavailable)
         }
     }

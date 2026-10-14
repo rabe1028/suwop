@@ -35,7 +35,7 @@
 | 日時を保った新規コピーと中断後の再開 | PR #11 の最終HEAD `e280879` とマージ後main CIは全3 job通過。POST前の開始記録・固有ID照合・開始記録解除を含めてマージ済み | 確認画面と中断・再起動のnative操作 |
 | Apple静止画の原本へ戻す | PR #12 の最終HEAD `dc8eb58` とマージ後main CIは全3 job通過。Rust 154／Swift 38 testsとApple build通過 | 実PhotoKitの保存→復元→再起動と競合確認 |
 | 編集後の共有、取り込み、複製 | PR #13 / #14 で、選んだAppleの現在の静止画と、Immichの検証済み原本・対応する幾何編集系列からの現在のPNG共有をマージ済み。動画／Liveの現在の内容、複数選択、外部ファイル取り込み・複製は継続。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
-| 通常の削除、非表示／再表示、復元 | Immich の独立した `RefreshTrash` / `ChangeTrash` / `ResolveTrash`、確認後の保持設定・対象再検証、送信前の記録、結果不明の書込停止を実装。同じ原本のAppleコピーからの転送も送信前に止める。Apple の通常削除は独立した `TrashApple` / `ResolveAppleTrash` と専用の永続記録で実装する。復元は Apple Photos へ案内する。非表示は未実装 | 最終HEADの実API CIとnative操作。Apple 通常削除の最終HEAD native／VRT／CI、非表示・再表示、一括選択と現在の権限・ID確認、両保存先の状態との一致 |
+| 通常の削除、非表示／再表示、復元 | Immich の独立した `RefreshTrash` / `ChangeTrash` / `ResolveTrash`、確認後の保持設定・対象再検証、送信前の記録、結果不明の書込停止を実装。同じ原本のAppleコピーからの転送も送信前に止める。Apple の通常削除は独立した `TrashApple` / `ResolveAppleTrash` と専用の永続記録で実装する。復元は Apple Photos へ案内する。非表示の製品操作は未実装。[可視性基盤](apple-visibility.md)を実装中 | 最終HEADの実API CIとnative操作。Apple 通常削除の最終HEAD native／VRT／CI、非表示・再表示、一括選択と現在の権限・ID確認、両保存先の状態との一致 |
 | 明るさ・色・フィルターと編集のコピー／貼り付け | Apple静止画の露出・明るさ・コントラスト・彩度、3フィルターをRustの履歴・保存モデルに追加。[色編集](color-editing.md)。調整値・フィルター・幾何編集を選ぶ[コピー／貼り付け](edit-copy-paste.md)と、部分成功・結果不明の記録と読取りを実装。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Native画素・色空間・保存・取り消し・元へ戻すの検証。専用Simulatorの生成JPEGで実PhotoKit保存・再起動・読取と復元を確認。実機・iCloudと最終HEAD CI |
 | 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
 
@@ -234,3 +234,5 @@ PhotoKit の Applied / NotApplied / Unknown を分け、成功応答の保存後
 最終 pushed HEAD の hosted CI、実機／iCloud／native batch、RAW／Live／burst の native 削除と Photos アプリでの実復元は未確認。
 
 最終 `make apple-build` も Rust 全5 target・XCFramework・iOS Simulator / universal macOS の両 app で通過した。これは実機や iCloud の受入れを追加する証拠ではない。
+
+2026-10-14: Apple通常削除の PR #20 は main `8351ea7` へ merge 済み。最終HEAD／merge後CIの4 jobが成功（Rust202 / Swift50、VRT26 / UI5、Native12）。この証拠は PP-02 の新しい可視性基盤の検証とは分ける。実機・iCloud・Photosでの実復元は未確認。

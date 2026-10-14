@@ -169,7 +169,7 @@ pub fn validate_ordinary_apple_trash(
 ) -> Result<(), String> {
     if fresh
         .iter()
-        .any(|f| !f.full_access || !f.can_delete || f.shared)
+        .any(|f| !f.full_access || !f.can_delete || f.shared || !f.asset.content_visible())
     {
         return Err("フルアクセスと写真の削除権限を確認できません。".into());
     }

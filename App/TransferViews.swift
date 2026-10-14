@@ -2,97 +2,43 @@ import SuwopShell
 import SwiftUI
 
 struct PhotoInfo: View {
-    let photo: UnifiedPhoto
+    private let referenceKeys: Set<AssetKey>
     @ObservedObject var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @State private var pendingSource: Provider?
     @State private var wantsMove = false
     @State private var pendingMetadata: MetadataTarget?
+    init(photo: UnifiedPhoto, model: LibraryModel) {
+        referenceKeys = Set(photo.assets.map(\.key))
+        self.model = model
+    }
+
+    private var currentPhoto: UnifiedPhoto? {
+        model.photos.first { !$0.assets.allSatisfy { !referenceKeys.contains($0.key) } }
+    }
+
+    private var photo: UnifiedPhoto {
+        currentPhoto ?? UnifiedPhoto(assets: [], presence: .unverified)
+    }
+
     var body: some View {
         NavigationStack {
-            List {
-                Section {
-                    Text(model.displayedSource(photo)?.name ?? photo.name).font(.headline)
-                    if let date = model.displayedSource(photo)?.capturedAt {
-                        Text(date, style: .date).foregroundStyle(.secondary)
-                    } else {
-                        Text("撮影日不明").foregroundStyle(.secondary)
-                    }
-                    Text(photo.presence.title)
+            Group {
+                if currentPhoto != nil {
+                    details
+                } else {
+                    ContentUnavailableView(
+                        "写真を表示できません",
+                        systemImage: "photo",
+                        description: Text("アクセスが変わりました。一覧を更新してください。")
+                    )
                 }
-                ForEach(Provider.allCases, id: \.self) { provider in
-                    let assets = photo.assets.filter { $0.key.provider == provider }
-                    Section(provider.title) {
-                        if assets.isEmpty {
-                            Text("未検出（未照合の原本がある場合は未確定）").foregroundStyle(.secondary)
-                        }
-                        ForEach(assets) { asset in
-                            VStack(alignment: .leading, spacing: 7) {
-                                Text(asset.name).font(.subheadline.bold())
-                                if let date = asset.capturedAt {
-                                    Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption)
-                                } else {
-                                    Text("撮影日時不明").font(.caption).foregroundStyle(.secondary)
-                                }
-                                if let latitude = asset.latitude, let longitude = asset.longitude {
-                                    Text("位置: \(latitude), \(longitude)").font(.caption).textSelection(.enabled)
-                                }
-                                ForEach(asset.resources) { resource in
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        HStack {
-                                            Text(resource.role.title)
-                                            Text(resource.name).lineLimit(1)
-                                            Spacer()
-                                            if let bytes = resource.bytes {
-                                                Text(ByteCountFormatter.string(
-                                                    fromByteCount: bytes,
-                                                    countStyle: .file
-                                                ))
-                                            }
-                                        }.font(.caption)
-                                        Text(resource.sha1.map { "SHA-1: \($0)" } ?? "原本未照合")
-                                            .font(.caption2.monospaced()).foregroundStyle(.secondary)
-                                            .textSelection(.enabled)
-                                    }
-                                }
-                                ForEach(asset.deletionBlockers, id: \.self) {
-                                    Text($0).font(.caption).foregroundStyle(.orange)
-                                }
-                            }.padding(.vertical, 4)
-                        }
-                        if !assets.isEmpty {
-                            ForEach(model.metadataTargets(photo).filter { $0.provider == provider }) { target in
-                                Button("日時・位置情報を変更") { pendingMetadata = target }
-                                    .disabled(model.isBusy)
-                            }
-                            let destination = provider == .apple ? Provider.immich : .apple
-                            Button("\(destination.title) にコピー") { wantsMove = false
-                                pendingSource = provider
-                            }
-                            .disabled(!model.canTransfer)
-                            Button("\(destination.title) へ移動") { wantsMove = true
-                                pendingSource = provider
-                            }
-                            .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
-                            if provider == .apple {
-                                Button(
-                                    assets.count > 1 ? "Apple 側のすべての \(assets.count) 件を削除" : "Apple Photos から削除",
-                                    role: .destructive
-                                ) { model.trashOnApple([photo]) }
-                                    .disabled(model.isBusy)
-                            }
-                            if provider == .immich {
-                                Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich([photo]) }
-                                    .disabled(model.isBusy)
-                            }
-                        }
-                    }
-                }
-                Section("転送について") {
-                    Text("コピーはすべての原本を対象にします。RAW＋JPEGは両方を検証します。編集履歴・アルバム・人物認識などのサービス固有情報は移しません。")
-                    Text("移動はコピー → 転送先の原本検証 → 確認画面 → 両方を再検証 → 元の削除の順です。検証失敗時は元データを削除しません。")
-                }.font(.caption).foregroundStyle(.secondary)
             }
+            .onChange(of: model.thumbnailGeneration) {
+                pendingMetadata = nil
+                pendingSource = nil
+            }
+
             .navigationTitle("写真の保存先")
             .sheet(item: $pendingMetadata) { PhotoMetadataEditor(target: $0, model: model) }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
@@ -119,6 +65,92 @@ struct PhotoInfo: View {
         #if os(macOS)
         .frame(minWidth: 580, minHeight: 640)
         #endif
+    }
+
+    private var details: some View {
+        List {
+            Section {
+                Text(model.displayedSource(photo)?.name ?? photo.name).font(.headline)
+                if let date = model.displayedSource(photo)?.capturedAt {
+                    Text(date, style: .date).foregroundStyle(.secondary)
+                } else {
+                    Text("撮影日不明").foregroundStyle(.secondary)
+                }
+                Text(photo.presence.title)
+            }
+            ForEach(Provider.allCases, id: \.self) { provider in
+                let assets = photo.assets.filter { $0.key.provider == provider }
+                Section(provider.title) {
+                    if assets.isEmpty {
+                        Text("未検出（未照合の原本がある場合は未確定）").foregroundStyle(.secondary)
+                    }
+                    ForEach(assets) { asset in
+                        VStack(alignment: .leading, spacing: 7) {
+                            Text(asset.name).font(.subheadline.bold())
+                            if let date = asset.capturedAt {
+                                Text(date.formatted(date: .abbreviated, time: .shortened)).font(.caption)
+                            } else {
+                                Text("撮影日時不明").font(.caption).foregroundStyle(.secondary)
+                            }
+                            if let latitude = asset.latitude, let longitude = asset.longitude {
+                                Text("位置: \(latitude), \(longitude)").font(.caption).textSelection(.enabled)
+                            }
+                            ForEach(asset.resources) { resource in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    HStack {
+                                        Text(resource.role.title)
+                                        Text(resource.name).lineLimit(1)
+                                        Spacer()
+                                        if let bytes = resource.bytes {
+                                            Text(ByteCountFormatter.string(
+                                                fromByteCount: bytes,
+                                                countStyle: .file
+                                            ))
+                                        }
+                                    }.font(.caption)
+                                    Text(resource.sha1.map { "SHA-1: \($0)" } ?? "原本未照合")
+                                        .font(.caption2.monospaced()).foregroundStyle(.secondary)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            ForEach(asset.deletionBlockers, id: \.self) {
+                                Text($0).font(.caption).foregroundStyle(.orange)
+                            }
+                        }.padding(.vertical, 4)
+                    }
+                    if !assets.isEmpty {
+                        ForEach(model.metadataTargets(photo).filter { $0.provider == provider }) { target in
+                            Button("日時・位置情報を変更") { pendingMetadata = target }
+                                .disabled(model.isBusy)
+                        }
+                        let destination = provider == .apple ? Provider.immich : .apple
+                        Button("\(destination.title) にコピー") { wantsMove = false
+                            pendingSource = provider
+                        }
+                        .disabled(!model.canTransfer)
+                        Button("\(destination.title) へ移動") { wantsMove = true
+                            pendingSource = provider
+                        }
+                        .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
+                        if provider == .apple {
+                            Button(
+                                assets.count > 1 ? "Apple 側のすべての \(assets.count) 件を削除" : "Apple Photos から削除",
+                                role: .destructive
+                            ) { model.trashOnApple([photo]) }
+                                .disabled(model.isBusy)
+                        }
+                        if provider == .immich {
+                            Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich([photo]) }
+                                .disabled(model.isBusy)
+                        }
+                    }
+                }
+            }
+            Section("転送について") {
+                Text("コピーはすべての原本を対象にします。RAW＋JPEGは両方を検証します。編集履歴・アルバム・人物認識などのサービス固有情報は移しません。")
+                Text("移動はコピー → 転送先の原本検証 → 確認画面 → 両方を再検証 → 元の削除の順です。検証失敗時は元データを削除しません。")
+            }.font(.caption).foregroundStyle(.secondary)
+        }
     }
 }
 

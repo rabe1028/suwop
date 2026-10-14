@@ -184,7 +184,7 @@ async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Res
         .as_secs_f64();
     let assets = session.list(ctx, now).await?;
     let state = SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "unused-test-library".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Immich,
@@ -838,6 +838,7 @@ async fn upload_sidecar(
 
 fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "fixture".into(),

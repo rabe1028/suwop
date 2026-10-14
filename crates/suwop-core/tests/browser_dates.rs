@@ -8,6 +8,7 @@ fn date_search_uses_the_display_time_zone_including_historical_daylight_saving()
     let photo = |date| UnifiedPhoto {
         presence: Presence::AppleOnly,
         assets: vec![StoredAsset {
+            apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,
                 scope: "library".into(),

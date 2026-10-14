@@ -57,6 +57,7 @@ impl Runtime<'_> {
                 .retain(|p| p.token != intent.token);
             return Err(error);
         }
+        self.check_content_generation(std::slice::from_ref(&source.key))?;
         let (id, created) = session
             .create_intended_upload(self.ctx, file, &intent, now)
             .await?;
@@ -140,7 +141,7 @@ impl Runtime<'_> {
         let prompt = UploadIntentForgetPrompt {
             scope: scope.into(),
             token: token.into(),
-            name: record.source.name.clone(),
+            name: crate::privacy::public_asset_name(&self.state, &record.source),
         };
         let confirmed: bool = io(
             self.ctx,

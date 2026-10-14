@@ -65,9 +65,23 @@ pub struct PhotoResource {
     pub bytes: Option<u64>,
 }
 
+/// Apple physical-asset visibility is independent of content revision evidence.
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum AppleVisibility {
+    #[default]
+    Unknown,
+    Visible,
+    Hidden,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAsset {
+    #[serde(default)]
+    pub apple_visibility: AppleVisibility,
     pub key: AssetKey,
     pub name: String,
     pub captured_at: Option<f64>,
@@ -82,6 +96,18 @@ pub struct StoredAsset {
     pub deletion_blockers: Vec<String>,
 }
 impl StoredAsset {
+    #[must_use]
+    pub fn content_visible(&self) -> bool {
+        self.key.provider != Provider::Apple || self.apple_visibility == AppleVisibility::Visible
+    }
+
+    /// Visibility authorizes current reads, but is not part of persisted original evidence.
+    #[must_use]
+    pub fn same_content_evidence(&self, other: &Self) -> bool {
+        let mut evidence = self.clone();
+        evidence.apple_visibility = other.apple_visibility;
+        evidence == *other
+    }
     pub fn originals(&self) -> impl Iterator<Item = &PhotoResource> {
         self.resources.iter().filter(|r| r.role.is_original())
     }
@@ -186,17 +212,23 @@ fn checksum_counts(assets: &[StoredAsset], provider: Provider) -> BTreeMap<Strin
     }
     counts
 }
-#[must_use]
-pub fn catalog(snapshots: &[LibrarySnapshot], receipts: &[TransferReceipt]) -> Vec<UnifiedPhoto> {
+fn catalog_assets(snapshots: &[LibrarySnapshot]) -> Vec<StoredAsset> {
     let mut by_key = BTreeMap::new();
     for snapshot in snapshots {
         for asset in &snapshot.assets {
-            if asset.key.provider == snapshot.provider && asset.key.scope == snapshot.scope {
+            if asset.content_visible()
+                && asset.key.provider == snapshot.provider
+                && asset.key.scope == snapshot.scope
+            {
                 by_key.insert(asset.key.clone(), asset.clone());
             }
         }
     }
-    let assets: Vec<_> = by_key.into_values().collect();
+    by_key.into_values().collect()
+}
+#[must_use]
+pub fn catalog(snapshots: &[LibrarySnapshot], receipts: &[TransferReceipt]) -> Vec<UnifiedPhoto> {
+    let assets = catalog_assets(snapshots);
     let mut parent: Vec<_> = (0..assets.len()).collect();
     let mut owner = BTreeMap::new();
     for (i, asset) in assets.iter().enumerate() {

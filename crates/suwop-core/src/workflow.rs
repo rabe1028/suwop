@@ -34,6 +34,10 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 struct Runtime<'a> {
+    // A generation comparison is a cancellation fence, not cross-thread data synchronization.
+    // Capture once at workflow start; refresh must never renew an already granted read.
+    apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    started_generation: u64,
     reversion_started: bool,
     preferred_preview: Option<AssetKey>,
     ctx: &'a Context,
@@ -43,13 +47,27 @@ struct Runtime<'a> {
     editing_token: Option<String>,
 }
 
+/// Standalone contract runners have no concurrent Apple observer.
 pub async fn run(
     ctx: &Context,
     event: Event,
     state: SavedLibrary,
     session: Option<Session>,
 ) -> Outcome {
+    run_observed(ctx, event, state, session, std::sync::Arc::default()).await
+}
+
+pub async fn run_observed(
+    ctx: &Context,
+    event: Event,
+    state: SavedLibrary,
+    session: Option<Session>,
+    apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+) -> Outcome {
+    let started_generation = apple_generation.load(std::sync::atomic::Ordering::Relaxed);
     let mut runtime = Runtime {
+        apple_generation,
+        started_generation,
         reversion_started: false,
         preferred_preview: None,
         ctx,
@@ -133,7 +151,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -156,7 +174,7 @@ impl Runtime<'_> {
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
             Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 2 => {
+            _ if self.state.schema_version != 3 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
             }
             Event::Refresh { permission, now } => {
@@ -320,7 +338,7 @@ impl Runtime<'_> {
         let keys: Vec<_> = self.state.snapshots[index]
             .assets
             .iter()
-            .filter(|a| !a.fingerprints_complete())
+            .filter(|a| a.content_visible() && !a.fingerprints_complete())
             .map(|a| a.key.clone())
             .collect();
         let mut failures = 0;
@@ -503,6 +521,31 @@ impl Runtime<'_> {
         }
     }
     fn check_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
+        self.check_content_keys(keys)?;
+        self.check_identity_keys(keys)
+    }
+    fn check_content_generation(&self, keys: &[AssetKey]) -> Result<(), String> {
+        if keys.iter().any(|k| k.provider == Provider::Apple)
+            && self.started_generation
+                != self
+                    .apple_generation
+                    .load(std::sync::atomic::Ordering::Relaxed)
+        {
+            return Err(
+                "読み出し中に Apple Photos のアクセスが変わりました。処理を中止しました。".into(),
+            );
+        }
+        Ok(())
+    }
+    fn check_content_keys(&self, keys: &[AssetKey]) -> Result<(), String> {
+        let access = crate::privacy::ContentAccess::new(&self.state);
+        if keys.iter().any(|k| !access.visible(k)) {
+            return Err("Apple Photos の可視性を確認して一覧を更新してください。".into());
+        }
+        Ok(())
+    }
+    // Scope, exact set and pending-write fences also apply to newly created copies.
+    fn check_identity_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
         if self
             .state
             .pending_edit_pastes
@@ -556,7 +599,16 @@ impl Runtime<'_> {
         Ok(asset.record(&session.scope, companion.as_ref(), files.as_deref()))
     }
     async fn export(&self, keys: &[AssetKey], name: &str) -> Result<TransferBundle, String> {
-        let provider = self.check_keys(keys)?;
+        self.check_content_keys(keys)?;
+        self.export_readback(keys, name).await
+    }
+    /// Only fresh keys returned by this operation's import may bypass catalog membership.
+    async fn export_readback(
+        &self,
+        keys: &[AssetKey],
+        name: &str,
+    ) -> Result<TransferBundle, String> {
+        let provider = self.check_identity_keys(keys)?;
         let directory = self.directory(name)?;
         let bundle = match provider {
             Provider::Apple => {
@@ -606,6 +658,9 @@ impl Runtime<'_> {
             }
         };
         bundle.validate()?;
+        if bundle.assets.iter().any(|a| !a.content_visible()) {
+            return Err("読み出し中に Apple Photos の可視性が変わりました。".into());
+        }
         if bundle
             .assets
             .iter()
@@ -623,6 +678,13 @@ impl Runtime<'_> {
         provider: Provider,
         now: f64,
     ) -> Result<Vec<AssetKey>, String> {
+        self.check_content_generation(
+            &bundle
+                .assets
+                .iter()
+                .map(|a| a.key.clone())
+                .collect::<Vec<_>>(),
+        )?;
         self.check_transfer_trash(&bundle.assets)?;
         if provider == Provider::Apple {
             return io(
@@ -735,7 +797,7 @@ impl Runtime<'_> {
         self.save_receipt(receipt.clone());
         self.persist().await?;
         let imported = self.import(&bundle, destination, now).await?;
-        let verification = self.export(&imported, "verify").await?;
+        let verification = self.export_readback(&imported, "verify").await?;
         receipt.destination = verification.assets.clone();
         verify_destination(&receipt, &verification)?;
         receipt.phase = TransferPhase::Copied;
@@ -850,7 +912,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2].contains(&version) {
+    if ![1, 2, 3].contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
     if version == 1 {
@@ -862,6 +924,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
             }
         }
     }
+    raw["schemaVersion"] = Value::from(3);
     serde_json::from_value(raw)
         .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))
 }

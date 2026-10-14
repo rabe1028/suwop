@@ -66,7 +66,7 @@ struct FixtureManifest: Codable, Sendable {
         return manifest
     }
 
-    private static func createAsset(_ index: Int) async throws -> AssetKey {
+    static func createAsset(_ index: Int) async throws -> AssetKey {
         let size = CGSize(width: index == 1 ? 480 : 360, height: 240)
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1

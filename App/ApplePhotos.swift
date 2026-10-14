@@ -243,6 +243,7 @@ import UniformTypeIdentifiers
                 gate.setRequest(id)
             }
         } onCancel: { gate.cancel() }
+        _ = try Self.fetch(key.assetID)
         #if os(iOS)
             return payload
         #else
@@ -256,6 +257,13 @@ import UniformTypeIdentifiers
     }
 
     nonisolated static func fetch(_ id: String) throws -> PHAsset {
+        let asset = try fetchFacts(id)
+        guard !asset.isHidden else { throw SuwopError("非表示の写真にはアクセスできません。") }
+        return asset
+    }
+
+    /// Journal reconciliation may inspect identity/visibility, never image content.
+    nonisolated static func fetchFacts(_ id: String) throws -> PHAsset {
         guard let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject else {
             throw SuwopError("写真が見つからないか、アクセス権限がありません。")
         }
@@ -266,6 +274,9 @@ import UniformTypeIdentifiers
         let assets = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
         let returned = (0 ..< assets.count).map { assets.object(at: $0).localIdentifier }
         try NativeChange.validateIdentifiers(requested: identifiers, returned: returned)
+        guard (0 ..< assets.count).allSatisfy({ !assets.object(at: $0).isHidden }) else {
+            throw SuwopError("非表示の写真にはアクセスできません。")
+        }
         return assets
     }
 
@@ -304,6 +315,7 @@ import UniformTypeIdentifiers
         ]
         let revision = parts.joined(separator: "|")
         let record = StoredAsset(
+            appleVisibility: asset.isHidden ? .hidden : .visible,
             key: AssetKey(provider: .apple, scope: scope, assetID: asset.localIdentifier),
             name: resources.first?.name ?? "写真",
             capturedAt: asset.creationDate,

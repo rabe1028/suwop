@@ -24,6 +24,7 @@ fn key(index: u32) -> AssetKey {
 }
 fn asset(index: u32) -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: key(index),
         name: format!("photo-{index}.jpg"),
         captured_at: Some(10.0),
@@ -57,6 +58,7 @@ fn clipboard() -> Result<EditClipboard, String> {
         ..ColorAdjustments::default()
     };
     Ok(EditClipboard {
+        source_key: None,
         source_name: "edited.jpg".into(),
         dimensions: dimensions(),
         transform,
@@ -82,7 +84,7 @@ fn core(mut state: SavedLibrary) -> Core<Suwop> {
 }
 fn state() -> Result<SavedLibrary, String> {
     Ok(SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "apple".into(),
         edit_clipboard: Some(clipboard()?),
         snapshots: vec![LibrarySnapshot {
@@ -118,12 +120,13 @@ struct Native {
     writes: Vec<AssetKey>,
     fault: Fault,
     confirmed: bool,
+    observe_changes: bool,
 }
 impl Native {
-    fn refreshed_core(&self, old: &Core<Suwop>) -> Core<Suwop> {
-        let mut saved = old.view().state;
+    fn refreshed_core(&self, _old: &Core<Suwop>) -> Result<Core<Suwop>, String> {
+        let mut saved = self.persisted.last().cloned().ok_or("no durable journal")?;
         saved.snapshots[0].assets = self.current.values().cloned().collect();
-        core(saved)
+        Ok(core(saved))
     }
     fn new(fault: Fault) -> Self {
         Self {
@@ -143,6 +146,14 @@ impl Native {
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
         match operation {
+            ShellOperation::AppleScan { scope, .. } => serde_json::to_value(LibrarySnapshot {
+                provider: Provider::Apple,
+                scope,
+                assets: self.current.values().cloned().collect(),
+                access: ScanAccess::Full,
+                scanned_at: Some(1.0),
+            })
+            .map_err(|e| e.to_string()),
             ShellOperation::Workspace { .. } => Ok(json!("/tmp/paste-workspace")),
             ShellOperation::Cleanup { .. } => {
                 self.operations.push("cleanup");
@@ -160,6 +171,7 @@ impl Native {
             ShellOperation::ConfirmPasteEdits { prompt } => {
                 self.operations.push("confirm");
                 assert_eq!(prompt.names.len(), 3);
+                assert_eq!(prompt.source_name, "非公開の写真");
                 self.confirmed = true;
                 Ok(json!(!matches!(self.fault, Fault::Cancel)))
             }
@@ -280,6 +292,7 @@ impl Native {
             steps += 1;
             assert!(steps < 120);
             let Effect::Io(mut request) = requests.remove(0);
+            let native_write = matches!(request.operation, ShellOperation::AppleEditSave { .. });
             let response = match self.handle(request.operation.clone()) {
                 Ok(value) => ShellResponse {
                     value: Some(value),
@@ -290,6 +303,9 @@ impl Native {
                     error: Some(error),
                 },
             };
+            if native_write && self.observe_changes {
+                assert!(core.process_event(Event::AppleChanged).is_empty());
+            }
             requests.extend(
                 core.resolve(&mut request, response)
                     .map_err(|e| e.to_string())?,
@@ -378,7 +394,13 @@ fn failed_journal_or_readback_keeps_fence_and_stops_remaining_targets() -> Resul
             native.writes.len(),
             usize::from(!matches!(fault, Fault::Journal))
         );
-        let restarted = core::clone_core(&core);
+        let restarted = if matches!(fault, Fault::Journal) {
+            let initial = self::core(state()?);
+            assert!(initial.view().state.pending_edit_pastes.is_empty());
+            initial
+        } else {
+            core::clone_core(&native)?
+        };
         let count = native.writes.len();
         native.paste(&restarted)?;
         assert_eq!(native.writes.len(), count);
@@ -389,9 +411,13 @@ fn failed_journal_or_readback_keeps_fence_and_stops_remaining_targets() -> Resul
 
 mod core {
     pub(super) fn clone_core(
-        old: &crux_core::Core<suwop_core::app::Suwop>,
-    ) -> crux_core::Core<suwop_core::app::Suwop> {
-        super::core(old.view().state)
+        native: &super::Native,
+    ) -> Result<crux_core::Core<suwop_core::app::Suwop>, String> {
+        let canonical = match native.persisted.last() {
+            Some(saved) => saved.clone(),
+            None => super::state()?,
+        };
+        Ok(super::core(canonical))
     }
 }
 
@@ -417,7 +443,7 @@ fn partial_success_survives_restart_and_read_only_reconciliation_never_resends()
             .iter()
             .all(|f| f.path.is_empty())
     );
-    let restarted = native.refreshed_core(&core);
+    let restarted = native.refreshed_core(&core)?;
     native.fault = Fault::None;
     native.run(
         &restarted,
@@ -438,25 +464,33 @@ fn partial_success_survives_restart_and_read_only_reconciliation_never_resends()
 }
 
 #[test]
-fn untouched_pending_write_can_be_resolved_without_writing() -> Result<(), String> {
+fn failed_pre_submit_save_can_be_resolved_in_memory_after_a_fresh_scan() -> Result<(), String> {
     let core = core(state()?);
     let mut native = Native::new(Fault::Journal);
     native.paste(&core)?;
-    let restarted = core::clone_core(&core);
+    assert!(
+        native.persisted.is_empty(),
+        "A failed pre-submit save is not a durable journal"
+    );
+    assert_eq!(core.view().state.pending_edit_pastes.len(), 1);
     native.fault = Fault::None;
     native.run(
-        &restarted,
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 1.0,
+        },
+    )?;
+    assert_eq!(core.view().state.snapshots[0].access, ScanAccess::Full);
+    native.run(
+        &core,
         Event::ResolveEditPaste {
             key: key(0),
             id: ID.into(),
         },
     )?;
-    assert!(
-        restarted.view().error.is_none(),
-        "{:?}",
-        restarted.view().error
-    );
-    assert!(restarted.view().state.pending_edit_pastes.is_empty());
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert!(core.view().state.pending_edit_pastes.is_empty());
     assert!(native.writes.is_empty());
     assert!(!native.operations.contains(&"inspect"));
     Ok(())
@@ -515,7 +549,7 @@ fn reconciliation_rejects_changed_originals_and_other_edit_without_resending() -
     let mut native = Native::new(Fault::SecondSaveLost);
     native.paste(&core)?;
     for changed_original in [true, false] {
-        let restarted = native.refreshed_core(&core);
+        let restarted = native.refreshed_core(&core)?;
         if changed_original {
             native.fault = Fault::OriginalChanged;
         } else {
@@ -585,5 +619,54 @@ fn selection_never_ignores_remote_only_photos_and_noop_batch_never_confirms() ->
     assert!(native.writes.is_empty());
     assert!(!native.operations.contains(&"confirm"));
     assert!(core.view().state.pending_edit_pastes.is_empty());
+    Ok(())
+}
+
+#[test]
+fn native_change_observations_do_not_stop_the_remaining_visible_paste_targets() -> Result<(), String>
+{
+    let core = core(state()?);
+    let mut native = Native::new(Fault::None);
+    native.observe_changes = true;
+    native.paste(&core)?;
+    assert_eq!(native.writes, vec![key(0), key(1), key(2)]);
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert!(core.view().state.pending_edit_pastes.is_empty());
+    Ok(())
+}
+
+#[test]
+fn hidden_or_legacy_clipboard_keeps_the_recipe_but_redacts_confirmation_source_name()
+-> Result<(), String> {
+    for source_key in [
+        None,
+        Some(AssetKey {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            asset_id: "hidden-source".into(),
+        }),
+    ] {
+        let mut saved = state()?;
+        let mut copied = clipboard()?;
+        copied.source_name = "PRIVATE-clipboard.jpg".into();
+        copied.source_key = source_key;
+        saved.edit_clipboard = Some(copied);
+        let core = core(saved);
+        let mut native = Native::new(Fault::Cancel);
+        native.paste(&core)?;
+        assert!(
+            native.confirmed,
+            "Recipe must still reach the visible targets' confirmation"
+        );
+        assert!(native.writes.is_empty());
+        assert_eq!(
+            core.view()
+                .state
+                .edit_clipboard
+                .ok_or("recipe lost")?
+                .source_name,
+            "非公開の写真"
+        );
+    }
     Ok(())
 }

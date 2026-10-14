@@ -13,6 +13,7 @@ use suwop_core::{
 const SHA1: &str = "1111111111111111111111111111111111111111";
 fn asset() -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -58,7 +59,7 @@ fn core() -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -435,7 +436,7 @@ fn remote_only_sharing_downloads_the_original_without_any_remote_mutation() -> R
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(remote, ScanAccess::Full)],
                 ..SavedLibrary::default()
@@ -469,5 +470,31 @@ fn remote_only_sharing_downloads_the_original_without_any_remote_mutation() -> R
     assert!(core.view().error.is_none());
     assert!(native.shared);
     assert!(native.cleaned);
+    Ok(())
+}
+
+#[test]
+fn apple_change_during_delayed_file_preparation_prevents_sharing_and_cleans_workspace()
+-> Result<(), String> {
+    let core = core();
+    let mut native = Native::default();
+    let mut changed = false;
+    let mut requests = core.process_event(event());
+    while !requests.is_empty() {
+        let Effect::Io(mut request) = requests.remove(0);
+        if !changed && matches!(request.operation, ShellOperation::HashFile { .. }) {
+            assert!(core.process_event(Event::AppleChanged).is_empty());
+            changed = true;
+        }
+        let result = native.handle(&request.operation);
+        requests.extend(
+            core.resolve(&mut request, response(result))
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    assert!(changed);
+    assert!(!native.shared);
+    assert!(native.cleaned);
+    assert!(core.view().error.is_some());
     Ok(())
 }

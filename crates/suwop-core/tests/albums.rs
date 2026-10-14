@@ -45,37 +45,41 @@ fn snapshot() -> AlbumSnapshot {
         access: ScanAccess::Full,
     }
 }
+fn fixture_state() -> SavedLibrary {
+    SavedLibrary {
+        schema_version: 3,
+        apple_scope: "apple".into(),
+        albums: vec![snapshot()],
+        snapshots: vec![LibrarySnapshot {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            access: ScanAccess::Full,
+            scanned_at: None,
+            assets: vec![StoredAsset {
+                apple_visibility: suwop_core::domain::AppleVisibility::Visible,
+                key: photo_key(),
+                name: "photo.jpg".into(),
+                captured_at: None,
+                modified_at: None,
+                revision: "revision".into(),
+                resources: vec![],
+                is_favorite: false,
+                latitude: None,
+                longitude: None,
+                inventory_complete: false,
+                is_offline: false,
+                deletion_blockers: vec![],
+            }],
+        }],
+        ..SavedLibrary::default()
+    }
+}
 fn core() -> Core<Suwop> {
     Core::new_with(
         Suwop,
         Model {
             ready: true,
-            state: SavedLibrary {
-                schema_version: 2,
-                apple_scope: "apple".into(),
-                albums: vec![snapshot()],
-                snapshots: vec![LibrarySnapshot {
-                    provider: Provider::Apple,
-                    scope: "apple".into(),
-                    access: ScanAccess::Full,
-                    scanned_at: None,
-                    assets: vec![StoredAsset {
-                        key: photo_key(),
-                        name: "photo.jpg".into(),
-                        captured_at: None,
-                        modified_at: None,
-                        revision: "revision".into(),
-                        resources: vec![],
-                        is_favorite: false,
-                        latitude: None,
-                        longitude: None,
-                        inventory_complete: false,
-                        is_offline: false,
-                        deletion_blockers: vec![],
-                    }],
-                }],
-                ..SavedLibrary::default()
-            },
+            state: fixture_state(),
             ..Model::default()
         },
     )
@@ -296,7 +300,7 @@ fn apple_albums_remain_available_when_immich_reconnect_fails() -> Result<(), Str
         edit(AlbumAction::Rename, vec![], Some("local")),
     ] {
         let refreshing = matches!(event, Event::RefreshAlbums);
-        let mut state = core().view().state;
+        let mut state = fixture_state();
         state.connection = Some(ConnectionSettings {
             address: "https://offline/api".into(),
             allow_http: false,
@@ -433,7 +437,7 @@ impl RemoteAlbum {
 }
 
 fn fenced_remote_album(members: Vec<String>) -> Result<(Core<Suwop>, Native), String> {
-    let mut state = core().view().state;
+    let mut state = fixture_state();
     let mut original = state.snapshots[0].assets[0].clone();
     original.resources = vec![PhotoResource {
         id: "original".into(),

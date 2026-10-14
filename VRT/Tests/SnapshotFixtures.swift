@@ -60,7 +60,7 @@ import XCTest
             appleScope: "vrt",
             editClipboard: editClipboard,
             pendingEditPastes: pendingEditPastes,
-            schemaVersion: 2,
+            schemaVersion: 3,
             snapshots: [LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full)]
         )
         let bridge = try CoreBridge()
@@ -115,6 +115,7 @@ import XCTest
             name: "夏の思い出.JPG"
         )
         let photo = StoredAsset(
+            appleVisibility: .visible,
             key: key,
             name: identity.name,
             capturedAt: Date(timeIntervalSince1970: 1_751_328_000),
@@ -129,7 +130,7 @@ import XCTest
         let state = SavedLibrary(
             appleScope: "vrt",
             pendingTrash: pending ? [operation] : [],
-            schemaVersion: 2,
+            schemaVersion: 3,
             trash: TrashSnapshot(items: [TrashItem(asset: photo, identity: identity)], scope: "remote", verified: true)
         )
         let bridge = try CoreBridge()
@@ -151,7 +152,7 @@ import XCTest
             scope: "vrt",
             visibility: .absent
         )
-        let state = SavedLibrary(appleScope: "vrt", pendingAppleTrash: [operation], schemaVersion: 2)
+        let state = SavedLibrary(appleScope: "vrt", pendingAppleTrash: [operation], schemaVersion: 3)
         let bridge = try CoreBridge()
         let read = try XCTUnwrap(bridge
             .call(0, input: .object(["type": .string("initialize"), "scope": .string("vrt")]))
@@ -165,6 +166,7 @@ import XCTest
         let roles: [ResourceRole] = [.image, .video, .rawImage, .image, .image, .image]
         return roles.enumerated().map { index, role in
             StoredAsset(
+                appleVisibility: .visible,
                 key: AssetKey(provider: .apple, scope: "vrt", assetID: "photo-\(index)"),
                 name: index == 1 ? "海辺の動画.MOV" : "夏の写真-\(index).JPG",
                 capturedAt: Date(timeIntervalSince1970: 1_751_328_000 + Double(index) * 86400),
@@ -185,7 +187,7 @@ import XCTest
         }
     }
 
-    private static func image(index: Int) -> UIImage {
+    static func image(index: Int) -> UIImage {
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
         format.opaque = true

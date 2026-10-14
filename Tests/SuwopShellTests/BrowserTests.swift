@@ -6,6 +6,7 @@ import Testing
     let bridge = try CoreBridge()
     let key = AssetKey(provider: .apple, scope: "fixture", assetID: "photo")
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: key,
         name: "SUMMER.JPG",
         revision: "1",
@@ -14,7 +15,7 @@ import Testing
     )
     let state = SavedLibrary(
         appleScope: "fixture",
-        schemaVersion: 2,
+        schemaVersion: 3,
         snapshots: [LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)]
     )
     let effects = try bridge.call(0, input: .object(["type": .string("initialize"), "scope": .string("fixture")]))
@@ -29,6 +30,19 @@ import Testing
         1,
         input: .object(["id": .number(Double(persist.id)), "response": .object(["value": .null, "error": .null])])
     )
+    #expect(try bridge.call(2).decode(ViewModel.self).photos.isEmpty)
+    let scan = try #require(bridge.call(0, input: .object([
+        "type": .string("refresh"), "permission": .bool(false), "now": .number(1),
+    ])).decode([EffectRequest].self).first)
+    let scanned = try #require(bridge.call(1, input: .object([
+        "id": .number(Double(scan.id)), "response": .object([
+            "value": .from(LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)),
+            "error": .null,
+        ]),
+    ])).decode([EffectRequest].self).first)
+    _ = try bridge.call(1, input: .object([
+        "id": .number(Double(scanned.id)), "response": .object(["value": .null, "error": .null]),
+    ]))
     let options = BrowserOptions(filter: .favorites, query: "summer", sort: .newest)
     _ = try bridge.call(0, input: .object(["type": .string("browse"), "options": .from(options)]))
     let view = try bridge.call(2).decode(ViewModel.self)

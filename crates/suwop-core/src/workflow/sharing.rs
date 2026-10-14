@@ -10,7 +10,12 @@ impl Runtime<'_> {
         keys: &[crate::domain::AssetKey],
         id: &str,
     ) -> Result<String, String> {
-        let keys = sources(&self.state.snapshots, &self.state.receipts, keys)?;
+        self.check_content_keys(keys)?;
+        let keys = sources(
+            &self.state.presentation_snapshots(),
+            &self.state.receipts,
+            keys,
+        )?;
         if keys.iter().any(|k| k.provider == Provider::Immich) {
             self.ensure_session().await?;
         }
@@ -57,6 +62,7 @@ impl Runtime<'_> {
         self.progress("共有先を選択してください。");
         // This effect resolves only when the native service finishes or cancels.
         // run() retains the workspace until that response, including cancellation.
+        self.check_content_generation(&keys)?;
         let completed: bool = io(self.ctx, ShellOperation::ShareFiles { files }).await?;
         Ok(if completed {
             "原本ファイルを共有しました。"

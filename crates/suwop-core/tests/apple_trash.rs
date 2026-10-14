@@ -14,6 +14,7 @@ use suwop_core::{
 const OP: &str = "33333333-3333-4333-8333-333333333333";
 fn photo(id: &str) -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -53,7 +54,7 @@ fn state() -> SavedLibrary {
     counterpart.key.provider = Provider::Immich;
     counterpart.key.scope = "remote".into();
     SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "apple".into(),
         snapshots: vec![
             LibrarySnapshot {
@@ -256,16 +257,18 @@ fn normal_delete_is_independent_of_move_preserves_counterpart_and_other_records(
     assert_eq!(native.writes, 1);
     assert_eq!(native.persists, 3);
     assert!(view.state.pending_apple_trash.is_empty());
+    let canonical = native.saved.as_ref().ok_or("no canonical journal")?;
+    assert!(view.state.snapshots[0].assets.is_empty());
     assert_eq!(
-        serde_json::to_value(&view.state.receipts).map_err(|e| e.to_string())?,
+        serde_json::to_value(&canonical.receipts).map_err(|e| e.to_string())?,
         original["receipts"]
     );
     assert_eq!(
-        serde_json::to_value(&view.state.snapshots[1]).map_err(|e| e.to_string())?,
+        serde_json::to_value(&canonical.snapshots[1]).map_err(|e| e.to_string())?,
         original["snapshots"][1]
     );
     assert_eq!(
-        serde_json::to_value(&view.state.snapshots[0].assets).map_err(|e| e.to_string())?,
+        serde_json::to_value(&canonical.snapshots[0].assets).map_err(|e| e.to_string())?,
         json!([untouched])
     );
     Ok(())
@@ -292,7 +295,11 @@ fn preflight_failures_and_native_rejection_do_not_leave_unknown_record() -> Resu
             native.writes,
             usize::from(matches!(fault, Fault::NativeRejected))
         );
-        assert_eq!(core.view().state.snapshots[0].assets.len(), 2);
+        let canonical = native.saved.clone().unwrap_or_else(state);
+        assert_eq!(canonical.snapshots[0].assets.len(), 2);
+        if canonical.snapshots[0].access == ScanAccess::Unavailable {
+            assert!(core.view().state.snapshots[0].assets.is_empty());
+        }
     }
     Ok(())
 }
@@ -363,7 +370,13 @@ fn durably_applied_outcome_finalizes_after_restart_without_native_replay() -> Re
     assert!(restarted.view().state.pending_apple_trash.is_empty());
     assert_eq!(native.writes, 1);
     assert_eq!(
-        restarted.view().state.snapshots[0].assets[0].key,
+        native
+            .saved
+            .as_ref()
+            .ok_or("no canonical journal")?
+            .snapshots[0]
+            .assets[0]
+            .key,
         photo("two").key
     );
     Ok(())

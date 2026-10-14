@@ -67,6 +67,16 @@ struct PhotoMetadataEditor: View {
                 }
             }
             .navigationTitle("日時・位置情報")
+            .onChange(of: model.thumbnailGeneration) {
+                let visible = Set(model.photos.flatMap { $0.assets.map(\.key) })
+                if target.keys.contains(where: { $0.provider == .apple && !visible.contains($0) }) {
+                    date = Date(timeIntervalSince1970: 0)
+                    latitude = ""
+                    longitude = ""
+                    confirmingRemoval = false
+                    dismiss()
+                }
+            }
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) { Button("キャンセル") { dismiss() }.disabled(submitting) }
                 ToolbarItem(placement: .confirmationAction) {

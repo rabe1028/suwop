@@ -10,7 +10,7 @@ Rust テストでは同一性、RAW/JPEG の部分一致と多重度、未照合
 
 `make integration` は隔離した実 Immich v3.2.4 に Rust の Crux effect を接続し、アップロード、調整済み日時・タイムゾーン・GPS、お気に入り・アルバム、一覧、バイト一致のダウンロード、編集後のプレビュー、現在の原本・編集系列の取得と再検証、スタックの全メンバー、sidecar による削除制限、ゴミ箱操作を確認します。PNGの画素・色空間・透過・日時と位置の実書き出しはmacOSのNativeテストで確認します。通常のRustテストでは実Immichの1件を明示的にignoreし、CIの専用ジョブで実行します。
 
-`make apple-native-test` は、専用Simulatorに生成したJPEGで、製品のcore・Appleアダプターを通じた実保存、7回の起動、結果不明の読取りによる確認、キャンセル、原本への復元を検証します。全段階の原本署名・日時・位置・お気に入りと、保存／復元後の現在の寸法・色を確認します。VRTとは別の証拠で、実機／iCloud／RAWなどの受入れは残ります。[手順と範囲](native-photokit.md)を参照してください。
+`make apple-native-test` は、専用Simulatorに生成したJPEGで、15段階の再起動、製品core・Appleアダプターを通じた実保存、結果不明の読取りによる確認、キャンセル、原本への復元、通常削除、外部の非表示変更後の取得拒否を検証します。残るcontrolの原本署名・日時・位置・お気に入りと、保存／復元後の現在の寸法・色を確認します。非表示assetを取得できない場合はPhotos案内の境界を記録し、再表示成功やそのhidden原本の再検証とは扱いません。VRTとは別の証拠で、実機／iCloud／RAWなどの受入れは残ります。[手順と範囲](native-photokit.md)を参照してください。
 
 `make apple-build` は iPhone / Simulator / Mac の Rust 静的ライブラリを XCFramework にまとめ、iOS Simulator と macOS のアプリをビルドします。これは PhotoKit 実機動作の確認とは別です。
 
@@ -63,3 +63,12 @@ Applied / NotApplied / Unknown のすべてで読取り更新し、明確な拒�
 新しい最終HEADの hosted CI と review の解消は別に確認する。PhotoKit adapter / native mutation の経路は今回変更しておらず、local Native12の証拠を今回再実行したものとして扱わない。
 
 review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests と全品質gateを通過。`make apple-build` は Rust 全5 target・XCFramework・iOS Simulator / universal macOS 両 app build を通過した。確認は source 固定・直列で実行した。
+
+## PP-02A-1 可視性基盤の local evidence（2026-10-14）
+
+- 最終 `make check` は Rust/FFI 215 / Swift 51 tests と全 lint・format・architecture・generated DTO・tool/hook checks を通過。`apple-build2` は Rust 全5 Apple target、XCFramework、iOS Simulator / universal macOS 両 app build を通過。ログは `/tmp/suwop-visibility-check-final.log` と `/tmp/suwop-visibility-apple-build2.log`。
+- strict VRT は `DerivedData/VRTArtifacts/20261014T115722Z-64797/report.json` で exit 0、`record: false` / `passed: true`。26画面・unit10・UI7 testsを通過。cacheと遅延画像、旧core errorの匿名化、表示中Info/metadataおよび実native editor/player/confirmationの取消回帰を含む。
+- 基準画像は表示レビュー後に意図的に更新した `apple-trash-pending.png` と `apple-trash-pending-large-text.png` の2枚のみ。非公開のApple原本名を伏せるprojectionに合わせた変更で、他24枚と比較条件は保持した。
+- Native は `DerivedData/PhotoKitArtifacts/20261014T120645Z-66766/report.json` で exit 0 / `passed: true`、既存12＋可視性3の全15 phaseが一度ずつ通過。外部PhotoKit hideのcallbackは `applied`、次の起動で通常scan/projection・thumbnail/export/currentImageとcore共有の拒否を確認。restore結果は `photos-handoff-required`。
+- Native reportの `native_unhide_verified=false` / `hidden_original_reverified=false` / `product_hide_ui_verified=false` を維持する。このrunは直接再表示、hidden原本の再検証、製品hide UIの成功を証明しない。Photosでの実再表示・PhotosPicker後の原assetへのアクセスも別の受入れ。
+- 最終HEADのhosted CIは未実施。実機／iCloudは未確認であり、Simulatorの証拠で代替しない。設計と共有の残制約は [Apple可視性基盤](apple-visibility.md) を参照。

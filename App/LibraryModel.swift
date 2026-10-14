@@ -30,10 +30,16 @@ import SwiftUI
 
     #if SUWOP_VRT
         // Only the dedicated snapshot host compiles this initializer. No native I/O is started.
+        private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
         private var snapshotImages: [AssetKey: PlatformImage] = [:]
-        init(runtime: RustRuntime, executeEffect: @escaping @MainActor (ShellOperation) async throws -> JSONValue) {
+        init(
+            runtime: RustRuntime,
+            thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
+            executeEffect: @escaping @MainActor (ShellOperation) async throws -> JSONValue
+        ) {
             self.runtime = runtime
             self.executeEffect = executeEffect
+            self.thumbnailEffect = thumbnailEffect
             started = true
         }
 
@@ -53,8 +59,8 @@ import SwiftUI
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
         observer = PhotoObserver { [weak self] in
-            self?.thumbnailGeneration = UUID()
-            self?.thumbnails.removeAllObjects()
+            self?.shell?.invalidateContentPresentations()
+            self?.invalidateThumbnails()
             self?.notifyPhotoChange()
         }
         if let observer {
@@ -140,17 +146,6 @@ import SwiftUI
                 "id": .string(UUID().uuidString),
             ])
         } catch { errorMessage = error.localizedDescription }
-    }
-
-    func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
-        #if SUWOP_VRT
-            if let key = view?.previewSources[photo.id], let image = snapshotImages[key] {
-                return image
-            }
-        #endif
-        guard let shell else { throw SuwopError("入出力が利用できません。") }
-        guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
-        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: true)
     }
 
     func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
@@ -310,24 +305,6 @@ import SwiftUI
         view?.moveBlockers[receipt.id] ?? ["記録を確認できません"]
     }
 
-    func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
-        guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
-        #if SUWOP_VRT
-            if let image = snapshotImages[key] {
-                return image
-            }
-        #endif
-        let cacheKey = previewIdentifier(photo) as NSString
-        if let image = thumbnails.object(forKey: cacheKey) {
-            return image
-        }
-        guard let shell else { throw SuwopError("入出力が利用できません。") }
-        let image = try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion)
-        try Task.checkCancellation()
-        thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
-        return image
-    }
-
     func send(
         _ event: [String: JSONValue],
         preservingError: Bool = false,
@@ -343,13 +320,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 2 {
+                if pendingRefresh, view?.state.schemaVersion == 3 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 2 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 3 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 2 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 3 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -388,6 +365,15 @@ import SwiftUI
     private func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
         publishedRevision = snapshot.revision
+        let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
+        let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
+        let removed = !previousKeys.isSubset(of: currentKeys)
+        if removed {
+            shell?.invalidateContentPresentations()
+        }
+        if removed || view?.previewSources != snapshot.view.previewSources {
+            invalidateThumbnails()
+        }
         view = snapshot.view
         if let failure = view?.error {
             errorMessage = failure
@@ -396,6 +382,31 @@ import SwiftUI
 }
 
 private extension LibraryModel {
+    func invalidateThumbnails() {
+        thumbnailGeneration = UUID()
+        thumbnails.removeAllObjects()
+        if errorMessage != nil {
+            errorMessage = "写真へのアクセスが変わりました。処理結果を確認してください。"
+        }
+    }
+
+    func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
+        #if SUWOP_VRT
+            if let thumbnailEffect {
+                return try await thumbnailEffect(key, preview)
+            }
+        #endif
+        guard let shell else { throw SuwopError("入出力が利用できません。") }
+        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: preview)
+    }
+
+    func validatePreview(_ id: String, key: AssetKey, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard generation == thumbnailGeneration, view?.previewSources[id] == key else {
+            throw SuwopError("写真の可視性が変わりました。一覧を更新してください。")
+        }
+    }
+
     private func notifyPhotoChange() {
         pendingRefresh = true
         pendingAlbumsRefresh = albumsRequested
@@ -486,5 +497,39 @@ private final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Senda
 
     func photoLibraryDidChange(_ changeInstance: PHChange) {
         Task { @MainActor in changed() }
+    }
+}
+
+extension LibraryModel {
+    func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        #if SUWOP_VRT
+            if let key = view?.previewSources[photo.id], let image = snapshotImages[key] {
+                return image
+            }
+        #endif
+        guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
+        let generation = thumbnailGeneration
+        let image = try await loadThumbnail(key, preview: true)
+        try validatePreview(photo.id, key: key, generation: generation)
+        return image
+    }
+
+    func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+        guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
+        #if SUWOP_VRT
+            if let image = snapshotImages[key] {
+                return image
+            }
+        #endif
+        let generation = thumbnailGeneration
+        try validatePreview(photo.id, key: key, generation: generation)
+        let cacheKey = previewIdentifier(photo) as NSString
+        if let image = thumbnails.object(forKey: cacheKey) {
+            return image
+        }
+        let image = try await loadThumbnail(key, preview: false)
+        try validatePreview(photo.id, key: key, generation: generation)
+        thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
+        return image
     }
 }

@@ -3,7 +3,14 @@ import Testing
 
 private func viewerPhoto(_ keys: [AssetKey]) -> UnifiedPhoto {
     UnifiedPhoto(assets: keys.map {
-        StoredAsset(key: $0, name: "same-name.jpg", revision: "1", resources: [], isFavorite: false)
+        StoredAsset(
+            appleVisibility: .visible,
+            key: $0,
+            name: "same-name.jpg",
+            revision: "1",
+            resources: [],
+            isFavorite: false
+        )
     }, presence: .both)
 }
 

@@ -36,6 +36,7 @@ fn changed_draft(
 
 fn asset() -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -76,35 +77,38 @@ fn bundle(asset: StoredAsset, directory: &str) -> TransferBundle {
         assets: vec![asset],
     }
 }
-fn core(access: ScanAccess, scope: &str) -> Core<Suwop> {
+fn fixture_state(access: ScanAccess, scope: &str) -> SavedLibrary {
     let mut remote = asset();
     remote.key.provider = Provider::Immich;
     remote.key.scope = "remote".into();
+    SavedLibrary {
+        schema_version: 3,
+        apple_scope: scope.into(),
+        snapshots: vec![
+            LibrarySnapshot {
+                provider: Provider::Apple,
+                scope: "apple".into(),
+                assets: vec![asset()],
+                access,
+                scanned_at: None,
+            },
+            LibrarySnapshot {
+                provider: Provider::Immich,
+                scope: "remote".into(),
+                assets: vec![remote],
+                access: ScanAccess::Full,
+                scanned_at: None,
+            },
+        ],
+        ..SavedLibrary::default()
+    }
+}
+fn core(access: ScanAccess, scope: &str) -> Core<Suwop> {
     Core::new_with(
         Suwop,
         Model {
             ready: true,
-            state: SavedLibrary {
-                schema_version: 2,
-                apple_scope: scope.into(),
-                snapshots: vec![
-                    LibrarySnapshot {
-                        provider: Provider::Apple,
-                        scope: "apple".into(),
-                        assets: vec![asset()],
-                        access,
-                        scanned_at: None,
-                    },
-                    LibrarySnapshot {
-                        provider: Provider::Immich,
-                        scope: "remote".into(),
-                        assets: vec![remote],
-                        access: ScanAccess::Full,
-                        scanned_at: None,
-                    },
-                ],
-                ..SavedLibrary::default()
-            },
+            state: fixture_state(access, scope),
             ..Model::default()
         },
     )
@@ -180,7 +184,8 @@ impl Native {
                 })
                 .map_err(|e| e.to_string())
             }
-            ShellOperation::EditImage { presentation } => {
+            ShellOperation::EditImage { key, presentation } => {
+                assert_eq!(key, asset().key);
                 self.operations.push("editor");
                 if matches!(self.fault, Fault::Cancel) {
                     return Ok(Value::Null);
@@ -319,7 +324,7 @@ fn verified_edit_keeps_unified_originals_metadata_and_fresh_revision() -> Result
 #[test]
 fn successful_edit_switches_the_preview_from_an_independent_copy_to_the_saved_one()
 -> Result<(), String> {
-    let mut state = core(ScanAccess::Full, "apple").view().state;
+    let mut state = fixture_state(ScanAccess::Full, "apple");
     let mut other = asset();
     other.key.asset_id = "other-copy".into();
     state.snapshots[0].assets.push(other.clone());

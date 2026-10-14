@@ -16,6 +16,7 @@ fn asset(kind: PlaybackKind) -> StoredAsset {
         PlaybackKind::Live => vec![ResourceRole::Image, ResourceRole::LiveVideo],
     };
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -101,7 +102,7 @@ fn core(kind: PlaybackKind) -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(kind), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -231,7 +232,7 @@ fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: snapshots.clone(),
                 ..SavedLibrary::default()
@@ -421,7 +422,7 @@ fn remote_playback_reads_the_authenticated_original_and_never_mutates_the_server
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(video, ScanAccess::Full)],
                 ..SavedLibrary::default()
@@ -490,5 +491,39 @@ fn remote_playback_reads_the_authenticated_original_and_never_mutates_the_server
     assert!(core.view().error.is_none());
     assert_eq!(core.view().photos.len(), 1);
     assert!(core.view().state.receipts.is_empty());
+    Ok(())
+}
+
+#[test]
+fn apple_change_during_delayed_playback_preparation_never_opens_player() -> Result<(), String> {
+    for kind in [PlaybackKind::Video, PlaybackKind::Live] {
+        let core = core(kind);
+        let mut requests = core.process_event(event(kind));
+        let mut changed = false;
+        let mut cleaned = false;
+        while !requests.is_empty() {
+            let Effect::Io(mut request) = requests.remove(0);
+            assert!(!matches!(
+                request.operation,
+                ShellOperation::PlayMedia { .. }
+            ));
+            let value = if matches!(request.operation, ShellOperation::Cleanup { .. }) {
+                cleaned = true;
+                Value::Null
+            } else {
+                if !changed && matches!(request.operation, ShellOperation::HashFile { .. }) {
+                    assert!(core.process_event(Event::AppleChanged).is_empty());
+                    changed = true;
+                }
+                prepare(&request.operation, kind)?
+            };
+            requests.extend(
+                core.resolve(&mut request, response(value))
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        assert!(changed && cleaned);
+        assert!(core.view().error.is_some());
+    }
     Ok(())
 }

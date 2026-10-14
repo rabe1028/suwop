@@ -65,6 +65,7 @@ impl Runtime<'_> {
             return Err("現在の共有画像のコピーが一致しません。".into());
         }
         self.progress("現在の静止画の共有先を選択してください。");
+        self.check_content_generation(std::slice::from_ref(key))?;
         let completed: bool = io(
             self.ctx,
             ShellOperation::ShareFiles {

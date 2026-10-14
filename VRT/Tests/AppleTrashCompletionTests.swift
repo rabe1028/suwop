@@ -6,6 +6,7 @@ import XCTest
     enum Outcome: Equatable { case applied, rejected, lost }
     let outcome: Outcome
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "completion", assetID: "fixture"),
         name: "fixture.JPG",
         revision: "1",
@@ -23,6 +24,8 @@ import XCTest
     private(set) var journal: SavedLibrary?
     private(set) var scans = 0
     private(set) var writes = 0
+    private(set) var favoriteWrites = 0
+    var visibleAgain = false
     private(set) var order: [String] = []
     private(set) var errorDuringRefresh: String?
     weak var model: LibraryModel?
@@ -40,7 +43,7 @@ import XCTest
         return try .from(LibrarySnapshot(
             provider: .apple,
             scope: "completion",
-            assets: writes == 0 || outcome == .rejected ? [asset] : [],
+            assets: writes == 0 || outcome == .rejected || visibleAgain ? [asset] : [],
             access: .full
         ))
     }
@@ -55,6 +58,14 @@ import XCTest
             applied: outcome == .applied,
             error: outcome == .rejected ? "native rejected" : nil
         ))
+    }
+
+    private func write(_ type: String) throws -> JSONValue {
+        if type == "appleFavorite" {
+            favoriteWrites += 1
+            return try .from([asset])
+        }
+        return try apply()
     }
 
     func execute(_ operation: ShellOperation) throws -> JSONValue {
@@ -88,7 +99,7 @@ import XCTest
                     signature: FileSignature(bytes: 12, sha256: String(repeating: "2", count: 64))
                 ),
             ]))
-        case "appleTrashApply": return try apply()
+        case "appleTrashApply", "appleFavorite": return try write(operation.type)
         default: throw SuwopError("Unexpected effect: \(operation.type)")
         }
     }
@@ -117,24 +128,58 @@ final class AppleTrashCompletionTests: XCTestCase {
             if outcome == .applied {
                 XCTAssertNil(model.errorMessage)
             } else {
-                XCTAssertEqual(model.errorMessage, outcome == .rejected ? "native rejected" : "lost native response")
-                XCTAssertEqual(effects.errorDuringRefresh, model.errorMessage)
+                XCTAssertEqual(
+                    effects.errorDuringRefresh,
+                    outcome == .rejected ? "native rejected" : "lost native response"
+                )
+                XCTAssertNotNil(model.errorMessage)
+                if outcome == .lost {
+                    XCTAssertEqual(model.errorMessage, "lost native response")
+                } else {
+                    XCTAssertTrue(model.errorMessage?.contains("アクセスが変わりました") == true)
+                }
                 XCTAssertTrue(model.showAppleTrash)
             }
             XCTAssertEqual(view.state.pendingAppleTrash.count, outcome == .lost ? 1 : 0)
             print("TRASH_COMPLETION_PASS \(outcome)")
             if outcome == .lost {
-                let pending = try XCTUnwrap(view.state.pendingAppleTrash.first)
-                XCTAssertEqual(pending.outcome, .unknown)
-                try model.send([
-                    "type": .string("setFavorite"), "keys": .from([effects.asset.key]), "value": .bool(false),
-                ])
-                try await waitUntil { !model.isBusy && model.errorMessage?.contains("削除結果が不明") == true }
-                XCTAssertEqual(effects.writes, 1)
-                let after = try await runtime.view()
-                XCTAssertEqual(after.state.pendingAppleTrash.count, 1)
+                try await verifyUnknownFence(effects, model: model, runtime: runtime)
             }
         }
+    }
+
+    @MainActor private func verifyUnknownFence(
+        _ effects: TrashCompletionEffects, model: LibraryModel, runtime: RustRuntime
+    ) async throws {
+        let before = try await runtime.view()
+        let pending = try XCTUnwrap(before.state.pendingAppleTrash.first)
+        XCTAssertEqual(pending.outcome, .unknown)
+        let favorite: [String: JSONValue] = try [
+            "type": .string("setFavorite"), "keys": .from([effects.asset.key]), "value": .bool(false),
+        ]
+        model.send(favorite)
+        try await waitUntil { !model.isBusy && model.errorMessage?.contains("可視性を確認") == true }
+        XCTAssertEqual(model.photos.count, 0)
+        XCTAssertEqual(effects.favoriteWrites, 0)
+
+        // A fresh visible scan permits content access, but cannot resolve a lost delete callback.
+        effects.visibleAgain = true
+        model.refresh()
+        try await waitUntil { effects.scans == 3 && !model.isBusy }
+        XCTAssertEqual(model.photos.count, 1)
+        let refreshed = try await runtime.view()
+        XCTAssertEqual(refreshed.state.pendingAppleTrash.count, 1)
+        XCTAssertEqual(refreshed.state.pendingAppleTrash.first?.id, pending.id)
+        XCTAssertEqual(refreshed.state.pendingAppleTrash.first?.outcome, .unknown)
+        model.send(favorite)
+        try await waitUntil { !model.isBusy && model.errorMessage?.contains("削除結果が不明") == true }
+        XCTAssertEqual(effects.writes, 1)
+        XCTAssertEqual(effects.favoriteWrites, 0)
+        let after = try await runtime.view()
+        XCTAssertEqual(after.state.pendingAppleTrash.count, 1)
+        XCTAssertEqual(after.state.pendingAppleTrash.first?.id, pending.id)
+        XCTAssertEqual(after.state.pendingAppleTrash.first?.outcome, .unknown)
+        print("TRASH_UNKNOWN_FENCE_PASS visible_reappearance")
     }
 
     @MainActor private func waitUntil(_ condition: @MainActor () -> Bool) async throws {

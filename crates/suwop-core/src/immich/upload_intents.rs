@@ -39,7 +39,7 @@ impl UploadIntent {
         live_id: Option<&str>,
     ) -> bool {
         self.scope == session.scope
-            && self.source == *source
+            && self.source.same_content_evidence(source)
             && self.resource == file.resource
             && self.signature == file.signature
             && self.live_id.as_deref() == live_id

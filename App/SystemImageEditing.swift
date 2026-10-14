@@ -9,11 +9,22 @@ import SwiftUI
 
 @MainActor final class SystemImageEditing {
     private var active: ImageEditWindow?
-    func present(_ input: ImageEditPresentation) async throws -> ImageEditDraft? {
+    private var sourceKey: AssetKey?
+
+    func invalidateForContentChange() {
+        guard sourceKey == nil || sourceKey?.provider == .apple else { return }
+        active?.invalidateForContentChange()
+    }
+
+    func present(_ input: ImageEditPresentation, sourceKey: AssetKey? = nil) async throws -> ImageEditDraft? {
         guard active == nil else { throw SuwopError("写真編集がすでに進行中です。") }
         let window = ImageEditWindow()
         active = window
-        defer { active = nil }
+        self.sourceKey = sourceKey
+        defer {
+            active = nil
+            self.sourceKey = nil
+        }
         return try await window.present(input)
     }
 }
@@ -22,11 +33,22 @@ import SwiftUI
     private var model: ImageEditorModel?
     private var waiting: CheckedContinuation<ImageEditDraft?, Error>?
     private var closing = false
+    private var invalidated = false
     #if os(iOS)
         private var controller: UIViewController?
     #else
         private var window: NSWindow?
     #endif
+
+    func invalidateForContentChange() {
+        invalidated = true
+        #if os(iOS)
+            controller?.view.isHidden = true
+        #else
+            window?.orderOut(nil)
+        #endif
+        close(error: CancellationError())
+    }
 
     func present(_ input: ImageEditPresentation) async throws -> ImageEditDraft? {
         try Task.checkCancellation()
@@ -105,7 +127,9 @@ import SwiftUI
             window?.contentView = nil
             window = nil
         #endif
-        if let error {
+        if invalidated {
+            pending?.resume(throwing: CancellationError())
+        } else if let error {
             pending?.resume(throwing: error)
         } else {
             pending?.resume(returning: draft)
