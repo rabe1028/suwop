@@ -79,6 +79,7 @@ impl SavedLibrary {
 pub(crate) struct ContentAccess {
     visible: BTreeSet<AssetKey>,
     hidden: BTreeSet<AssetKey>,
+    protected: BTreeSet<AssetKey>,
 }
 impl ContentAccess {
     pub(crate) fn new(state: &SavedLibrary) -> Self {
@@ -117,12 +118,24 @@ impl ContentAccess {
                     .any(|o| o.fences(k))
         });
         hidden.retain(|k| !duplicates.contains(k));
-        Self { visible, hidden }
+        Self {
+            visible,
+            hidden,
+            protected: state
+                .protected_entries
+                .iter()
+                .map(|e| e.key.clone())
+                .collect(),
+        }
     }
     pub(crate) fn visible(&self, key: &AssetKey) -> bool {
-        key.provider != Provider::Apple || self.visible.contains(key)
+        !self.protected.contains(key)
+            && (key.provider != Provider::Apple || self.visible.contains(key))
     }
 
+    pub(crate) fn protected(&self, key: &AssetKey) -> bool {
+        self.protected.contains(key)
+    }
     pub(crate) fn receipt_visible(&self, receipt: &TransferReceipt) -> bool {
         receipt
             .source
@@ -132,10 +145,50 @@ impl ContentAccess {
     }
 }
 
+fn omit_protected_records(state: &mut SavedLibrary, access: &ContentAccess) {
+    let protected = |key: &AssetKey| access.protected.contains(key);
+    state.receipts.retain(|r| {
+        !r.source
+            .iter()
+            .chain(&r.destination)
+            .any(|a| protected(&a.key))
+    });
+    state
+        .pending_uploads
+        .retain(|u| !protected(&u.source.key) && !protected(&u.key));
+    state.upload_intents.retain(|u| !protected(&u.source.key));
+    state
+        .pending_apple_trash
+        .retain(|o| !o.assets.iter().any(|a| protected(&a.key)));
+    state
+        .pending_trash
+        .retain(|o| !o.assets.iter().any(|a| protected(&a.key)));
+    state
+        .apple_visibility_operations
+        .retain(|o| !o.targets.iter().any(|t| protected(&t.key)));
+    state
+        .pending_edit_pastes
+        .retain(|p| !protected(&p.key) && !p.before.assets.iter().any(|a| protected(&a.key)));
+    if state
+        .edit_clipboard
+        .as_ref()
+        .and_then(|c| c.source_key.as_ref())
+        .is_some_and(protected)
+    {
+        state.edit_clipboard = None;
+    }
+    if let Some(trash) = &mut state.trash {
+        trash
+            .items
+            .retain(|item| !protected(&item.asset.key) && !protected(&item.identity.key));
+    }
+}
+
 impl PublishedLibrary {
     pub(crate) fn from_canonical(canonical: &SavedLibrary) -> Self {
         let access = ContentAccess::new(canonical);
         let mut state = canonical.clone();
+        omit_protected_records(&mut state, &access);
         state
             .snapshots
             .iter_mut()

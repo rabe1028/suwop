@@ -82,7 +82,7 @@ fn fixture_state(access: ScanAccess, scope: &str) -> SavedLibrary {
     remote.key.provider = Provider::Immich;
     remote.key.scope = "remote".into();
     SavedLibrary {
-        schema_version: 4,
+        schema_version: 5,
         apple_scope: scope.into(),
         snapshots: vec![
             LibrarySnapshot {

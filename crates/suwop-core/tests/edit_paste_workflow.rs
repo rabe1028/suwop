@@ -84,7 +84,7 @@ fn core(mut state: SavedLibrary) -> Core<Suwop> {
 }
 fn state() -> Result<SavedLibrary, String> {
     Ok(SavedLibrary {
-        schema_version: 4,
+        schema_version: 5,
         apple_scope: "apple".into(),
         edit_clipboard: Some(clipboard()?),
         snapshots: vec![LibrarySnapshot {

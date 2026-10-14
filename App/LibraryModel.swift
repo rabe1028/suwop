@@ -28,9 +28,9 @@ import SwiftUI
     private var pendingTrashRefresh = false
     private var albumsRequested = false
     private let thumbnails = NSCache<NSString, PlatformImage>()
+    let protection = ProtectedLibrarySession()
 
     #if SUWOP_VRT
-        // Only the dedicated snapshot host compiles this initializer. No native I/O is started.
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
         private var snapshotImages: [AssetKey: PlatformImage] = [:]
         init(
@@ -53,11 +53,18 @@ import SwiftUI
             self.runtime = runtime
             self.shell = shell
             self.thumbnailEffect = thumbnailEffect
+            protection.executeEffect = executeEffect
             self.executeEffect = { operation, context in
                 guard let context else { throw CancellationError() }
                 return try await executeEffect(operation, context)
             }
             started = true
+            protection.configure(
+                runtime: runtime,
+                shell: shell,
+                invalidateImages: { [weak self] in self?.invalidateThumbnails() },
+                publish: { [weak self] in self?.publish($0) }
+            )
         }
 
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage]) {
@@ -76,9 +83,20 @@ import SwiftUI
                 return try await nativeShell.execute(operation, context: context)
             }
         } catch { errorMessage = error.localizedDescription }
+        if let runtime, let shell {
+            protection.configure(
+                runtime: runtime,
+                shell: shell,
+                invalidateImages: { [weak self] in self?.invalidateThumbnails() },
+                publish: { [weak self] in self?.publish($0) }
+            )
+        }
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
         observer = PhotoObserver { [weak self] in
+            if self?.protection.ownerSceneID != nil {
+                self?.protection.close()
+            }
             self?.shell?.invalidateContentPresentations()
             self?.invalidateThumbnails()
             self?.notifyPhotoChange()
@@ -339,13 +357,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 4 {
+                if pendingRefresh, view?.state.schemaVersion == 5 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 4 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 5 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 4 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 5 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -375,8 +393,10 @@ import SwiftUI
             }
         }
     }
+}
 
-    private func readView() async throws {
+private extension LibraryModel {
+    func readView() async throws {
         guard let runtime else { return }
         try await publish(runtime.snapshot())
     }
@@ -394,6 +414,7 @@ import SwiftUI
             invalidateThumbnails()
         }
         view = snapshot.view
+        protection.receive(snapshot)
         if let failure = view?.error {
             errorMessage = failure
         }
@@ -429,10 +450,30 @@ private extension LibraryModel {
     private func notifyPhotoChange() {
         pendingRefresh = true
         pendingAlbumsRefresh = albumsRequested
-        guard let runtime else { return }
+        guard let runtime, let executeEffect else { return }
+        let context = shell?.beginWorkflow()
         Task {
-            do { _ = try await runtime.update(.object(["type": .string("appleChanged")]))
+            do {
+                var requests = try await runtime.update(.object(["type": .string("appleChanged")]))
                 try await readView()
+                while !requests.isEmpty {
+                    let request = requests.removeFirst()
+                    guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
+                    let value: JSONValue?
+                    let failure: String?
+                    do {
+                        value = try await executeEffect(operation, context)
+                        failure = nil
+                    } catch is CancellationError {
+                        value = nil
+                        failure = "cancelled"
+                    } catch {
+                        value = nil
+                        failure = error.localizedDescription
+                    }
+                    requests += try await runtime.resolve(id: request.id, value: value, error: failure)
+                    try await readView()
+                }
                 if work == nil {
                     pendingRefresh = false
                     refresh(preservingError: true)
@@ -521,17 +562,6 @@ extension LibraryModel {
                 "id": .string(UUID().uuidString),
             ])
         } catch { errorMessage = error.localizedDescription }
-    }
-}
-
-private final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
-    let changed: @MainActor @Sendable () -> Void
-    init(changed: @escaping @MainActor @Sendable () -> Void) {
-        self.changed = changed
-    }
-
-    func photoLibraryDidChange(_ changeInstance: PHChange) {
-        Task { @MainActor in changed() }
     }
 }
 

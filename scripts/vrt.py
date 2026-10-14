@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = json.loads((ROOT / "VRT/environment.json").read_text())
 BASELINES = ROOT / "VRT/Baselines"
 SCREENS = {
+    "protected-photos-locked",
+    "protected-photos-open",
+    "protected-photos-open-large-text",
     "apple-trash-guidance",
     "apple-trash-pending",
     "apple-trash-pending-large-text",

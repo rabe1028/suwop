@@ -65,7 +65,7 @@ fn state(visibility: AppleVisibility) -> SavedLibrary {
     remote.longitude = None;
     remote.resources[0].name = "public-copy.jpg".into();
     SavedLibrary {
-        schema_version: 4,
+        schema_version: 5,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(apple.clone()), snapshot(remote.clone())],
         receipts: vec![TransferReceipt {
@@ -366,7 +366,7 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
             .ok_or("receipt")?
             .remove("appleVisibility");
         let migrated = migrate(old)?;
-        assert_eq!(migrated.schema_version, 4);
+        assert_eq!(migrated.schema_version, 5);
         assert_eq!(
             migrated.snapshots[0].assets[0].apple_visibility,
             AppleVisibility::Unknown

@@ -34,6 +34,7 @@ targets:
         UILaunchScreen: {}
         UIApplicationSupportsIndirectInputEvents: true
         NSPhotoLibraryUsageDescription: 写真を閲覧・整理し、Apple Photos と Immich の原本を照合・コピー・移動します。
+        NSFaceIDUsageDescription: このアプリで保護した写真を表示するために認証します。
         NSPhotoLibraryAddUsageDescription: Immich の写真を Apple Photos に保存します。
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
         NSAppTransportSecurity:
@@ -82,6 +83,7 @@ targets:
       path: Generated/VRT-Info.plist
       properties:
         CFBundleDevelopmentRegion: ja
+        NSFaceIDUsageDescription: 検証用の保護された写真を表示するために認証します。
         CFBundleLocalizations: [ja]
         UILaunchScreen: {}
   SuwopVRT:
@@ -128,6 +130,7 @@ targets:
       properties:
         UILaunchScreen: {}
         NSPhotoLibraryUsageDescription: 専用 Simulator のテスト用写真で保存・復元を検証します。
+        NSFaceIDUsageDescription: 検証用の保護された写真を表示するために認証します。
         NSPhotoLibraryAddUsageDescription: 専用 Simulator に検証用の写真を作成します。
   SuwopPhotoKitTests:
     type: bundle.ui-testing

@@ -47,6 +47,7 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("apple-trash-guidance", view: AppleTrashView(model: empty))
         try await capture("apple-trash-pending", view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()))
         try await captureAppleVisibility()
+        try await captureProtectedPhotos()
         try await capture(
             "apple-trash-pending-large-text",
             view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()),
@@ -83,6 +84,24 @@ final class VisualRegressionTests: XCTestCase {
             view: EditPasteRecordsView(model: clipboard),
             largeText: true
         )
+    }
+
+    @MainActor private func captureProtectedPhotos() async throws {
+        // Each mounted screen owns its actual authorization session. Delayed
+        // SwiftUI disappearance from one capture cannot close the next grant.
+        for name in ["protected-photos-locked", "protected-photos-open", "protected-photos-open-large-text"] {
+            let fixture = try ProtectedPhotoFixture()
+            let model = try await fixture.start()
+            if name != "protected-photos-locked" {
+                try await fixture.open()
+            }
+            try await capture(
+                name,
+                view: ProtectedPhotosView(session: model.protection, sceneID: ProtectedPhotoFixture.sceneID),
+                largeText: name.hasSuffix("large-text")
+            )
+            model.protection.close()
+        }
     }
 
     @MainActor private func captureAppleVisibility() async throws {

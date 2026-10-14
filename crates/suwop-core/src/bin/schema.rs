@@ -9,6 +9,12 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    protected_scene_phase: suwop_core::protection::ProtectionScenePhase,
+    protected_auth_result: suwop_core::protection::ProtectedAuthResult,
+    protected_image_result: suwop_core::protection::ProtectedImageResult,
+    protected_image_ticket: suwop_core::protection::ProtectedImageTicket,
+    protected_challenge: suwop_core::protection::ProtectedChallenge,
+
     apple_visibility_inspection: suwop_core::apple_visibility::AppleVisibilityInspection,
     apple_visibility_apply: suwop_core::apple_visibility::AppleVisibilityApply,
     apple_visibility_prompt: suwop_core::apple_visibility::AppleVisibilityPrompt,

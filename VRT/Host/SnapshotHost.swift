@@ -4,7 +4,9 @@ import SwiftUI
 @main @MainActor struct SnapshotHost: App {
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--editor-fixture") {
+            if CommandLine.arguments.contains("--protected-fixture") {
+                InteractiveProtectedPhotosHost()
+            } else if CommandLine.arguments.contains("--editor-fixture") {
                 InteractiveEditorHost()
             } else if CommandLine.arguments.contains("--copy-fixture") {
                 InteractiveCopyHost()

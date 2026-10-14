@@ -20,6 +20,10 @@ import SuwopShell
         active?.invalidateForContentChange()
     }
 
+    func invalidateForProtection() {
+        active?.invalidateForContentChange(includingAllProviders: true)
+    }
+
     func present(_ request: SharePresentation, context: ContentPresentationContext) async throws -> Bool {
         try context.requireCurrent(sourceKeys: request.sourceKeys)
         guard active == nil else { throw SuwopError("共有がすでに進行中です。") }
@@ -52,10 +56,13 @@ import SuwopShell
         self.sourceKeys = sourceKeys
     }
 
-    func invalidateForContentChange() {
+    func invalidateForContentChange(includingAllProviders: Bool = false) {
         // Only the actual physical read sources matter; equivalent Apple copies
         // do not invalidate an Immich-only lease. Legacy identity is conservative.
-        guard sourceKeys.isEmpty || sourceKeys.contains(where: { $0.provider == .apple }) else { return }
+        guard includingAllProviders || sourceKeys.isEmpty || sourceKeys.contains(where: { $0.provider == .apple })
+        else {
+            return
+        }
         #if os(macOS)
             guard !selectedService.withLock({ $0 }) else { return }
             // close() reports nil didChoose; only that callback releases files.
