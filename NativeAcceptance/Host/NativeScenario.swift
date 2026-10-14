@@ -9,13 +9,17 @@ import UIKit
             throw SuwopError("Fixture manifest is incomplete.")
         }
         let visibility = phase.hasPrefix("visibility-") ? try await NativeVisibilityScenario.prepare(phase) : nil
-        let driver = AcceptanceDriver(keys: manifest.keys + (visibility.map { [$0.key] } ?? []))
+        let product = phase.hasPrefix("product-visibility-") ? try await ProductVisibilityScenario.prepare(phase) : nil
+        let driver = AcceptanceDriver(keys: manifest
+            .keys + (visibility.map { [$0.key] } ?? []) + (product.map { [$0.key] } ?? []))
         _ = try await driver.event("initialize", ["scope": .string(FixtureLibrary.scope)])
         _ = try await driver.event(
             "refresh",
             ["permission": .bool(false), "now": .number(Date().timeIntervalSince1970)]
         )
-        if phase.hasPrefix("visibility-") {
+        if let product {
+            try await ProductVisibilityScenario.run(phase, driver: driver, fixture: product)
+        } else if phase.hasPrefix("visibility-") {
             try await runVisibility(phase, driver: driver, fixture: visibility)
         } else {
             try await dispatch(phase, driver: driver, manifest: manifest)
@@ -63,7 +67,7 @@ import UIKit
     }
 
     private static func remainingKeys(_ phase: String, _ manifest: FixtureManifest) -> [AssetKey] {
-        if phase.hasPrefix("visibility-") {
+        if phase.hasPrefix("visibility-") || phase.hasPrefix("product-visibility-") {
             return [manifest.keys[2]]
         }
         if !phase.hasPrefix("trash") || phase.hasSuffix("cancel") {

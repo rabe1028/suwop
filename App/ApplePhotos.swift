@@ -280,7 +280,7 @@ import UniformTypeIdentifiers
         return assets
     }
 
-    private nonisolated static func role(_ resource: PHAssetResource) -> ResourceRole {
+    nonisolated static func role(_ resource: PHAssetResource) -> ResourceRole {
         switch resource.type {
         case .photo, .alternatePhoto:
             UTType(resource.uniformTypeIdentifier)?.conforms(to: .rawImage) == true ? .rawImage : .image

@@ -4,6 +4,7 @@ use crate::domain::StoredAsset;
 impl Runtime<'_> {
     pub(super) fn check_transfer_trash(&self, assets: &[StoredAsset]) -> Result<(), String> {
         self.check_transfer_apple_trash(assets)?;
+        self.check_visibility_keys(&assets.iter().map(|a| a.key.clone()).collect::<Vec<_>>())?;
         let Some(session) = &self.session else {
             return Ok(());
         };

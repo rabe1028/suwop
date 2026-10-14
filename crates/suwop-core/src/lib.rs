@@ -1,5 +1,6 @@
 pub mod albums;
 pub mod app;
+pub mod apple_visibility;
 pub mod browser;
 pub mod domain;
 pub mod editing;

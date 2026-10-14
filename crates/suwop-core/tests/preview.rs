@@ -66,7 +66,7 @@ fn session() -> Session {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 3,
+        schema_version: 4,
         apple_scope: "apple".into(),
         snapshots: vec![
             snapshot(

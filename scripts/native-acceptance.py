@@ -22,6 +22,10 @@ PHASES = {
     "visibility-hide",
     "visibility-hidden",
     "visibility-restore",
+    "product-visibility-hide",
+    "product-visibility-hidden",
+    "product-visibility-inspect",
+    "product-visibility-restore",
 }
 VISIBILITY_RESULTS = {"unhide-readback", "photos-handoff-required"}
 
@@ -55,13 +59,35 @@ def visibility_evidence(artifacts):
     return hide, restoration
 
 
+def product_visibility_evidence(artifacts):
+    log = artifacts / "native.log"
+    if not log.exists():
+        return Counter(), Counter()
+    lines = log.read_text().splitlines()
+    hide = Counter(
+        line.removeprefix("PHOTOKIT_PRODUCT_VISIBILITY_HIDE ").strip()
+        for line in lines
+        if line.startswith("PHOTOKIT_PRODUCT_VISIBILITY_HIDE ")
+    )
+    restoration = Counter(
+        line.removeprefix("PHOTOKIT_PRODUCT_VISIBILITY ").strip()
+        for line in lines
+        if line.startswith("PHOTOKIT_PRODUCT_VISIBILITY ")
+    )
+    return hide, restoration
+
+
 def complete_evidence(artifacts):
     hide, restoration = visibility_evidence(artifacts)
+    product_hide, product_restoration = product_visibility_evidence(artifacts)
     return (
         completed_phases(artifacts) == Counter(dict.fromkeys(PHASES, 1))
         and hide == Counter({"applied": 1})
         and sum(restoration.values()) == 1
         and set(restoration).issubset(VISIBILITY_RESULTS)
+        and product_hide == Counter({"applied": 1})
+        and sum(product_restoration.values()) == 1
+        and set(product_restoration).issubset(VISIBILITY_RESULTS)
     )
 
 
@@ -72,6 +98,7 @@ def report(artifacts, status, simulator):
         stages.append({"stage": stage, "seconds": int(elapsed), "exit_code": int(code)})
     phases = completed_phases(artifacts)
     hide, restoration = visibility_evidence(artifacts)
+    product_hide, product_restoration = product_visibility_evidence(artifacts)
     result = {
         "test_type": "native-photokit",
         "environment": json.loads((ROOT / "VRT/environment.json").read_text()),
@@ -87,6 +114,18 @@ def report(artifacts, status, simulator):
             "hidden_original_reverified": restoration == Counter({"unhide-readback": 1}),
             "photos_handoff_required": restoration == Counter({"photos-handoff-required": 1}),
             "product_hide_ui_verified": False,
+        },
+        "product_visibility": {
+            "hide_native_outcomes": product_hide,
+            "restoration_results": product_restoration,
+            "product_hide_workflow_verified": status == "0" and complete_evidence(artifacts),
+            "product_native_unhide_verified": product_restoration
+            == Counter({"unhide-readback": 1}),
+            "hidden_original_reverified": product_restoration == Counter({"unhide-readback": 1}),
+            "photos_handoff_required": product_restoration
+            == Counter({"photos-handoff-required": 1}),
+            "product_hide_ui_verified": False,
+            "confirmation": "host-injected app confirmation; real native changes",
         },
         "scope": "generated JPEG fixtures on the owned simulator; no device or iCloud claim",
     }

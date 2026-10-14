@@ -105,6 +105,25 @@ import SuwopShell
         )
     }
 
+    func changeAppleVisibility(
+        _ prompt: AppleVisibilityPrompt,
+        context: ContentPresentationContext
+    ) async throws -> Bool {
+        let hide = prompt.action == .hide
+        return try await confirm(
+            context: context,
+            title: hide ? "Apple Photos の写真を非表示にしますか？" : "Apple Photos の写真を再表示しますか？",
+            message: """
+            Apple Photos · \(prompt.count) 件
+            iCloud 写真が有効なら、同じアカウントの他の端末にも反映されます。
+            非表示アルバムがロックされていると、このアプリから再取得・再表示できない場合があります。
+            その場合は Apple Photos の「非表示」を開き、認証して対象を再表示してください。
+            """,
+            action: hide ? "Apple Photos で非表示" : "Apple Photos で再表示",
+            destructive: hide
+        )
+    }
+
     func changeTrash(_ prompt: TrashPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""

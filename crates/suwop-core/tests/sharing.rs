@@ -59,7 +59,7 @@ fn core() -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 3,
+                schema_version: 4,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -275,7 +275,7 @@ fn sharing_presentation_records_chosen_source_instead_of_equivalent_requested_ke
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 3,
+                schema_version: 4,
                 apple_scope: "apple".into(),
                 snapshots: vec![
                     snapshot(asset(), ScanAccess::Full),
@@ -486,7 +486,7 @@ fn remote_only_sharing_downloads_the_original_without_any_remote_mutation() -> R
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 3,
+                schema_version: 4,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(remote, ScanAccess::Full)],
                 ..SavedLibrary::default()

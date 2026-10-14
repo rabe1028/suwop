@@ -9,6 +9,10 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    apple_visibility_inspection: suwop_core::apple_visibility::AppleVisibilityInspection,
+    apple_visibility_apply: suwop_core::apple_visibility::AppleVisibilityApply,
+    apple_visibility_prompt: suwop_core::apple_visibility::AppleVisibilityPrompt,
+    apple_visibility_result: suwop_core::apple_visibility::AppleVisibilityResult,
     state: SavedLibrary,
     view: ViewModel,
     apple: AppleFacts,

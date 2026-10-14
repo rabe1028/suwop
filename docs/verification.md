@@ -10,7 +10,7 @@ Rust テストでは同一性、RAW/JPEG の部分一致と多重度、未照合
 
 `make integration` は隔離した実 Immich v3.2.4 に Rust の Crux effect を接続し、アップロード、調整済み日時・タイムゾーン・GPS、お気に入り・アルバム、一覧、バイト一致のダウンロード、編集後のプレビュー、現在の原本・編集系列の取得と再検証、スタックの全メンバー、sidecar による削除制限、ゴミ箱操作を確認します。PNGの画素・色空間・透過・日時と位置の実書き出しはmacOSのNativeテストで確認します。通常のRustテストでは実Immichの1件を明示的にignoreし、CIの専用ジョブで実行します。
 
-`make apple-native-test` は、専用Simulatorに生成したJPEGで、15段階の再起動、製品core・Appleアダプターを通じた実保存、結果不明の読取りによる確認、キャンセル、原本への復元、通常削除、外部の非表示変更後の取得拒否を検証します。残るcontrolの原本署名・日時・位置・お気に入りと、保存／復元後の現在の寸法・色を確認します。非表示assetを取得できない場合はPhotos案内の境界を記録し、再表示成功やそのhidden原本の再検証とは扱いません。VRTとは別の証拠で、実機／iCloud／RAWなどの受入れは残ります。[手順と範囲](native-photokit.md)を参照してください。
+現行 `make apple-native-test` は、専用Simulatorに生成したJPEGで、既存15＋製品可視性4の19段階の再起動、製品core・Appleアダプターを通じた実保存、結果不明の読取りによる確認、キャンセル、原本への復元、通常削除、非表示変更後の取得拒否を検証します。残るcontrolの原本署名・日時・位置・お気に入りと、保存／復元後の現在の寸法・色を確認します。非表示assetを取得できない場合はPhotos案内の境界を記録し、再表示成功やそのhidden原本の再検証とは扱いません。19段階版は下記のA-2最終runで成功し、以前のNative15とは別の証拠です。VRTとは別の証拠で、実機／iCloud／RAWなどの受入れは残ります。[手順と範囲](native-photokit.md)を参照してください。
 
 `make apple-build` は iPhone / Simulator / Mac の Rust 静的ライブラリを XCFramework にまとめ、iOS Simulator と macOS のアプリをビルドします。これは PhotoKit 実機動作の確認とは別です。
 
@@ -98,7 +98,7 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - strict `make vrt`: exit 0、`DerivedData/VRTArtifacts/20261014T130612Z-3518/report.json` は `passed: true`／`record: false`。26画面・unit15・UI7を通過。実 `LibraryModel.send` の固定文脈と、ペースト／復元両方の読取り検査中の競合、Apple／旧形式の登録拒否、Immich表示・lease保持の回帰を含む。基準画像の追加変更はない。
 - 先行VRTはテストhelperの `@escaping` 欠落によるコンパイル失敗。test-only修正後の上記成功runとは区別する。
 
-以前のNative15は `9e8f6f7` の証拠として保持し、P1修正後のローカル再実行とは扱わない。共有修正HEAD `ca13f38` の hosted CI run `38565835960` は全4 job成功確認済み。P1修正後の最終 pushed HEADの hosted CIは確認待ち。実機／iCloud／Photosでの直接再表示／実macOS共有UIは引き続き未確認。
+以前のNative15は `9e8f6f7` の証拠として保持し、P1修正後のローカル再実行とは扱わない。共有修正HEAD `ca13f38` の hosted CI run `38565835960` は全4 job成功確認済み。P1 HEAD `03331a9` のCIはcore／integration／apple成功、metadata UI待ちでVRT失敗（P2で修正後に全4 job成功）。実機／iCloud／Photosでの直接再表示／実macOS共有UIは引き続き未確認。
 
 ## PR #21 の重複指紋・移動理由の匿名化（P2、最終ローカル検証）
 
@@ -109,5 +109,37 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - P2の `make apple-build` は exit 0、全5 Rust Apple target／XCFrameworkとiOS Simulator／universal macOS両 app buildを通過。ログ `/tmp/suwop-private-evidence-apple.log`。
 - P2の strict `make vrt` は exit 0、`DerivedData/VRTArtifacts/20261014T132634Z-12640/report.json` は `passed: true`／`record: false`。26画面／unit15／UI7を通過。以前のP1の結果と今回の再実行結果は別の証拠として記録する。
 - 前HEAD `03331a9` の hosted CIはcore／Immich integration／apple成功、VRT失敗。metadata editorのdismiss直後のUI assertionで失敗した。失敗ログは `/tmp/suwop-ci03331a9-vrt/VRTArtifacts/20261014T131134Z-1961/compare.log`。テストを有限時間の終了待ちへ修正し、上記local VRTで当該UI回帰は11.8秒で通過。本番の終了処理はこのテスト修正で変更していない。
-- P2修正後の最終 pushed HEADの hosted CIは確認待ち。前HEADのVRT失敗を成功として扱わない。
+- P2最終 pushed HEAD `51dd7df` の [hosted CI run 38572443227](https://github.com/rabe1028/suwop/actions/runs/38572443227) は全4 job成功。PR #21はmain `b12db01` としてmerge済みで、[merge後CI run 38574669375](https://github.com/rabe1028/suwop/actions/runs/38574669375) は全4 job成功。前HEADのVRT失敗を成功として扱わない。
 - 基準画像の追加更新はしていない。実機／iCloud／Photosでの直接再表示／実macOS共有UIと外部service handoffは引き続き未確認。
+
+## PP-02A-2 の実装とローカル UI／build 検証（Native／CI待ち）
+
+[Apple 可視性と非表示・再表示](apple-visibility.md)の source は、製品 Gallery／写真情報からの非表示、匿名の操作記録からの明示的検査・既知 hidden 原本の再表示、取得不可時の Photos 案内を追加した。保存 schema は4。Unknown の保存が native 変更より先で、応答消失／結果保存失敗／再起動後は再送せず exact key の fence を保持する。観測は個別の fence を解決しても native Unknown を Applied／NotApplied に変更せず、通常 scan は journal を解決しない。
+
+- P1 統合前の `make check` は Rust/FFI232／Swift53 と品質 gate を通過。ログ `/tmp/suwop-visibility-actions-check3.log`。永続化前後の失敗、lost response／restart、partial／unavailable observation、nested privacy、同じ checksum の Immich コピーと PP-01 削除 fence、schema migration／実 Rust ABI を含む。
+- 同時点の `make apple-build` は全5 Rust Apple target／XCFramework、iOS Simulator／universal macOS両 app buildを通過。ログ `/tmp/suwop-visibility-actions-apple.log`。P1 統合後の最終 gate の代わりにはしない。
+- 初回 VRT capture は `DerivedData/VRTArtifacts/20261014T125016Z-96658/report.json` で `passed: false`／`record: false`、compare exit65。28画面を生成し既存26枚は一致。新規2枚 `apple-visibility-unknown.png`／`apple-visibility-observed-large-text.png` は当時基準欠落。レビュー後の record run `DerivedData/VRTArtifacts/20261014T131758Z-8410/report.json` で2基準を生成したが、`record: true`／`passed: false`、compare exit65で全体の成功ではない。現在の基準差分は新規2枚だけで、既存26枚・比較条件は保持する。
+- 初回runの新しい可視性 model tests3件は通過。新 UI tests3件の写真選択失敗は landscape raster thumbnail に変えたrecord runでも再現したため、SF Symbol固有のfixture問題という仮説を撤回した。actual Button bounds は199×132.7のaspect-fill画像と同じで132.7角cellから溢れ、描画clippingだけでは hit／accessibility boundsを制限できていなかった。製品 `PhotoGrid`／`PhotoTile` に矩形 `contentShape` と decorative children のAX除外を追加した。名前・selected trait・選択action、landscape画像と実 Gallery→選択→操作メニュー→確認の経路は保持した。修正後の UI／`record:false` strict 比較は実行待ちで、成功とは扱わない。
+- recordで生じた既存基準の7差分は `DerivedData/VRTArtifacts/20261014T131758Z-8410/unselected-recorded-baselines/` に保存した。既存26枚すべてを `/tmp/suwop-a2-reviewed-baseline-backup` の元バイトへ戻し、hash一致を確認済み。新規2枚だけを画面レビュー・承認後の追加として保持し、比較条件は変更していない。
+- 続くstrict run `20261014T133714Z-16648` では28画面／host19が通過したが、Button全体へのAX children ignoreで写真tileがOther／PopUpButtonへ変わり新UI3が失敗した。AX除外をPhotoTile labelへ移しnative Buttonの名前・selected trait・選択actionを保持した。次の `20261014T134228Z-18303` は写真選択を含む新UI2件が通過したが、同じList rowのautomatic ButtonsがInspectを先に開始しUnhideがbusy guardで拒否され、残る1件の再表示alert待ちが失敗した。独立 `.borderless` styleを各row Buttonへ付け、テストの実操作とalert／新UUID assertionは保持した。
+- 最新 `DerivedData/VRTArtifacts/20261014T134733Z-20100/compare.log` は新製品UI3件がすべて通過。確認取消18.9秒、取得不可Photos案内15.6秒、明示的検査→新UUIDの再表示21.2秒。landscape raster fixtureと実Galleryの選択／操作menu／確認を通す証拠で、実PhotoKit mutation成功とは区別する。既存UI7を含むrun全体の最終結果は確認待ち。
+- 最新snapshot比較は既存26枚一致、新規2枚のみ2283／3014 pixelsのDIFF。Button style変更による漢字glyphの局所差分でlayout／privacyは保持し、2 actual画面とdiffをレビューして新規2基準だけの更新を承認済み。record後に既存26枚を元バイトへ復元し、`record:false` strict比較を改めて必要とする。record／最終strict成功はまだ宣言しない。
+- P1／P2統合後の `make check` は `/tmp/suwop-visibility-actions-check6.log` でRust/FFI234／Swift53と品質gateを通過。`/tmp/suwop-visibility-actions-apple3.log` は最後のlabel AX／List row Button style修正前のApple build成功。修正後の最終 `/tmp/suwop-visibility-actions-apple4.log` は全Rust targetのcached buildと、iOS Simulator／universal macOS両 appの `BUILD SUCCEEDED` を確認した。
+- 承認済み2基準だけの再recordは `/tmp/suwop-visibility-actions-vrt-record2.log`、artifact `20261014T135144Z-21038/report.json` で `passed:true`／`record:true`、28画面／host19／UI10成功。既存26画像の記録時variantは同artifactの `unselected-recorded-baselines/` に保存した後、26基準を元バイトへ戻してhash一致を確認し、新規2枚のみを保持した。比較条件は変更しない。
+- 最終strictは `/tmp/suwop-visibility-actions-vrt-final4.log`、`DerivedData/VRTArtifacts/20261014T135523Z-21968/report.json` で `passed:true`／`record:false`、28画面／host19／UI10成功。実Galleryのlandscape tile選択、確認取消、取得不可時の案内、明示的検査から新UUIDの再表示までの製品UIを含む。先行する欠落baseline／hit bounds／AX role／List row activationの失敗runは上記に保持し、この成功結果と区別する。
+- Native19は `/tmp/suwop-visibility-actions-native.log`、`DerivedData/PhotoKitArtifacts/20261014T135859Z-22975/report.json` でexit0／`passed:true`、全19 phaseが各1回通過。別生成JPEGの実Rust Event→Unknown先行保存→製品ApplePhotos adapter→PhotoKit Applied、restartでjournal保持／再送なし、通常読取り拒否、明示的facts検査を確認した。product hide Applied1、`product_hide_workflow_verified=true`、product restoration `photos-handoff-required`1。
+- Native19の `product_native_unhide_verified=false`／`hidden_original_reverified=false`／`product_hide_ui_verified=false` は保持する。取得不可時のPhotos handoffの証拠であり、直接再表示やhidden原本readback成功ではない。Nativeのアプリ確認はhost注入で実native変更を実行する。製品UI3はfake PhotoKit effectでの別検証であり、実製品UIからPhotoKit hide／unhideまで一本の受入れを完了した意味にはしない。strict VRT→Apple4→Native19を直列で通過した。
+- Native report は既存外部変更の `visibility` と製品 workflow の `product_visibility` を分ける。`product_native_unhide_verified`／`hidden_original_reverified` は実readbackが通った時だけ true、`photos_handoff_required` は取得不可時の別結果。確認へのhost注入は製品UIの証拠ではなく `product_hide_ui_verified` は false を保持する。
+
+現在のA-2 sourceはP1／P2 `51dd7df` を統合済みで、check234／Swift53、最終Apple build、承認済み2基準のrecordと `record:false` strict VRT28／host19／UI10、Native19が成功。A-2最終HEADの hosted CIは未実施。実機／iCloud、Photosでの直接再表示とhidden原本再検証、app 認証付きの非表示（PP-02B）と Immich locked／session PIN（PP-02C）は未確認または未実装。上記A-1／P1／P2とPR #21 mergeの成功結果、A-2ローカル検証を混同しない。
+
+
+## PR #22 レビュー修正：再表示済み履歴の操作可否
+
+現在の観測と後続の一致する操作を使って、再表示済み・原本ID置換・一部未解決の履歴からの再表示を拒否する。明示的検査の新しい観測だけを関連記録に反映し、Unknown／native outcomeと保存失敗時のrollbackを保持する。4件の回帰を追加した。
+
+- 修正後 `make check`：Rust/FFI238、Swift53、品質gate成功。`/tmp/suwop-a2-review-check.log`。
+- `make apple-build`：全5 Rust target／XCFramework、iOS Simulator／universal macOS build成功。`/tmp/suwop-a2-review-apple.log`。
+- strict VRT：`DerivedData/VRTArtifacts/20261014T142003Z-30915/report.json` は `passed:true`／`record:false`、28画面／host19／UI10成功。基準画像変更なし。
+- 修正前HEAD `9140a4d` の [CI run 38577664392](https://github.com/rabe1028/suwop/actions/runs/38577664392) はPhotoKit検証を含む全4 job成功。修正後HEADのCI／レビューは確認待ち。
+- Native19のローカル証拠とPhotos handoffの制約は前節を参照。実機・iCloud・直接再表示は未確認。

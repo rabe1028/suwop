@@ -29,6 +29,11 @@ private struct AcceptanceScreen: View {
                     visibilityEvidence = fixture.evidence?.rawValue ?? ""
                     visibilityOutcome = fixture.hideOutcome.rawValue
                 }
+                if phase.hasPrefix("product-visibility-") {
+                    let fixture = try ProductVisibilityScenario.read()
+                    visibilityEvidence = fixture.restoration ?? ""
+                    visibilityOutcome = fixture.hideOutcome?.rawValue ?? ""
+                }
                 result = "PASS \(phase)"
             } catch {
                 result = "FAIL \(phase): \(error.localizedDescription)"

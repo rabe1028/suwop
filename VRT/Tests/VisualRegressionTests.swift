@@ -46,6 +46,7 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("trash-pending", view: TrashView(model: SnapshotFixtures.trashModel(pending: true)))
         try await capture("apple-trash-guidance", view: AppleTrashView(model: empty))
         try await capture("apple-trash-pending", view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()))
+        try await captureAppleVisibility()
         try await capture(
             "apple-trash-pending-large-text",
             view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()),
@@ -81,6 +82,19 @@ final class VisualRegressionTests: XCTestCase {
             "edit-paste-pending-large-text",
             view: EditPasteRecordsView(model: clipboard),
             largeText: true
+        )
+    }
+
+    @MainActor private func captureAppleVisibility() async throws {
+        try await capture(
+            "apple-visibility-unknown",
+            view: AppleVisibilityView(model: SnapshotFixtures.appleVisibilityModel())
+        )
+        try await capture(
+            "apple-visibility-observed-large-text",
+            view: AppleVisibilityView(model: SnapshotFixtures.appleVisibilityModel(observed: true)),
+            largeText: true,
+            scrollToBottom: true
         )
     }
 

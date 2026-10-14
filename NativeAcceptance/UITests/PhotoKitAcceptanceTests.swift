@@ -20,6 +20,10 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             "visibility-hide",
             "visibility-hidden",
             "visibility-restore",
+            "product-visibility-hide",
+            "product-visibility-hidden",
+            "product-visibility-inspect",
+            "product-visibility-restore",
         ] {
             app.launchArguments = ["--native-acceptance", phase]
             app.launch()
@@ -55,6 +59,16 @@ final class PhotoKitAcceptanceTests: XCTestCase {
                     XCTAssertEqual(outcome, "applied")
                     print("PHOTOKIT_VISIBILITY_HIDE \(outcome)")
                 }
+                if phase == "product-visibility-hide" {
+                    let outcome = app.staticTexts["nativeVisibilityOutcome"].label
+                    XCTAssertEqual(outcome, "applied")
+                    print("PHOTOKIT_PRODUCT_VISIBILITY_HIDE \(outcome)")
+                }
+                if phase == "product-visibility-restore" {
+                    let evidence = app.staticTexts["nativeVisibilityEvidence"].label
+                    XCTAssertTrue(["unhide-readback", "photos-handoff-required"].contains(evidence))
+                    print("PHOTOKIT_PRODUCT_VISIBILITY \(evidence)")
+                }
                 if phase == "visibility-restore" {
                     let evidence = app.staticTexts["nativeVisibilityEvidence"].label
                     XCTAssertTrue(["unhide-readback", "photos-handoff-required"].contains(evidence))
@@ -75,9 +89,9 @@ final class PhotoKitAcceptanceTests: XCTestCase {
         switch phase {
         case "trash-native-cancel", "trash", "trash-lost":
             answerNativeDeletion(app, cancel: phase == "trash-native-cancel")
-        case "visibility-hide":
+        case "visibility-hide", "product-visibility-hide":
             answerNativeVisibility(app, hide: true, result: result)
-        case "visibility-restore":
+        case "visibility-restore", "product-visibility-restore":
             answerNativeVisibility(app, hide: false, result: result)
         default: true
         }
@@ -107,10 +121,13 @@ final class PhotoKitAcceptanceTests: XCTestCase {
                 // Protected Hidden assets take the Photos handoff branch without
                 // requesting Unhide. Only the verified phase result can skip a prompt.
                 let evidence = app.staticTexts["nativeVisibilityEvidence"]
-                let restored = !hide && result.label == "PASS visibility-restore"
+                let restored = !hide && ["PASS visibility-restore", "PASS product-visibility-restore"]
+                    .contains(result.label)
                 let verified = evidence.exists && ["unhide-readback", "photos-handoff-required"]
                     .contains(evidence.label)
-                if restored, verified {
+                let productHide = hide && result.label == "PASS product-visibility-hide" &&
+                    app.staticTexts["nativeVisibilityOutcome"].label == "applied"
+                if productHide || (restored && verified) {
                     return true
                 }
                 break

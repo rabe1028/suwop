@@ -12,6 +12,8 @@ SCREENS = {
     "apple-trash-guidance",
     "apple-trash-pending",
     "apple-trash-pending-large-text",
+    "apple-visibility-unknown",
+    "apple-visibility-observed-large-text",
     "gallery-empty",
     "gallery-empty-dark",
     "gallery-empty-large-text",

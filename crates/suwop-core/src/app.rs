@@ -23,6 +23,8 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub apple_visibility_operations: Vec<crate::apple_visibility::AppleVisibilityOperation>,
+    #[serde(default)]
     pub edit_clipboard: Option<crate::editing::EditClipboard>,
     #[serde(default)]
     pub pending_edit_pastes: Vec<crate::editing::PendingEditPaste>,
@@ -50,6 +52,16 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    AppleVisibilityInspect {
+        scope: String,
+        keys: Vec<crate::domain::AssetKey>,
+    },
+    ConfirmAppleVisibility {
+        prompt: crate::apple_visibility::AppleVisibilityPrompt,
+    },
+    AppleVisibilityApply {
+        request: crate::apple_visibility::AppleVisibilityApply,
+    },
     ConfirmPasteEdits {
         prompt: crate::editing::PasteEditsPrompt,
     },
@@ -201,6 +213,19 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    HideApple {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
+    UnhideApple {
+        #[serde(rename = "recordID")]
+        record_id: String,
+        id: String,
+    },
+    InspectAppleVisibility {
+        #[serde(rename = "recordID")]
+        record_id: String,
+    },
     CopyPhotoEdits {
         key: crate::domain::AssetKey,
         options: crate::editing::EditCopyOptions,
@@ -348,6 +373,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub apple_visibility_hide_keys: Vec<crate::domain::AssetKey>,
     pub preview_choices: std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
     pub remote_version: Option<crate::immich::Version>,
     pub editing_targets: std::collections::BTreeMap<String, Vec<crate::editing::EditingTarget>>,
@@ -406,7 +432,7 @@ impl crux_core::App for Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 3;
+                model.ready = model.state.schema_version == 4;
                 update_preview_preferences(model, preview_to_select);
                 Command::done()
             }
@@ -448,37 +474,8 @@ impl crux_core::App for Suwop {
         }
     }
     fn view(&self, model: &Model) -> ViewModel {
-        let mut move_blockers = std::collections::BTreeMap::new();
         let can_transfer = model.ready && model.session.is_some() && !model.busy;
-        let content_access = crate::privacy::ContentAccess::new(&model.state);
-        for receipt in &model.state.receipts {
-            if !content_access.receipt_visible(receipt) {
-                move_blockers.insert(
-                    receipt.id.clone(),
-                    vec!["写真の可視性を確認して一覧を更新してください。".into()],
-                );
-                continue;
-            }
-            let mut blockers = receipt.move_blockers();
-            if !can_transfer {
-                blockers.push("接続または処理状態を確認してください".into());
-            }
-            if let Some(session) = &model.session {
-                let immich_scope = if receipt.destination_provider == Provider::Immich {
-                    Some(receipt.destination_scope.as_str())
-                } else {
-                    receipt
-                        .source
-                        .first()
-                        .filter(|a| a.key.provider == Provider::Immich)
-                        .map(|a| a.key.scope.as_str())
-                };
-                if immich_scope.is_some_and(|scope| scope != session.scope) {
-                    blockers.push("転送時と Immich の接続先が異なります".into());
-                }
-            }
-            move_blockers.insert(receipt.id.clone(), blockers);
-        }
+        let move_blockers = public_move_blockers(model, can_transfer);
         let public = crate::privacy::PublishedLibrary::from_canonical(&model.state);
         let photos = catalog(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
@@ -499,6 +496,11 @@ impl crux_core::App for Suwop {
         let editing_access =
             crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
         ViewModel {
+            apple_visibility_hide_keys: if model.ready && !model.busy {
+                crate::apple_visibility::hide_keys(&model.state)
+            } else {
+                vec![]
+            },
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
@@ -549,6 +551,43 @@ impl crux_core::App for Suwop {
         }
     }
 }
+fn public_move_blockers(
+    model: &Model,
+    can_transfer: bool,
+) -> std::collections::BTreeMap<String, Vec<String>> {
+    let mut move_blockers = std::collections::BTreeMap::new();
+    let content_access = crate::privacy::ContentAccess::new(&model.state);
+    for receipt in &model.state.receipts {
+        if !content_access.receipt_visible(receipt) {
+            move_blockers.insert(
+                receipt.id.clone(),
+                vec!["写真の可視性を確認して一覧を更新してください。".into()],
+            );
+            continue;
+        }
+        let mut blockers = receipt.move_blockers();
+        if !can_transfer {
+            blockers.push("接続または処理状態を確認してください".into());
+        }
+        if let Some(session) = &model.session {
+            let immich_scope = if receipt.destination_provider == Provider::Immich {
+                Some(receipt.destination_scope.as_str())
+            } else {
+                receipt
+                    .source
+                    .first()
+                    .filter(|a| a.key.provider == Provider::Immich)
+                    .map(|a| a.key.scope.as_str())
+            };
+            if immich_scope.is_some_and(|scope| scope != session.scope) {
+                blockers.push("転送時と Immich の接続先が異なります".into());
+            }
+        }
+        move_blockers.insert(receipt.id.clone(), blockers);
+    }
+    move_blockers
+}
+
 fn displayed_dates(
     previews: &std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
 ) -> std::collections::BTreeMap<String, Option<f64>> {

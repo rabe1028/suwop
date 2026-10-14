@@ -51,7 +51,10 @@ import SuwopShell
     func execute(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
         try context.requireOwner(presentationEpoch)
         let data = operation.data ?? .null
-        if !["persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply"].contains(operation.type) {
+        let completionEffects = [
+            "persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply", "appleVisibilityApply",
+        ]
+        if !completionEffects.contains(operation.type) {
             try Task.checkCancellation()
         }
         if operation.type == "randomId" {
@@ -101,7 +104,8 @@ import SuwopShell
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch operation.type {
-        case "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleTrashEffect(
+        case "confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect",
+             "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleJournalEffect(
                 operation.type,
                 data: data,
                 context: context
@@ -324,10 +328,15 @@ import SuwopShell
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
         return .null
     }
+}
 
-    private func appleTrashEffect(
+private extension AppleShell {
+    func appleJournalEffect(
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
+        if ["confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect"].contains(type) {
+            return try await appleVisibilityEffect(type, data: data, context: context)
+        }
         switch type {
         case "confirmAppleTrash": return try await .from(confirmation
                 .trashApple(data["prompt"].decode(AppleTrashPrompt.self), context: context))
@@ -338,6 +347,21 @@ import SuwopShell
         case "appleTrashInspect": return try .from(appleStore(scope: requiredString(data, "scope"))
                 .inspectTrash(data["keys"].decode([AssetKey].self)))
         default: throw SuwopError("未知の Apple 削除入出力です。")
+        }
+    }
+
+    private func appleVisibilityEffect(
+        _ type: String, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        switch type {
+        case "confirmAppleVisibility": return try await .from(confirmation
+                .changeAppleVisibility(data["prompt"].decode(AppleVisibilityPrompt.self), context: context))
+        case "appleVisibilityApply":
+            let request = try data["request"].decode(AppleVisibilityApply.self)
+            return try await .from(appleStore(scope: request.scope).applyVisibility(request))
+        case "appleVisibilityInspect": return try .from(appleStore(scope: requiredString(data, "scope"))
+                .inspectVisibility(data["keys"].decode([AssetKey].self)))
+        default: throw SuwopError("未知の Apple 可視性入出力です。")
         }
     }
 
