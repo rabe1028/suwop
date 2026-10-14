@@ -167,7 +167,7 @@ impl Session {
     }
     pub async fn asset(&self, ctx: &Context, id: &str) -> Result<Asset, String> {
         let a = self.owned_asset(ctx, id).await?;
-        if a.is_trashed {
+        if a.is_trashed || a.visibility.as_deref() == Some("locked") {
             return Err("写真の所有者または状態が変わりました。".into());
         }
         Ok(a)
@@ -428,6 +428,7 @@ pub struct Asset {
     pub is_favorite: bool,
     pub is_offline: bool,
     pub is_trashed: bool,
+    pub visibility: Option<String>,
     pub is_edited: Option<bool>,
     pub is_external: Option<bool>,
     #[serde(default, deserialize_with = "nullable_library")]

@@ -35,6 +35,7 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 struct Runtime<'a> {
+    denied_content: BTreeSet<AssetKey>,
     // A generation comparison is a cancellation fence, not cross-thread data synchronization.
     // Capture once at workflow start; refresh must never renew an already granted read.
     apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -65,8 +66,28 @@ pub async fn run_observed(
     session: Option<Session>,
     apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> Outcome {
+    run_guarded(
+        ctx,
+        event,
+        state,
+        session,
+        apple_generation,
+        BTreeSet::new(),
+    )
+    .await
+}
+
+pub async fn run_guarded(
+    ctx: &Context,
+    event: Event,
+    state: SavedLibrary,
+    session: Option<Session>,
+    apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    denied_content: BTreeSet<AssetKey>,
+) -> Outcome {
     let started_generation = apple_generation.load(std::sync::atomic::Ordering::Relaxed);
     let mut runtime = Runtime {
+        denied_content,
         apple_generation,
         started_generation,
         reversion_started: false,
@@ -152,7 +173,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 4,
+                schema_version: 5,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -175,7 +196,7 @@ impl Runtime<'_> {
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
             Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 4 => {
+            _ if self.state.schema_version != 5 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
             }
             Event::HideApple { keys, id } => self.hide_apple(&keys, &id).await,
@@ -344,7 +365,11 @@ impl Runtime<'_> {
         let keys: Vec<_> = self.state.snapshots[index]
             .assets
             .iter()
-            .filter(|a| a.content_visible() && !a.fingerprints_complete())
+            .filter(|a| {
+                self.state.apple_content_visible(&a.key)
+                    && !self.denied_content.contains(&a.key)
+                    && !a.fingerprints_complete()
+            })
             .map(|a| a.key.clone())
             .collect();
         let mut failures = 0;
@@ -544,6 +569,9 @@ impl Runtime<'_> {
         Ok(())
     }
     fn check_content_keys(&self, keys: &[AssetKey]) -> Result<(), String> {
+        if keys.iter().any(|key| self.denied_content.contains(key)) {
+            return Err("保護する写真を通常の操作から利用できません。".into());
+        }
         let access = crate::privacy::ContentAccess::new(&self.state);
         if keys.iter().any(|k| !access.visible(k)) {
             return Err("Apple Photos の可視性を確認して一覧を更新してください。".into());
@@ -552,6 +580,16 @@ impl Runtime<'_> {
     }
     // Scope, exact set and pending-write fences also apply to newly created copies.
     fn check_identity_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
+        if keys.iter().any(|key| {
+            self.denied_content.contains(key)
+                || self
+                    .state
+                    .protected_entries
+                    .iter()
+                    .any(|entry| entry.key == *key)
+        }) {
+            return Err("保護する写真を通常の操作から利用できません。".into());
+        }
         if self
             .state
             .pending_edit_pastes
@@ -919,7 +957,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2, 3, 4].contains(&version) {
+    if ![1, 2, 3, 4, 5].contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
     if version == 1 {
@@ -931,7 +969,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
             }
         }
     }
-    raw["schemaVersion"] = Value::from(4);
+    raw["schemaVersion"] = Value::from(5);
     let state: SavedLibrary = serde_json::from_value(raw)
         .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))?;
     let mut ids = BTreeSet::new();
@@ -941,6 +979,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
             return Err("非表示の操作 UUID が重複しています。".into());
         }
     }
+    crate::protection::validate_membership(&state)?;
     Ok(state)
 }
 fn convert_dates(value: &mut Value) {

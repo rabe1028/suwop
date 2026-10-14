@@ -23,6 +23,8 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub protected_entries: Vec<crate::protection::PersistentProtectedEntry>,
+    #[serde(default)]
     pub apple_visibility_operations: Vec<crate::apple_visibility::AppleVisibilityOperation>,
     #[serde(default)]
     pub edit_clipboard: Option<crate::editing::EditClipboard>,
@@ -52,6 +54,26 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    AuthenticateProtected {
+        challenge: crate::protection::ProtectedChallenge,
+    },
+    ReadProtectedImage {
+        ticket: crate::protection::ProtectedImageTicket,
+    },
+    PublishProtectedImage {
+        ticket: crate::protection::ProtectedImageTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseProtectedImage {
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseProtectedImages {
+        #[serde(rename = "grantID")]
+        grant_id: Option<String>,
+    },
+
     AppleVisibilityInspect {
         scope: String,
         keys: Vec<crate::domain::AssetKey>,
@@ -213,6 +235,73 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    BeginProtectedAccess {
+        #[serde(rename = "challengeID")]
+        challenge_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        purpose: crate::protection::ProtectedPurpose,
+    },
+    LockProtectedAccess,
+    ReconcileProtectedState {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+    },
+    #[serde(skip)]
+    ProtectedReconciled {
+        state: Option<SavedLibrary>,
+    },
+    ProtectedSceneChanged {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        phase: crate::protection::ProtectionScenePhase,
+    },
+    ProtectPhotos {
+        keys: Vec<crate::domain::AssetKey>,
+        #[serde(rename = "operationID")]
+        operation_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+    },
+    UnprotectPhotos {
+        ids: Vec<String>,
+        #[serde(rename = "operationID")]
+        operation_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+    },
+    RequestProtectedImage {
+        #[serde(rename = "entryID")]
+        entry_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        kind: crate::protection::ProtectedImageKind,
+    },
+    #[serde(skip)]
+    ProtectedAuthCompleted {
+        challenge: crate::protection::ProtectedChallenge,
+        result: Option<crate::protection::ProtectedAuthResult>,
+    },
+    #[serde(skip)]
+    ProtectedPersisted {
+        state: SavedLibrary,
+        keys: Vec<crate::domain::AssetKey>,
+        outcome: crate::protection::ProtectedPersistOutcome,
+    },
+    #[serde(skip)]
+    ProtectedImageRead {
+        ticket: crate::protection::ProtectedImageTicket,
+        result: Option<crate::protection::ProtectedImageResult>,
+    },
+    #[serde(skip)]
+    ProtectedImagePublished {
+        staged_id: String,
+        ticket: crate::protection::ProtectedImageTicket,
+        result: Option<crate::protection::ProtectedImageResult>,
+    },
+
     HideApple {
         keys: Vec<crate::domain::AssetKey>,
         id: String,
@@ -358,6 +447,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub protection: crate::protection::ProtectionModel,
     /// Observation-only token shared with in-flight workflows; never persisted.
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
@@ -373,6 +463,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub protected_view: crate::protection::ProtectedView,
     pub apple_visibility_hide_keys: Vec<crate::domain::AssetKey>,
     pub preview_choices: std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
     pub remote_version: Option<crate::immich::Version>,
@@ -400,6 +491,22 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Some(command) = crate::protection::update(event.clone(), model) {
+            return command;
+        }
+        if model.protection.membership_uncertain
+            && !matches!(
+                event,
+                Event::AppleChanged
+                    | Event::Progress { .. }
+                    | Event::Finished { .. }
+                    | Event::Browse { .. }
+                    | Event::ChoosePreview { .. }
+            )
+        {
+            model.error = Some("保護の保存状態を先に確認してください。変更は開始しません。".into());
+            return Command::done();
+        }
         match event {
             Event::ChoosePreview { anchor, key } if !model.busy => {
                 model.error = choose_preview(model, &anchor, key).err();
@@ -415,7 +522,7 @@ impl crux_core::App for Suwop {
                 }
                 model.state = state;
                 model.status = status;
-                Command::done()
+                crate::protection::reconcile(model)
             }
             Event::Finished {
                 mut state,
@@ -432,9 +539,9 @@ impl crux_core::App for Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 4;
+                model.ready = model.state.schema_version == 5;
                 update_preview_preferences(model, preview_to_select);
-                Command::done()
+                crate::protection::reconcile(model)
             }
             Event::AppleChanged => {
                 model
@@ -442,7 +549,7 @@ impl crux_core::App for Suwop {
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 invalidate_apple(&mut model.state);
                 model.changed_during_work = model.busy;
-                Command::done()
+                crate::protection::reconcile(model)
             }
             _ if model.busy => Command::done(),
             event => {
@@ -453,13 +560,15 @@ impl crux_core::App for Suwop {
                 let state = model.state.clone();
                 let session = model.session.clone();
                 let apple_generation = model.apple_generation.clone();
+                let denied_content = model.protection.denied.clone();
                 Command::new(move |ctx| async move {
-                    let result = crate::workflow::run_observed(
+                    let result = crate::workflow::run_guarded(
                         &ctx,
                         event,
                         state,
                         session,
                         apple_generation,
+                        denied_content,
                     )
                     .await;
                     ctx.send_event(Event::Finished {
@@ -474,9 +583,14 @@ impl crux_core::App for Suwop {
         }
     }
     fn view(&self, model: &Model) -> ViewModel {
-        let can_transfer = model.ready && model.session.is_some() && !model.busy;
+        let can_transfer = model.ready
+            && model.session.is_some()
+            && !model.busy
+            && !model.protection.membership_uncertain;
         let move_blockers = public_move_blockers(model, can_transfer);
-        let public = crate::privacy::PublishedLibrary::from_canonical(&model.state);
+        let public = crate::privacy::PublishedLibrary::from_canonical(
+            &crate::protection::ordinary_state(model),
+        );
         let photos = catalog(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
             &public.snapshots,
@@ -496,8 +610,12 @@ impl crux_core::App for Suwop {
         let editing_access =
             crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
         ViewModel {
-            apple_visibility_hide_keys: if model.ready && !model.busy {
-                crate::apple_visibility::hide_keys(&model.state)
+            protected_view: crate::protection::view(model),
+            apple_visibility_hide_keys: if model.ready
+                && !model.busy
+                && !model.protection.membership_uncertain
+            {
+                crate::apple_visibility::hide_keys(&crate::protection::ordinary_state(model))
             } else {
                 vec![]
             },
@@ -540,11 +658,13 @@ impl crux_core::App for Suwop {
                 .count(),
             state: public,
             busy: model.busy,
-            status: crate::privacy::public_text(&model.state, &model.status),
-            error: model
-                .error
-                .as_ref()
-                .map(|error| crate::privacy::public_text(&model.state, error)),
+            status: crate::privacy::public_text(
+                &crate::protection::ordinary_state(model),
+                &model.status,
+            ),
+            error: model.error.as_ref().map(|error| {
+                crate::privacy::public_text(&crate::protection::ordinary_state(model), error)
+            }),
             server_version: model.session.as_ref().map(|s| s.version.description()),
             can_transfer,
             move_blockers,
@@ -556,8 +676,17 @@ fn public_move_blockers(
     can_transfer: bool,
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut move_blockers = std::collections::BTreeMap::new();
-    let content_access = crate::privacy::ContentAccess::new(&model.state);
+    let ordinary = crate::protection::ordinary_state(model);
+    let content_access = crate::privacy::ContentAccess::new(&ordinary);
     for receipt in &model.state.receipts {
+        if receipt
+            .source
+            .iter()
+            .chain(&receipt.destination)
+            .any(|asset| content_access.protected(&asset.key))
+        {
+            continue;
+        }
         if !content_access.receipt_visible(receipt) {
             move_blockers.insert(
                 receipt.id.clone(),
@@ -611,6 +740,9 @@ fn choose_preview(
 ) -> Result<(), String> {
     if !model.ready {
         return Err("写真ライブラリを読み込んでください。".into());
+    }
+    if model.protection.denied.contains(anchor) || model.protection.denied.contains(&key) {
+        return Err("保護した写真を通常の一覧から表示できません。".into());
     }
     if !model.state.apple_content_visible(anchor) || !model.state.apple_content_visible(&key) {
         return Err("写真の可視性を確認してください。".into());

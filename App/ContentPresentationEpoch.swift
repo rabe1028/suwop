@@ -4,17 +4,26 @@ import SuwopShell
 /// independent; neither counter synchronizes domain state or authorizes a write.
 @MainActor final class ContentPresentationEpoch {
     private var value: UInt64 = 0
+    private var protectionValue: UInt64 = 0
 
     func beginWorkflow() -> ContentPresentationContext {
-        ContentPresentationContext(epoch: self, value: value)
+        ContentPresentationContext(epoch: self, value: value, protectionValue: protectionValue)
     }
 
     func invalidate() {
         value += 1
     }
 
+    func invalidateProtection() {
+        protectionValue += 1
+    }
+
     fileprivate func matches(_ captured: UInt64) -> Bool {
         value == captured
+    }
+
+    fileprivate func matchesProtection(_ captured: UInt64) -> Bool {
+        protectionValue == captured
     }
 }
 
@@ -23,6 +32,7 @@ import SuwopShell
 @MainActor struct ContentPresentationContext {
     fileprivate let epoch: ContentPresentationEpoch
     fileprivate let value: UInt64
+    fileprivate let protectionValue: UInt64
 
     func belongs(to epoch: ContentPresentationEpoch) -> Bool {
         self.epoch === epoch
@@ -33,6 +43,7 @@ import SuwopShell
     }
 
     func permits(sourceKeys: [AssetKey]? = nil) -> Bool {
+        guard epoch.matchesProtection(protectionValue) else { return false }
         if let sourceKeys, !sourceKeys.isEmpty, sourceKeys.allSatisfy({ $0.provider == .immich }) {
             return true
         }

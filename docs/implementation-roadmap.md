@@ -24,7 +24,7 @@
 
 各IDで、実装、local checks、最終HEADのhosted CI、画面操作、native/API保存結果、
 実機/iCloud受入れを別々に記録する。実装済みでも未確認の欄を完了にしない。
-以下の状態は `eb47377` の監査時点を基準とし、PP-01とPP-02A-1は現在の進捗を反映する。
+以下の状態は `eb47377` の監査時点を基準とし、PP-01とPP-02は以下の進捗を反映する。
 
 原則はPP-01から順に小さなPRで進める。PP-15の証拠は各PRで蓄積し、
 PP-16で対応する実機・配布の条件を閉じる。依存はPP-03→PP-04、PP-09→PP-10。
@@ -34,7 +34,7 @@ PP-08のImmich幾何保存は色編集の保存方針と独立して進められ
 | ID | 監査状態と実装範囲 | 完了に必要な証拠 |
 | --- | --- | --- |
 | PP-01 Apple通常削除・復元案内 | **PR #20 merge 済み（main `8351ea7`、最終HEAD／merge後 hosted CI 全4 job成功）**。Moveと独立した確認・原本照合・永続意図・PhotoKit応答・可視性検査とApple Photosでの復元案内。Rust202/Swift50、VRT26/UI5、生成JPEGのNative12段階を通過。 | 単独/複数、確認取消、権限/ID変更、応答消失/再起動、結果不明時の書込み停止と同じ原本の転送保護。公開復元APIの制約を表示。実PhotoKit保存と実機/iCloudは別記録。 |
-| PP-02 非表示・再表示 | **PR #21 A-1／P1／P2はmain `b12db01` へmerge済み、A-2 Apple製品操作はsource実装済み／最終受入れ待ち**。[可視性と非表示・再表示](apple-visibility.md)。A-2はschema4・Unknown先行保存・exact key／witness・匿名履歴・明示的検査・既知hidden原本の再表示／Photos案内を含む。P1／P2統合後check234／Swift53と最終Apple4のiOS／macOS app buildが成功。実Galleryからの新UI3が成功し、Button glyphの局所差分をレビューし新規2基準だけ更新。既存26基準は元バイトを保持し、最終strict `20261014T135523Z-21968` は `passed:true`／`record:false`、28画面／host19／UI10成功。Native19 `20261014T135859Z-22975` は19 phase各1回成功、product hide Applied／restore Photos handoffで直接再表示未確認、Native15は外部hide／Photos handoffの旧証拠。PR #21最終HEAD `51dd7df` CI全4 job成功、merge後main CIも全4 job成功。詳細履歴は[検証](verification.md)。A-2最終HEAD CI・実機／iCloud未確認。PP-02B app認証付き非表示とPP-02C Immich locked／session PINは未実装でApple Hidden認証とは別。 | 製品非表示→一覧／検索／アルバムから除外→匿名履歴→明示的検査→直接再表示またはPhotos案内→再起動。最終strict VRT／Native19／hosted CI、取得可能時の実再表示とhidden原本readback、実機／iCloudを別記録。次にapp認証の有効／無効・背景／再起動の再ロック、Immich PIN期限／再ロック・全アルバム所属への影響を検証する。 |
+| PP-02 非表示・再表示 | **A-1 PR #21、A-2 PR #22はmerge済み（A-2 main `f845a6f`）。Bは実装・ローカル検証済み、hosted CI待ち**。[Apple可視性](apple-visibility.md)／[アプリ内保護](app-protected-photos.md)。A-2最終HEAD `9b78207` とmerge後mainのCI全4 jobが成功。Bはschema5の表示元別保護、端末認証、scene限定閲覧、再ロック、結果不明時の書込み停止・読取り回復を実装。Rust/FFI250／Swift55、全Apple build、Immich結合、strict VRT31画面／host25／UI15、PhotoKit19が成功。既存28基準は保持し、新規3枚だけ追加。PhotoKit製品hideはApplied、restoreはPhotos handoffで、直接再表示・hidden原本readbackは未確認。CのImmich locked／session PINは未実装。 | Bの最終HEAD CIとmerge後確認。Cはsession／PIN期限／再ロック・全アルバム所属への影響を別に検証する。実Face ID／Touch ID／パスコード、複数ウィンドウの手動操作、実機／iCloudは未確認。 |
 | PP-03 外部ファイル取り込み | 未実装。転送用AppleImport effectを完了証拠にしない。native picker/読取りとRustの構成検証・保存先選択・永続化を追加する。 | JPEG/HEIC/PNG/動画、RAW+JPEG/Live関連ファイル。元バイト・名前・日時・位置、欠落した組の拒否、キャンセル、送信前保存失敗、応答消失/再起動、PhotoKit/実Immichの保存結果。 |
 | PP-04 複製 | 未実装。原本の複製と現在の編集済み見た目の複製を区別し、新しい保存先IDを確認する。PP-03に依存。 | 元写真/履歴を保持、新ID・バイト・メタデータ、RAW/Liveの組、再起動。Immichのchecksum重複排除を先に確認し、既存IDが返ることを複製成功としない。 |
 | PP-05 現在の内容の共有・書き出し・片付け | 単独の現在静止画と単独/複数の原本共有は実装済み。現在の内容の複数選択、動画/Live、位置情報を除去する書き出し、強制終了後の回収は未実装。 | 表示元/原本の選択、受信先で開いた実結果、寸法・向き・色・メタデータ、組の完全性、キャンセル、iPad/Mac共有、強制終了後の安全な片付け。原本共有では元バイトを保持。 |

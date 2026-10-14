@@ -72,7 +72,7 @@ fn facts() -> CurrentImageFacts {
 }
 fn state(asset: StoredAsset) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 4,
+        schema_version: 5,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: asset.key.provider,
@@ -83,6 +83,19 @@ fn state(asset: StoredAsset) -> SavedLibrary {
         }],
         ..SavedLibrary::default()
     }
+}
+// Compare the public projection with the same projection before sharing. The
+// canonical schema also stores private membership, which is never published.
+fn published_state(asset: StoredAsset) -> Result<Value, String> {
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: state(asset),
+            ..Model::default()
+        },
+    );
+    serde_json::to_value(core.view().state).map_err(|e| e.to_string())
 }
 #[derive(Clone, Copy, Default)]
 enum Fault {
@@ -353,7 +366,7 @@ fn current_image_share_keeps_rendered_bytes_and_finishes_before_cleanup_without_
 -> Result<(), String> {
     for fault in [Fault::None, Fault::WebP, Fault::Cancel, Fault::Cleanup] {
         let mut shell = shell(apple(), fault);
-        let before = serde_json::to_value(state(shell.asset.clone())).map_err(|e| e.to_string())?;
+        let before = published_state(shell.asset.clone())?;
         let core = shell.run(false)?;
         assert_eq!(
             shell.trace,
@@ -442,7 +455,7 @@ fn edited_remote_sharing_renders_the_latest_series_without_reading_cached_fullsi
     assert!(shell.trace.contains(&"share".into()));
     assert_eq!(
         serde_json::to_value(core.view().state).map_err(|e| e.to_string())?,
-        serde_json::to_value(state(shell.asset.clone())).map_err(|e| e.to_string())?
+        published_state(shell.asset.clone())?
     );
     Ok(())
 }

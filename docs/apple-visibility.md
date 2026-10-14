@@ -1,6 +1,6 @@
 # Apple 可視性と非表示・再表示（PP-02A）
 
-PP-02A-1 は通常の一覧・操作から非表示の原本を隔離する基盤。PP-02A-2 はその上に Apple Photos の非表示変更、既知の操作記録からの再表示、取得できない対象の Photos 案内を追加した。製品操作・永続化の実装、ローカルcheck／Apple build／strict VRT／Native19は通過した。実PhotoKitのproduct hideはApplied、restoreはPhotos handoffで、直接再表示とhidden原本の再検証は未確認。A-2の初回HEAD `9140a4d` のCIは全4 job成功。レビュー修正後HEADのCIは確認待ち。アプリ独自の認証付き非表示（PP-02B）と Immich の locked／session PIN（PP-02C）は未実装。
+PP-02A-1 は通常の一覧・操作から非表示の原本を隔離する基盤。PP-02A-2 はその上に Apple Photos の非表示変更、既知の操作記録からの再表示、取得できない対象の Photos 案内を追加した。製品操作・永続化の実装、ローカルcheck／Apple build／strict VRT／Native19は通過した。実PhotoKitのproduct hideはApplied、restoreはPhotos handoffで、直接再表示とhidden原本の再検証は未確認。A-2の最終HEAD `9b78207` のCIは全4 job成功し、PR #22はmain `f845a6f` へmerge済み。merge後CI全4 jobも成功。アプリ独自の認証付き保護（PP-02B）は実装・統合検証中、Immich の locked／session PIN（PP-02C）は未実装。
 
 ## 保存状態と公開状態
 

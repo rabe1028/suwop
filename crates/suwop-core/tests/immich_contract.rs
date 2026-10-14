@@ -45,7 +45,7 @@ fn scan(
         Suwop,
         Model {
             state: SavedLibrary {
-                schema_version: 4,
+                schema_version: 5,
                 apple_scope: "apple".into(),
                 ..SavedLibrary::default()
             },

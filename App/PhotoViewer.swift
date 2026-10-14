@@ -13,11 +13,19 @@ struct PhotoViewer: View {
     @State private var copyingEdits = false
     @State private var pendingCopy: (AssetKey, EditCopyOptions)?
     @State private var showVisibility = false
+    @State private var protectedSource: AssetKey?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.protectionSceneID) private var inheritedSceneID
     private let collection: AlbumKey?
-    init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
+    private let sceneID: String
+    private var protectionOwner: String {
+        inheritedSceneID ?? sceneID
+    }
+
+    init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil, sceneID: String = UUID().uuidString) {
         self.model = model
         self.collection = collection
+        self.sceneID = sceneID
         _cursor = State(initialValue: PhotoViewerCursor(anchor: key))
     }
 
@@ -72,6 +80,9 @@ struct PhotoViewer: View {
                 }
             }
             .sheet(isPresented: $showVisibility) { AppleVisibilityView(model: model) }
+            .sheet(item: $protectedSource) { key in
+                ProtectedPhotosView(session: model.protection, sceneID: protectionOwner, protectingKeys: [key])
+            }
             .sheet(
                 isPresented: $copyingEdits,
                 onDismiss: {
@@ -210,6 +221,10 @@ struct PhotoViewer: View {
                     Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
                         showVisibility = true
                     }
+                    Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
+                        protectedSource = model.displayedSource(photo)?.key
+                    }.disabled(model.displayedSource(photo) == nil)
+                        .accessibilityIdentifier("protectDisplayedSource")
                 } label: { Image(systemName: "slider.horizontal.3") }
                     .disabled(model.isBusy).accessibilityLabel("写真を編集")
                 Button { model.favorite([photo], value: !photo.isFavorite) } label: {

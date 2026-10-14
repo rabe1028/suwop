@@ -48,7 +48,7 @@ fn asset(provider: Provider) -> StoredAsset {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 4,
+        schema_version: 5,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()

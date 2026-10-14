@@ -13,6 +13,7 @@ import SuwopShell
     private let confirmation = SystemConfirmation()
     private let photoReversion = ApplePhotoReversion()
     private let presentationEpoch = ContentPresentationEpoch()
+    let protectedAccess = ProtectedNativeAccess()
     #if SUWOP_VRT
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
@@ -29,6 +30,14 @@ import SuwopShell
         playback.invalidateForContentChange()
         confirmation.invalidateForContentChange()
         sharing.invalidateForContentChange()
+    }
+
+    func invalidateProtectedPresentations() {
+        presentationEpoch.invalidateProtection()
+        imageEditing.invalidateForProtection()
+        playback.invalidateForProtection()
+        confirmation.invalidateForContentChange()
+        sharing.invalidateForProtection()
     }
 
     init() throws {
@@ -53,6 +62,7 @@ import SuwopShell
         let data = operation.data ?? .null
         let completionEffects = [
             "persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply", "appleVisibilityApply",
+            "releaseProtectedImages", "releaseProtectedImage",
         ]
         if !completionEffects.contains(operation.type) {
             try Task.checkCancellation()
@@ -110,7 +120,9 @@ import SuwopShell
                 data: data,
                 context: context
             )
-        case "readState", "persist": return try stateEffect(operation.type, data: data)
+        case "readState", "persist", "authenticateProtected", "readProtectedImage", "publishProtectedImage",
+             "releaseProtectedImages", "releaseProtectedImage":
+            return try await appStateEffect(operation.type, data: data)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
                 operation.type,
                 data: data
@@ -331,6 +343,34 @@ import SuwopShell
 }
 
 private extension AppleShell {
+    func appStateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        if ["readState", "persist"].contains(type) {
+            return try stateEffect(type, data: data)
+        }
+        return try await protectedEffect(type, data: data)
+    }
+
+    func protectedEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        switch type {
+        case "authenticateProtected": return try await .from(protectedAccess.authenticate(
+                data["challenge"].decode(ProtectedChallenge.self)
+            ))
+        case "readProtectedImage": return try await .from(protectedAccess.read(
+                data["ticket"].decode(ProtectedImageTicket.self), http: http
+            ))
+        case "publishProtectedImage": return try await .from(protectedAccess.publish(
+                data["ticket"].decode(ProtectedImageTicket.self), stagedID: requiredString(data, "stagedID")
+            ))
+        case "releaseProtectedImages":
+            try protectedAccess.release(grantID: data["grantID"].decode(String?.self))
+            return .null
+        case "releaseProtectedImage":
+            try protectedAccess.release(stagedID: requiredString(data, "stagedID"))
+            return .null
+        default: throw SuwopError("未知の保護された写真の入出力です。")
+        }
+    }
+
     func appleJournalEffect(
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {

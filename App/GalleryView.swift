@@ -3,6 +3,8 @@ import SwiftUI
 
 struct GalleryView: View {
     @ObservedObject var model: LibraryModel
+    private let sceneID: String
+    @State private var showProtected = false
     @State private var tab = 0
     @State private var filter: PhotoFilter = .all
     @State private var presence: Presence?
@@ -17,15 +19,20 @@ struct GalleryView: View {
     @AppStorage("galleryDensity") private var density = 3
     @State private var timeline: TimelineGrouping = .all
 
+    init(model: LibraryModel, sceneID: String = UUID().uuidString) {
+        self.model = model
+        self.sceneID = sceneID
+    }
+
     private var selection: [UnifiedPhoto] {
         model.photos.filter { $0.assets.contains { selectedKeys.contains($0.key) } }
     }
 
     var body: some View {
         #if os(iOS)
-            content.fullScreenCover(item: $viewer) { PhotoViewer(model: model, key: $0) }
+            content.fullScreenCover(item: $viewer) { PhotoViewer(model: model, key: $0, sceneID: sceneID) }
         #else
-            content.sheet(item: $viewer) { PhotoViewer(model: model, key: $0) }
+            content.sheet(item: $viewer) { PhotoViewer(model: model, key: $0, sceneID: sceneID) }
         #endif
     }
 
@@ -58,6 +65,7 @@ struct GalleryView: View {
         .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
         .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
         .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }
+        .sheet(isPresented: $showProtected) { ProtectedPhotosView(session: model.protection, sceneID: sceneID) }
         .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
         .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
         .alert("操作を完了できませんでした", isPresented: Binding(
@@ -177,6 +185,8 @@ struct GalleryView: View {
             Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
                 model.showAppleVisibility = true
             }.accessibilityIdentifier("appleVisibilityHistory")
+            Button("このアプリで保護した写真", systemImage: "lock") { showProtected = true }
+                .accessibilityIdentifier("protectedPhotosHistory")
             Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)
             Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)

@@ -16,6 +16,10 @@ import SwiftUI
         active?.invalidateForContentChange()
     }
 
+    func invalidateForProtection() {
+        active?.invalidateForContentChange()
+    }
+
     func present(
         _ input: ImageEditPresentation, sourceKey: AssetKey? = nil, context: ContentPresentationContext
     ) async throws -> ImageEditDraft? {

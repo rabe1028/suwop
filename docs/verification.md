@@ -143,3 +143,20 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - strict VRT：`DerivedData/VRTArtifacts/20261014T142003Z-30915/report.json` は `passed:true`／`record:false`、28画面／host19／UI10成功。基準画像変更なし。
 - 修正前HEAD `9140a4d` の [CI run 38577664392](https://github.com/rabe1028/suwop/actions/runs/38577664392) はPhotoKit検証を含む全4 job成功。修正後HEADのCI／レビューは確認待ち。
 - Native19のローカル証拠とPhotos handoffの制約は前節を参照。実機・iCloud・直接再表示は未確認。
+
+## PP-02A-2 最終レビューとmerge
+
+最終HEAD `9b7820721406a682ae6809452a4f1d94d133b947` の [CI run 38580301810](https://github.com/rabe1028/suwop/actions/runs/38580301810) はcore／Immich integration／apple／VRT（Native PhotoKit含む）の全4 job成功。最終レビューの追加指摘なし、古い非表示履歴の再表示資格に関する指摘は修正・解決済み。[PR #22](https://github.com/rabe1028/suwop/pull/22) は `f845a6fde523fc01b187005d4c96abaf789f0d63` としてmainへmergeした。merge後 [CI run 38582633824](https://github.com/rabe1028/suwop/actions/runs/38582633824) も同じmain SHAで全4 job成功。実機／iCloudの検証とは区別する。
+
+## PP-02B アプリ内保護のローカル受入れ
+
+表示元のexact keyによるschema 5の保護記録、端末認証前の非公開、認証後も通常projectionに戻さない制御、scene／scope／世代の照合、保存応答消失からの読取り回復、画像同時取得1件と古い応答破棄を実装した。
+
+- `make check`: Rust/FFI250／Swift55と品質gate成功（`/tmp/suwop-protection-check5.log`）。
+- Apple全5 Rust target／XCFrameworkとiOS Simulator／universal macOS成功（`/tmp/suwop-protection-apple4.log`）。
+- 固定Immich v3.2.4の実サービス結合テスト成功（`/tmp/suwop-protection-integration.log`、専用Docker project終了・削除済み）。
+- strict VRT `DerivedData/VRTArtifacts/20261014T151954Z-49504/report.json`: `passed:true`／`record:false`、31画面／host25／UI15成功。実Gallery→viewer→認証→保護、認証失敗時の書込みなし、別物理コピー保持、表示／解除の独立性を含む。
+- 新規3画面を目視レビュー後、record `20261014T151447Z-47910` を明示実行。記録後も3枚を再レビュー。既存28枚の記録時variantはartifact内 `recorded-existing-variants` に保持し、基準には元バイトを復元。既存基準変更なし。
+- Native PhotoKit `DerivedData/PhotoKitArtifacts/20261014T152920Z-51867/report.json`: `passed:true`、19 phase各1回。product hide Applied／workflow確認、restoreはPhotos handoff。`product_native_unhide_verified=false`、`hidden_original_reverified=false`、`product_hide_ui_verified=false`。
+
+途中のテストfixture・公開projection・schema期待値の修正、親AX識別子の伝播修正、撮影sessionの分離は[アプリ内保護の検証履歴](app-protected-photos.md)に記録した。OS認証は制御可能なfixture応答で検証したものであり、実Face ID／Touch ID／パスコード、実機・iCloud・複数ウィンドウの手動受入れは未確認。最終pushed HEADのhosted CIは別に確認する。

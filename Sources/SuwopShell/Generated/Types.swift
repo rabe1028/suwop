@@ -846,6 +846,15 @@ public struct PendingUpload: Codable, Sendable {
     }
 }
 
+public struct PersistentProtectedEntry: Codable, Sendable {
+    public var id: String
+    public var key: AssetKey
+    public init(id: String, key: AssetKey) {
+        self.id = id
+        self.key = key
+    }
+}
+
 public enum PhotoFilter: String, Codable, CaseIterable, Sendable {
     case `all`
     case `favorites`
@@ -943,6 +952,152 @@ public struct PreviewChoice: Codable, Sendable {
     }
 }
 
+public enum ProtectedAuthOutcome: String, Codable, CaseIterable, Sendable {
+    case `success`
+    case `cancelled`
+    case `unavailable`
+    case `failed`
+}
+
+public struct ProtectedAuthResult: Codable, Sendable {
+    public var challengeID: String
+    public var outcome: ProtectedAuthOutcome
+    public var sceneID: String
+    public var scope: String
+    public init(challengeID: String, outcome: ProtectedAuthOutcome, sceneID: String, scope: String) {
+        self.challengeID = challengeID
+        self.outcome = outcome
+        self.sceneID = sceneID
+        self.scope = scope
+    }
+}
+
+public struct ProtectedChallenge: Codable, Sendable {
+    public var challengeID: String
+    public var generation: Int64
+    public var purpose: ProtectedPurpose
+    public var sceneID: String
+    public var scope: String
+    public init(challengeID: String, generation: Int64, purpose: ProtectedPurpose, sceneID: String, scope: String) {
+        self.challengeID = challengeID
+        self.generation = generation
+        self.purpose = purpose
+        self.sceneID = sceneID
+        self.scope = scope
+    }
+}
+
+public struct ProtectedEntryView: Codable, Sendable {
+    public var asset: StoredAsset?
+    public var id: String
+    public init(asset: StoredAsset? = nil, id: String) {
+        self.asset = asset
+        self.id = id
+    }
+}
+
+public struct ProtectedImageAccess: Codable, Sendable {
+    public var entryID: String
+    public var generation: Int64
+    public var grantID: String
+    public var kind: ProtectedImageKind
+    public var requestID: String
+    public var sceneID: String
+    public var stagedID: String
+    public init(entryID: String, generation: Int64, grantID: String, kind: ProtectedImageKind, requestID: String, sceneID: String, stagedID: String) {
+        self.entryID = entryID
+        self.generation = generation
+        self.grantID = grantID
+        self.kind = kind
+        self.requestID = requestID
+        self.sceneID = sceneID
+        self.stagedID = stagedID
+    }
+}
+
+public enum ProtectedImageKind: String, Codable, CaseIterable, Sendable {
+    case `thumbnail`
+    case `preview`
+}
+
+public struct ProtectedImageResult: Codable, Sendable {
+    public var freshAppleAsset: StoredAsset?
+    public var fullAccess: Bool
+    public var requestID: String
+    public var stagedID: String
+    public init(freshAppleAsset: StoredAsset? = nil, fullAccess: Bool, requestID: String, stagedID: String) {
+        self.freshAppleAsset = freshAppleAsset
+        self.fullAccess = fullAccess
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct ProtectedImageTicket: Codable, Sendable {
+    public var entryID: String
+    public var expectedRevision: String
+    public var generation: Int64
+    public var grantID: String
+    public var key: AssetKey
+    public var kind: ProtectedImageKind
+    public var remoteRequest: HttpRequest?
+    public var requestID: String
+    public var sceneID: String
+    public init(entryID: String, expectedRevision: String, generation: Int64, grantID: String, key: AssetKey, kind: ProtectedImageKind, remoteRequest: HttpRequest? = nil, requestID: String, sceneID: String) {
+        self.entryID = entryID
+        self.expectedRevision = expectedRevision
+        self.generation = generation
+        self.grantID = grantID
+        self.key = key
+        self.kind = kind
+        self.remoteRequest = remoteRequest
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public enum ProtectedPurpose: String, Codable, CaseIterable, Sendable {
+    case `view`
+    case `protect`
+}
+
+public struct ProtectedView: Codable, Sendable {
+    public var canRecover: Bool
+    public var entries: [ProtectedEntryView]?
+    public var error: String?
+    public var generation: Int64
+    public var grantID: String?
+    public var image: ProtectedImageAccess?
+    public var persistenceUncertain: Bool
+    public var purpose: ProtectedPurpose?
+    public var sceneID: String?
+    public var state: ProtectedViewState
+    public init(canRecover: Bool, entries: [ProtectedEntryView]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ProtectedImageAccess? = nil, persistenceUncertain: Bool, purpose: ProtectedPurpose? = nil, sceneID: String? = nil, state: ProtectedViewState) {
+        self.canRecover = canRecover
+        self.entries = entries
+        self.error = error
+        self.generation = generation
+        self.grantID = grantID
+        self.image = image
+        self.persistenceUncertain = persistenceUncertain
+        self.purpose = purpose
+        self.sceneID = sceneID
+        self.state = state
+    }
+}
+
+public enum ProtectedViewState: String, Codable, CaseIterable, Sendable {
+    case `locked`
+    case `authenticating`
+    case `open`
+}
+
+public enum ProtectionScenePhase: String, Codable, CaseIterable, Sendable {
+    case `background`
+    case `active`
+    case `inactive`
+}
+
 public enum Provider: String, Codable, CaseIterable, Sendable {
     case `apple`
     case `immich`
@@ -1013,12 +1168,13 @@ public struct SavedLibrary: Codable, Sendable {
     public var pendingEditPastes: [PendingEditPaste]
     public var pendingTrash: [TrashOperation]
     public var pendingUploads: [PendingUpload]
+    public var protectedEntries: [PersistentProtectedEntry]
     public var receipts: [TransferReceipt]
     public var schemaVersion: Int64
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.appleVisibilityOperations = appleVisibilityOperations
@@ -1028,6 +1184,7 @@ public struct SavedLibrary: Codable, Sendable {
         self.pendingEditPastes = pendingEditPastes
         self.pendingTrash = pendingTrash
         self.pendingUploads = pendingUploads
+        self.protectedEntries = protectedEntries
         self.receipts = receipts
         self.schemaVersion = schemaVersion
         self.snapshots = snapshots
@@ -1329,11 +1486,12 @@ public struct ViewModel: Codable, Sendable {
     public var photos: [UnifiedPhoto]
     public var previewChoices: [String: [PreviewChoice]]
     public var previewSources: [String: AssetKey]
+    public var protectedView: ProtectedView
     public var remoteVersion: Version?
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -1348,6 +1506,7 @@ public struct ViewModel: Codable, Sendable {
         self.photos = photos
         self.previewChoices = previewChoices
         self.previewSources = previewSources
+        self.protectedView = protectedView
         self.remoteVersion = remoteVersion
         self.serverVersion = serverVersion
         self.state = state

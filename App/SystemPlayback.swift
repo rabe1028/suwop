@@ -25,6 +25,10 @@ import SwiftUI
         active?.invalidateForContentChange()
     }
 
+    func invalidateForProtection() {
+        active?.invalidateForContentChange()
+    }
+
     func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
         try context.requireCurrent(sourceKeys: plan.sourceKeys)
         guard active == nil else { throw SuwopError("再生がすでに進行中です。") }
