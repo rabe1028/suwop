@@ -48,3 +48,18 @@ PoC の次の優先順位は、テスト用の小さな実機写真ライブラ�
 - ローカルの実装・上記検証と、最終 pushed HEAD の hosted CI、実機／iCloud／native 複数選択／Photos アプリでの実復元は別の証拠である。
 
 - 最終 `make apple-build` は Rust 全5 Apple target / XCFramework、iOS Simulator と universal macOS の両 app build が exit 0。native / VRT / check 完了後に直列で実行した。
+
+
+## PR #20 の review 修正
+
+削除 completion からの更新を、LibraryModel の work 解放後に pendingRefresh から開始する。
+Applied / NotApplied / Unknown のすべてで読取り更新し、明確な拒否後は full-access の一覧を回復する。
+自動更新は元のエラー案内を消さず、Unknown の journal と書込み拒否は保持する。
+実 RustRuntime と製品 send/defer を通す VRT unit test は3結果すべてを検証し、`20261014T100857Z-20693` で通過した。
+同 run は26画面・unit3 tests・UI5 testsの strict 比較を通過し、基準画像は変更していない。
+
+アルバムの保護対象は Add / Remove の edit.keys。Unknown の Apple 削除と同じ原本がアルバムに含まれていても、rename / delete と無関係な写真の Add / Remove は許可する。
+本人所有権の変更と Unknown 対象への Add / Remove を拒否し、journal・写真・receiptを保持する回帰テストを追加した。
+新しい最終HEADの hosted CI と review の解消は別に確認する。PhotoKit adapter / native mutation の経路は今回変更しておらず、local Native12の証拠を今回再実行したものとして扱わない。
+
+review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests と全品質gateを通過。`make apple-build` は Rust 全5 target・XCFramework・iOS Simulator / universal macOS 両 app build を通過した。確認は source 固定・直列で実行した。

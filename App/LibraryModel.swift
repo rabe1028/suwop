@@ -14,6 +14,7 @@ import SwiftUI
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
     private var shell: AppleShell?
+    private var executeEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
@@ -30,6 +31,12 @@ import SwiftUI
     #if SUWOP_VRT
         // Only the dedicated snapshot host compiles this initializer. No native I/O is started.
         private var snapshotImages: [AssetKey: PlatformImage] = [:]
+        init(runtime: RustRuntime, executeEffect: @escaping @MainActor (ShellOperation) async throws -> JSONValue) {
+            self.runtime = runtime
+            self.executeEffect = executeEffect
+            started = true
+        }
+
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage]) {
             view = snapshotView
             snapshotImages = images
@@ -39,7 +46,9 @@ import SwiftUI
 
     init() {
         do { runtime = try RustRuntime()
-            shell = try AppleShell()
+            let nativeShell = try AppleShell()
+            shell = nativeShell
+            executeEffect = { try await nativeShell.execute($0) }
         } catch { errorMessage = error.localizedDescription }
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
@@ -319,18 +328,24 @@ import SwiftUI
         return image
     }
 
-    func send(_ event: [String: JSONValue], completion: (@MainActor (Bool) -> Void)? = nil) {
-        guard work == nil, let runtime, let shell else {
+    func send(
+        _ event: [String: JSONValue],
+        preservingError: Bool = false,
+        completion: (@MainActor (Bool) -> Void)? = nil
+    ) {
+        guard work == nil, let runtime, let executeEffect else {
             completion?(false)
             return
         }
-        errorMessage = nil
+        if !preservingError {
+            errorMessage = nil
+        }
         work = Task {
             defer {
                 work = nil
                 if pendingRefresh, view?.state.schemaVersion == 2 {
                     pendingRefresh = false
-                    refresh()
+                    refresh(preservingError: true)
                 } else if pendingAlbumsRefresh, view?.state.schemaVersion == 2 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
@@ -347,7 +362,7 @@ import SwiftUI
                     guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
                     let value: JSONValue?
                     let failure: String?
-                    do { value = try await shell.execute(operation)
+                    do { value = try await executeEffect(operation)
                         failure = nil
                     } catch is CancellationError { value = nil
                         failure = "cancelled"
@@ -378,7 +393,9 @@ import SwiftUI
             errorMessage = failure
         }
     }
+}
 
+private extension LibraryModel {
     private func notifyPhotoChange() {
         pendingRefresh = true
         pendingAlbumsRefresh = albumsRequested
@@ -388,7 +405,7 @@ import SwiftUI
                 try await readView()
                 if work == nil {
                     pendingRefresh = false
-                    refresh()
+                    refresh(preservingError: true)
                 }
             } catch { errorMessage = error.localizedDescription }
         }
@@ -423,12 +440,16 @@ extension LibraryModel {
         send(["type": .string("initialize"), "scope": .string(UUID().uuidString)])
     }
 
-    func refresh(requestPermission: Bool = false) {
+    func refreshAfterAppleTrash() {
+        pendingRefresh = true
+    }
+
+    func refresh(requestPermission: Bool = false, preservingError: Bool = false) {
         send([
             "type": .string("refresh"),
             "permission": .bool(requestPermission),
             "now": .number(Date().timeIntervalSince1970),
-        ])
+        ], preservingError: preservingError)
     }
 
     func configure(address: String, apiKey: String, allowHTTP: Bool) {

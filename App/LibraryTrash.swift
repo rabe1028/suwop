@@ -10,9 +10,8 @@ extension LibraryModel {
                 "keys": .from(Array(keys)),
                 "id": .string(UUID().uuidString),
             ]) { [weak self] success in
-                if success {
-                    self?.refresh()
-                } else {
+                self?.refreshAfterAppleTrash()
+                if !success {
                     self?.showAppleTrash = true
                 }
             }
