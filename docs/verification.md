@@ -132,3 +132,14 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - Native report は既存外部変更の `visibility` と製品 workflow の `product_visibility` を分ける。`product_native_unhide_verified`／`hidden_original_reverified` は実readbackが通った時だけ true、`photos_handoff_required` は取得不可時の別結果。確認へのhost注入は製品UIの証拠ではなく `product_hide_ui_verified` は false を保持する。
 
 現在のA-2 sourceはP1／P2 `51dd7df` を統合済みで、check234／Swift53、最終Apple build、承認済み2基準のrecordと `record:false` strict VRT28／host19／UI10、Native19が成功。A-2最終HEADの hosted CIは未実施。実機／iCloud、Photosでの直接再表示とhidden原本再検証、app 認証付きの非表示（PP-02B）と Immich locked／session PIN（PP-02C）は未確認または未実装。上記A-1／P1／P2とPR #21 mergeの成功結果、A-2ローカル検証を混同しない。
+
+
+## PR #22 レビュー修正：再表示済み履歴の操作可否
+
+現在の観測と後続の一致する操作を使って、再表示済み・原本ID置換・一部未解決の履歴からの再表示を拒否する。明示的検査の新しい観測だけを関連記録に反映し、Unknown／native outcomeと保存失敗時のrollbackを保持する。4件の回帰を追加した。
+
+- 修正後 `make check`：Rust/FFI238、Swift53、品質gate成功。`/tmp/suwop-a2-review-check.log`。
+- `make apple-build`：全5 Rust target／XCFramework、iOS Simulator／universal macOS build成功。`/tmp/suwop-a2-review-apple.log`。
+- strict VRT：`DerivedData/VRTArtifacts/20261014T142003Z-30915/report.json` は `passed:true`／`record:false`、28画面／host19／UI10成功。基準画像変更なし。
+- 修正前HEAD `9140a4d` の [CI run 38577664392](https://github.com/rabe1028/suwop/actions/runs/38577664392) はPhotoKit検証を含む全4 job成功。修正後HEADのCI／レビューは確認待ち。
+- Native19のローカル証拠とPhotos handoffの制約は前節を参照。実機・iCloud・直接再表示は未確認。

@@ -191,7 +191,7 @@ impl PublishedLibrary {
             apple_visibility_operations: state
                 .apple_visibility_operations
                 .iter()
-                .map(crate::apple_visibility::AppleVisibilityOperation::summary)
+                .map(|operation| operation.summary_with_history(&state.apple_visibility_operations))
                 .collect(),
             edit_clipboard: state.edit_clipboard,
             pending_edit_pastes: state.pending_edit_pastes,

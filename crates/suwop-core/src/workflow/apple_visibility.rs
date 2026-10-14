@@ -113,7 +113,10 @@ impl Runtime<'_> {
             .find(|o| o.id == record_id)
             .cloned()
             .ok_or("非表示の操作記録がありません。")?;
-        if !op.summary().can_unhide {
+        if !op
+            .summary_with_history(&self.state.apple_visibility_operations)
+            .can_unhide
+        {
             return Err("非表示を確認してください。Apple Photos で確認することもできます。".into());
         }
         let keys = op.targets.iter().map(|t| t.key.clone()).collect::<Vec<_>>();
@@ -245,8 +248,8 @@ impl Runtime<'_> {
             );
         }
         let before = self.state.clone();
-        let mut observed = op.targets.clone();
-        for t in &mut observed {
+        let mut observed = Vec::new();
+        for mut t in op.targets {
             if let Some(f) = facts.assets.iter().find(|f| f.key == t.key)
                 && f.full_access
                 && witness(f)? == t.witness_digest
@@ -258,17 +261,22 @@ impl Runtime<'_> {
                     crate::domain::AppleVisibility::Hidden => {
                         Some(VisibilityObservation::ObservedHidden)
                     }
-                    crate::domain::AppleVisibility::Unknown => t.observation,
+                    crate::domain::AppleVisibility::Unknown => None,
                 };
+                if t.observation.is_some() {
+                    observed.push(t);
+                }
             }
         }
-        let current = self
-            .state
-            .apple_visibility_operations
-            .iter_mut()
-            .find(|o| o.id == id)
-            .ok_or("操作記録がありません。")?;
-        current.targets = observed;
+        for operation in &mut self.state.apple_visibility_operations {
+            for target in &mut operation.targets {
+                if let Some(fresh) = observed.iter().find(|candidate| {
+                    candidate.key == target.key && candidate.witness_digest == target.witness_digest
+                }) {
+                    target.observation = fresh.observation;
+                }
+            }
+        }
         // Observations settle individual fences; they never rewrite native outcome.
         self.invalidate(Provider::Apple);
         if let Err(e) = self.persist().await {

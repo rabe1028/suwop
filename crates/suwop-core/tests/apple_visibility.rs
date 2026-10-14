@@ -5,8 +5,8 @@ use suwop_core::{
     apple_visibility::{
         AppleVisibilityApply, AppleVisibilityFacts, AppleVisibilityInspection,
         AppleVisibilityOperation, VisibilityAction, VisibilityApplyTarget, VisibilityIdentity,
-        VisibilityOutcome, VisibilityResource, VisibilityTarget, valid_operation_id,
-        validate_apply, witness,
+        VisibilityObservation, VisibilityOutcome, VisibilityResource, VisibilityTarget,
+        valid_operation_id, validate_apply, witness,
     },
     domain::{
         AppleVisibility, AssetKey, LibrarySnapshot, Provider, ResourceRole, ScanAccess, StoredAsset,
@@ -420,6 +420,226 @@ fn known_hidden_record_unhides_with_new_uuid_but_missing_ids_never_write() -> Re
         )?;
         assert_eq!(s.writes, if missing { 1 } else { 2 });
     }
+    Ok(())
+}
+
+#[test]
+fn successful_unhide_disables_original_record_and_repeated_event_before_native_inspection()
+-> Result<(), String> {
+    let c = core(state());
+    let mut shell = Shell::default();
+    shell.run(&c, hide())?;
+    shell.hidden = true;
+    shell.run(
+        &c,
+        Event::UnhideApple {
+            record_id: ID.into(),
+            id: "44444444-4444-4444-8444-444444444444".into(),
+        },
+    )?;
+    let view = c.view();
+    assert!(!view.state.apple_visibility_operations[0].can_unhide);
+    assert_eq!(
+        view.state.apple_visibility_operations[0].outcome,
+        VisibilityOutcome::Applied
+    );
+    let inspections = shell.inspections;
+    shell.run(
+        &c,
+        Event::UnhideApple {
+            record_id: ID.into(),
+            id: "55555555-5555-4555-8555-555555555555".into(),
+        },
+    )?;
+    assert_eq!(shell.inspections, inspections);
+    assert_eq!(shell.writes, 2);
+    assert!(c.view().error.is_some());
+    Ok(())
+}
+
+#[test]
+fn explicit_visible_inspection_overrides_applied_hide_without_rewriting_native_outcome()
+-> Result<(), String> {
+    let c = core(state());
+    let mut shell = Shell::default();
+    shell.run(&c, hide())?;
+    shell.run(
+        &c,
+        Event::InspectAppleVisibility {
+            record_id: ID.into(),
+        },
+    )?;
+    let view = c.view();
+    assert!(!view.state.apple_visibility_operations[0].can_unhide);
+    let original = &shell
+        .saved
+        .as_ref()
+        .ok_or("saved")?
+        .apple_visibility_operations[0];
+    assert_eq!(original.outcome, VisibilityOutcome::Applied);
+    assert!(
+        original
+            .targets
+            .iter()
+            .all(|target| target.observation == Some(VisibilityObservation::ObservedVisible))
+    );
+    let inspections = shell.inspections;
+    shell.run(
+        &c,
+        Event::UnhideApple {
+            record_id: ID.into(),
+            id: "44444444-4444-4444-8444-444444444444".into(),
+        },
+    )?;
+    assert_eq!(shell.inspections, inspections);
+    assert_eq!(shell.writes, 1);
+    Ok(())
+}
+
+fn visibility_record(
+    id: &str,
+    action: VisibilityAction,
+    outcome: VisibilityOutcome,
+    targets: &[&str],
+) -> Result<AppleVisibilityOperation, String> {
+    Ok(AppleVisibilityOperation {
+        id: id.into(),
+        scope: "apple".into(),
+        action,
+        outcome,
+        targets: targets
+            .iter()
+            .map(|id| {
+                let facts = facts(id);
+                Ok(VisibilityTarget {
+                    key: facts.key.clone(),
+                    witness_digest: witness(&facts)?,
+                    observation: None,
+                })
+            })
+            .collect::<Result<_, String>>()?,
+    })
+}
+
+#[test]
+fn later_partial_restore_only_supersedes_matching_physical_identity_and_preserves_unknown_fences()
+-> Result<(), String> {
+    let original = visibility_record(
+        ID,
+        VisibilityAction::Hide,
+        VisibilityOutcome::Applied,
+        &["one", "two"],
+    )?;
+    let restore = visibility_record(
+        "44444444-4444-4444-8444-444444444444",
+        VisibilityAction::Unhide,
+        VisibilityOutcome::Applied,
+        &["one"],
+    )?;
+    assert!(
+        !original
+            .summary_with_history(&[original.clone(), restore.clone()])
+            .can_unhide
+    );
+    let unaffected = visibility_record(
+        "66666666-6666-4666-8666-666666666666",
+        VisibilityAction::Hide,
+        VisibilityOutcome::Applied,
+        &["two"],
+    )?;
+    assert!(
+        unaffected
+            .summary_with_history(&[unaffected.clone(), restore.clone()])
+            .can_unhide
+    );
+    let mut different = restore.clone();
+    different.targets[0].witness_digest = "f".repeat(64);
+    assert!(
+        !original
+            .summary_with_history(&[original.clone(), different])
+            .can_unhide
+    );
+    let mut uncertain = restore.clone();
+    uncertain.outcome = VisibilityOutcome::Unknown;
+    assert!(uncertain.fences(&facts("one").key));
+    assert!(
+        !original
+            .summary_with_history(&[original.clone(), uncertain])
+            .can_unhide
+    );
+    let mut rejected = restore;
+    rejected.outcome = VisibilityOutcome::NotApplied;
+    assert!(
+        original
+            .summary_with_history(&[original.clone(), rejected])
+            .can_unhide
+    );
+    Ok(())
+}
+
+#[test]
+fn inspecting_older_record_propagates_only_fresh_matching_observations_atomically()
+-> Result<(), String> {
+    let mut saved = state();
+    let mut original = visibility_record(
+        ID,
+        VisibilityAction::Hide,
+        VisibilityOutcome::Applied,
+        &["one", "two"],
+    )?;
+    for target in &mut original.targets {
+        target.observation = Some(VisibilityObservation::ObservedHidden);
+    }
+    let restore = visibility_record(
+        "44444444-4444-4444-8444-444444444444",
+        VisibilityAction::Unhide,
+        VisibilityOutcome::Unknown,
+        &["one", "two"],
+    )?;
+    saved.apple_visibility_operations = vec![original, restore];
+    let c = core(saved);
+    let mut shell = Shell {
+        hidden: true,
+        partial: true,
+        ..Shell::default()
+    };
+    shell.run(
+        &c,
+        Event::InspectAppleVisibility {
+            record_id: ID.into(),
+        },
+    )?;
+    let saved = shell.saved.as_ref().ok_or("saved")?;
+    let restore = &saved.apple_visibility_operations[1];
+    assert_eq!(restore.outcome, VisibilityOutcome::Unknown);
+    assert_eq!(
+        restore.targets[0].observation,
+        Some(VisibilityObservation::ObservedHidden)
+    );
+    assert!(
+        restore.targets[1].observation.is_none(),
+        "Missing facts must not propagate an old stored observation"
+    );
+    assert!(restore.fences(&facts("two").key));
+    assert!(!c.view().state.apple_visibility_operations[0].can_unhide);
+    assert_eq!(shell.writes, 0);
+    shell.partial = false;
+    shell.fail_persist = shell.persists + 1;
+    shell.run(
+        &c,
+        Event::InspectAppleVisibility {
+            record_id: ID.into(),
+        },
+    )?;
+    let retained = &shell
+        .saved
+        .as_ref()
+        .ok_or("saved")?
+        .apple_visibility_operations[1];
+    assert!(retained.targets[1].observation.is_none());
+    assert!(retained.fences(&facts("two").key));
+    assert!(!c.view().state.apple_visibility_operations[0].can_unhide);
+    assert!(c.view().error.is_some());
     Ok(())
 }
 #[test]

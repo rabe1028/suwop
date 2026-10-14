@@ -193,6 +193,43 @@ impl AppleVisibilityOperation {
     }
     #[must_use]
     pub fn summary(&self) -> AppleVisibilitySummary {
+        self.summary_with_history(std::slice::from_ref(self))
+    }
+
+    /// Receipts describe past changes. Recovery availability follows the latest
+    /// exact physical identity evidence, without rewriting any native outcome.
+    #[must_use]
+    pub fn summary_with_history(&self, history: &[Self]) -> AppleVisibilitySummary {
+        let later = history
+            .iter()
+            .position(|operation| operation.id == self.id)
+            .map_or(&[][..], |index| &history[index + 1..]);
+        let can_unhide = self.action == VisibilityAction::Hide
+            && !self.targets.is_empty()
+            && self.targets.iter().all(|target| {
+                let mut observation = self.target_observation(target);
+                for operation in later {
+                    if let Some(matching) = operation
+                        .targets
+                        .iter()
+                        .find(|candidate| candidate.key == target.key)
+                    {
+                        if matching.witness_digest != target.witness_digest {
+                            // A reused physical ID cannot borrow visibility from
+                            // the replacement identity or retain old authority.
+                            observation = None;
+                        } else if operation.outcome != VisibilityOutcome::NotApplied
+                            || matching.observation.is_some()
+                        {
+                            observation = operation.target_observation(matching);
+                        }
+                    }
+                }
+                observation == Some(VisibilityObservation::ObservedHidden)
+                    && !history
+                        .iter()
+                        .any(|operation| operation.fences(&target.key))
+            });
         AppleVisibilitySummary {
             id: self.id.clone(),
             action: self.action,
@@ -200,14 +237,18 @@ impl AppleVisibilityOperation {
             outcome: self.outcome,
             observations: self.targets.iter().map(|t| t.observation).collect(),
             can_inspect: true,
-            can_unhide: self.action == VisibilityAction::Hide
-                && (self.outcome == VisibilityOutcome::Applied
-                    || self
-                        .targets
-                        .iter()
-                        .all(|t| t.observation == Some(VisibilityObservation::ObservedHidden))),
+            can_unhide,
             photos_handoff: self.targets.iter().any(|t| t.observation.is_none()),
         }
+    }
+
+    fn target_observation(&self, target: &VisibilityTarget) -> Option<VisibilityObservation> {
+        target.observation.or_else(|| {
+            (self.outcome == VisibilityOutcome::Applied).then_some(match self.action {
+                VisibilityAction::Hide => VisibilityObservation::ObservedHidden,
+                VisibilityAction::Unhide => VisibilityObservation::ObservedVisible,
+            })
+        })
     }
 }
 pub fn validate_apply(

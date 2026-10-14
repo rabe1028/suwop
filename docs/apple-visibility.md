@@ -1,6 +1,6 @@
 # Apple 可視性と非表示・再表示（PP-02A）
 
-PP-02A-1 は通常の一覧・操作から非表示の原本を隔離する基盤。PP-02A-2 はその上に Apple Photos の非表示変更、既知の操作記録からの再表示、取得できない対象の Photos 案内を追加した。製品操作・永続化の実装、ローカルcheck／Apple build／strict VRT／Native19は通過した。実PhotoKitのproduct hideはApplied、restoreはPhotos handoffで、直接再表示とhidden原本の再検証は未確認。A-2の最終HEAD CIは未実施。アプリ独自の認証付き非表示（PP-02B）と Immich の locked／session PIN（PP-02C）は未実装。
+PP-02A-1 は通常の一覧・操作から非表示の原本を隔離する基盤。PP-02A-2 はその上に Apple Photos の非表示変更、既知の操作記録からの再表示、取得できない対象の Photos 案内を追加した。製品操作・永続化の実装、ローカルcheck／Apple build／strict VRT／Native19は通過した。実PhotoKitのproduct hideはApplied、restoreはPhotos handoffで、直接再表示とhidden原本の再検証は未確認。A-2の初回HEAD `9140a4d` のCIは全4 job成功。レビュー修正後HEADのCIは確認待ち。アプリ独自の認証付き非表示（PP-02B）と Immich の locked／session PIN（PP-02C）は未実装。
 
 ## 保存状態と公開状態
 
@@ -123,3 +123,10 @@ Native19 は `/tmp/suwop-visibility-actions-native.log`、`DerivedData/PhotoKitA
 P1／P2統合後の `/tmp/suwop-visibility-actions-check6.log` はRust/FFI234／Swift53と品質gateを通過した。最後のUI修正前のApple3結果と別に、最終 `/tmp/suwop-visibility-actions-apple4.log` は全Rust targetのcached buildを通し、iOS Simulator／universal macOS両 appが `BUILD SUCCEEDED`。最終strict VRT→Apple4→Native19を直列で通過した。A-2最終 pushed HEADの hosted CIと実機／iCloudは未確認。
 
 PR #21 は `b12db01` としてmainへmerge済み。最終review HEAD `51dd7df` の [CI run 38572443227](https://github.com/rabe1028/suwop/actions/runs/38572443227) は全4 job成功、merge後mainの [CI run 38574669375](https://github.com/rabe1028/suwop/actions/runs/38574669375) は全4 job成功。A-1／P1／P2の成功結果とA-2途中検証は [検証](verification.md) に分けて保持する。
+
+
+## PR #22 の再表示可否の修正
+
+後続の再表示成功や明示的な Visible 観測がある履歴では、古い Hide の Applied だけを根拠に再表示を許可しない。公開画面と操作受付が、同じ物理キー・照合情報・後続記録を使う判定を共有する。原本が置き換わったID、部分的な再表示、未解決の Unknown は保守的に拒否する。明示的な再確認では、今回取得できた一致する原本の観測だけを関連記録へ反映し、元の native outcome は変更しない。
+
+修正後の `make check` はRust/FFI238／Swift53、Apple全targetとiOS／macOS build、strict VRT28画面／host19／UI10を通過した。VRTは `20261014T142003Z-30915`、`passed:true`／`record:false`。基準画像の追加変更はない。ログは `/tmp/suwop-a2-review-check.log`、`/tmp/suwop-a2-review-apple.log`、`/tmp/suwop-a2-review-vrt.log`。修正前HEAD `9140a4d` の [CI run 38577664392](https://github.com/rabe1028/suwop/actions/runs/38577664392) はPhotoKit検証を含む全4 job成功。修正後HEADのCIとレビューは別に確認する。
