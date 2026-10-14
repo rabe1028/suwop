@@ -64,7 +64,7 @@ Applied / NotApplied / Unknown のすべてで読取り更新し、明確な拒�
 
 review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests と全品質gateを通過。`make apple-build` は Rust 全5 target・XCFramework・iOS Simulator / universal macOS 両 app build を通過した。確認は source 固定・直列で実行した。
 
-## PP-02A-1 可視性基盤の local evidence（2026-10-14）
+## PP-02A-1 可視性基盤の初回 local evidence（2026-10-14、review 修正前）
 
 - 最終 `make check` は Rust/FFI 215 / Swift 51 tests と全 lint・format・architecture・generated DTO・tool/hook checks を通過。`apple-build2` は Rust 全5 Apple target、XCFramework、iOS Simulator / universal macOS 両 app build を通過。ログは `/tmp/suwop-visibility-check-final.log` と `/tmp/suwop-visibility-apple-build2.log`。
 - strict VRT は `DerivedData/VRTArtifacts/20261014T115722Z-64797/report.json` で exit 0、`record: false` / `passed: true`。26画面・unit10・UI7 testsを通過。cacheと遅延画像、旧core errorの匿名化、表示中Info/metadataおよび実native editor/player/confirmationの取消回帰を含む。
@@ -72,3 +72,14 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - Native は `DerivedData/PhotoKitArtifacts/20261014T120645Z-66766/report.json` で exit 0 / `passed: true`、既存12＋可視性3の全15 phaseが一度ずつ通過。外部PhotoKit hideのcallbackは `applied`、次の起動で通常scan/projection・thumbnail/export/currentImageとcore共有の拒否を確認。restore結果は `photos-handoff-required`。
 - Native reportの `native_unhide_verified=false` / `hidden_original_reverified=false` / `product_hide_ui_verified=false` を維持する。このrunは直接再表示、hidden原本の再検証、製品hide UIの成功を証明しない。Photosでの実再表示・PhotosPicker後の原assetへのアクセスも別の受入れ。
 - 最終HEADのhosted CIは未実施。実機／iCloudは未確認であり、Simulatorの証拠で代替しない。設計と共有の残制約は [Apple可視性基盤](apple-visibility.md) を参照。
+
+## PR #21 の共有 review 修正（2026-10-14）
+
+共有 effect に実際に読み出した物理 `sourceKeys` を渡し、macOS の Apple 可視性変更が Immich のみの共有 picker を閉じないようにした。Apple source を含む共有と元キー不明の旧形式は選択前だけ取り消し、選択済み service と iOS の completion lease は保持する。
+
+- 修正後の最終 `make check` は exit 0、Rust/FFI 216 / Swift 52 tests と全品質 gateを通過。ログは `/tmp/suwop-sharing-review-check2.log`。
+- 修正後の `make apple-build` は exit 0、Rust 全5 Apple target / XCFramework と iOS Simulator / universal macOS 両 app buildを通過。ログは `/tmp/suwop-sharing-review-apple2.log`。
+- `make sharing-test` は `/tmp/suwop-sharing-review-native7.log` で exit 0、macOS component tests 2件を通過。Immich のみは close 0回、Apple／混在／旧形式は選択前 close 1回。選択後の可視性変更と遅延した取消 callbackでも leaseを保持し、service完了まで解決しないことを確認。結果は `DerivedData/Sharing/Logs/Test/Test-SuwopSharing-2026.10.14_21-39-04-+0900.xcresult`。
+- 先行 sharing-test の失敗は専用 fixture の key window確立に失敗したもので、成功結果とは区別する。最終 component testは test-only の view / show / close hookと実picker delegateを使う。本番の key window guardは保持し、実macOS共有UI／手動操作／外部serviceへのhandoff成功は未検証。
+- 上記26画面・unit10・UI7の strict VRTと Native15は review修正前 HEAD `9e8f6f7` の証拠。共有修正後のローカル再実行結果とは扱わない。基準画像に追加変更はない。
+- 修正後の最終 pushed HEADの hosted CIは確認待ち。実機／iCloudと Photosでの直接再表示は引き続き未確認。

@@ -186,9 +186,10 @@ impl Shell {
                 self.trace.push("copy".into());
                 Ok(Value::Null)
             }
-            ShellOperation::ShareFiles { files } => {
+            ShellOperation::ShareFiles(presentation) => {
+                assert_eq!(presentation.source_keys, Some(vec![self.asset.key.clone()]));
                 self.trace.push("share".into());
-                self.files = files.into_iter().map(|f| f.name).collect();
+                self.files = presentation.files.into_iter().map(|f| f.name).collect();
                 Ok(json!(!matches!(self.fault, Fault::Cancel)))
             }
             ShellOperation::Cleanup { .. } => {

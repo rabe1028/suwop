@@ -20,6 +20,7 @@ struct Protocol {
     browser: suwop_core::browser::BrowserOptions,
     album_edit: suwop_core::albums::AlbumEdit,
     share_file: suwop_core::sharing::ShareFile,
+    share_presentation: suwop_core::sharing::SharePresentation,
     playback: suwop_core::media::PlaybackPlan,
     metadata_input: suwop_core::metadata::MetadataInput,
     metadata_change: suwop_core::metadata::MetadataChange,

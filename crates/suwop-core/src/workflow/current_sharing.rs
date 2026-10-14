@@ -3,7 +3,7 @@ use crate::{
     app::{ShellOperation, io},
     domain::{AssetKey, Provider},
     sharing::{
-        CurrentImageExport, ShareFile, current_image_asset, current_image_name,
+        CurrentImageExport, ShareFile, SharePresentation, current_image_asset, current_image_name,
         verify_current_image,
     },
 };
@@ -68,9 +68,10 @@ impl Runtime<'_> {
         self.check_content_generation(std::slice::from_ref(key))?;
         let completed: bool = io(
             self.ctx,
-            ShellOperation::ShareFiles {
+            ShellOperation::ShareFiles(SharePresentation {
                 files: vec![ShareFile { path, name }],
-            },
+                source_keys: Some(vec![key.clone()]),
+            }),
         )
         .await?;
         Ok(if completed {

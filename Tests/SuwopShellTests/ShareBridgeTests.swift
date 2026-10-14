@@ -57,7 +57,9 @@ import Testing
         value: .from(HashResult(sha1: sha1, signature: signature))
     ).first)
     #expect(share.effect["Io"]?.type == "shareFiles")
-    let files = try #require(share.effect["Io"]?.data)["files"].decode([ShareFile].self)
+    let presentation = try #require(share.effect["Io"]?.data).decode(SharePresentation.self)
+    #expect(presentation.sourceKeys == [asset.key])
+    let files = presentation.files
     #expect(files.count == 1)
     #expect(files.first?.path.hasSuffix("/original.jpg") == true)
     #expect(try bridge.call(2).decode(ViewModel.self).busy)
@@ -69,4 +71,11 @@ import Testing
     #expect(view.error == nil)
     #expect(view.photos.count == 1)
     #expect(view.state.receipts.isEmpty)
+}
+
+@Test func legacySharingPresentationDefaultsToUnknownPhysicalSources() throws {
+    let file = ShareFile(name: "fixture.jpg", path: "/tmp/generated-fixture.jpg")
+    let presentation = try JSONValue.object(["files": .from([file])]).decode(SharePresentation.self)
+    #expect(presentation.files.first?.path == file.path)
+    #expect(presentation.sourceKeys == nil)
 }

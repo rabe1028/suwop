@@ -239,7 +239,7 @@ import SuwopShell
             let destination = try URL(fileURLWithPath: requiredString(data, "destination"))
             try await NativeFileCopy.copy(from: source, to: destination)
             return .null
-        case "shareFiles": return try await .bool(sharing.present(data["files"].decode([ShareFile].self)))
+        case "shareFiles": return try await .bool(sharing.present(data.decode(SharePresentation.self)))
         case "playMedia":
             try await playback.present(data["plan"].decode(PlaybackPlan.self))
             return .null

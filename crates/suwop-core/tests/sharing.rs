@@ -151,7 +151,18 @@ impl Native {
                 })
                 .map_err(|e| e.to_string())
             }
-            ShellOperation::ShareFiles { files } => {
+            ShellOperation::ShareFiles(presentation) => {
+                let files = &presentation.files;
+                let expected = if matches!(self.fault, Fault::Remote) {
+                    AssetKey {
+                        provider: Provider::Immich,
+                        scope: "immich".into(),
+                        asset_id: "11111111-1111-4111-8111-111111111111".into(),
+                    }
+                } else {
+                    asset().key
+                };
+                assert_eq!(presentation.source_keys, Some(vec![expected]));
                 self.shared = true;
                 assert!(!self.cleaned);
                 assert_eq!(files.len(), 1);
@@ -211,7 +222,7 @@ fn native_share_retains_files_until_completion_and_does_not_mutate_the_library()
         let mut pending = None;
         while !requests.is_empty() {
             let Effect::Io(mut request) = requests.remove(0);
-            if matches!(request.operation, ShellOperation::ShareFiles { .. }) {
+            if matches!(request.operation, ShellOperation::ShareFiles(_)) {
                 pending = Some(request);
                 break;
             }
@@ -247,6 +258,45 @@ fn native_share_retains_files_until_completion_and_does_not_mutate_the_library()
             "キャンセル"
         }));
     }
+    Ok(())
+}
+
+#[test]
+fn sharing_presentation_records_chosen_source_instead_of_equivalent_requested_key()
+-> Result<(), String> {
+    let mut remote = asset();
+    remote.key = AssetKey {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        asset_id: "equivalent".into(),
+    };
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: SavedLibrary {
+                schema_version: 3,
+                apple_scope: "apple".into(),
+                snapshots: vec![
+                    snapshot(asset(), ScanAccess::Full),
+                    snapshot(remote.clone(), ScanAccess::Full),
+                ],
+                ..SavedLibrary::default()
+            },
+            ..Model::default()
+        },
+    );
+    let mut native = Native::default();
+    run_event(
+        &mut native,
+        &core,
+        Event::Share {
+            keys: vec![remote.key],
+            id: "11111111-1111-4111-8111-111111111111".into(),
+        },
+    )?;
+    assert!(native.shared && native.cleaned);
+    assert!(core.view().error.is_none());
     Ok(())
 }
 

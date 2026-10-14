@@ -1,7 +1,7 @@
 use super::{HashResult, Runtime, ShellOperation, io};
 use crate::{
     domain::Provider,
-    sharing::{ShareFile, contains_file, filename, sources},
+    sharing::{ShareFile, SharePresentation, contains_file, filename, sources},
 };
 
 impl Runtime<'_> {
@@ -63,7 +63,14 @@ impl Runtime<'_> {
         // This effect resolves only when the native service finishes or cancels.
         // run() retains the workspace until that response, including cancellation.
         self.check_content_generation(&keys)?;
-        let completed: bool = io(self.ctx, ShellOperation::ShareFiles { files }).await?;
+        let completed: bool = io(
+            self.ctx,
+            ShellOperation::ShareFiles(SharePresentation {
+                files,
+                source_keys: Some(keys),
+            }),
+        )
+        .await?;
         Ok(if completed {
             "原本ファイルを共有しました。"
         } else {

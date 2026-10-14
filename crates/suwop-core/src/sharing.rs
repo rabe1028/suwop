@@ -87,6 +87,16 @@ pub struct ShareFile {
     pub name: String,
 }
 
+/// Native presentation identity contains only the physical sources actually read.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SharePresentation {
+    pub files: Vec<ShareFile>,
+    /// Missing identity in a legacy request is handled conservatively by the shell.
+    #[serde(default)]
+    pub source_keys: Option<Vec<AssetKey>>,
+}
+
 /// Select a complete source group for each catalog photo. Prefer Apple when it
 /// provides the same complete originals, without duplicating related resources.
 pub fn sources(

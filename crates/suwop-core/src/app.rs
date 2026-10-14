@@ -104,9 +104,7 @@ pub enum ShellOperation {
         source: String,
         destination: String,
     },
-    ShareFiles {
-        files: Vec<crate::sharing::ShareFile>,
-    },
+    ShareFiles(crate::sharing::SharePresentation),
     PlayMedia {
         plan: crate::media::PlaybackPlan,
     },

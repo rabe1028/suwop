@@ -50,7 +50,9 @@ import Testing
     let copiedHash = try #require(resolve(copied, value: .null).first)
     let share = try #require(resolve(copiedHash, value: .from(hash)).first)
     #expect(share.effect["Io"]?.type == "shareFiles")
-    let files = try #require(share.effect["Io"]?.data)["files"].decode([ShareFile].self)
+    let presentation = try #require(share.effect["Io"]?.data).decode(SharePresentation.self)
+    #expect(presentation.sourceKeys == [asset.key])
+    let files = presentation.files
     #expect(files.first?.name == "original-current.png")
     #expect(try bridge.call(2).decode(ViewModel.self).busy)
     let cleanup = try #require(resolve(share, value: .bool(false)).first)

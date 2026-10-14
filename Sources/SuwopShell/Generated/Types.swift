@@ -952,6 +952,15 @@ public struct ShareFile: Codable, Sendable {
     }
 }
 
+public struct SharePresentation: Codable, Sendable {
+    public var files: [ShareFile]
+    public var sourceKeys: [AssetKey]?
+    public init(files: [ShareFile] = [], sourceKeys: [AssetKey]? = []) {
+        self.files = files
+        self.sourceKeys = sourceKeys
+    }
+}
+
 public struct StoredAlbum: Codable, Sendable {
     public var key: AlbumKey
     public var members: [AssetKey]
