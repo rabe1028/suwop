@@ -1,5 +1,15 @@
 # Immich の PIN 認証付き閲覧（PP-02C-1）
 
+## PR #24 のレビュー修正
+
+- `8a339cf` のレビューで、閉じた後に届く認証成功の後始末結果が表示へ届かない点と、100ページで一覧取得を打ち切る点を指摘された。遅延ログインの失敗経路も含めて、実際のlock／logout結果を内部イベントへ引き継ぐ。結果を反映できるのは直前の認証試行を閉じた世代だけで、後から開いたセッションやその終了結果を上書きしない。
+- ページ取得はカーソルの循環を検出し、通常一覧と同じ10,000ページ上限を持つ。終了は明示的なnullに限り、欠落・不正・空のカーソルや途中の取得失敗を完全な一覧として公開しない。
+- 対象13件（unit3／専用session10）が成功。10,001枚／101ページの最後のID、通常一覧への非混入、後始末の成功・失敗、後始末中の新しい認証との競合を検証した。strict ClippyとDTO生成も成功し、生成Swift型に差分はない。
+- 修正後の全体checkはRust/FFI266／Swift57、Apple buildは全5 Rust target／XCFrameworkとiOS／universal macOS、実Immich v3.2.4結合は2件が成功（`/tmp/suwop-locked-reviewfix-{check,apple,integration}.log`）。更新HEADのhosted CIは未確認。
+- SwiftUI、native画像処理、正解画像はこのレビュー修正では変更していない。既存のstrict VRT証拠は前回の実行に対応し、更新HEADのhosted VRT／PhotoKit結果とは分けて記録する。
+
+## 初回提出時の状態
+
 実装と最終ローカル検証は完了。hosted CI、実機受入れは未完了。
 
 既存の API キー接続を維持し、同じ接続先・利用者の専用パスワードセッションで PIN を確認する。今回の範囲は locked 写真の一覧と選択した1枚のプレビュー。サーバー上の visibility 変更は PP-02C-2 で扱う。

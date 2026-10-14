@@ -81,6 +81,7 @@ enum AuthFault {
 }
 #[derive(Default)]
 struct Shell {
+    pages: Option<std::collections::VecDeque<Value>>,
     paths: Vec<String>,
     status_reads: usize,
     fail_status: Option<usize>,
@@ -145,7 +146,11 @@ impl Shell {
                                 ["in"],
                             json!(["locked"])
                         );
-                        json!({"assets":{"items":[asset()],"nextCursor":null}})
+                        if let Some(pages) = &mut self.pages {
+                            pages.pop_front().ok_or("missing pagefixture")?
+                        } else {
+                            json!({"assets":{"items":[asset()],"nextCursor":null}})
+                        }
                     }
                     "auth/session/lock" => {
                         if self.lock_fail {
@@ -292,6 +297,10 @@ fn wrong_pin_wrong_account_and_unset_pin_never_publish_private_entries() -> Resu
             assert!(!s.paths.contains(&"auth/login".into()));
         } else {
             assert!(s.paths.contains(&"auth/logout".into()));
+            assert_eq!(
+                c.view().immich_locked_view.remote_lock_confirmed,
+                Some(true)
+            );
         }
     }
     Ok(())
@@ -460,6 +469,164 @@ fn inactive_scene_rejects_queued_open_without_credentials_or_server_side_session
         assert_eq!(c.view().immich_locked_view.state, ImmichLockedState::Locked);
         assert!(s.paths.is_empty());
         assert!(c.view().immich_locked_view.entries.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn locked_library_over_one_hundred_pages_is_complete_and_remains_ephemeral() -> Result<(), String> {
+    let c = core(false);
+    let pages=(0..101).map(|page| {
+        let items=(0..if page==100 {1}else{100}).map(|item|{let mut asset=asset();asset["id"]=json!(format!("{:08x}-1111-4111-8111-111111111111",page*100+item+1));asset}).collect::<Vec<_>>();
+        json!({"assets":{"items":items,"nextCursor":if page==100 {Value::Null}else{json!(format!("cursor-{}",page+1))}}})
+    }).collect();
+    let mut s = Shell {
+        pages: Some(pages),
+        ..Shell::default()
+    };
+    s.run(&c, open(GRANT))?;
+    let view = c.view();
+    assert_eq!(view.immich_locked_view.state, ImmichLockedState::Open);
+    assert_eq!(
+        view.immich_locked_view
+            .entries
+            .as_ref()
+            .ok_or("no complete list")?
+            .len(),
+        10_001
+    );
+    assert_eq!(
+        s.paths
+            .iter()
+            .filter(|p| p.as_str() == "search/metadata")
+            .count(),
+        101
+    );
+    assert_eq!(
+        view.immich_locked_view
+            .entries
+            .as_ref()
+            .ok_or("no complete list")?
+            .last()
+            .ok_or("missing final asset")?
+            .id,
+        format!("{:08x}-1111-4111-8111-111111111111", 10_001)
+    );
+    assert!(view.state.snapshots.is_empty());
+    assert!(view.photos.is_empty());
+    Ok(())
+}
+
+#[test]
+fn missing_malformed_empty_or_cyclic_cursor_never_publishes_partial_locked_library()
+-> Result<(), String> {
+    for next in [
+        None,
+        Some(json!(false)),
+        Some(json!(123)),
+        Some(json!("")),
+        Some(json!("cycle")),
+        Some(json!("unavailable")),
+    ] {
+        let c = core(false);
+        let mut page = json!({"assets":{"items":[asset()]}});
+        if let Some(next) = &next {
+            page["assets"]["nextCursor"] = next.clone();
+        }
+        let mut pages = std::collections::VecDeque::from([page]);
+        if next == Some(json!("cycle")) {
+            pages.push_back(json!({"assets":{"items":[],"nextCursor":"cycle"}}));
+        }
+        let mut s = Shell {
+            pages: Some(pages),
+            ..Shell::default()
+        };
+        s.run(&c, open(GRANT))?;
+        assert_eq!(c.view().immich_locked_view.state, ImmichLockedState::Locked);
+        assert!(c.view().immich_locked_view.entries.is_none());
+        assert!(c.view().immich_locked_view.image.is_none());
+        assert_eq!(
+            c.view().immich_locked_view.remote_lock_confirmed,
+            Some(true)
+        );
+        assert!(s.paths.contains(&"auth/logout".into()));
+    }
+    Ok(())
+}
+fn response(result: Result<Value, String>) -> ShellResponse {
+    match result {
+        Ok(value) => ShellResponse {
+            value: Some(value),
+            error: None,
+        },
+        Err(error) => ShellResponse {
+            value: None,
+            error: Some(error),
+        },
+    }
+}
+
+#[test]
+fn cancelled_late_login_cleanup_reports_truth_and_never_overwrites_newer_grant()
+-> Result<(), String> {
+    for confirmed in [true, false] {
+        for reopen in [false, true] {
+            let c = core(false);
+            let mut s = Shell {
+                lock_fail: !confirmed,
+                logout_fail: !confirmed,
+                ..Shell::default()
+            };
+            s.run(
+                &c,
+                Event::ImmichLockedSceneChanged {
+                    scene_id: SCENE.into(),
+                    phase: suwop_core::protection::ProtectionScenePhase::Active,
+                },
+            )?;
+            let mut effects = c.process_event(open(GRANT));
+            let Effect::Io(mut preflight) = effects.remove(0);
+            let preflight_response = response(s.respond(&preflight.operation));
+            effects.extend(
+                c.resolve(&mut preflight, preflight_response)
+                    .map_err(|_| "preflight")?,
+            );
+            let Effect::Io(mut login) = effects.remove(0);
+            s.run(&c, Event::CloseImmichLocked)?;
+            let login_response = response(s.respond(&login.operation));
+            effects.extend(
+                c.resolve(&mut login, login_response)
+                    .map_err(|_| "late login")?,
+            );
+            while !effects.is_empty() {
+                let Effect::Io(mut request) = effects.remove(0);
+                if reopen
+                    && matches!(&request.operation,ShellOperation::Http(http) if http.url.ends_with("auth/logout"))
+                {
+                    s.run(&c, open("88888888-8888-4888-8888-888888888888"))?;
+                }
+                let result = s.respond(&request.operation);
+                effects.extend(
+                    c.resolve(&mut request, response(result))
+                        .map_err(|_| "cleanup")?,
+                );
+            }
+            let view = c.view().immich_locked_view;
+            if reopen {
+                assert_eq!(view.state, ImmichLockedState::Open);
+                assert_eq!(
+                    view.grant_id.as_deref(),
+                    Some("88888888-8888-4888-8888-888888888888")
+                );
+                assert_eq!(view.remote_lock_confirmed, None);
+            } else {
+                assert_eq!(view.state, ImmichLockedState::Locked);
+                assert_eq!(view.remote_lock_confirmed, Some(confirmed));
+                assert!(view.entries.is_none());
+            }
+            assert!(s.paths.contains(&"auth/session/lock".into()));
+            assert!(s.paths.contains(&"auth/logout".into()));
+        }
     }
     Ok(())
 }

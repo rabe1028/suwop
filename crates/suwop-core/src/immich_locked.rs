@@ -161,6 +161,29 @@ pub enum LockedFailure {
     PinNotSet,
     PasswordUnavailable,
 }
+#[derive(Debug, Clone)]
+pub struct OpenFailure {
+    failure: LockedFailure,
+    cleanup_confirmed: Option<bool>,
+}
+impl From<LockedFailure> for OpenFailure {
+    fn from(failure: LockedFailure) -> Self {
+        Self {
+            failure,
+            cleanup_confirmed: None,
+        }
+    }
+}
+impl From<String> for OpenFailure {
+    fn from(_: String) -> Self {
+        LockedFailure::Authentication.into()
+    }
+}
+impl From<&str> for OpenFailure {
+    fn from(_: &str) -> Self {
+        LockedFailure::Authentication.into()
+    }
+}
 impl LockedFailure {
     fn message(self) -> &'static str {
         match self {
@@ -372,12 +395,12 @@ async fn open_session(
     email: Secret,
     password: Secret,
     pin: Secret,
-) -> Result<OpenedSession, LockedFailure> {
+) -> Result<OpenedSession, OpenFailure> {
     let mut features_request = ordinary.request("server/features", "GET", None);
     features_request.headers.remove("x-api-key");
     let features = guarded(ctx, &generation, expected, features_request).await?;
     if features["passwordLogin"] != true {
-        return Err(LockedFailure::PasswordUnavailable);
+        return Err(LockedFailure::PasswordUnavailable.into());
     }
     let mut login = ordinary.request(
         "auth/login",
@@ -387,11 +410,17 @@ async fn open_session(
     login.headers.remove("x-api-key");
     check(&generation, expected)?;
     // Parse the token even after local cancellation, so a late login can be cleaned up.
-    let response = http(ctx, login).await?;
+    let response = http(ctx, login).await.map_err(|_| OpenFailure {
+        failure: LockedFailure::Authentication,
+        cleanup_confirmed: Some(false),
+    })?;
     let token = response.body["accessToken"]
         .as_str()
         .filter(|s| !s.is_empty() && !s.contains(['\r', '\n']))
-        .ok_or(ERROR)?
+        .ok_or(OpenFailure {
+            failure: LockedFailure::Authentication,
+            cleanup_confirmed: Some(false),
+        })?
         .to_owned();
     let session = DedicatedSession {
         ordinary,
@@ -408,8 +437,11 @@ async fn open_session(
             hard_deadline,
         }),
         Err(failure) => {
-            cleanup(ctx, &session).await;
-            Err(failure)
+            let confirmed = cleanup(ctx, &session).await;
+            Err(OpenFailure {
+                failure,
+                cleanup_confirmed: Some(confirmed),
+            })
         }
     }
 }
@@ -463,7 +495,8 @@ async fn open_authenticated(
     let mut entries = Vec::new();
     let mut cursor: Option<String> = None;
     let mut seen = BTreeSet::new();
-    for _ in 0..100 {
+    let mut cursors = BTreeSet::new();
+    for _ in 0..10_000 {
         let mut body = json!({"size":100,"withExif":true,"filter":{"visibility":{"in":["locked"]},"trashedAt":{"eq":null}},"orderBy":{"field":"fileCreatedAt","direction":"desc"}});
         if let Some(c) = &cursor {
             body["cursor"] = json!(c);
@@ -493,10 +526,18 @@ async fn open_authenticated(
                 asset: asset.record(&session.ordinary.scope, None, None),
             });
         }
-        cursor = page["assets"]["nextCursor"].as_str().map(str::to_owned);
-        if cursor.is_none() {
+        let next = page["assets"].get("nextCursor").ok_or(ERROR)?;
+        if next.is_null() {
             return Ok((entries, status(ctx, generation, expected, session).await?));
         }
+        let next = next
+            .as_str()
+            .filter(|value| !value.is_empty())
+            .ok_or(ERROR)?;
+        if !cursors.insert(next.to_owned()) {
+            return Err(ERROR.into());
+        }
+        cursor = Some(next.to_owned());
     }
     Err(ERROR.into())
 }
@@ -673,7 +714,9 @@ pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Eff
             generation,
             confirmed,
         } => {
-            if epoch(&model.immich_locked) == generation {
+            if epoch(&model.immich_locked) == generation
+                && model.immich_locked.state == ImmichLockedState::Locked
+            {
                 model.immich_locked.remote_lock_confirmed = Some(confirmed);
             }
             Command::done()
@@ -826,19 +869,27 @@ fn begin(
         ctx.send_event(Event::ImmichLockedOpened { generation, result });
     }))
 }
+// A callback may update only the immediately revoked attempt, before any newer opening.
+fn closed_attempt(model: &Model, attempt: u64) -> bool {
+    model.immich_locked.state == ImmichLockedState::Locked
+        && epoch(&model.immich_locked) == attempt.wrapping_add(1)
+}
 fn opened(
     model: &mut Model,
     generation: u64,
-    result: Result<OpenedSession, LockedFailure>,
+    result: Result<OpenedSession, OpenFailure>,
 ) -> Command<crate::app::Effect, Event> {
     let mut result = match result {
         Ok(result) => result,
         Err(failure) => {
             if epoch(&model.immich_locked) == generation {
-                model.immich_locked.error = Some(failure.message().into());
+                model.immich_locked.error = Some(failure.failure.message().into());
                 let command = close(model);
-                model.immich_locked.remote_lock_confirmed = Some(false);
+                model.immich_locked.remote_lock_confirmed = failure.cleanup_confirmed;
                 return command;
+            }
+            if closed_attempt(model, generation) {
+                model.immich_locked.remote_lock_confirmed = failure.cleanup_confirmed;
             }
             return Command::done();
         }
@@ -848,9 +899,18 @@ fn opened(
         || model.immich_locked.scene_id != model.immich_locked.active_scene
         || !bound(model, &result.session)
     {
-        return Command::new(move |ctx| async move {
-            cleanup(&ctx, &result.session).await;
-        });
+        let release = if epoch(&model.immich_locked) == generation {
+            close(model)
+        } else {
+            Command::done()
+        };
+        return release.and(Command::new(move |ctx| async move {
+            let confirmed = cleanup(&ctx, &result.session).await;
+            ctx.send_event(Event::ImmichLockedClosed {
+                generation: generation.wrapping_add(1),
+                confirmed,
+            });
+        }));
     }
     result
         .entries
@@ -1076,5 +1136,84 @@ mod tests {
         let mut model = open_model();
         let _ = timers(&mut model, std::time::Instant::now());
         assert_eq!(model.immich_locked.state, ImmichLockedState::Locked);
+    }
+    #[test]
+    fn stale_successful_open_cleanup_reports_truth_without_overwriting_a_new_generation()
+    -> Result<(), String> {
+        for confirmed in [true, false] {
+            for newer in 0..3 {
+                let mut model = open_model();
+                let session = model
+                    .immich_locked
+                    .session
+                    .take()
+                    .ok_or("missing fixture session")?;
+                let result = OpenedSession {
+                    session: session.clone(),
+                    entries: vec![],
+                    lease_deadline: std::time::Instant::now() + std::time::Duration::from_secs(30),
+                    hard_deadline: std::time::Instant::now() + std::time::Duration::from_mins(15),
+                };
+                model.immich_locked.state = ImmichLockedState::Locked;
+                model.immich_locked.grant_id = None;
+                model.immich_locked.generation.store(2, Ordering::SeqCst);
+                let mut command = opened(&mut model, 1, Ok(result));
+                let mut attempts = 0;
+                loop {
+                    let effects: Vec<_> = command.effects().collect();
+                    if effects.is_empty() {
+                        break;
+                    }
+                    for crate::app::Effect::Io(mut request) in effects {
+                        let ShellOperation::Http(http) = &request.operation else {
+                            return Err("unexpected stale cleanup effect".into());
+                        };
+                        attempts += 1;
+                        if http.url.ends_with("auth/logout") && newer > 0 {
+                            model
+                                .immich_locked
+                                .generation
+                                .store(if newer == 1 { 3 } else { 4 }, Ordering::SeqCst);
+                            model.immich_locked.state = if newer == 1 {
+                                ImmichLockedState::Open
+                            } else {
+                                ImmichLockedState::Locked
+                            };
+                            model.immich_locked.grant_id = (newer == 1).then(|| "new-grant".into());
+                            model.immich_locked.session = (newer == 1).then(|| session.clone());
+                            model.immich_locked.remote_lock_confirmed = Some(!confirmed);
+                        }
+                        let response = if confirmed {
+                            crate::app::ShellResponse {
+                                value: Some(json!({"status":200,"body":{"successful":true}})),
+                                error: None,
+                            }
+                        } else {
+                            crate::app::ShellResponse {
+                                value: None,
+                                error: Some("unavailable".into()),
+                            }
+                        };
+                        request.resolve(response).map_err(|_| "cleanup resolve")?;
+                    }
+                }
+                for event in command.events() {
+                    let _ = update(event, &mut model);
+                }
+                assert_eq!(attempts, 2);
+                if newer == 0 {
+                    assert_eq!(model.immich_locked.remote_lock_confirmed, Some(confirmed));
+                    assert_eq!(model.immich_locked.state, ImmichLockedState::Locked);
+                } else {
+                    assert_eq!(model.immich_locked.remote_lock_confirmed, Some(!confirmed));
+                    assert_eq!(
+                        model.immich_locked.grant_id.as_deref(),
+                        if newer == 1 { Some("new-grant") } else { None }
+                    );
+                }
+                assert!(model.immich_locked.image.is_none());
+            }
+        }
+        Ok(())
     }
 }

@@ -311,7 +311,7 @@ pub enum Event {
     #[serde(skip)]
     ImmichLockedOpened {
         generation: u64,
-        result: Result<crate::immich_locked::OpenedSession, crate::immich_locked::LockedFailure>,
+        result: Result<crate::immich_locked::OpenedSession, crate::immich_locked::OpenFailure>,
     },
     #[serde(skip)]
     ImmichLockedClosed {
