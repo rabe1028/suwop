@@ -104,9 +104,7 @@ pub enum ShellOperation {
         source: String,
         destination: String,
     },
-    ShareFiles {
-        files: Vec<crate::sharing::ShareFile>,
-    },
+    ShareFiles(crate::sharing::SharePresentation),
     PlayMedia {
         plan: crate::media::PlaybackPlan,
     },
@@ -150,6 +148,7 @@ pub enum ShellOperation {
         directory: String,
     },
     EditImage {
+        key: crate::domain::AssetKey,
         presentation: crate::editing::ImageEditPresentation,
     },
     AppleEditSave {
@@ -334,6 +333,8 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    /// Observation-only token shared with in-flight workflows; never persisted.
+    pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
     pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
@@ -355,7 +356,7 @@ pub struct ViewModel {
     pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
     pub albums: Vec<crate::albums::AlbumView>,
     pub browser: crate::browser::BrowserView,
-    pub state: SavedLibrary,
+    pub state: crate::privacy::PublishedLibrary,
     pub photos: Vec<UnifiedPhoto>,
     pub busy: bool,
     pub status: String,
@@ -405,11 +406,14 @@ impl crux_core::App for Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 2;
+                model.ready = model.state.schema_version == 3;
                 update_preview_preferences(model, preview_to_select);
                 Command::done()
             }
             Event::AppleChanged => {
+                model
+                    .apple_generation
+                    .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 invalidate_apple(&mut model.state);
                 model.changed_during_work = model.busy;
                 Command::done()
@@ -422,8 +426,16 @@ impl crux_core::App for Suwop {
                 model.status = "処理中…".into();
                 let state = model.state.clone();
                 let session = model.session.clone();
+                let apple_generation = model.apple_generation.clone();
                 Command::new(move |ctx| async move {
-                    let result = crate::workflow::run(&ctx, event, state, session).await;
+                    let result = crate::workflow::run_observed(
+                        &ctx,
+                        event,
+                        state,
+                        session,
+                        apple_generation,
+                    )
+                    .await;
                     ctx.send_event(Event::Finished {
                         state: result.state,
                         session: result.session,
@@ -438,7 +450,15 @@ impl crux_core::App for Suwop {
     fn view(&self, model: &Model) -> ViewModel {
         let mut move_blockers = std::collections::BTreeMap::new();
         let can_transfer = model.ready && model.session.is_some() && !model.busy;
+        let content_access = crate::privacy::ContentAccess::new(&model.state);
         for receipt in &model.state.receipts {
+            if !content_access.receipt_visible(receipt) {
+                move_blockers.insert(
+                    receipt.id.clone(),
+                    vec!["写真の可視性を確認して一覧を更新してください。".into()],
+                );
+                continue;
+            }
             let mut blockers = receipt.move_blockers();
             if !can_transfer {
                 blockers.push("接続または処理状態を確認してください".into());
@@ -459,9 +479,10 @@ impl crux_core::App for Suwop {
             }
             move_blockers.insert(receipt.id.clone(), blockers);
         }
-        let photos = catalog(&model.state.snapshots, &model.state.receipts);
+        let public = crate::privacy::PublishedLibrary::from_canonical(&model.state);
+        let photos = catalog(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
-            &model.state.snapshots,
+            &public.snapshots,
             &model.state.apple_scope,
             model.session.as_ref(),
         );
@@ -476,7 +497,7 @@ impl crux_core::App for Suwop {
             .collect();
         let displayed_dates = displayed_dates(&preview_choices);
         let editing_access =
-            crate::editing::EditingAccess::new(&model.state.snapshots, &model.state.apple_scope);
+            crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
         ViewModel {
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
@@ -488,7 +509,7 @@ impl crux_core::App for Suwop {
                 .map(|p| {
                     (
                         crate::browser::photo_id(p),
-                        crate::metadata::targets(p, &model.state.snapshots),
+                        crate::metadata::targets(p, &public.snapshots),
                     )
                 })
                 .collect(),
@@ -505,21 +526,23 @@ impl crux_core::App for Suwop {
                     crate::media::kind(p).map(|kind| (crate::browser::photo_id(p), kind))
                 })
                 .collect(),
-            albums: crate::albums::views(&model.state.albums, &photos, &model.state.snapshots),
+            albums: crate::albums::views(&public.albums, &photos, &public.snapshots),
             browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
-            pending_apple_count: model
-                .state
+            pending_apple_count: public
                 .snapshots
                 .iter()
                 .filter(|s| s.provider == Provider::Apple)
                 .flat_map(|s| &s.assets)
                 .filter(|a| !a.fingerprints_complete())
                 .count(),
-            state: model.state.clone(),
+            state: public,
             busy: model.busy,
-            status: model.status.clone(),
-            error: model.error.clone(),
+            status: crate::privacy::public_text(&model.state, &model.status),
+            error: model
+                .error
+                .as_ref()
+                .map(|error| crate::privacy::public_text(&model.state, error)),
             server_version: model.session.as_ref().map(|s| s.version.description()),
             can_transfer,
             move_blockers,
@@ -550,7 +573,10 @@ fn choose_preview(
     if !model.ready {
         return Err("写真ライブラリを読み込んでください。".into());
     }
-    let photos = catalog(&model.state.snapshots, &model.state.receipts);
+    if !model.state.apple_content_visible(anchor) || !model.state.apple_content_visible(&key) {
+        return Err("写真の可視性を確認してください。".into());
+    }
+    let photos = catalog(&model.state.presentation_snapshots(), &model.state.receipts);
     let photo = photos
         .iter()
         .find(|p| p.assets.iter().any(|a| a.key == *anchor))

@@ -11,6 +11,7 @@ ORDER = {
     "AlbumKey": ["provider", "scope", "albumID"],
     "PhotoResource": ["id", "name", "role", "sha1", "bytes"],
     "StoredAsset": [
+        "appleVisibility",
         "key",
         "name",
         "capturedAt",
@@ -79,6 +80,8 @@ def generate(schema):
         args = []
         for field, kind in fields:
             default = " = nil" if kind.endswith("?") else ""
+            if field == "appleVisibility":
+                default = " = .unknown"
             if field in {"isFavorite", "isOffline"}:
                 default = " = false"
             if field == "inventoryComplete":

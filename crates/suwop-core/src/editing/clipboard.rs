@@ -25,6 +25,8 @@ impl EditCopyOptions {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct EditClipboard {
+    #[serde(default)]
+    pub source_key: Option<AssetKey>,
     pub source_name: String,
     pub dimensions: PixelSize,
     pub transform: ImageTransform,
@@ -42,6 +44,7 @@ impl EditClipboard {
             return Err("Suwopで保存した編集がある写真を選んでください。".into());
         }
         Ok(Self {
+            source_key: None,
             source_name: source.name.clone(),
             dimensions: source.draft.dimensions,
             transform: source.draft.current()?,

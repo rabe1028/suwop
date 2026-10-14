@@ -57,6 +57,8 @@ jobs:
         run: make test
       - name: Build universal Rust libraries, iOS and macOS apps
         run: make apple-build
+      - name: Verify native sharing source invalidation and selected-service leases
+        run: make sharing-test
 
   vrt:
     runs-on: macos-26

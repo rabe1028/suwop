@@ -52,6 +52,7 @@ func editingAsset() -> StoredAsset {
         id: "0", name: "photo.jpg", role: .image, sha1: String(repeating: "a", count: 40), bytes: 12
     )
     return StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "library", assetID: "photo"),
         name: "photo.jpg",
         capturedAt: Date(timeIntervalSince1970: 10),

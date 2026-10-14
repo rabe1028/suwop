@@ -9,6 +9,7 @@ extension SnapshotFixtures {
         let clipboard = EditClipboard(
             dimensions: draft.dimensions,
             options: EditCopyOptions(adjustments: true, filter: true, geometry: false),
+            sourceKey: AssetKey(provider: .apple, scope: "vrt", assetID: "photo-0"),
             sourceName: "夏の写真-0.JPG",
             transform: editor.state.transform
         )

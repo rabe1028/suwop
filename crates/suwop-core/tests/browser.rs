@@ -6,6 +6,7 @@ fn photo(id: &str, date: Option<f64>, role: ResourceRole, favorite: bool) -> Uni
     UnifiedPhoto {
         presence: Presence::AppleOnly,
         assets: vec![StoredAsset {
+            apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,
                 scope: "library".into(),
@@ -169,7 +170,8 @@ fn browsing_remains_available_while_native_work_is_running() {
         Model {
             busy: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
+                apple_scope: "library".into(),
                 snapshots: vec![LibrarySnapshot {
                     provider: Provider::Apple,
                     scope: "library".into(),

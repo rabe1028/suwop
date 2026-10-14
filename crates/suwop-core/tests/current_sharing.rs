@@ -20,6 +20,7 @@ const OWNER: &str = "22222222-2222-4222-8222-222222222222";
 const FILE: &str = "33333333-3333-4333-8333-333333333333";
 fn apple() -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -71,7 +72,7 @@ fn facts() -> CurrentImageFacts {
 }
 fn state(asset: StoredAsset) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: asset.key.provider,
@@ -185,9 +186,10 @@ impl Shell {
                 self.trace.push("copy".into());
                 Ok(Value::Null)
             }
-            ShellOperation::ShareFiles { files } => {
+            ShellOperation::ShareFiles(presentation) => {
+                assert_eq!(presentation.source_keys, Some(vec![self.asset.key.clone()]));
                 self.trace.push("share".into());
-                self.files = files.into_iter().map(|f| f.name).collect();
+                self.files = presentation.files.into_iter().map(|f| f.name).collect();
                 Ok(json!(!matches!(self.fault, Fault::Cancel)))
             }
             ShellOperation::Cleanup { .. } => {

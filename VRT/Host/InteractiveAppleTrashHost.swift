@@ -28,11 +28,12 @@ import SwiftUI
             scope: "fixture",
             visibility: .absent
         )
-        return SavedLibrary(appleScope: "fixture", pendingAppleTrash: [operation], schemaVersion: 2)
+        return SavedLibrary(appleScope: "fixture", pendingAppleTrash: [operation], schemaVersion: 3)
     }
 
     private static func fixture() throws -> LibraryModel {
         let asset = StoredAsset(
+            appleVisibility: .visible,
             key: AssetKey(provider: .apple, scope: "fixture", assetID: "one"),
             name: "生成写真.JPG",
             revision: "1",

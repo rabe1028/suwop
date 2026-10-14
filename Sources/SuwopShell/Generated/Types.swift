@@ -230,6 +230,12 @@ public enum AppleTrashVisibility: String, Codable, CaseIterable, Sendable {
     case `mixed`
 }
 
+public enum AppleVisibility: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `visible`
+    case `hidden`
+}
+
 public struct AssetKey: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -392,11 +398,13 @@ public struct CurrentImageRenderResult: Codable, Sendable {
 public struct EditClipboard: Codable, Sendable {
     public var dimensions: PixelSize
     public var options: EditCopyOptions
+    public var sourceKey: AssetKey?
     public var sourceName: String
     public var transform: ImageTransform
-    public init(dimensions: PixelSize, options: EditCopyOptions, sourceName: String, transform: ImageTransform) {
+    public init(dimensions: PixelSize, options: EditCopyOptions, sourceKey: AssetKey? = nil, sourceName: String, transform: ImageTransform) {
         self.dimensions = dimensions
         self.options = options
+        self.sourceKey = sourceKey
         self.sourceName = sourceName
         self.transform = transform
     }
@@ -804,10 +812,12 @@ public struct PlaybackPlan: Codable, Sendable {
     public var files: [String]
     public var kind: PlaybackKind
     public var name: String
-    public init(files: [String] = [], kind: PlaybackKind, name: String) {
+    public var sourceKeys: [AssetKey]
+    public init(files: [String] = [], kind: PlaybackKind, name: String, sourceKeys: [AssetKey] = []) {
         self.files = files
         self.kind = kind
         self.name = name
+        self.sourceKeys = sourceKeys
     }
 }
 
@@ -841,6 +851,37 @@ public struct PreviewChoice: Codable, Sendable {
 public enum Provider: String, Codable, CaseIterable, Sendable {
     case `apple`
     case `immich`
+}
+
+public struct PublishedLibrary: Codable, Sendable {
+    public var albums: [AlbumSnapshot]
+    public var appleScope: String
+    public var connection: ConnectionSettings?
+    public var editClipboard: EditClipboard?
+    public var pendingAppleTrash: [AppleTrashOperation]
+    public var pendingEditPastes: [PendingEditPaste]
+    public var pendingTrash: [TrashOperation]
+    public var pendingUploads: [PendingUpload]
+    public var receipts: [TransferReceipt]
+    public var schemaVersion: Int64
+    public var snapshots: [LibrarySnapshot]
+    public var trash: TrashSnapshot?
+    public var uploadIntents: [UploadIntent]
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+        self.albums = albums
+        self.appleScope = appleScope
+        self.connection = connection
+        self.editClipboard = editClipboard
+        self.pendingAppleTrash = pendingAppleTrash
+        self.pendingEditPastes = pendingEditPastes
+        self.pendingTrash = pendingTrash
+        self.pendingUploads = pendingUploads
+        self.receipts = receipts
+        self.schemaVersion = schemaVersion
+        self.snapshots = snapshots
+        self.trash = trash
+        self.uploadIntents = uploadIntents
+    }
 }
 
 public enum RenderFormat: String, Codable, CaseIterable, Sendable {
@@ -911,6 +952,15 @@ public struct ShareFile: Codable, Sendable {
     }
 }
 
+public struct SharePresentation: Codable, Sendable {
+    public var files: [ShareFile]
+    public var sourceKeys: [AssetKey]?
+    public init(files: [ShareFile] = [], sourceKeys: [AssetKey]? = []) {
+        self.files = files
+        self.sourceKeys = sourceKeys
+    }
+}
+
 public struct StoredAlbum: Codable, Sendable {
     public var key: AlbumKey
     public var members: [AssetKey]
@@ -925,6 +975,7 @@ public struct StoredAlbum: Codable, Sendable {
 }
 
 public struct StoredAsset: Codable, Sendable {
+    public var appleVisibility: AppleVisibility
     public var key: AssetKey
     public var name: String
     public var capturedAt: Date?
@@ -937,7 +988,8 @@ public struct StoredAsset: Codable, Sendable {
     public var inventoryComplete: Bool
     public var isOffline: Bool
     public var deletionBlockers: [String]
-    public init(key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = []) {
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = []) {
+        self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
         self.capturedAt = capturedAt
@@ -1179,9 +1231,9 @@ public struct ViewModel: Codable, Sendable {
     public var previewSources: [String: AssetKey]
     public var remoteVersion: Version?
     public var serverVersion: String?
-    public var state: SavedLibrary
+    public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: SavedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.browser = browser
         self.busy = busy

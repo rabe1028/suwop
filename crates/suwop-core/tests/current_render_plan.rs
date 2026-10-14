@@ -8,6 +8,7 @@ use suwop_core::{
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 fn source() -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Immich,
             scope: "library".into(),

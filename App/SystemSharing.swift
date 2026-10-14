@@ -4,6 +4,7 @@ import SuwopShell
     import UIKit
 #else
     import AppKit
+    import os
 #endif
 
 /// Native presentation only. The Rust workflow retains all files until this
@@ -11,25 +12,64 @@ import SuwopShell
 /// a sharing extension can still be reading them.
 @MainActor final class SystemSharing {
     private var active: NativeSharePresentation?
+    #if os(macOS) && SUWOP_SHARING_TEST
+        var pickerTestHooks: SharingPickerTestHooks?
+    #endif
 
-    func present(_ files: [ShareFile]) async throws -> Bool {
+    func invalidateForContentChange() {
+        active?.invalidateForContentChange()
+    }
+
+    func present(_ request: SharePresentation, context: ContentPresentationContext) async throws -> Bool {
+        try context.requireCurrent(sourceKeys: request.sourceKeys)
         guard active == nil else { throw SuwopError("共有がすでに進行中です。") }
-        let presentation = NativeSharePresentation()
+        let presentation = NativeSharePresentation(sourceKeys: request.sourceKeys ?? [])
+        #if os(macOS) && SUWOP_SHARING_TEST
+            presentation.pickerTestHooks = pickerTestHooks
+        #endif
         active = presentation
         defer { active = nil }
-        return try await presentation.present(files)
+        return try await presentation.present(request.files, context: context)
     }
 }
 
 /// One delegate per operation prevents late callbacks from a previous service
 /// from completing a newer operation and releasing its files early.
 @MainActor private final class NativeSharePresentation: NSObject {
+    private let sourceKeys: [AssetKey]
     private var pending: CheckedContinuation<Bool, Error>?
     #if os(macOS)
         private var picker: NSSharingServicePicker?
+        /// SDK picker delegate methods are nonisolated. Record selection before
+        /// they return: the service may receive the files immediately afterwards.
+        private nonisolated let selectedService = OSAllocatedUnfairLock(initialState: false)
+    #endif
+    #if os(macOS) && SUWOP_SHARING_TEST
+        var pickerTestHooks: SharingPickerTestHooks?
     #endif
 
-    func present(_ files: [ShareFile]) async throws -> Bool {
+    init(sourceKeys: [AssetKey]) {
+        self.sourceKeys = sourceKeys
+    }
+
+    func invalidateForContentChange() {
+        // Only the actual physical read sources matter; equivalent Apple copies
+        // do not invalidate an Immich-only lease. Legacy identity is conservative.
+        guard sourceKeys.isEmpty || sourceKeys.contains(where: { $0.provider == .apple }) else { return }
+        #if os(macOS)
+            guard !selectedService.withLock({ $0 }) else { return }
+            // close() reports nil didChoose; only that callback releases files.
+            closePicker()
+        #else
+            // UIActivityViewController has no public selection-before-handoff
+            // signal. Keep the lease until completionWithItemsHandler, rather
+            // than dismissing an extension or releasing its files early.
+            // https://developer.apple.com/documentation/uikit/uiactivityviewcontroller/completionwithitemshandler-swift.property
+            // Data already handed to another app cannot be withdrawn here.
+        #endif
+    }
+
+    func present(_ files: [ShareFile], context: ContentPresentationContext) async throws -> Bool {
         try Task.checkCancellation()
         guard pending == nil, !files.isEmpty else { throw SuwopError("共有画面を開けません。") }
         let urls = files.map { URL(fileURLWithPath: $0.path) }
@@ -45,6 +85,11 @@ import SuwopShell
                 presenter = shown
             }
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
                 controller.completionWithItemsHandler = { @Sendable [weak self] _, completed, _, error in
@@ -60,23 +105,59 @@ import SuwopShell
                     )
                     popover.permittedArrowDirections = []
                 }
-                presenter.present(controller, animated: true) { [weak self] in
-                    controller.presentationController?.delegate = self
-                }
+                presenter.present(controller, animated: true)
             }
         #else
-            guard let view = NSApplication.shared.keyWindow?.contentView else {
-                throw SuwopError("共有画面を表示するウインドウがありません。")
-            }
+            let view = try presentationView()
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 let picker = NSSharingServicePicker(items: urls)
                 self.picker = picker
                 picker.delegate = self
-                picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+                showPicker(picker, in: view)
             }
         #endif
     }
+
+    #if os(macOS)
+        private func presentationView() throws -> NSView {
+            #if SUWOP_SHARING_TEST
+                if let pickerTestHooks {
+                    return pickerTestHooks.presentationView
+                }
+            #endif
+            guard let view = NSApplication.shared.keyWindow?.contentView else {
+                throw SuwopError("共有画面を表示するウインドウがありません。")
+            }
+            return view
+        }
+
+        private func closePicker() {
+            guard let picker else { return }
+            #if SUWOP_SHARING_TEST
+                if let pickerTestHooks {
+                    pickerTestHooks.close(picker)
+                    return
+                }
+            #endif
+            picker.close()
+        }
+
+        private func showPicker(_ picker: NSSharingServicePicker, in view: NSView) {
+            #if SUWOP_SHARING_TEST
+                if let pickerTestHooks {
+                    pickerTestHooks.show(picker)
+                    return
+                }
+            #endif
+            picker.show(relativeTo: view.bounds, of: view, preferredEdge: .minY)
+        }
+    #endif
 
     private func finish(completed: Bool, error: Error? = nil) {
         let continuation = pending
@@ -92,11 +173,13 @@ import SuwopShell
     }
 }
 
-#if os(iOS)
-    extension NativeSharePresentation: UIAdaptivePresentationControllerDelegate {
-        func presentationControllerDidDismiss(_ presentationController: UIPresentationController) {
-            finish(completed: false)
-        }
+#if os(macOS) && SUWOP_SHARING_TEST
+    /// Observe picker presentation/close without launching a service or handing
+    /// generated fixture files to another app. Real delegate callbacks own completion.
+    @MainActor struct SharingPickerTestHooks {
+        let presentationView: NSView
+        let show: (NSSharingServicePicker) -> Void
+        let close: (NSSharingServicePicker) -> Void
     }
 #endif
 
@@ -106,8 +189,13 @@ import SuwopShell
             _ sharingServicePicker: NSSharingServicePicker,
             didChoose service: NSSharingService?
         ) {
-            if service == nil {
-                Task { @MainActor [weak self] in self?.finish(completed: false) }
+            if service != nil {
+                selectedService.withLock { $0 = true }
+            } else {
+                Task { @MainActor [weak self] in
+                    guard let self, !selectedService.withLock({ $0 }) else { return }
+                    finish(completed: false)
+                }
             }
         }
 
@@ -117,7 +205,8 @@ import SuwopShell
             _ sharingServicePicker: NSSharingServicePicker,
             delegateFor sharingService: NSSharingService
         ) -> (any NSSharingServiceDelegate)? {
-            self
+            selectedService.withLock { $0 = true }
+            return self
         }
 
         func sharingService(_ sharingService: NSSharingService, didShareItems items: [Any]) {

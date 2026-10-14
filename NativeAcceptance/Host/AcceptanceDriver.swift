@@ -22,6 +22,7 @@ import UIKit
         guard let runtime, let shell else { throw SuwopError("Cannot create production Rust runtime / shell.") }
         var event = data
         event["type"] = .string(type)
+        let context = shell.beginWorkflow()
         var requests = try await runtime.update(.object(event))
         var steps = 0
         while !requests.isEmpty {
@@ -34,7 +35,7 @@ import UIKit
             let failure: String?
             do {
                 try fence(operation)
-                value = try await execute(operation, shell: shell)
+                value = try await execute(operation, shell: shell, context: context)
                 failure = nil
             } catch {
                 value = nil
@@ -50,10 +51,13 @@ import UIKit
         return view
     }
 
-    private func execute(_ operation: ShellOperation, shell: AppleShell) async throws -> JSONValue {
+    private func execute(
+        _ operation: ShellOperation, shell: AppleShell, context: ContentPresentationContext
+    ) async throws -> JSONValue {
         let data = operation.data ?? .null
         switch operation.type {
         case "editImage":
+            try context.requireCurrent(sourceKeys: [data["key"].decode(AssetKey.self)])
             if cancelEditor {
                 return .null
             }
@@ -79,24 +83,24 @@ import UIKit
                 ), draft: cropped.draft
             ))).decode(ImageEditState.self)
             return try .from(edited.draft)
-        case "confirmAppleTrash": return .bool(!cancelTrash)
+        case "confirmAppleTrash": return .bool(context.permits() && !cancelTrash)
         case "appleTrashApply":
-            let result = try await shell.execute(operation)
+            let result = try await shell.execute(operation, context: context)
             if loseNextTrashResponse {
                 loseNextTrashResponse = false
                 throw SuwopError("Intentional lost response after real PhotoKit deletion.")
             }
             return result
-        case "confirmPasteEdits", "confirmReversion": return .bool(true)
+        case "confirmPasteEdits", "confirmReversion": return .bool(context.permits())
         case "appleEditSave":
-            let result = try await shell.execute(operation)
+            let result = try await shell.execute(operation, context: context)
             savedAdjustment = try result.decode(AppleEditResult.self).adjustment
             if loseNextSaveResponse {
                 loseNextSaveResponse = false
                 throw SuwopError("Intentional lost response after real PhotoKit save.")
             }
             return result
-        default: return try await shell.execute(operation)
+        default: return try await shell.execute(operation, context: context)
         }
     }
 

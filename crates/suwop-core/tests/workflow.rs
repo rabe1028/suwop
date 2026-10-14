@@ -32,6 +32,11 @@ enum UploadFault {
     PostLost,
     IntentForgetJournal,
 }
+#[derive(Clone, Copy)]
+enum ObserveWrite {
+    Post,
+    Put,
+}
 struct Shell {
     source: TransferBundle,
     deleted: usize,
@@ -50,6 +55,7 @@ struct Shell {
     http_requests: usize,
     uploaded_name: String,
     uploaded_marker: Value,
+    observe_write: Option<ObserveWrite>,
     reconciliation: Option<Value>,
 }
 impl Shell {
@@ -62,6 +68,7 @@ impl Shell {
             bytes: Some(12),
         };
         let a = StoredAsset {
+            apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,
                 scope: "apple".into(),
@@ -107,6 +114,7 @@ impl Shell {
             http_requests: 0,
             uploaded_name: "test.jpg".into(),
             uploaded_marker: Value::Null,
+            observe_write: None,
             reconciliation: None,
         }
     }
@@ -345,6 +353,20 @@ impl Shell {
                     error: Some(e),
                 },
             };
+            let observed = match (&request.operation, self.observe_write) {
+                (ShellOperation::Persist(saved), Some(ObserveWrite::Post)) => {
+                    !saved.upload_intents.is_empty()
+                }
+                (ShellOperation::Persist(saved), Some(ObserveWrite::Put)) => saved
+                    .pending_uploads
+                    .iter()
+                    .any(|p| p.phase == suwop_core::immich::UploadPhase::MetadataStarted),
+                _ => false,
+            };
+            if observed {
+                self.observe_write = None;
+                assert!(core.process_event(Event::AppleChanged).is_empty());
+            }
             effects.extend(
                 core.resolve(&mut request, response)
                     .map_err(|e| e.to_string())?,
@@ -356,8 +378,15 @@ impl Shell {
 }
 fn core() -> Core<Suwop> {
     let state = SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "apple".into(),
+        snapshots: vec![LibrarySnapshot {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            assets: Shell::new().source.assets,
+            access: ScanAccess::Full,
+            scanned_at: Some(1.0),
+        }],
         ..SavedLibrary::default()
     };
     core_from_state(state)
@@ -986,7 +1015,7 @@ fn schema_migration_preserves_dates_and_disables_legacy_deletion() -> Result<(),
     let state = suwop_core::workflow::migrate(
         json!({"schemaVersion":1,"appleScope":"old","connection":null,"snapshots":[],"receipts":[]}),
     )?;
-    assert_eq!(state.schema_version, 2);
+    assert_eq!(state.schema_version, 3);
     assert_eq!(state.apple_scope, "old");
     assert!(suwop_core::workflow::migrate(json!({"schemaVersion":99})).is_err());
     Ok(())
@@ -1101,7 +1130,7 @@ fn pending_same_original_fences_new_apple_copy_and_move_before_any_journal_or_up
             let mut operation = pending_same_original("immich", SHA1);
             operation.action = action;
             let state = SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 pending_trash: vec![operation],
                 ..SavedLibrary::default()
@@ -1135,8 +1164,15 @@ fn unrelated_originals_and_other_accounts_do_not_fence_transfers() -> Result<(),
     for (scope, checksum) in [("immich", "2".repeat(40)), ("other-account", SHA1.into())] {
         let mut shell = Shell::new();
         let restored = core_from_state(SavedLibrary {
-            schema_version: 2,
+            schema_version: 3,
             apple_scope: "apple".into(),
+            snapshots: vec![LibrarySnapshot {
+                provider: Provider::Apple,
+                scope: "apple".into(),
+                assets: shell.source.assets.clone(),
+                access: ScanAccess::Full,
+                scanned_at: Some(1.0),
+            }],
             pending_trash: vec![pending_same_original(scope, &checksum)],
             ..SavedLibrary::default()
         });
@@ -1154,7 +1190,7 @@ fn pending_same_original_fences_completion_of_an_existing_move() -> Result<(), S
     let mut shell = Shell::new();
     let first = core();
     shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
-    let mut state = first.view().state;
+    let mut state = shell.journal.clone().ok_or("no canonical journal")?;
     state
         .pending_trash
         .push(pending_same_original("immich", SHA1));
@@ -1430,6 +1466,101 @@ fn failed_reconciliation_promotion_rolls_back_before_metadata_or_unrelated_save(
     assert_eq!(
         (shell.writes, shell.metadata_writes, shell.deleted),
         (1, 1, 0)
+    );
+    Ok(())
+}
+
+#[test]
+fn schema2_upload_journals_resume_after_fresh_visible_scan_without_new_post() -> Result<(), String>
+{
+    for fault in [UploadFault::Read, UploadFault::PostLost] {
+        let mut shell = Shell::new();
+        shell.source.assets[0].captured_at = Some(20.0);
+        shell.upload_fault = fault;
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Copy))?;
+        let mut old = serde_json::to_value(shell.journal.as_ref().ok_or("no journal")?)
+            .map_err(|e| e.to_string())?;
+        old["schemaVersion"] = json!(2);
+        for field in ["pendingUploads", "uploadIntents"] {
+            for entry in old[field].as_array_mut().ok_or("journal array")? {
+                entry["source"]
+                    .as_object_mut()
+                    .ok_or("source")?
+                    .remove("appleVisibility");
+            }
+        }
+        let migrated = suwop_core::workflow::migrate(old)?;
+        for source in migrated
+            .pending_uploads
+            .iter()
+            .map(|p| &p.source)
+            .chain(migrated.upload_intents.iter().map(|i| &i.source))
+        {
+            assert_eq!(
+                source.apple_visibility,
+                suwop_core::domain::AppleVisibility::Unknown
+            );
+        }
+        let restored = core_from_state(migrated);
+        shell.upload_fault = UploadFault::None;
+        shell.run(&restored, retry_copy_event(&shell))?;
+        assert!(
+            restored.view().error.is_none(),
+            "{:?}",
+            restored.view().error
+        );
+        assert_eq!(shell.writes, 1);
+        assert_eq!(shell.metadata_writes, 1);
+        assert!(restored.view().state.pending_uploads.is_empty());
+        assert!(restored.view().state.upload_intents.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn apple_change_after_upload_intent_persist_prevents_the_post() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.observe_write = Some(ObserveWrite::Post);
+    let core = core();
+    shell.run(&core, copy_event(&shell, TransferIntent::Copy))?;
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (0, 0, 0)
+    );
+    assert!(core.view().error.is_some());
+    assert_eq!(
+        shell
+            .journal
+            .as_ref()
+            .ok_or("no durable pre-post intent")?
+            .upload_intents
+            .len(),
+        1
+    );
+    Ok(())
+}
+
+#[test]
+fn apple_change_after_metadata_intent_persist_prevents_the_put() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.source.assets[0].captured_at = Some(20.0);
+    shell.observe_write = Some(ObserveWrite::Put);
+    let core = core();
+    shell.run(&core, copy_event(&shell, TransferIntent::Copy))?;
+    assert_eq!(
+        (shell.writes, shell.metadata_writes, shell.deleted),
+        (1, 0, 0)
+    );
+    assert!(core.view().error.is_some());
+    assert_eq!(
+        shell
+            .journal
+            .as_ref()
+            .ok_or("no durable pre-put intent")?
+            .pending_uploads[0]
+            .phase,
+        suwop_core::immich::UploadPhase::MetadataStarted
     );
     Ok(())
 }

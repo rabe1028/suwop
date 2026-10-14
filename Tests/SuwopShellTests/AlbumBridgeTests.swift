@@ -5,6 +5,7 @@ import Testing
     let bridge = try CoreBridge()
     let key = AlbumKey(provider: .apple, scope: "library", albumID: "album")
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "library", assetID: "photo"),
         name: "photo.jpg",
         revision: "1",
@@ -21,7 +22,7 @@ import Testing
     let state = SavedLibrary(
         albums: [snapshot],
         appleScope: "library",
-        schemaVersion: 2,
+        schemaVersion: 3,
         snapshots: [library]
     )
     func resolve(_ request: EffectRequest, value: JSONValue) throws -> [EffectRequest] {
@@ -37,6 +38,11 @@ import Testing
         .decode([EffectRequest].self).first)
     let persist = try #require(resolve(read, value: .from(state)).first)
     _ = try resolve(persist, value: .null)
+    let photoScan = try #require(bridge.call(0, input: .object([
+        "type": .string("refresh"), "permission": .bool(false), "now": .number(0),
+    ])).decode([EffectRequest].self).first)
+    let scannedPhotos = try #require(resolve(photoScan, value: .from(library)).first)
+    _ = try resolve(scannedPhotos, value: .null)
     let scan = try #require(bridge.call(
         0,
         input: .object(["type": .string("editAlbum"), "key": .from(key), "edit": .from(AlbumEdit(action: .delete))])

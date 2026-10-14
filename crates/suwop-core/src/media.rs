@@ -19,7 +19,10 @@ pub enum PlaybackKind {
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct PlaybackPlan {
+    #[serde(default)]
+    pub source_keys: Vec<AssetKey>,
     pub kind: PlaybackKind,
     pub name: String,
     pub files: Vec<String>,

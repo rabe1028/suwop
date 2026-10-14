@@ -1,3 +1,4 @@
+import Foundation
 import SuwopShell
 #if os(iOS)
     import UIKit
@@ -8,14 +9,31 @@ import SuwopShell
 /// Presents a Rust-requested confirmation and completes exactly once.
 @MainActor final class SystemConfirmation {
     private var waiting: CheckedContinuation<Bool, Error>?
+    private var presentationID: UUID?
+    private var invalidated = false
     #if os(iOS)
         private var alert: UIAlertController?
     #else
         private var alert: NSAlert?
     #endif
 
-    func resumeUpload(_ prompt: UploadResumePrompt) async throws -> Bool {
+    /// Some confirmation DTOs identify only names / counts, so conservatively
+    /// close every active confirmation after Apple content access changes.
+    func invalidateForContentChange() {
+        guard let id = presentationID else { return }
+        invalidated = true
+        #if os(iOS)
+            alert?.title = nil
+            alert?.message = nil
+        #else
+            alert?.window.orderOut(nil)
+        #endif
+        cancel(id: id, error: nil)
+    }
+
+    func resumeUpload(_ prompt: UploadResumePrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "作成済みコピーへの反映を再開しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -26,8 +44,9 @@ import SuwopShell
         )
     }
 
-    func forgetUpload(_ prompt: UploadForgetPrompt) async throws -> Bool {
+    func forgetUpload(_ prompt: UploadForgetPrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "未完了コピーの再開記録を解除しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -39,8 +58,12 @@ import SuwopShell
         )
     }
 
-    func forgetUploadIntent(_ prompt: UploadIntentForgetPrompt) async throws -> Bool {
+    func forgetUploadIntent(
+        _ prompt: UploadIntentForgetPrompt,
+        context: ContentPresentationContext
+    ) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "アップロード開始記録を解除しますか？",
             message: """
             Immich · \(prompt.name)
@@ -52,8 +75,9 @@ import SuwopShell
         )
     }
 
-    func revertImage(_ prompt: ReversionPrompt) async throws -> Bool {
+    func revertImage(_ prompt: ReversionPrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "この保存先の写真を原本へ戻しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -64,10 +88,11 @@ import SuwopShell
         )
     }
 
-    func trashApple(_ prompt: AppleTrashPrompt) async throws -> Bool {
+    func trashApple(_ prompt: AppleTrashPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
         return try await confirm(
+            context: context,
             title: "Apple Photos の写真を削除しますか？",
             message: """
             保存先: Apple Photos · \(prompt.names.count) 件
@@ -80,13 +105,14 @@ import SuwopShell
         )
     }
 
-    func changeTrash(_ prompt: TrashPrompt) async throws -> Bool {
+    func changeTrash(_ prompt: TrashPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
         let policy = prompt.retentionDays.map {
             "現在の保持設定は\($0)日です。期間経過やサーバー設定の変更で復元できなくなる場合があります。"
         } ?? "同じ Immich のライブラリへ戻します。"
         return try await confirm(
+            context: context,
             title: prompt.action == .trash ? "Immich のゴミ箱に移しますか？" : "Immich の写真を復元しますか？",
             message: """
             \(prompt.names.count) 件 · \(prompt.address)
@@ -99,7 +125,7 @@ import SuwopShell
         )
     }
 
-    func pasteEdits(_ prompt: PasteEditsPrompt) async throws -> Bool {
+    func pasteEdits(_ prompt: PasteEditsPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 枚" : ""
         let categories = [
@@ -108,6 +134,7 @@ import SuwopShell
             prompt.options.geometry ? "切り抜き・向き" : nil,
         ].compactMap(\.self).joined(separator: "、")
         return try await confirm(
+            context: context,
             title: "\(prompt.names.count) 枚に編集をペーストしますか？",
             message: """
             コピー元: \(prompt.sourceName)
@@ -123,25 +150,35 @@ import SuwopShell
     }
 
     private func confirm(
+        context: ContentPresentationContext,
         title: String,
         message: String,
         action: String,
         destructive: Bool = true
     ) async throws -> Bool {
+        guard context.permits() else { return false }
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()
+        let id = UUID()
+        invalidated = false
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
+                guard context.permits() else {
+                    continuation.resume(returning: false)
+                    return
+                }
                 waiting = continuation
-                do { try open(title: title, message: message, action: action, destructive: destructive) } catch {
-                    finish(error: error)
+                presentationID = id
+                do { try open(title: title, message: message, action: action, destructive: destructive, id: id)
+                } catch {
+                    finish(id: id, error: error)
                 }
             }
-        } onCancel: { Task { @MainActor [weak self] in self?.cancel() } }
+        } onCancel: { Task { @MainActor [weak self] in self?.cancel(id: id) } }
     }
 
-    private func open(title: String, message: String, action: String, destructive: Bool) throws {
+    private func open(title: String, message: String, action: String, destructive: Bool, id: UUID) throws {
         #if os(iOS)
             guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
                 .first(where: { $0.activationState == .foregroundActive }),
@@ -151,11 +188,11 @@ import SuwopShell
                 presenter = shown
             }
             let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.finish() })
+            alert.addAction(UIAlertAction(title: "キャンセル", style: .cancel) { [weak self] _ in self?.finish(id: id) })
             alert.preferredAction = alert.actions.first
             alert
                 .addAction(UIAlertAction(title: action, style: destructive ? .destructive : .default) { [weak self] _ in
-                    self?.finish(confirmed: true)
+                    self?.finish(id: id, confirmed: true)
                 })
             self.alert = alert
             presenter.present(alert, animated: true)
@@ -170,32 +207,36 @@ import SuwopShell
             alert.addButton(withTitle: action)
             self.alert = alert
             alert.beginSheetModal(for: window) { [weak self] response in
-                Task { @MainActor in self?.finish(confirmed: response == .alertSecondButtonReturn) }
+                Task { @MainActor in self?.finish(id: id, confirmed: response == .alertSecondButtonReturn) }
             }
         #endif
     }
 
-    private func cancel() {
-        guard waiting != nil else { return }
+    private func cancel(id: UUID, error: Error? = CancellationError()) {
+        guard waiting != nil, presentationID == id else { return }
         #if os(iOS)
             if let alert {
-                alert.dismiss(animated: true) { [weak self] in self?.finish(error: CancellationError()) }
+                alert.dismiss(animated: false) { [weak self] in self?.finish(id: id, error: error) }
             } else {
-                finish(error: CancellationError())
+                finish(id: id, error: error)
             }
         #else
             if let alert {
                 alert.window.sheetParent?.endSheet(alert.window, returnCode: .cancel)
             }
-            finish(error: CancellationError())
+            finish(id: id, error: error)
         #endif
     }
 
-    private func finish(confirmed: Bool = false, error: Error? = nil) {
+    private func finish(id: UUID, confirmed: Bool = false, error: Error? = nil) {
+        guard presentationID == id else { return }
         let pending = waiting
         waiting = nil
+        presentationID = nil
         alert = nil
-        if let error {
+        if invalidated {
+            pending?.resume(returning: false)
+        } else if let error {
             pending?.resume(throwing: error)
         } else {
             pending?.resume(returning: confirmed)

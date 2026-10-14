@@ -8,12 +8,26 @@ import UIKit
         guard manifest.keys.count == 3, manifest.originals.count == 3 else {
             throw SuwopError("Fixture manifest is incomplete.")
         }
-        let driver = AcceptanceDriver(keys: manifest.keys)
+        let visibility = phase.hasPrefix("visibility-") ? try await NativeVisibilityScenario.prepare(phase) : nil
+        let driver = AcceptanceDriver(keys: manifest.keys + (visibility.map { [$0.key] } ?? []))
         _ = try await driver.event("initialize", ["scope": .string(FixtureLibrary.scope)])
         _ = try await driver.event(
             "refresh",
             ["permission": .bool(false), "now": .number(Date().timeIntervalSince1970)]
         )
+        if phase.hasPrefix("visibility-") {
+            try await runVisibility(phase, driver: driver, fixture: visibility)
+        } else {
+            try await dispatch(phase, driver: driver, manifest: manifest)
+        }
+        try await verifyOriginals(manifest, keys: remainingKeys(phase, manifest))
+    }
+
+    private static func dispatch(
+        _ phase: String,
+        driver: AcceptanceDriver,
+        manifest: FixtureManifest
+    ) async throws {
         switch phase {
         case "seed": try await seed(driver, manifest)
         case "saved": try await saved(driver, manifest)
@@ -26,7 +40,19 @@ import UIKit
             try await NativeTrashScenario.run(phase, driver: driver, manifest: manifest)
         default: throw SuwopError("Unknown acceptance phase.")
         }
-        try await verifyOriginals(manifest, keys: remainingKeys(phase, manifest))
+    }
+
+    private static func runVisibility(
+        _ phase: String,
+        driver: AcceptanceDriver,
+        fixture: NativeVisibilityScenario.Fixture?
+    ) async throws {
+        switch phase {
+        case "visibility-hide", "visibility-hidden", "visibility-restore":
+            guard let fixture else { throw SuwopError("Missing visibility fixture.") }
+            try await NativeVisibilityScenario.run(phase, driver: driver, fixture: fixture)
+        default: throw SuwopError("Unknown acceptance phase.")
+        }
     }
 
     private static func loadManifest(_ phase: String) async throws -> FixtureManifest {
@@ -37,6 +63,9 @@ import UIKit
     }
 
     private static func remainingKeys(_ phase: String, _ manifest: FixtureManifest) -> [AssetKey] {
+        if phase.hasPrefix("visibility-") {
+            return [manifest.keys[2]]
+        }
         if !phase.hasPrefix("trash") || phase.hasSuffix("cancel") {
             return manifest.keys
         }

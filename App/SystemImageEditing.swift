@@ -9,12 +9,26 @@ import SwiftUI
 
 @MainActor final class SystemImageEditing {
     private var active: ImageEditWindow?
-    func present(_ input: ImageEditPresentation) async throws -> ImageEditDraft? {
+    private var sourceKey: AssetKey?
+
+    func invalidateForContentChange() {
+        guard sourceKey == nil || sourceKey?.provider == .apple else { return }
+        active?.invalidateForContentChange()
+    }
+
+    func present(
+        _ input: ImageEditPresentation, sourceKey: AssetKey? = nil, context: ContentPresentationContext
+    ) async throws -> ImageEditDraft? {
+        try context.requireCurrent(sourceKeys: sourceKey.map { [$0] })
         guard active == nil else { throw SuwopError("写真編集がすでに進行中です。") }
         let window = ImageEditWindow()
         active = window
-        defer { active = nil }
-        return try await window.present(input)
+        self.sourceKey = sourceKey
+        defer {
+            active = nil
+            self.sourceKey = nil
+        }
+        return try await window.present(input, sourceKey: sourceKey, context: context)
     }
 }
 
@@ -22,18 +36,36 @@ import SwiftUI
     private var model: ImageEditorModel?
     private var waiting: CheckedContinuation<ImageEditDraft?, Error>?
     private var closing = false
+    private var invalidated = false
     #if os(iOS)
         private var controller: UIViewController?
     #else
         private var window: NSWindow?
     #endif
 
-    func present(_ input: ImageEditPresentation) async throws -> ImageEditDraft? {
+    func invalidateForContentChange() {
+        invalidated = true
+        #if os(iOS)
+            controller?.view.isHidden = true
+        #else
+            window?.orderOut(nil)
+        #endif
+        close(error: CancellationError())
+    }
+
+    func present(
+        _ input: ImageEditPresentation, sourceKey: AssetKey?, context: ContentPresentationContext
+    ) async throws -> ImageEditDraft? {
         try Task.checkCancellation()
         model = try ImageEditorModel(input)
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKey.map { [$0] })
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 waiting = continuation
                 do { try open() } catch { close(error: error) }
             }
@@ -105,7 +137,9 @@ import SwiftUI
             window?.contentView = nil
             window = nil
         #endif
-        if let error {
+        if invalidated {
+            pending?.resume(throwing: CancellationError())
+        } else if let error {
             pending?.resume(throwing: error)
         } else {
             pending?.resume(returning: draft)

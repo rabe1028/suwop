@@ -17,6 +17,7 @@ const SHA: &str = "1111111111111111111111111111111111111111";
 
 fn asset(provider: Provider) -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,
             scope: if provider == Provider::Apple {
@@ -196,30 +197,33 @@ fn metadata_requires_one_complete_provider_group_and_full_current_access() -> Re
     Ok(())
 }
 
-fn core(provider: Provider, access: ScanAccess) -> Core<Suwop> {
+fn fixture_state(provider: Provider, access: ScanAccess) -> SavedLibrary {
     let local = asset(Provider::Apple);
     let remote = asset(Provider::Immich);
+    SavedLibrary {
+        schema_version: 3,
+        apple_scope: "apple".into(),
+        snapshots: vec![snapshot(provider, access)],
+        receipts: vec![TransferReceipt {
+            id: "copy".into(),
+            created_at: 10.0,
+            phase: TransferPhase::Copied,
+            intent: TransferIntent::Copy,
+            source: vec![local],
+            destination: vec![remote],
+            destination_provider: Provider::Immich,
+            destination_scope: "remote".into(),
+            signatures: std::collections::BTreeSet::new(),
+        }],
+        ..SavedLibrary::default()
+    }
+}
+fn core(provider: Provider, access: ScanAccess) -> Core<Suwop> {
     Core::new_with(
         Suwop,
         Model {
             ready: true,
-            state: SavedLibrary {
-                schema_version: 2,
-                apple_scope: "apple".into(),
-                snapshots: vec![snapshot(provider, access)],
-                receipts: vec![TransferReceipt {
-                    id: "copy".into(),
-                    created_at: 10.0,
-                    phase: TransferPhase::Copied,
-                    intent: TransferIntent::Copy,
-                    source: vec![local],
-                    destination: vec![remote],
-                    destination_provider: Provider::Immich,
-                    destination_scope: "remote".into(),
-                    signatures: std::collections::BTreeSet::new(),
-                }],
-                ..SavedLibrary::default()
-            },
+            state: fixture_state(provider, access),
             session: (provider == Provider::Immich).then(|| Session {
                 endpoint: "https://server/api".into(),
                 key: "test".into(),
@@ -491,7 +495,7 @@ fn uncertain_incomplete_or_unpersisted_native_metadata_disables_writes_without_r
 #[test]
 fn metadata_and_normal_refresh_preserve_unified_identity_but_not_the_old_deletion_revision()
 -> Result<(), String> {
-    let mut state = core(Provider::Apple, ScanAccess::Full).view().state;
+    let mut state = fixture_state(Provider::Apple, ScanAccess::Full);
     state
         .snapshots
         .push(snapshot(Provider::Immich, ScanAccess::Full));
@@ -610,7 +614,7 @@ fn metadata_never_reuses_fingerprints_for_changed_or_incomplete_inventories() ->
 #[test]
 fn metadata_keeps_known_partial_original_matches_without_inventing_unknown_hashes()
 -> Result<(), String> {
-    let mut state = core(Provider::Apple, ScanAccess::Full).view().state;
+    let mut state = fixture_state(Provider::Apple, ScanAccess::Full);
     state.snapshots[0].assets[0].resources.push(PhotoResource {
         id: "raw".into(),
         name: "photo.dng".into(),

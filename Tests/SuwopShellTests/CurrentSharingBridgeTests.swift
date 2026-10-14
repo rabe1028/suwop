@@ -5,12 +5,13 @@ import Testing
 @Test func currentImageSharingVerifiesTheRenderedCopyAndWaitsForNativeCompletionAcrossABI() throws {
     let bridge = try CoreBridge()
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "library", assetID: "photo"),
         name: "original.jpg",
         revision: "original-revision",
         resources: [PhotoResource(id: "0", name: "original.jpg", role: .image)]
     )
-    let saved = SavedLibrary(appleScope: "library", schemaVersion: 2)
+    let saved = SavedLibrary(appleScope: "library", schemaVersion: 3)
     let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
     func update(_ event: [String: JSONValue]) throws -> [EffectRequest] {
         try bridge.call(0, input: .object(event)).decode([EffectRequest].self)
@@ -49,7 +50,9 @@ import Testing
     let copiedHash = try #require(resolve(copied, value: .null).first)
     let share = try #require(resolve(copiedHash, value: .from(hash)).first)
     #expect(share.effect["Io"]?.type == "shareFiles")
-    let files = try #require(share.effect["Io"]?.data)["files"].decode([ShareFile].self)
+    let presentation = try #require(share.effect["Io"]?.data).decode(SharePresentation.self)
+    #expect(presentation.sourceKeys == [asset.key])
+    let files = presentation.files
     #expect(files.first?.name == "original-current.png")
     #expect(try bridge.call(2).decode(ViewModel.self).busy)
     let cleanup = try #require(resolve(share, value: .bool(false)).first)

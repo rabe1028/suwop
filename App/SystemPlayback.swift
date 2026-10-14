@@ -1,6 +1,7 @@
 import AVKit
 import Foundation
 import Photos
+import PhotosUI
 import SuwopShell
 import SwiftUI
 #if os(iOS)
@@ -13,31 +14,91 @@ import SwiftUI
 /// have stopped using them, including when the operation is cancelled.
 @MainActor final class SystemPlayback {
     private var active: NativeMediaPresentation?
+    private var sourceKeys: [AssetKey] = []
+    #if SUWOP_VRT
+        var preparationBarrier: (@MainActor () async throws -> Void)?
+    #endif
 
-    func present(_ plan: PlaybackPlan) async throws {
+    func invalidateForContentChange() {
+        // A legacy plan without source identity cannot grant an Immich-only exception.
+        guard sourceKeys.isEmpty || sourceKeys.contains(where: { $0.provider == .apple }) else { return }
+        active?.invalidateForContentChange()
+    }
+
+    func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
+        try context.requireCurrent(sourceKeys: plan.sourceKeys)
         guard active == nil else { throw SuwopError("再生がすでに進行中です。") }
         let presentation = NativeMediaPresentation()
+        #if SUWOP_VRT
+            presentation.preparationBarrier = preparationBarrier
+        #endif
         active = presentation
-        defer { active = nil }
-        try await presentation.present(plan)
+        sourceKeys = plan.sourceKeys
+        defer {
+            active = nil
+            sourceKeys = []
+        }
+        try await presentation.present(plan, context: context)
     }
 }
 
 @MainActor private final class NativeMediaPresentation: NSObject {
     private var pending: CheckedContinuation<Void, Error>?
     private var player: AVPlayer?
+    private var preparing: Task<Void, Error>?
+    private var content: NativeMediaContent?
+    private var invalidated = false
+    private var closing = false
+    #if SUWOP_VRT
+        var preparationBarrier: (@MainActor () async throws -> Void)?
+    #endif
     #if os(iOS)
         private var controller: UIViewController?
     #else
         private var window: NSWindow?
     #endif
 
-    func present(_ plan: PlaybackPlan) async throws {
+    func invalidateForContentChange() {
+        invalidated = true
+        preparing?.cancel()
+        stopPlayer()
+        #if os(iOS)
+            controller?.view.isHidden = true
+        #else
+            window?.orderOut(nil)
+        #endif
+        close(error: CancellationError())
+    }
+
+    func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
         try Task.checkCancellation()
-        let content = try await load(plan)
+        defer {
+            preparing = nil
+            content = nil
+            stopPlayer()
+        }
+        let preparation = Task {
+            try Task.checkCancellation()
+            #if SUWOP_VRT
+                try await preparationBarrier?()
+                try Task.checkCancellation()
+            #endif
+            content = try await load(plan)
+            try Task.checkCancellation()
+        }
+        preparing = preparation
+        try await withTaskCancellationHandler {
+            try await preparation.value
+        } onCancel: { preparation.cancel() }
         try Task.checkCancellation()
+        guard !invalidated, let content else { throw CancellationError() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                do { try context.requireCurrent(sourceKeys: plan.sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 do {
                     try open(content, name: plan.name)
@@ -118,7 +179,9 @@ import SwiftUI
             self.controller = controller
             presenter.present(controller, animated: true) { [weak self] in
                 controller.presentationController?.delegate = self
-                self?.player?.play()
+                if self?.invalidated == false, self?.closing == false {
+                    self?.player?.play()
+                }
             }
         #else
             let window = NSWindow(
@@ -139,7 +202,8 @@ import SwiftUI
     }
 
     private func close(error: Error? = nil) {
-        guard pending != nil else { return }
+        guard pending != nil, !closing else { return }
+        closing = true
         stopPlayer()
         #if os(iOS)
             if let controller {
@@ -158,7 +222,36 @@ import SwiftUI
         player?.pause()
         player?.replaceCurrentItem(with: nil)
         player = nil
+        #if os(iOS)
+            stopLivePlayback(in: controller?.viewIfLoaded)
+        #else
+            stopLivePlayback(in: window?.contentView)
+        #endif
     }
+
+    #if os(iOS)
+        private func stopLivePlayback(in view: UIView?) {
+            guard let view else { return }
+            if let live = view as? PHLivePhotoView {
+                live.stopPlayback()
+                live.livePhoto = nil
+            }
+            for child in view.subviews {
+                stopLivePlayback(in: child)
+            }
+        }
+    #else
+        private func stopLivePlayback(in view: NSView?) {
+            guard let view else { return }
+            if let live = view as? PHLivePhotoView {
+                live.stopPlayback()
+                live.livePhoto = nil
+            }
+            for child in view.subviews {
+                stopLivePlayback(in: child)
+            }
+        }
+    #endif
 
     private func finish(error: Error? = nil) {
         let waiting = pending
@@ -170,7 +263,9 @@ import SwiftUI
             window?.contentView = nil
             window = nil
         #endif
-        if let error {
+        if invalidated {
+            waiting?.resume(throwing: CancellationError())
+        } else if let error {
             waiting?.resume(throwing: error)
         } else {
             waiting?.resume()

@@ -141,6 +141,22 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance.tests
         TEST_TARGET_NAME: SuwopPhotoKitHost
+  SuwopSharingTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: App/SystemSharing.swift
+      - path: App/ContentPresentationEpoch.swift
+      - path: NativeAcceptance/SharingTests
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.sharing.tests
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_SHARING_TEST'
 schemes:
   SuwopiOS:
     build:
@@ -172,3 +188,10 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopPhotoKitTests]
+  SuwopSharing:
+    build:
+      targets:
+        SuwopSharingTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopSharingTests]

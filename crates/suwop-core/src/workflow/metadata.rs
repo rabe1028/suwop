@@ -12,7 +12,12 @@ impl Runtime<'_> {
         keys: &[AssetKey],
         input: &MetadataInput,
     ) -> Result<String, String> {
-        let (target, change) = prepare(&self.state.snapshots, &self.state.receipts, keys, input)?;
+        let (target, change) = prepare(
+            &self.state.presentation_snapshots(),
+            &self.state.receipts,
+            keys,
+            input,
+        )?;
         if target.provider == Provider::Immich {
             self.ensure_session().await?;
         }

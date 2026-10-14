@@ -82,3 +82,8 @@ vrt-record:
 .PHONY: apple-native-test
 apple-native-test:
 	bash scripts/apple-native-test.sh
+
+.PHONY: sharing-test
+sharing-test:
+	xcodegen generate
+	xcodebuild -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test

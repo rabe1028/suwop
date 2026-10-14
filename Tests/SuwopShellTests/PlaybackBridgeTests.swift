@@ -11,6 +11,7 @@ import Testing
         bytes: 12
     )
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "library", assetID: "video"),
         name: resource.name,
         revision: "1",
@@ -26,7 +27,7 @@ import Testing
         ])).decode([EffectRequest].self)
     }
     let read = try update(["type": .string("initialize"), "scope": .string("library")])
-    let save = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 2))).first)
+    let save = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 3))).first)
     _ = try resolve(save, value: .null)
     let scan = try update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)])
     let scanned = try #require(resolve(scan, value: .from(LibrarySnapshot(
@@ -49,6 +50,7 @@ import Testing
     ))).first)
     #expect(play.effect["Io"]?.type == "playMedia")
     let plan = try #require(play.effect["Io"]?.data)["plan"].decode(PlaybackPlan.self)
+    #expect(plan.sourceKeys == [asset.key])
     #expect(plan.kind == .video)
     #expect(plan.files.count == 1)
     #expect(try bridge.call(2).decode(ViewModel.self).busy)

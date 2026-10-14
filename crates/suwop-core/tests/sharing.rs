@@ -13,6 +13,7 @@ use suwop_core::{
 const SHA1: &str = "1111111111111111111111111111111111111111";
 fn asset() -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
             scope: "apple".into(),
@@ -58,7 +59,7 @@ fn core() -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -150,7 +151,18 @@ impl Native {
                 })
                 .map_err(|e| e.to_string())
             }
-            ShellOperation::ShareFiles { files } => {
+            ShellOperation::ShareFiles(presentation) => {
+                let files = &presentation.files;
+                let expected = if matches!(self.fault, Fault::Remote) {
+                    AssetKey {
+                        provider: Provider::Immich,
+                        scope: "immich".into(),
+                        asset_id: "11111111-1111-4111-8111-111111111111".into(),
+                    }
+                } else {
+                    asset().key
+                };
+                assert_eq!(presentation.source_keys, Some(vec![expected]));
                 self.shared = true;
                 assert!(!self.cleaned);
                 assert_eq!(files.len(), 1);
@@ -210,7 +222,7 @@ fn native_share_retains_files_until_completion_and_does_not_mutate_the_library()
         let mut pending = None;
         while !requests.is_empty() {
             let Effect::Io(mut request) = requests.remove(0);
-            if matches!(request.operation, ShellOperation::ShareFiles { .. }) {
+            if matches!(request.operation, ShellOperation::ShareFiles(_)) {
                 pending = Some(request);
                 break;
             }
@@ -246,6 +258,45 @@ fn native_share_retains_files_until_completion_and_does_not_mutate_the_library()
             "キャンセル"
         }));
     }
+    Ok(())
+}
+
+#[test]
+fn sharing_presentation_records_chosen_source_instead_of_equivalent_requested_key()
+-> Result<(), String> {
+    let mut remote = asset();
+    remote.key = AssetKey {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        asset_id: "equivalent".into(),
+    };
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: SavedLibrary {
+                schema_version: 3,
+                apple_scope: "apple".into(),
+                snapshots: vec![
+                    snapshot(asset(), ScanAccess::Full),
+                    snapshot(remote.clone(), ScanAccess::Full),
+                ],
+                ..SavedLibrary::default()
+            },
+            ..Model::default()
+        },
+    );
+    let mut native = Native::default();
+    run_event(
+        &mut native,
+        &core,
+        Event::Share {
+            keys: vec![remote.key],
+            id: "11111111-1111-4111-8111-111111111111".into(),
+        },
+    )?;
+    assert!(native.shared && native.cleaned);
+    assert!(core.view().error.is_none());
     Ok(())
 }
 
@@ -435,7 +486,7 @@ fn remote_only_sharing_downloads_the_original_without_any_remote_mutation() -> R
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 2,
+                schema_version: 3,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(remote, ScanAccess::Full)],
                 ..SavedLibrary::default()
@@ -469,5 +520,31 @@ fn remote_only_sharing_downloads_the_original_without_any_remote_mutation() -> R
     assert!(core.view().error.is_none());
     assert!(native.shared);
     assert!(native.cleaned);
+    Ok(())
+}
+
+#[test]
+fn apple_change_during_delayed_file_preparation_prevents_sharing_and_cleans_workspace()
+-> Result<(), String> {
+    let core = core();
+    let mut native = Native::default();
+    let mut changed = false;
+    let mut requests = core.process_event(event());
+    while !requests.is_empty() {
+        let Effect::Io(mut request) = requests.remove(0);
+        if !changed && matches!(request.operation, ShellOperation::HashFile { .. }) {
+            assert!(core.process_event(Event::AppleChanged).is_empty());
+            changed = true;
+        }
+        let result = native.handle(&request.operation);
+        requests.extend(
+            core.resolve(&mut request, response(result))
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    assert!(changed);
+    assert!(!native.shared);
+    assert!(native.cleaned);
+    assert!(core.view().error.is_some());
     Ok(())
 }

@@ -49,9 +49,11 @@ impl Runtime<'_> {
         .await?;
         self.editing_token = Some(input.token.clone());
         let presentation = prepare_apple_edit(source, &input, &directory)?;
+        self.check_content_generation(std::slice::from_ref(key))?;
         let returned: Option<ImageEditDraft> = io(
             self.ctx,
             ShellOperation::EditImage {
+                key: key.clone(),
                 presentation: presentation.clone(),
             },
         )

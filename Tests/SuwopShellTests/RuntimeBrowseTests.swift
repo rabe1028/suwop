@@ -35,6 +35,7 @@ private func browserRuntime() async throws -> RustRuntime {
     let runtime = try RustRuntime()
     let key = AssetKey(provider: .apple, scope: "fixture", assetID: "photo")
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: key,
         name: "SUMMER.JPG",
         revision: "1",
@@ -43,7 +44,7 @@ private func browserRuntime() async throws -> RustRuntime {
     )
     let state = SavedLibrary(
         appleScope: "fixture",
-        schemaVersion: 2,
+        schemaVersion: 3,
         snapshots: [LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)]
     )
     let effects = try await runtime.update(.object(["type": .string("initialize"), "scope": .string("fixture")]))
@@ -51,5 +52,15 @@ private func browserRuntime() async throws -> RustRuntime {
     let next = try await runtime.resolve(id: read.id, value: .from(state), error: nil)
     let persist = try #require(next.first)
     _ = try await runtime.resolve(id: persist.id, value: .null, error: nil)
+    #expect(try await runtime.view().photos.isEmpty)
+    let scan = try #require(await runtime.update(.object([
+        "type": .string("refresh"), "permission": .bool(false), "now": .number(0),
+    ])).first)
+    let scanned = try #require(await runtime.resolve(
+        id: scan.id,
+        value: .from(LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)),
+        error: nil
+    ).first)
+    _ = try await runtime.resolve(id: scanned.id, value: .null, error: nil)
     return runtime
 }

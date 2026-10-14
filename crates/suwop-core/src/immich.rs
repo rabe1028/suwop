@@ -526,6 +526,7 @@ impl Asset {
         }
         inventory_sidecars(files, &mut resources, &mut blockers);
         StoredAsset {
+            apple_visibility: crate::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Immich,
                 scope: scope.into(),

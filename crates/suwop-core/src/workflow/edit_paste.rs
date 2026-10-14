@@ -23,7 +23,7 @@ impl Runtime<'_> {
         &self,
         anchors: &[AssetKey],
     ) -> Result<Vec<AssetKey>, String> {
-        let photos = catalog(&self.state.snapshots, &self.state.receipts);
+        let photos = catalog(&self.state.presentation_snapshots(), &self.state.receipts);
         let mut keys = std::collections::BTreeSet::new();
         for anchor in anchors {
             let photo = photos
@@ -46,15 +46,19 @@ impl Runtime<'_> {
     }
 
     fn paste_asset(&self, key: &AssetKey) -> Result<StoredAsset, String> {
-        let photos = catalog(&self.state.snapshots, &self.state.receipts);
+        let photos = catalog(&self.state.presentation_snapshots(), &self.state.receipts);
         let photo = photos
             .iter()
             .find(|p| p.assets.iter().any(|a| a.key == *key))
             .ok_or("写真を確認できません。一覧を更新してください。")?;
-        let target = targets(photo, &self.state.snapshots, &self.state.apple_scope)
-            .into_iter()
-            .find(|t| t.key == *key)
-            .ok_or("編集する保存先を確認できません。")?;
+        let target = targets(
+            photo,
+            &self.state.presentation_snapshots(),
+            &self.state.apple_scope,
+        )
+        .into_iter()
+        .find(|t| t.key == *key)
+        .ok_or("編集する保存先を確認できません。")?;
         if let Some(reason) = target.disabled_reason {
             return Err(reason);
         }
@@ -107,8 +111,9 @@ impl Runtime<'_> {
         let directory = self.directory("copy-editor")?;
         let input = self.paste_open(source, &directory).await?;
         let presentation = prepare_apple_edit(source, &input, &directory)?;
-        let clipboard = EditClipboard::capture(&presentation, options)?;
+        let mut clipboard = EditClipboard::capture(&presentation, options)?;
         self.paste_close().await?;
+        clipboard.source_key = Some(key.clone());
         let old = self.state.edit_clipboard.replace(clipboard);
         if let Err(error) = self.persist().await {
             self.state.edit_clipboard = old;
@@ -173,7 +178,7 @@ impl Runtime<'_> {
         let prepared = self.prepare_pastes(keys, &clipboard).await?;
         let unchanged = prepared.iter().filter(|p| p.plan.is_none()).count();
         let prompt = PasteEditsPrompt {
-            source_name: clipboard.source_name.clone(),
+            source_name: crate::privacy::public_clipboard_name(&self.state, &clipboard),
             options: clipboard.options,
             names: prepared
                 .iter()
@@ -281,6 +286,7 @@ impl Runtime<'_> {
     async fn paste_export(&self, key: &AssetKey, name: &str) -> Result<TransferBundle, String> {
         // Read-only inspection must bypass the pending-write fence. No caller
         // of this helper is allowed to dispatch a mutation without a journal.
+        self.check_content_keys(std::slice::from_ref(key))?;
         let bundle: TransferBundle = io(
             self.ctx,
             ShellOperation::AppleExport {

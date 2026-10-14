@@ -3,6 +3,7 @@ use suwop_core::domain::*;
 
 fn asset(provider: Provider, id: &str, hashes: &[&str]) -> StoredAsset {
     StoredAsset {
+        apple_visibility: AppleVisibility::Visible,
         key: AssetKey {
             provider,
             scope: format!("{provider:?}"),

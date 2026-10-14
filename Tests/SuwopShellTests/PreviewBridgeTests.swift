@@ -14,6 +14,7 @@ private func previewRuntime() async throws -> PreviewFixture {
     let second = AssetKey(provider: .apple, scope: "fixture", assetID: "second")
     let assets = [first, second].enumerated().map { index, key in
         StoredAsset(
+            appleVisibility: .visible,
             key: key,
             name: "photo.jpg",
             capturedAt: Date(timeIntervalSince1970: Double(index + 1)),

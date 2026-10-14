@@ -4,7 +4,13 @@ import Testing
 
 @Test func ordinaryAppleTrashPolicyTraversesRustABIWithoutMoveEligibility() throws {
     let key = AssetKey(provider: .apple, scope: "test", assetID: "one")
-    let asset = StoredAsset(key: key, name: "edited.jpg", revision: "1", deletionBlockers: ["copy only"])
+    let asset = StoredAsset(
+        appleVisibility: .visible,
+        key: key,
+        name: "edited.jpg",
+        revision: "1",
+        deletionBlockers: ["copy only"]
+    )
     let facts = AppleFacts(asset: asset, burst: true, canDelete: true, fullAccess: true, live: true, shared: false)
     let input: JSONValue = try .object(["saved": .from([asset]), "fresh": .from([facts])])
     _ = try CoreBridge.utility(13, input: input)
@@ -67,6 +73,7 @@ import Testing
     var loseResponse = true
     var absent = false
     let asset = StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "apple", assetID: "one"),
         name: "one.jpg",
         revision: "1",
@@ -180,5 +187,13 @@ import Testing
     let view = try await restarted.view()
     #expect(view.state.pendingAppleTrash.first?.visibility == .absent)
     #expect(view.state.pendingAppleTrash.first?.outcome == .unknown)
+    let journal = try #require(shell.journal)
+    #expect(journal.pendingAppleTrash.first?.assets.first?.name == shell.asset.name)
+    #expect(journal.pendingAppleTrash.first?.assets.first?.revision == shell.asset.revision)
+    #expect(journal.pendingAppleTrash.first?.assets.first?.resources.first?.name == shell.asset.resources.first?.name)
+    #expect(view.photos.isEmpty)
+    #expect(view.state.pendingAppleTrash.first?.assets.first?.name == "非公開の写真")
+    #expect(view.state.pendingAppleTrash.first?.assets.first?.revision.isEmpty == true)
+    #expect(view.state.pendingAppleTrash.first?.assets.first?.resources.isEmpty == true)
     #expect(shell.deletes == 1)
 }

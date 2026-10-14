@@ -12,6 +12,7 @@ use suwop_core::{
 
 fn asset(provider: Provider, id: &str, fingerprint: char) -> StoredAsset {
     StoredAsset {
+        apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,
             scope: if provider == Provider::Apple {
@@ -65,7 +66,7 @@ fn session() -> Session {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 2,
+        schema_version: 3,
         apple_scope: "apple".into(),
         snapshots: vec![
             snapshot(

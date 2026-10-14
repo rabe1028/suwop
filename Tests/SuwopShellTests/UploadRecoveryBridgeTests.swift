@@ -16,6 +16,13 @@ private struct UploadRecoveryABI {
         self.state = state
     }
 
+    mutating func initializeAndRefresh() throws {
+        try run(["type": .string("initialize"), "scope": .string("library")])
+        try run(["type": .string("refresh"), "permission": .bool(false), "now": .number(20)])
+        #expect(try bridge.call(2).decode(ViewModel.self).photos.count == 1)
+        trace = []
+    }
+
     mutating func run(_ event: [String: JSONValue], failRead: Bool = false) throws {
         var requests = try bridge.call(0, input: .object(event)).decode([EffectRequest].self)
         while !requests.isEmpty {
@@ -47,6 +54,9 @@ private struct UploadRecoveryABI {
         case "readState": return try .from(state)
         case "persist": state = try #require(operation.data).decode(SavedLibrary.self)
             return .null
+        case "appleScan": return try .from(LibrarySnapshot(
+                provider: .apple, scope: "library", assets: [uploadFixture()], access: .full
+            ))
         case "readCredential": return .string("fixture")
         case "workspace": return .string("/tmp/upload-recovery")
         case "appleExport":
@@ -98,6 +108,8 @@ private struct UploadRecoveryABI {
             body = try .from(Version(major: 3, minor: 2, patch: 4))
         } else if http.url.hasSuffix("users/me") {
             body = .object(["id": .string(owner)])
+        } else if http.url.hasSuffix("search/metadata") {
+            body = .object(["assets": .object(["items": .array([]), "nextCursor": .null])])
         } else if http.url.hasSuffix("assets/bulk-upload-check") {
             let token = try #require(state.uploadIntents.first).token
             let row: [String: JSONValue] = [
@@ -126,9 +138,9 @@ private struct UploadRecoveryABI {
     var driver = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 2
+        schemaVersion: 3
     ))
-    try driver.run(["type": .string("initialize"), "scope": .string("library")])
+    try driver.initializeAndRefresh()
     try driver.run([
         "type": .string("copy"), "keys": .from([uploadFixture().key]),
         "intent": .string("move"), "id": .string("receipt"), "now": .number(20),
@@ -159,6 +171,7 @@ private func uploadFixture() -> StoredAsset {
         bytes: 12
     )
     return StoredAsset(
+        appleVisibility: .visible,
         key: AssetKey(provider: .apple, scope: "library", assetID: "source"),
         name: "original.jpg",
         capturedAt: Date(timeIntervalSince1970: 20),
@@ -186,9 +199,8 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     let state = SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 2
+        schemaVersion: 3
     )
-    let initialize: [String: JSONValue] = ["type": .string("initialize"), "scope": .string("library")]
     let copy: [String: JSONValue] = try [
         "type": .string("copy"),
         "keys": .from([uploadFixture().key]),
@@ -197,7 +209,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
         "now": .number(20),
     ]
     var first = try UploadRecoveryABI(state: state)
-    try first.run(initialize)
+    try first.initializeAndRefresh()
     try first.run(copy, failRead: true)
     #expect(first.state.pendingUploads.count == 1)
     #expect(first.state.pendingUploads.first?.phase == .metadataPending)
@@ -205,7 +217,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     #expect(first.trace.filter { $0.hasPrefix("POST ") }.count == 1)
     #expect(!first.trace.contains { $0.hasPrefix("PUT ") })
     var restarted = try UploadRecoveryABI(state: first.state)
-    try restarted.run(initialize)
+    try restarted.initializeAndRefresh()
     try restarted.run(copy)
     #expect(restarted.trace.contains("confirmUploadResume"))
     #expect(!restarted.trace.contains { $0.hasPrefix("POST ") || $0.hasPrefix("PUT ") })
@@ -219,14 +231,13 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     var first = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 2
+        schemaVersion: 3
     ))
-    let initialize: [String: JSONValue] = ["type": .string("initialize"), "scope": .string("library")]
     let copy: [String: JSONValue] = try [
         "type": .string("copy"), "keys": .from([uploadFixture().key]),
         "intent": .string("move"), "id": .string("receipt"), "now": .number(20),
     ]
-    try first.run(initialize)
+    try first.initializeAndRefresh()
     first.failCreatedJournal = true
     try first.run(copy)
     #expect(first.state.uploadIntents.count == 1)
@@ -235,7 +246,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     #expect(!first.trace.contains { $0.hasPrefix("PUT ") })
     var restarted = try UploadRecoveryABI(state: first.state)
     restarted.origin = first.origin
-    try restarted.run(initialize)
+    try restarted.initializeAndRefresh()
     try restarted.run(copy)
     #expect(restarted.trace.contains("POST https://photos.example/api/assets/bulk-upload-check"))
     #expect(restarted.trace
@@ -253,9 +264,9 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     var driver = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 2
+        schemaVersion: 3
     ))
-    try driver.run(["type": .string("initialize"), "scope": .string("library")])
+    try driver.initializeAndRefresh()
     driver.failCreatedJournal = true
     try driver.run([
         "type": .string("copy"), "keys": .from([uploadFixture().key]),
