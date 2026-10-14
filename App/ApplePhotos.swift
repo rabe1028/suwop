@@ -164,7 +164,7 @@ import UniformTypeIdentifiers
 
     func trash(_ assets: [StoredAsset]) async throws {
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
-            throw SuwopError("移動には写真ライブラリへのフルアクセスが必要です。")
+            throw SuwopError("削除には写真ライブラリへのフルアクセスが必要です。")
         }
         var fresh: [StoredAsset] = []
         for record in assets {

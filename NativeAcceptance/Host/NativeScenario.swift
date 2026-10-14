@@ -4,11 +4,7 @@ import UIKit
 
 @MainActor enum NativeScenario {
     static func run(_ phase: String) async throws {
-        let manifest: FixtureManifest = if phase == "seed" {
-            try await FixtureLibrary.create()
-        } else {
-            try FixtureLibrary.read()
-        }
+        let manifest = try await loadManifest(phase)
         guard manifest.keys.count == 3, manifest.originals.count == 3 else {
             throw SuwopError("Fixture manifest is incomplete.")
         }
@@ -26,9 +22,25 @@ import UIKit
         case "pasted": try await pasted(driver, manifest)
         case "revert": try await revert(driver, manifest)
         case "original": try await original(driver, manifest)
+        case "trash-cancel", "trash-native-cancel", "trash", "trash-lost", "trash-inspect":
+            try await NativeTrashScenario.run(phase, driver: driver, manifest: manifest)
         default: throw SuwopError("Unknown acceptance phase.")
         }
-        try await verifyOriginals(manifest)
+        try await verifyOriginals(manifest, keys: remainingKeys(phase, manifest))
+    }
+
+    private static func loadManifest(_ phase: String) async throws -> FixtureManifest {
+        if phase == "seed" {
+            return try await FixtureLibrary.create()
+        }
+        return try FixtureLibrary.read()
+    }
+
+    private static func remainingKeys(_ phase: String, _ manifest: FixtureManifest) -> [AssetKey] {
+        if !phase.hasPrefix("trash") || phase.hasSuffix("cancel") {
+            return manifest.keys
+        }
+        return phase == "trash" ? Array(manifest.keys.dropFirst()) : [manifest.keys[2]]
     }
 
     private static func revert(_ driver: AcceptanceDriver, _ manifest: FixtureManifest) async throws {
@@ -181,10 +193,10 @@ import UIKit
         }
     }
 
-    private static func verifyOriginals(_ manifest: FixtureManifest) async throws {
+    private static func verifyOriginals(_ manifest: FixtureManifest, keys: [AssetKey]) async throws {
         let store = ApplePhotosStore(scope: FixtureLibrary.scope)
         _ = try await store.scan()
-        for (index, key) in manifest.keys.enumerated() {
+        for (index, key) in manifest.keys.enumerated() where keys.contains(key) {
             let directory = FixtureLibrary.root.appendingPathComponent("verify-\(UUID().uuidString)")
             let after = try await store.export([key], to: directory)
             defer { try? FileManager.default.removeItem(at: directory) }

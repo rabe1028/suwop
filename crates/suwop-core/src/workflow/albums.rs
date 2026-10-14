@@ -213,6 +213,7 @@ impl Runtime<'_> {
             .flat_map(|s| &s.albums)
             .find(|a| a.key == *key)
             .ok_or("アルバムを確認できません。")?;
+        self.check_apple_trash_keys(&album.members)?;
         validate_edit(album, edit)?;
         let mut edit = edit.clone();
         edit.title = edit.title.map(|s| s.trim().into());

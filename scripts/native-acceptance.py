@@ -6,7 +6,20 @@ from collections import Counter
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-PHASES = {"seed", "saved", "paste-lost", "resolve", "pasted", "revert", "original"}
+PHASES = {
+    "seed",
+    "saved",
+    "paste-lost",
+    "resolve",
+    "pasted",
+    "revert",
+    "original",
+    "trash-cancel",
+    "trash-native-cancel",
+    "trash",
+    "trash-lost",
+    "trash-inspect",
+}
 
 
 def completed_phases(artifacts):

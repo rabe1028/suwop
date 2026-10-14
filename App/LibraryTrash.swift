@@ -2,6 +2,27 @@ import Foundation
 import SuwopShell
 
 extension LibraryModel {
+    func trashOnApple(_ photos: [UnifiedPhoto]) {
+        let keys = Set(photos.flatMap { $0.assets.filter { $0.key.provider == .apple }.map(\.key) })
+        do {
+            try send([
+                "type": .string("trashApple"),
+                "keys": .from(Array(keys)),
+                "id": .string(UUID().uuidString),
+            ]) { [weak self] success in
+                if success {
+                    self?.refresh()
+                } else {
+                    self?.showAppleTrash = true
+                }
+            }
+        } catch { errorMessage = error.localizedDescription }
+    }
+
+    func resolveAppleTrash(_ operation: AppleTrashOperation) {
+        send(["type": .string("resolveAppleTrash"), "id": .string(operation.id)])
+    }
+
     func changeTrash(_ keys: [AssetKey], action: TrashAction) {
         do {
             try send([

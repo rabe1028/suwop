@@ -9,6 +9,7 @@ import SwiftUI
     @Published var showSettings = false
     @Published var showTransfers = false
     @Published var showTrash = false
+    @Published var showAppleTrash = false
     @Published var showEditPasteRecords = false
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
@@ -397,6 +398,10 @@ import SwiftUI
 extension LibraryModel {
     var trashSnapshot: TrashSnapshot? {
         view?.state.trash
+    }
+
+    var pendingAppleTrashOperations: [AppleTrashOperation] {
+        view?.state.pendingAppleTrash ?? []
     }
 
     var pendingTrashOperations: [TrashOperation] {

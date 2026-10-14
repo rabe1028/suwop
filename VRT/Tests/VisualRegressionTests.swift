@@ -44,6 +44,14 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("trash-empty", view: TrashView(model: empty))
         try await capture("trash-cached", view: TrashView(model: SnapshotFixtures.trashModel(pending: false)))
         try await capture("trash-pending", view: TrashView(model: SnapshotFixtures.trashModel(pending: true)))
+        try await capture("apple-trash-guidance", view: AppleTrashView(model: empty))
+        try await capture("apple-trash-pending", view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()))
+        try await capture(
+            "apple-trash-pending-large-text",
+            view: AppleTrashView(model: SnapshotFixtures.appleTrashModel()),
+            largeText: true,
+            scrollToBottom: true
+        )
         let editor = try await SnapshotFixtures.editor()
         try await capture("editor", view: ImageEditorView(model: editor, finish: { _ in }), dark: true)
         try await capture(
@@ -108,6 +116,25 @@ final class VisualRegressionTests: XCTestCase {
             scroll.setContentOffset(CGPoint(x: 0, y: scroll.contentSize.height - scroll.bounds.height), animated: false)
             try await Task.sleep(for: .milliseconds(100))
             controller.view.layoutIfNeeded()
+            if scroll is UICollectionView {
+                // List measures distant cells lazily. Continue until the final
+                // measured content height settles, so the action is actually shown.
+                for _ in 0 ..< 20 {
+                    let bottom = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom
+                    scroll.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
+                    try await Task.sleep(for: .milliseconds(100))
+                    controller.view.layoutIfNeeded()
+                    let finalBottom = scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset
+                        .bottom
+                    if abs(finalBottom - bottom) < 1, abs(scroll.contentOffset.y - bottom) < 1 {
+                        break
+                    }
+                }
+                // Navigation Liquid Glass updates after List scrolling ends,
+                // independently of the content-size measurement and UIView animations.
+                try await Task.sleep(for: .milliseconds(800))
+                controller.view.layoutIfNeeded()
+            }
         }
         let format = UIGraphicsImageRendererFormat()
         format.scale = 3

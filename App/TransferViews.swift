@@ -74,6 +74,13 @@ struct PhotoInfo: View {
                                 pendingSource = provider
                             }
                             .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
+                            if provider == .apple {
+                                Button(
+                                    assets.count > 1 ? "Apple 側のすべての \(assets.count) 件を削除" : "Apple Photos から削除",
+                                    role: .destructive
+                                ) { model.trashOnApple([photo]) }
+                                    .disabled(model.isBusy)
+                            }
                             if provider == .immich {
                                 Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich([photo]) }
                                     .disabled(model.isBusy)

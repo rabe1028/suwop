@@ -174,6 +174,62 @@ public struct AppleReversionFacts: Codable, Sendable {
     }
 }
 
+public struct AppleTrashInspection: Codable, Sendable {
+    public var assets: [AppleFacts]
+    public var fullAccess: Bool
+    public var scope: String
+    public init(assets: [AppleFacts] = [], fullAccess: Bool, scope: String) {
+        self.assets = assets
+        self.fullAccess = fullAccess
+        self.scope = scope
+    }
+}
+
+public struct AppleTrashOperation: Codable, Sendable {
+    public var assets: [StoredAsset]
+    public var id: String
+    public var outcome: AppleTrashOutcome
+    public var scope: String
+    public var visibility: AppleTrashVisibility?
+    public init(assets: [StoredAsset] = [], id: String, outcome: AppleTrashOutcome, scope: String, visibility: AppleTrashVisibility? = nil) {
+        self.assets = assets
+        self.id = id
+        self.outcome = outcome
+        self.scope = scope
+        self.visibility = visibility
+    }
+}
+
+public enum AppleTrashOutcome: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `applied`
+    case `notApplied`
+}
+
+public struct AppleTrashPrompt: Codable, Sendable {
+    public var names: [String]
+    public var scope: String
+    public init(names: [String] = [], scope: String) {
+        self.names = names
+        self.scope = scope
+    }
+}
+
+public struct AppleTrashResult: Codable, Sendable {
+    public var applied: Bool
+    public var error: String?
+    public init(applied: Bool, error: String? = nil) {
+        self.applied = applied
+        self.error = error
+    }
+}
+
+public enum AppleTrashVisibility: String, Codable, CaseIterable, Sendable {
+    case `present`
+    case `absent`
+    case `mixed`
+}
+
 public struct AssetKey: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -814,6 +870,7 @@ public struct SavedLibrary: Codable, Sendable {
     public var appleScope: String
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
+    public var pendingAppleTrash: [AppleTrashOperation]
     public var pendingEditPastes: [PendingEditPaste]
     public var pendingTrash: [TrashOperation]
     public var pendingUploads: [PendingUpload]
@@ -822,11 +879,12 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.connection = connection
         self.editClipboard = editClipboard
+        self.pendingAppleTrash = pendingAppleTrash
         self.pendingEditPastes = pendingEditPastes
         self.pendingTrash = pendingTrash
         self.pendingUploads = pendingUploads

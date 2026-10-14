@@ -31,7 +31,7 @@ import SuwopShell
 
     func execute(_ operation: ShellOperation) async throws -> JSONValue {
         let data = operation.data ?? .null
-        if !["persist", "cleanup", "removeCredential", "appleEditClose"].contains(operation.type) {
+        if !["persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply"].contains(operation.type) {
             try Task.checkCancellation()
         }
         if operation.type == "randomId" {
@@ -73,13 +73,11 @@ import SuwopShell
 
     private func dispatch(_ operation: ShellOperation, data: JSONValue) async throws -> JSONValue {
         switch operation.type {
-        case "readState": return try readState()
-        case "persist":
-            let bytes = try Wire.encoder().encode(data)
-            let url = root.appendingPathComponent("library-v1.json")
-            try bytes.write(to: url, options: .atomic)
-            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            return .null
+        case "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleTrashEffect(
+                operation.type,
+                data: data
+            )
+        case "readState", "persist": return try stateEffect(operation.type, data: data)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
                 operation.type,
                 data: data
@@ -246,6 +244,31 @@ import SuwopShell
             try FileManager.default.removeItem(atPath: requiredString(data, "path"))
             return .null
         default: throw SuwopError("未知のファイル入出力です。")
+        }
+    }
+
+    private func stateEffect(_ type: String, data: JSONValue) throws -> JSONValue {
+        if type == "readState" {
+            return try readState()
+        }
+        let bytes = try Wire.encoder().encode(data)
+        let url = root.appendingPathComponent("library-v1.json")
+        try bytes.write(to: url, options: .atomic)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        return .null
+    }
+
+    private func appleTrashEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        switch type {
+        case "confirmAppleTrash": return try await .from(confirmation
+                .trashApple(data["prompt"].decode(AppleTrashPrompt.self)))
+        case "appleTrashApply":
+            let assets = try data["assets"].decode([StoredAsset].self)
+            guard let first = assets.first else { throw SuwopError("写真を選択してください。") }
+            return try await .from(appleStore(scope: first.key.scope).ordinaryTrash(assets))
+        case "appleTrashInspect": return try .from(appleStore(scope: requiredString(data, "scope"))
+                .inspectTrash(data["keys"].decode([AssetKey].self)))
+        default: throw SuwopError("未知の Apple 削除入出力です。")
         }
     }
 

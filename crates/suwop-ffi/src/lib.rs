@@ -115,30 +115,16 @@ pub unsafe extern "C" fn suwop_free(value: *mut c_char) {
 fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
     match action {
         3 => {
-            let facts: AppleFacts = serde_json::from_str(input).map_err(|e| e.to_string())?;
-            return serde_json::to_value(describe_apple(facts)).map_err(|e| e.to_string());
+            return serde_json::to_value(describe_apple(
+                serde_json::from_str(input).map_err(|e| e.to_string())?,
+            ))
+            .map_err(|e| e.to_string());
         }
         4 => {
             return hash_input(input);
         }
-        5 => {
-            #[derive(serde::Deserialize)]
-            struct Check {
-                saved: Vec<StoredAsset>,
-                fresh: Vec<StoredAsset>,
-            }
-            let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
-            suwop_core::domain::allow_deletion(&check.fresh)?;
-            let revisions = |a: &[StoredAsset]| {
-                a.iter()
-                    .map(|a| (a.key.clone(), a.revision.clone()))
-                    .collect::<BTreeMap<_, _>>()
-            };
-            if revisions(&check.saved) != revisions(&check.fresh) {
-                return Err("削除直前に写真の状態が変わりました。元データは残します。".into());
-            }
-            return Ok(Value::Null);
-        }
+        5 => return move_trash_check(input),
+        13 => return ordinary_trash_check(input),
         6 => {
             #[derive(serde::Deserialize)]
             struct Origins {
@@ -300,6 +286,36 @@ fn hash_reader(mut file: impl Read, flag: &AtomicBool) -> Result<HashResult, Str
             bytes: count,
         },
     })
+}
+
+fn move_trash_check(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Check {
+        saved: Vec<StoredAsset>,
+        fresh: Vec<StoredAsset>,
+    }
+    let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    suwop_core::domain::allow_deletion(&check.fresh)?;
+    let revisions = |a: &[StoredAsset]| {
+        a.iter()
+            .map(|a| (a.key.clone(), a.revision.clone()))
+            .collect::<BTreeMap<_, _>>()
+    };
+    if revisions(&check.saved) != revisions(&check.fresh) {
+        return Err("削除直前に写真の状態が変わりました。元データは残します。".into());
+    }
+    Ok(Value::Null)
+}
+
+fn ordinary_trash_check(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Check {
+        saved: Vec<StoredAsset>,
+        fresh: Vec<AppleFacts>,
+    }
+    let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    suwop_core::trash::validate_ordinary_apple_trash(&check.saved, &check.fresh)?;
+    Ok(Value::Null)
 }
 
 #[cfg(test)]

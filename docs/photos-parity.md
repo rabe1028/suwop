@@ -15,12 +15,14 @@
 | 写真編集、切り抜き・回転・明るさ・色・フィルター、元へ戻す | Apple 静止画の切り抜き・90度回転・反転・露出・明るさ・コントラスト・彩度・3フィルター、編集履歴と保存、確認後の原本への復元を実装。項目を選ぶ編集コピーと複数写真への貼り付けも実装。専用Simulatorの生成JPEGでPhotoKit実保存・応答消失・起動し直した後の貼り付け確認と復元を検証。詳しくは[Native PhotoKit](native-photokit.md) | 実機・iCloud・RAW・既存の他アプリ編集・大量の一括適用、Immich編集、HDR・透過・高解像度、Photos専用の調整とフィルター、自動補正 |
 | 動画トリム、Live Photo 編集 | 未実装 | 原本の保持と再生、対応形式・権限の確認 |
 | 共有、原本 / 編集後の書き出し、取り込み、複製 | 原本ファイルのシステム共有を実装、単独 / 複数選択の native 画面とキャンセル・片付けを確認。選んだ表示元の現在の静止画共有を実装、Rust / 実FFI通過 | 現在の静止画のnative共有、動画／Live・複数選択の現在の内容、取り込み・複製、受信先での保存、強制終了後の片付け |
-| ゴミ箱、削除確認、復元、削除結果不明 | Immich 3.2+ の単独・複数選択の通常削除、本人のゴミ箱一覧、復元、送信前の記録と読取による結果確認を実装。Rust / Swift実FFIテストを追加。ゴミ箱の3画面を含む14画面VRTを追加 | [削除と復元](trash.md) の最終HEAD実API CI、実ライブラリの操作。Apple側の通常削除と公開復元APIの制約、両側の保護 |
+| ゴミ箱、削除確認、復元、削除結果不明 | Immich 3.2+ の通常削除・本人のゴミ箱一覧・復元・結果確認を実装。Apple は Move と独立した単独・複数選択の通常削除、保存先確認、原本照合、永続意図と PhotoKit 応答、可視性のみの検査、Photos での復元案内を追加 | [削除と復元](trash.md) の最終HEAD native／VRT／CI、実ライブラリ。Apple の実機／iCloud／native 複数選択と Photos アプリでの実復元は別途検証。公開 PhotoKit 復元は提供しない |
 | 保存先確認・照合・Copy / Move | Rust / FFI / Immich テスト、PR #2 CI | 実 PhotoKit の RAW / Live / 編集済み / iCloud / バースト / 限定権限 |
 | 場所、人物、分類、思い出、重複整理 | 未実装 | 検索・分類の実結果。公開 API で扱えない Photos 専用機能は差分と代替を明記 |
 | 権限変更、通信断、再開、性能、アクセシビリティ | 一部の core / cancellation テスト | 拒否 / 限定 / フル、VoiceOver / 大文字、端末と大量写真、断線・再起動 |
-| 表示の退行検出 | simslim の専用 Simulator と実 Rust ABI の固定データで SwiftUI 23 画面を VRT 比較。明暗・大文字・選択・ビューア・情報・アルバム・設定・転送画面を確認し、一画素の故意の変更で失敗検出を確認 | [固定環境での VRT](vrt.md) を維持。iPad / Mac、編集・動画・Live の画面と操作、実写真・VoiceOver は別途確認 |
+| 表示の退行検出 | simslim の専用 Simulator と実 Rust ABI の固定データで SwiftUI 26 画面を VRT 比較。明暗・大文字・選択・ビューア・情報・アルバム・設定・転送画面を確認し、一画素の故意の変更で失敗検出を確認 | [固定環境での VRT](vrt.md) を維持。iPad / Mac、編集・動画・Live の画面と操作、実写真・VoiceOver は別途確認 |
 | 署名・配布、iCloud 同期 | 未確認 | 実機のインストール、同じ Apple account の native 保存結果 |
+
+[実装ロードマップ](implementation-roadmap.md)で全体の残操作と採用する段階を管理する。
 
 各行は実装、local tests / build、CI、画面・操作、native 保存結果を別に記録する。未実装・未検証を残したまま目標全体を完了としない。
 
@@ -33,7 +35,7 @@
 | 日時を保った新規コピーと中断後の再開 | PR #11 の最終HEAD `e280879` とマージ後main CIは全3 job通過。POST前の開始記録・固有ID照合・開始記録解除を含めてマージ済み | 確認画面と中断・再起動のnative操作 |
 | Apple静止画の原本へ戻す | PR #12 の最終HEAD `dc8eb58` とマージ後main CIは全3 job通過。Rust 154／Swift 38 testsとApple build通過 | 実PhotoKitの保存→復元→再起動と競合確認 |
 | 編集後の共有、取り込み、複製 | PR #13 / #14 で、選んだAppleの現在の静止画と、Immichの検証済み原本・対応する幾何編集系列からの現在のPNG共有をマージ済み。動画／Liveの現在の内容、複数選択、外部ファイル取り込み・複製は継続。転送用AppleImport effectを、これらの完了の証拠に数えない | 選んだ保存先と現在の見た目／原本の区別、元バイトの保持、受信／保存先の実結果、キャンセルと片付け |
-| 通常の削除、非表示／再表示、復元 | Immich の独立した `RefreshTrash` / `ChangeTrash` / `ResolveTrash`、確認後の保持設定・対象再検証、送信前の記録、結果不明の書込停止を実装。同じ原本のAppleコピーからの転送も送信前に止める。AppleTrashは現在Moveの完了からだけ要求する。非表示は未実装 | 最終HEADの実API CIとnative操作。Apple側の通常削除・復元案内の判断、非表示・再表示、一括選択と現在の権限・ID確認、両保存先の状態との一致 |
+| 通常の削除、非表示／再表示、復元 | Immich の独立した `RefreshTrash` / `ChangeTrash` / `ResolveTrash`、確認後の保持設定・対象再検証、送信前の記録、結果不明の書込停止を実装。同じ原本のAppleコピーからの転送も送信前に止める。Apple の通常削除は独立した `TrashApple` / `ResolveAppleTrash` と専用の永続記録で実装する。復元は Apple Photos へ案内する。非表示は未実装 | 最終HEADの実API CIとnative操作。Apple 通常削除の最終HEAD native／VRT／CI、非表示・再表示、一括選択と現在の権限・ID確認、両保存先の状態との一致 |
 | 明るさ・色・フィルターと編集のコピー／貼り付け | Apple静止画の露出・明るさ・コントラスト・彩度、3フィルターをRustの履歴・保存モデルに追加。[色編集](color-editing.md)。調整値・フィルター・幾何編集を選ぶ[コピー／貼り付け](edit-copy-paste.md)と、部分成功・結果不明の記録と読取りを実装。16MP上限、HDR・透過・24/48MP、Immichの書込みは残る | Native画素・色空間・保存・取り消し・元へ戻すの検証。専用Simulatorの生成JPEGで実PhotoKit保存・再起動・読取と復元を確認。実機・iCloudと最終HEAD CI |
 | 動画／Live編集、説明、アルバムの並びとフォルダー、人物／場所／分類 | 未実装または表の継続項目。原本再生、日時／座標の編集、通常アルバムをこれらの代用にしない | 対応する各操作の現在API、原本・関連ファイル・所属の保持、実データ操作と再起動、アクセシビリティ・端末別確認 |
 
@@ -217,3 +219,18 @@
 - JPEGの再圧縮による追加劣化を避けるPNG出力で、Display P3・8bit透過、撮影日時と小数秒・UTCオフセット・GPSを保持する。未知の系列、HDR、色空間不明、1,600万画素を超える描画、メタデータ不一致を拒否する。Appleの現在の画像と未編集原本のバイト列をそのまま共有する経路には描画上限を追加しない。
 - `make check`はRust 165／Swift 42 testsと全品質gateを通過。実Nativeの画素・Display P3・透過の反転・日時と位置の読み戻し・元バイト保持を確認。Rustは最新系列の変更、非対応操作、誤った出力・メタデータ、HDR・上限・不正日時・部分座標を拒否する。実Immichのfixtureも最新系列と原本の取得・再検証を使う経路へ更新した。
 - `make apple-build`はRust全5 target・XCFramework・iOS Simulator／macOS universal app buildsを通過。最終HEAD CIの実通信、実際の共有画面と受信先の保存・実機／iCloud／高解像度／HDRは別に確認する。
+
+
+## Apple 通常削除と Photos 復元案内（2026-10-14）
+
+Move と独立した Apple 通常削除を追加した。保存先と件数、全 Apple コピーの選択、iCloud の影響、Photos の復元案内を確認する。
+Rust が原本を照合し専用意図を永続化してから、native queue 内でも正確な ID・権限・版・構成を検証する。
+PhotoKit の Applied / NotApplied / Unknown を分け、成功応答の保存後の記録完了は再開できる。Unknown は可視性だけを読取り、削除の再送や absence による記録解除を行わない。
+同じ原本の書込み・新しい Copy / Move は記録で保護し、無関係な Apple 写真・Immich 原本・非空の既存 Copy / Move receipt の保持を回帰テストで確認した。
+
+最終 local check は Rust/FFI 200 / Swift 50 tests と全品質gate、最終 strict VRT は26画面と UI5で通過。
+専用 Simulator の生成JPEGは Native PhotoKit 12段階・coverageを通過した。OS確認拒否・単独削除・応答消失と再起動を含む。
+[検証記録](verification.md)と[Native の対象](native-photokit.md)を参照する。
+最終 pushed HEAD の hosted CI、実機／iCloud／native batch、RAW／Live／burst の native 削除と Photos アプリでの実復元は未確認。
+
+最終 `make apple-build` も Rust 全5 target・XCFramework・iOS Simulator / universal macOS の両 app で通過した。これは実機や iCloud の受入れを追加する証拠ではない。

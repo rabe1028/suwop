@@ -11,11 +11,13 @@ if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
     exit 1
 fi
 RECORD=0
+CAPTURE=0
 if [[ "${1:-}" == --record && $# == 1 ]]; then RECORD=1
-elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record]' >&2; exit 1
+elif [[ "${1:-}" == --capture && $# == 1 ]]; then CAPTURE=1
+elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture]' >&2; exit 1
 fi
-if [[ "$RECORD" == 1 && -n "${CI:-}" ]]; then
-    echo 'Baseline recording is forbidden in CI.' >&2
+if [[ ( "$RECORD" == 1 || "$CAPTURE" == 1 ) && -n "${CI:-}" ]]; then
+    echo 'Baseline recording and incomplete-baseline capture are forbidden in CI.' >&2
     exit 1
 fi
 mkdir -p DerivedData
@@ -35,7 +37,7 @@ if [[ "$(simslim --version)" != "simslim $SIMSLIM_VERSION" ]]; then
     echo 'Run make setup-vrt to install the pinned simslim.' >&2
     exit 1
 fi
-if [[ "$RECORD" == 0 ]]; then python3 scripts/vrt.py baseline-check; fi
+if [[ "$RECORD" == 0 && "$CAPTURE" == 0 ]]; then python3 scripts/vrt.py baseline-check; fi
 UDID="$(xcrun simctl list --json | python3 scripts/vrt.py device)"
 if [[ -z "$UDID" ]]; then
     UDID="$(xcrun simctl create "$(python3 scripts/vrt.py name)" "$(config device)" "$(config runtime)")"

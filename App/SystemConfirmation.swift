@@ -64,6 +64,22 @@ import SuwopShell
         )
     }
 
+    func trashApple(_ prompt: AppleTrashPrompt) async throws -> Bool {
+        let names = prompt.names.prefix(5).joined(separator: "\n")
+        let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
+        return try await confirm(
+            title: "Apple Photos の写真を削除しますか？",
+            message: """
+            保存先: Apple Photos · \(prompt.names.count) 件
+            \(names)\(remaining)
+            削除前に原本を照合します。iCloud の原本はダウンロードされる場合があり、削除開始前は停止できます。
+            iCloud 写真が有効なら、同じアカウントの他の端末からも削除されます。Immich の写真は変更しません。
+            復元は Apple Photos の「最近削除した項目」を開き、ロックを解除して対象を選び「復元」してください。保持期限や Photos の状態によって復元できない場合があります。
+            """,
+            action: "Apple Photos から削除"
+        )
+    }
+
     func changeTrash(_ prompt: TrashPrompt) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
