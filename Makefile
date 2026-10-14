@@ -4,7 +4,7 @@ ifeq ($(shell uname -s),Darwin)
 export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
 endif
 
-.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record
+.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record vrt-capture
 setup:
 	bash scripts/install-tools.sh
 	bash scripts/install-hooks.sh
@@ -69,6 +69,9 @@ integration:
 
 setup-vrt:
 	bash scripts/install-simslim.sh
+
+vrt-capture:
+	bash scripts/vrt.sh --capture
 
 vrt:
 	bash scripts/vrt.sh

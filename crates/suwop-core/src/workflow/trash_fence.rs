@@ -3,6 +3,7 @@ use crate::domain::StoredAsset;
 
 impl Runtime<'_> {
     pub(super) fn check_transfer_trash(&self, assets: &[StoredAsset]) -> Result<(), String> {
+        self.check_transfer_apple_trash(assets)?;
         let Some(session) = &self.session else {
             return Ok(());
         };

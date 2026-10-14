@@ -9,6 +9,8 @@ import UIKit
     let keys: [AssetKey]
     var loseNextSaveResponse = false
     var cancelEditor = false
+    var cancelTrash = false
+    var loseNextTrashResponse = false
     private(set) var savedAdjustment: AppleAdjustment?
     private(set) var effects: [String] = []
 
@@ -77,6 +79,14 @@ import UIKit
                 ), draft: cropped.draft
             ))).decode(ImageEditState.self)
             return try .from(edited.draft)
+        case "confirmAppleTrash": return .bool(!cancelTrash)
+        case "appleTrashApply":
+            let result = try await shell.execute(operation)
+            if loseNextTrashResponse {
+                loseNextTrashResponse = false
+                throw SuwopError("Intentional lost response after real PhotoKit deletion.")
+            }
+            return result
         case "confirmPasteEdits", "confirmReversion": return .bool(true)
         case "appleEditSave":
             let result = try await shell.execute(operation)
@@ -102,6 +112,15 @@ import UIKit
         if assetEffects.contains(operation.type) {
             let asset = try data["asset"].decode(StoredAsset.self)
             guard keys.contains(asset.key) else { throw SuwopError("Refusing a non-fixture photo.") }
+        }
+        if operation.type == "appleTrashApply" {
+            let requested = try data["assets"].decode([StoredAsset].self).map(\.key)
+            guard !requested.isEmpty,
+                  requested.allSatisfy(keys.contains) else { throw SuwopError("Refusing a non-fixture deletion.") }
+        }
+        if operation.type == "appleTrashInspect" {
+            let requested = try data["keys"].decode([AssetKey].self)
+            guard requested.allSatisfy(keys.contains) else { throw SuwopError("Refusing a non-fixture inspection.") }
         }
         if operation.type == "appleExport" {
             let requested = try data["keys"].decode([AssetKey].self)

@@ -143,6 +143,24 @@ import XCTest
         return LibraryModel(snapshotView: view, images: [:])
     }
 
+    static func appleTrashModel() throws -> LibraryModel {
+        let operation = AppleTrashOperation(
+            assets: [assets()[0]],
+            id: "33333333-3333-4333-8333-333333333333",
+            outcome: .unknown,
+            scope: "vrt",
+            visibility: .absent
+        )
+        let state = SavedLibrary(appleScope: "vrt", pendingAppleTrash: [operation], schemaVersion: 2)
+        let bridge = try CoreBridge()
+        let read = try XCTUnwrap(bridge
+            .call(0, input: .object(["type": .string("initialize"), "scope": .string("vrt")]))
+            .decode([EffectRequest].self).first)
+        let persist = try XCTUnwrap(resolve(bridge, request: read, value: .from(state)).first)
+        XCTAssertTrue(try resolve(bridge, request: persist, value: .null).isEmpty)
+        return try LibraryModel(snapshotView: bridge.call(2).decode(ViewModel.self), images: [:])
+    }
+
     private static func assets() -> [StoredAsset] {
         let roles: [ResourceRole] = [.image, .video, .rawImage, .image, .image, .image]
         return roles.enumerated().map { index, role in

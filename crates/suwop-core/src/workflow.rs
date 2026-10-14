@@ -10,6 +10,7 @@ use crate::{
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod apple_trash;
 mod current_rendering;
 mod current_sharing;
 mod edit_paste;
@@ -216,6 +217,8 @@ impl Runtime<'_> {
             Event::Play { keys, id } => self.play(&keys, &id).await,
             Event::RefreshAlbums => self.refresh_albums().await,
             Event::RefreshTrash { now } => self.refresh_trash(now).await,
+            Event::TrashApple { keys, id } => self.trash_apple(&keys, &id).await,
+            Event::ResolveAppleTrash { id } => self.resolve_apple_trash(&id).await,
             Event::ChangeTrash { keys, action, id } => self.change_trash(&keys, action, &id).await,
             Event::ResolveTrash { id } => self.resolve_trash(&id).await,
             Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,
@@ -510,6 +513,7 @@ impl Runtime<'_> {
                 "編集の貼り付け結果を先に確認してください。書き込みは再送しません。".into(),
             );
         }
+        self.check_apple_trash_keys(keys)?;
         if self
             .state
             .pending_trash

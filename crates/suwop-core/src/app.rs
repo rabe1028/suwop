@@ -43,6 +43,8 @@ pub struct SavedLibrary {
     pub trash: Option<crate::trash::TrashSnapshot>,
     #[serde(default)]
     pub pending_trash: Vec<crate::trash::TrashOperation>,
+    #[serde(default)]
+    pub pending_apple_trash: Vec<crate::trash::AppleTrashOperation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -61,6 +63,16 @@ pub enum ShellOperation {
     },
     ConfirmUploadResume {
         prompt: crate::immich::UploadResumePrompt,
+    },
+    ConfirmAppleTrash {
+        prompt: crate::trash::AppleTrashPrompt,
+    },
+    AppleTrashApply {
+        assets: Vec<crate::domain::StoredAsset>,
+    },
+    AppleTrashInspect {
+        scope: String,
+        keys: Vec<crate::domain::AssetKey>,
     },
     ConfirmTrash {
         prompt: crate::trash::TrashPrompt,
@@ -238,6 +250,13 @@ pub enum Event {
     RefreshAlbums,
     RefreshTrash {
         now: f64,
+    },
+    TrashApple {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+    },
+    ResolveAppleTrash {
+        id: String,
     },
     ChangeTrash {
         keys: Vec<crate::domain::AssetKey>,

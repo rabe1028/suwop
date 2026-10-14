@@ -3,7 +3,20 @@ import XCTest
 final class PhotoKitAcceptanceTests: XCTestCase {
     @MainActor func testNativeEditsPasteLostResponseReconciliationAndReversionSurviveAppRelaunch() {
         let app = XCUIApplication()
-        for phase in ["seed", "saved", "paste-lost", "resolve", "pasted", "revert", "original"] {
+        for phase in [
+            "seed",
+            "saved",
+            "paste-lost",
+            "resolve",
+            "pasted",
+            "revert",
+            "original",
+            "trash-cancel",
+            "trash-native-cancel",
+            "trash",
+            "trash-lost",
+            "trash-inspect",
+        ] {
             app.launchArguments = ["--native-acceptance", phase]
             app.launch()
             if phase == "seed" {
@@ -21,6 +34,12 @@ final class PhotoKitAcceptanceTests: XCTestCase {
                 predicate: NSPredicate(format: "label != 'RUNNING'"),
                 object: result
             )
+            if ["trash-native-cancel", "trash", "trash-lost"].contains(phase) {
+                guard answerNativeDeletion(app, cancel: phase == "trash-native-cancel") else {
+                    app.terminate()
+                    return
+                }
+            }
             XCTAssertEqual(XCTWaiter.wait(for: [finished], timeout: 120), .completed, phase)
             let screenshot = XCTAttachment(screenshot: app.screenshot())
             screenshot.name = "photokit-\(phase)"
@@ -36,5 +55,22 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             }
             app.terminate()
         }
+    }
+
+    @MainActor private func answerNativeDeletion(_ app: XCUIApplication, cancel: Bool) -> Bool {
+        let labels = cancel ? ["Don’t Allow", "Don't Allow", "許可しない"] : ["Delete", "削除"]
+        let predicate = NSPredicate(format: "label IN %@", labels)
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        for surface in [app, springboard] {
+            let button = surface.buttons.matching(predicate).firstMatch
+            if button.waitForExistence(timeout: 5) {
+                button.tap()
+                return true
+            }
+        }
+        XCTFail("Missing native deletion confirmation: \(labels)")
+        print(app.debugDescription)
+        print(springboard.debugDescription)
+        return false
     }
 }

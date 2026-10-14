@@ -6,7 +6,11 @@ use suwop_core::{
         ConnectionSettings, Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse,
         Suwop,
     },
-    domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset},
+    domain::{
+        AssetKey, LibrarySnapshot, PhotoResource, Provider, ResourceRole, ScanAccess, StoredAsset,
+    },
+    immich::{Asset, HttpRequest, HttpResponse, Session, Version},
+    trash::{AppleTrashOperation, AppleTrashOutcome},
 };
 
 fn photo_key() -> AssetKey {
@@ -81,6 +85,7 @@ struct Native {
     writes: usize,
     persists: usize,
     ignore_write: bool,
+    remote: Option<RemoteAlbum>,
 }
 impl Native {
     fn new() -> Self {
@@ -89,6 +94,7 @@ impl Native {
             writes: 0,
             persists: 0,
             ignore_write: false,
+            remote: None,
         }
     }
     fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
@@ -149,6 +155,17 @@ impl Native {
                     ShellOperation::Persist(_) => {
                         self.persists += 1;
                         Ok(Value::Null)
+                    }
+                    ShellOperation::Http(http) => {
+                        let response = self
+                            .remote
+                            .as_mut()
+                            .ok_or("unexpected Immich album request")?
+                            .response(http)?;
+                        if matches!(http.method.as_str(), "PATCH" | "PUT" | "DELETE") {
+                            self.writes += 1;
+                        }
+                        serde_json::to_value(response)
                     }
                     _ => return Err(
                         "albums must not mutate photo files, transfer receipts or asset deletion"
@@ -305,5 +322,281 @@ fn apple_albums_remain_available_when_immich_reconnect_fails() -> Result<(), Str
         assert_eq!(native.writes, usize::from(!refreshing));
         assert_eq!(native.persists, 1);
     }
+    Ok(())
+}
+
+const REMOTE_OWNER: &str = "11111111-1111-4111-8111-111111111111";
+const REMOTE_ALBUM: &str = "22222222-2222-4222-8222-222222222222";
+const COUNTERPART: &str = "33333333-3333-4333-8333-333333333333";
+const UNRELATED: &str = "44444444-4444-4444-8444-444444444444";
+const TRASH_OPERATION: &str = "55555555-5555-4555-8555-555555555555";
+
+fn remote_key(id: &str) -> AssetKey {
+    AssetKey {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        asset_id: id.into(),
+    }
+}
+
+fn remote_photo(id: &str) -> Value {
+    json!({
+        "id":id,"ownerId":REMOTE_OWNER,"type":"IMAGE",
+        "originalFileName":format!("{id}.jpg"),
+        "checksum":if id == COUNTERPART { "1".repeat(40) } else { "2".repeat(40) },
+        "fileCreatedAt":"2026-01-01T00:00:00Z",
+        "fileModifiedAt":"2026-01-01T00:00:00Z",
+        "updatedAt":"2026-01-01T00:00:00Z",
+        "isFavorite":false,"isOffline":false,"isTrashed":false
+    })
+}
+
+struct RemoteAlbum {
+    title: String,
+    members: Vec<String>,
+    deleted: bool,
+    owner: String,
+}
+
+impl RemoteAlbum {
+    fn info(&self) -> Value {
+        json!({"id":REMOTE_ALBUM,"albumName":self.title,"ownerId":self.owner})
+    }
+
+    fn response(&mut self, request: &HttpRequest) -> Result<HttpResponse, String> {
+        let route = request
+            .url
+            .strip_prefix("https://example/api/")
+            .ok_or("unexpected album origin")?;
+        let album_route = format!("albums/{REMOTE_ALBUM}");
+        let members_route = format!("{album_route}/assets");
+        let body = match (request.method.as_str(), route) {
+            ("GET", "albums") => json!(if self.deleted {
+                vec![]
+            } else {
+                vec![self.info()]
+            }),
+            ("GET", route) if route == album_route => self.info(),
+            ("POST", "search/metadata") => {
+                let body = request.body.as_ref().ok_or("missing album search body")?;
+                assert_eq!(body["filter"]["albumIds"]["any"], json!([REMOTE_ALBUM]));
+                json!({"assets":{"items":self.members.iter().map(|id| remote_photo(id)).collect::<Vec<_>>(),"nextCursor":null}})
+            }
+            ("GET", route) if route.starts_with("assets/") => {
+                let id = route.strip_prefix("assets/").ok_or("missing photo ID")?;
+                if ![COUNTERPART, UNRELATED].contains(&id) {
+                    return Err("unexpected album photo".into());
+                }
+                remote_photo(id)
+            }
+            ("PATCH", route) if route == album_route => {
+                self.title = request
+                    .body
+                    .as_ref()
+                    .and_then(|b| b["albumName"].as_str())
+                    .ok_or("missing album title")?
+                    .into();
+                self.info()
+            }
+            ("DELETE", route) if route == album_route => {
+                self.deleted = true;
+                Value::Null
+            }
+            (method @ ("PUT" | "DELETE"), route) if route == members_route => {
+                let ids: Vec<String> = serde_json::from_value(
+                    request.body.as_ref().ok_or("missing member body")?["ids"].clone(),
+                )
+                .map_err(|e| e.to_string())?;
+                assert!(
+                    ids.iter()
+                        .all(|id| [COUNTERPART, UNRELATED].contains(&id.as_str()))
+                );
+                if method == "PUT" {
+                    self.members.extend(ids.clone());
+                } else {
+                    self.members.retain(|id| !ids.contains(id));
+                }
+                json!(
+                    ids.iter()
+                        .map(|id| json!({"id":id,"success":true}))
+                        .collect::<Vec<_>>()
+                )
+            }
+            _ => return Err("album workflow attempted an unrelated request".into()),
+        };
+        Ok(HttpResponse {
+            status: 200,
+            body,
+            path: None,
+        })
+    }
+}
+
+fn fenced_remote_album(members: Vec<String>) -> Result<(Core<Suwop>, Native), String> {
+    let mut state = core().view().state;
+    let mut original = state.snapshots[0].assets[0].clone();
+    original.resources = vec![PhotoResource {
+        id: "original".into(),
+        name: original.name.clone(),
+        role: ResourceRole::Image,
+        sha1: Some("1".repeat(40)),
+        bytes: Some(12),
+    }];
+    original.inventory_complete = true;
+    state.snapshots[0].assets[0] = original.clone();
+    state.pending_apple_trash.push(AppleTrashOperation {
+        id: TRASH_OPERATION.into(),
+        scope: "apple".into(),
+        assets: vec![original],
+        outcome: AppleTrashOutcome::Unknown,
+        visibility: None,
+    });
+    let assets = [COUNTERPART, UNRELATED]
+        .into_iter()
+        .map(|id| {
+            serde_json::from_value::<Asset>(remote_photo(id))
+                .map(|asset| asset.record("remote", None, None))
+                .map_err(|e| e.to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    state.snapshots.push(LibrarySnapshot {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        assets,
+        access: ScanAccess::Full,
+        scanned_at: Some(1.0),
+    });
+    let session = Session {
+        endpoint: "https://example/api".into(),
+        key: "test".into(),
+        user_id: REMOTE_OWNER.into(),
+        scope: "remote".into(),
+        version: Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+    };
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            state,
+            session: Some(session),
+            ready: true,
+            ..Model::default()
+        },
+    );
+    let mut native = Native::new();
+    native.remote = Some(RemoteAlbum {
+        title: "旅行".into(),
+        members,
+        deleted: false,
+        owner: REMOTE_OWNER.into(),
+    });
+    Ok((core, native))
+}
+
+fn remote_edit(action: AlbumAction, keys: Vec<AssetKey>, title: Option<&str>) -> Event {
+    Event::EditAlbum {
+        key: AlbumKey {
+            provider: Provider::Immich,
+            scope: "remote".into(),
+            album_id: REMOTE_ALBUM.into(),
+        },
+        edit: AlbumEdit {
+            action,
+            keys,
+            title: title.map(str::to_owned),
+        },
+    }
+}
+
+#[test]
+fn pending_apple_delete_allows_album_only_edits_and_unrelated_members() -> Result<(), String> {
+    for action in [
+        AlbumAction::Rename,
+        AlbumAction::Delete,
+        AlbumAction::Add,
+        AlbumAction::Remove,
+    ] {
+        let mut members = vec![COUNTERPART.into()];
+        if matches!(action, AlbumAction::Remove) {
+            members.push(UNRELATED.into());
+        }
+        let (core, mut native) = fenced_remote_album(members)?;
+        let before = serde_json::to_value(core.view().state).map_err(|e| e.to_string())?;
+        let keys = if matches!(action, AlbumAction::Add | AlbumAction::Remove) {
+            vec![remote_key(UNRELATED)]
+        } else {
+            vec![]
+        };
+        let rename = matches!(action, AlbumAction::Rename);
+        let deleting = matches!(action, AlbumAction::Delete);
+        let adding = matches!(action, AlbumAction::Add);
+        native.run(&core, remote_edit(action, keys, rename.then_some("家族")))?;
+        let view = core.view();
+        assert!(view.error.is_none(), "{:?}", view.error);
+        assert_eq!(native.writes, 1);
+        assert_eq!(native.persists, 1);
+        let after = serde_json::to_value(&view.state).map_err(|e| e.to_string())?;
+        for field in ["pendingAppleTrash", "snapshots", "receipts"] {
+            assert_eq!(after[field], before[field], "{field}");
+        }
+        let remote = native.remote.as_ref().ok_or("missing remote album")?;
+        assert_eq!(remote.deleted, deleting);
+        if !deleting {
+            let saved = view
+                .state
+                .albums
+                .iter()
+                .find(|s| s.provider == Provider::Immich)
+                .and_then(|s| s.albums.first())
+                .ok_or("missing saved album")?;
+            assert!(saved.members.contains(&remote_key(COUNTERPART)));
+            assert_eq!(saved.members.contains(&remote_key(UNRELATED)), adding);
+            assert_eq!(saved.title, if rename { "家族" } else { "旅行" });
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn pending_apple_delete_still_fences_target_album_members_and_owner_changes() -> Result<(), String>
+{
+    for action in [AlbumAction::Add, AlbumAction::Remove] {
+        let members = if matches!(action, AlbumAction::Remove) {
+            vec![COUNTERPART.into()]
+        } else {
+            vec![]
+        };
+        let (core, mut native) = fenced_remote_album(members)?;
+        let before = serde_json::to_value(core.view().state).map_err(|e| e.to_string())?;
+        native.run(
+            &core,
+            remote_edit(action, vec![remote_key(COUNTERPART)], None),
+        )?;
+        assert!(
+            core.view()
+                .error
+                .as_deref()
+                .is_some_and(|e| e.contains("削除結果が不明"))
+        );
+        assert_eq!(native.writes, 0);
+        assert_eq!(native.persists, 0);
+        assert_eq!(
+            serde_json::to_value(core.view().state).map_err(|e| e.to_string())?,
+            before
+        );
+    }
+    let (core, mut native) = fenced_remote_album(vec![COUNTERPART.into()])?;
+    native.remote.as_mut().ok_or("missing remote album")?.owner = UNRELATED.into();
+    native.run(
+        &core,
+        remote_edit(AlbumAction::Rename, vec![], Some("家族")),
+    )?;
+    assert!(core.view().error.is_some());
+    assert_eq!(native.writes, 0);
+    assert_eq!(native.persists, 0);
+    assert_eq!(core.view().state.pending_apple_trash.len(), 1);
     Ok(())
 }

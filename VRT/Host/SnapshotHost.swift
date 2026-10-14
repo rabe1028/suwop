@@ -8,6 +8,8 @@ import SwiftUI
                 InteractiveEditorHost()
             } else if CommandLine.arguments.contains("--copy-fixture") {
                 InteractiveCopyHost()
+            } else if CommandLine.arguments.contains("--trash-fixture") {
+                InteractiveAppleTrashHost()
             } else {
                 Color.clear
             }
