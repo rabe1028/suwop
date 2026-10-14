@@ -1,7 +1,10 @@
 //! One-way presentation boundary. This type is never accepted by persistence.
 use crate::{
     app::{ConnectionSettings, SavedLibrary},
-    domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt},
+    domain::{
+        AssetKey, FileSignature, LibrarySnapshot, PhotoResource, Provider, ResourceRole,
+        ScanAccess, StoredAsset, TransferReceipt,
+    },
 };
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
@@ -112,6 +115,14 @@ impl ContentAccess {
     pub(crate) fn visible(&self, key: &AssetKey) -> bool {
         key.provider != Provider::Apple || self.visible.contains(key)
     }
+
+    pub(crate) fn receipt_visible(&self, receipt: &TransferReceipt) -> bool {
+        receipt
+            .source
+            .iter()
+            .chain(&receipt.destination)
+            .all(|asset| self.visible(&asset.key))
+    }
 }
 
 impl PublishedLibrary {
@@ -123,6 +134,11 @@ impl PublishedLibrary {
             .iter_mut()
             .for_each(|s| s.assets.retain(|a| access.visible(&a.key)));
         for r in &mut state.receipts {
+            // Aggregate signatures cannot be attributed safely to the visible
+            // members of a mixed receipt. Keep its identity and workflow phase.
+            if !access.receipt_visible(r) {
+                r.signatures.clear();
+            }
             for a in r.source.iter_mut().chain(&mut r.destination) {
                 redact_asset(&access, a);
             }
@@ -134,13 +150,13 @@ impl PublishedLibrary {
         }
         for u in &mut state.pending_uploads {
             if !access.visible(&u.source.key) {
-                u.resource.name = "非公開の写真".into();
+                redact_upload_evidence(&mut u.resource, &mut u.signature);
             }
             redact_asset(&access, &mut u.source);
         }
         for u in &mut state.upload_intents {
             if !access.visible(&u.source.key) {
-                u.resource.name = "非公開の写真".into();
+                redact_upload_evidence(&mut u.resource, &mut u.signature);
             }
             redact_asset(&access, &mut u.source);
         }
@@ -180,6 +196,18 @@ impl PublishedLibrary {
             pending_apple_trash: state.pending_apple_trash,
         }
     }
+}
+
+fn redact_upload_evidence(resource: &mut PhotoResource, signature: &mut FileSignature) {
+    resource.id.clear();
+    resource.name = "非公開の写真".into();
+    resource.role = ResourceRole::Image;
+    resource.sha1 = None;
+    resource.bytes = None;
+    // This deliberately invalid placeholder belongs only to PublishedLibrary;
+    // all reconciliation and mutation authorization use the canonical proof.
+    signature.sha256.clear();
+    signature.bytes = 0;
 }
 
 fn redact_asset(access: &ContentAccess, asset: &mut StoredAsset) {

@@ -54,6 +54,14 @@ iOS の `UIActivityViewController` は、公開 API から選択前であるこ�
 
 ## 検証の区別
 
+### 公開された重複証拠と移動理由の修正（P2）
+
+`PublishedLibrary` の cloneだけで、非公開 Apple sourceのアップロード記録に重複する resource ID／名前／role／SHA-1／byte数とファイル署名を匿名化する。roleは固定の `Image`、signatureは空のSHA-256と0 bytesを使う無効な表示用placeholderであり、実mediaや照合成功の証拠ではない。元の canonical記録、復旧・解除用の key／token／phase／関連IDは保持する。
+
+転送履歴の aggregate signaturesは sourceかdestinationに現在見えない Apple物理キーを含む場合だけ公開側から除去する。混在した指紋を assetごとに安全に割り当て直すことはしない。`ViewModel.moveBlockers` もその履歴では一般的な可視性案内に置き換え、バースト／Live／共有／補助resourceの元理由を公開しない。canonicalの削除判定・照合・journalは変えず、独立して見える Immichの同hashコピーや記録を一律に匿名化しない。
+
+Hidden／Unknown／一覧Unavailableの whole-ViewModel serialization、canonical不変、source／destination両方向の履歴保護、公開Immichの独立証拠・復旧ID保持の回帰を追加した。P2の `make check` は `/tmp/suwop-private-evidence-check2.log` でRust/FFI218／Swift52と全品質 gateを通過。`/tmp/suwop-private-evidence-apple.log` で全5 Rust Apple target／XCFrameworkと両 app buildが exit 0。strict VRTは `DerivedData/VRTArtifacts/20261014T132634Z-12640/report.json` で `passed: true`／`record: false`、26画面／unit15／UI7を通過した。基準画像の追加変更はない。以下のP1成功結果とは別の再実行証拠として記録する。`03331a9` の hosted CIは core／integration／apple成功、VRTのmetadata UI即時dismiss確認で失敗した。有限時間の終了待ちを追加したtest-only修正が上記local VRTで通過し、本番の終了処理は変更していない。P2最終 pushed HEADの hosted CIは確認待ち。
+
 Rust の migration、公開 serialization、canonical 不変、履歴解除の確認文、旧アップロードの再開、stale Apple anchor、共有／再生の遅延、native 通知を含む一括編集の回帰を追加した。Swift ABI の旧 schema 2 → 3 → fresh scan と、製品 `LibraryModel` の cache hit／遅延 thumbnail・preview／復帰を検証する。
 
 2026-10-14 の共有 review 修正 `ca13f38` 時点（表示登録競合のP1修正前）の `make check` は Rust/FFI 216 / Swift 52 tests と全 lint・format・architecture・generated DTO・tool/hook checks を通過した。`make apple-build` は Rust 全5 Apple target、XCFramework、iOS Simulator / universal macOS の両 app build を通過した。ログは `/tmp/suwop-sharing-review-check2.log` と `/tmp/suwop-sharing-review-apple2.log`。修正前の215 / 51件の結果は [検証](verification.md) に別記録する。

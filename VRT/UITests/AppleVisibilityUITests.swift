@@ -28,7 +28,11 @@ final class AppleVisibilityUITests: XCTestCase {
         metadata.tap()
         XCTAssertTrue(app.navigationBars["日時・位置情報"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["写真を表示できません"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.navigationBars["日時・位置情報"].exists)
+        let dismissed = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == false"),
+            object: app.navigationBars["日時・位置情報"]
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 3), .completed)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "PRIVATE-")).count, 0)
         XCTAssertFalse(app.otherElements["metadataDate"].exists)
         app.terminate()

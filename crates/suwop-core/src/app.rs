@@ -450,7 +450,15 @@ impl crux_core::App for Suwop {
     fn view(&self, model: &Model) -> ViewModel {
         let mut move_blockers = std::collections::BTreeMap::new();
         let can_transfer = model.ready && model.session.is_some() && !model.busy;
+        let content_access = crate::privacy::ContentAccess::new(&model.state);
         for receipt in &model.state.receipts {
+            if !content_access.receipt_visible(receipt) {
+                move_blockers.insert(
+                    receipt.id.clone(),
+                    vec!["写真の可視性を確認して一覧を更新してください。".into()],
+                );
+                continue;
+            }
             let mut blockers = receipt.move_blockers();
             if !can_transfer {
                 blockers.push("接続または処理状態を確認してください".into());

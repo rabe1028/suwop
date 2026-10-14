@@ -99,3 +99,15 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - 先行VRTはテストhelperの `@escaping` 欠落によるコンパイル失敗。test-only修正後の上記成功runとは区別する。
 
 以前のNative15は `9e8f6f7` の証拠として保持し、P1修正後のローカル再実行とは扱わない。共有修正HEAD `ca13f38` の hosted CI run `38565835960` は全4 job成功確認済み。P1修正後の最終 pushed HEADの hosted CIは確認待ち。実機／iCloud／Photosでの直接再表示／実macOS共有UIは引き続き未確認。
+
+## PR #21 の重複指紋・移動理由の匿名化（P2、最終ローカル検証）
+
+公開cloneの private Apple sourceに重複する upload resource／signatureと、private sourceまたはdestinationを含むreceiptのaggregate signaturesを除去した。private履歴の公開moveBlockersは一般的な可視性案内に置き換える。canonicalの証拠・削除判定と、公開Immichの独立証拠、復旧・解除用IDは保持する。DTO／schema変更はない。
+
+- `make check` の再実行は成功。`/tmp/suwop-private-evidence-check2.log` はRust/FFI218／Swift52 testsと全品質 gateを通過。whole-viewからdistinct hash／bytes／resource情報／private blocker文が消え、Hidden・Unknown・一覧Unavailableでもcanonical不変と公開Immichの証拠保持を確認する追加2件を含む。
+- 最初のcheckは新テストの不要な `Result` 戻り値をClippyが検出して失敗。assertを保持したtest-only修正後の上記成功とは区別する。
+- P2の `make apple-build` は exit 0、全5 Rust Apple target／XCFrameworkとiOS Simulator／universal macOS両 app buildを通過。ログ `/tmp/suwop-private-evidence-apple.log`。
+- P2の strict `make vrt` は exit 0、`DerivedData/VRTArtifacts/20261014T132634Z-12640/report.json` は `passed: true`／`record: false`。26画面／unit15／UI7を通過。以前のP1の結果と今回の再実行結果は別の証拠として記録する。
+- 前HEAD `03331a9` の hosted CIはcore／Immich integration／apple成功、VRT失敗。metadata editorのdismiss直後のUI assertionで失敗した。失敗ログは `/tmp/suwop-ci03331a9-vrt/VRTArtifacts/20261014T131134Z-1961/compare.log`。テストを有限時間の終了待ちへ修正し、上記local VRTで当該UI回帰は11.8秒で通過。本番の終了処理はこのテスト修正で変更していない。
+- P2修正後の最終 pushed HEADの hosted CIは確認待ち。前HEADのVRT失敗を成功として扱わない。
+- 基準画像の追加更新はしていない。実機／iCloud／Photosでの直接再表示／実macOS共有UIと外部service handoffは引き続き未確認。
