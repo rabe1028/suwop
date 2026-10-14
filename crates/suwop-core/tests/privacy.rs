@@ -65,7 +65,7 @@ fn state(visibility: AppleVisibility) -> SavedLibrary {
     remote.longitude = None;
     remote.resources[0].name = "public-copy.jpg".into();
     SavedLibrary {
-        schema_version: 3,
+        schema_version: 4,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(apple.clone()), snapshot(remote.clone())],
         receipts: vec![TransferReceipt {
@@ -366,7 +366,7 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
             .ok_or("receipt")?
             .remove("appleVisibility");
         let migrated = migrate(old)?;
-        assert_eq!(migrated.schema_version, 3);
+        assert_eq!(migrated.schema_version, 4);
         assert_eq!(
             migrated.snapshots[0].assets[0].apple_visibility,
             AppleVisibility::Unknown
@@ -519,5 +519,45 @@ fn local_journal_disposition_confirmation_does_not_reveal_a_private_apple_source
         assert_eq!(name, "非公開の写真");
         assert_eq!(canonical.pending_uploads[0].source, source);
     }
+    Ok(())
+}
+
+#[test]
+fn visibility_journal_fence_redacts_nested_state_and_stale_error_without_hiding_counterpart()
+-> Result<(), Box<dyn std::error::Error>> {
+    use suwop_core::apple_visibility::{
+        AppleVisibilityOperation, VisibilityAction, VisibilityOutcome, VisibilityTarget,
+    };
+    let mut canonical = state(AppleVisibility::Visible);
+    canonical
+        .apple_visibility_operations
+        .push(AppleVisibilityOperation {
+            id: "44444444-4444-4444-8444-444444444444".into(),
+            scope: "apple".into(),
+            action: VisibilityAction::Hide,
+            outcome: VisibilityOutcome::Unknown,
+            targets: vec![VisibilityTarget {
+                key: canonical.snapshots[0].assets[0].key.clone(),
+                witness_digest: "a".repeat(64),
+                observation: None,
+            }],
+        });
+    let before = serde_json::to_value(&canonical)?;
+    let model = model(canonical);
+    let view = Suwop.view(&model);
+    let public = serde_json::to_string(&view)?;
+    for secret in [
+        "PRIVATE-original.jpg",
+        "PRIVATE-resource.jpg",
+        "PRIVATE-raw-revision",
+        "37.12345",
+        "139.12345",
+        &"a".repeat(64),
+    ] {
+        assert!(!public.contains(secret), "leaked {secret}");
+    }
+    assert_eq!(view.photos.len(), 1);
+    assert_eq!(view.photos[0].assets[0].key.provider, Provider::Immich);
+    assert_eq!(serde_json::to_value(&model.state)?, before);
     Ok(())
 }

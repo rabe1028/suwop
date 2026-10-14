@@ -11,13 +11,14 @@ simslimでは`photos`カテゴリーを残し、プロファイル一致とPhoto
 
 製品のRust coreとAppleアダプターを別bundleのテスト専用ホストへコンパイルする。
 確認への回答、テスト用の編集ドラフト、保存済み応答の意図的な消失をテストが制御する。
-可視性のシナリオだけは、別の生成fixtureをテスト専用のPhotoKitコードで非表示・再表示する。
-これは外部アプリでの変更を模したもので、製品の非表示UIや非表示effectの実装証拠ではない。
+外部可視性の3段階は別の生成fixtureをテスト専用PhotoKitコードで非表示・再表示し、外部アプリでの変更を模す。
+追加の製品可視性4段階はさらに別のfixtureで実Rust Event・永続記録・製品ApplePhotos adapterを通す。
+製品可視性のアプリ確認はhostが回答し、実native変更はPhotoKitが実行する。これは製品UI操作の証拠ではない。
 Photosのスキャン・原本取得・編集セッション・実保存・現在の画像の取得・復元・アプリ内状態の保存は製品コードを使う。
 製品アプリにはこのホストとシナリオを含めない。ホストの書込み対象は作成したfixtureのIDに限定する。
 
-最初の3枚のJPEGを使う既存12段階の後に、別の4枚目を作る可視性3段階を加え、
-次の15段階でアプリのプロセスを終了・起動する。
+最初の3枚のJPEGを使う既存12段階、別の4枚目を使う外部可視性3段階、
+さらに別の5枚目を使う製品可視性4段階の計19段階でプロセスを終了・起動する。
 
 1. 原本のバイト署名と日時・位置・お気に入りを記録し、切り抜き・色・セピアを実保存して編集をコピー。
 2. 次の起動で保存された編集、描画サイズ・色の画素、アプリ内クリップボードを再取得。
@@ -35,23 +36,28 @@ Photosのスキャン・原本取得・編集セッション・実保存・現�
 14. 次の起動で製品coreの通常scan・公開projectionから除外され、thumbnail/export/currentImageが拒否され、共有のRust effectも発行されないことを確認。
 15. hidden assetをfresh fetchできる場合だけ再表示し、通常read・原本署名・日時/位置/お気に入り・全サイズ画像の回復を確認する。
     取得できなければ書込みを要求せず、Photosでの認証・再表示が必要な境界として別の結果を記録する。
+16. 別生成JPEGへ `hideApple` Eventを送り、実RustのUnknown保存が製品adapter／PhotoKit変更より先であることを確認。native Appliedを記録し、通常scan／projection／thumbnail／export／currentImage／Rust共有の取得拒否を確認。
+17. 次の起動でcanonicalのschema4 journal、既知exact keyとdigest、匿名公開summaryを確認し、変更effectが再送されないことを確認。
+18. `inspectAppleVisibility` Eventで既知IDのfactsだけを取得。取得不可なら観測を捏造せずnative outcomeを保持し、Photos handoffを案内。取得可能ならexact witnessに一致する現在のHidden観測を記録。
+19. exact hidden fetchとproperties変更能力がある場合だけ新UUIDの `unhideApple` を実行し、Applied・Visibleのreadback、fresh scanと原本署名／metadataを検証。取得不可ならnative変更を要求せず `photos-handoff-required` を別結果として記録する。
 
 異なるサイズの写真も含む。削除対象外として残る fixture の原本・メタデータは全段階で読み直す。既存の写真は読取りだけで、変更・削除しない。
 通常削除するのは、今回の manifest に記録した生成 fixture の2枚だけで、3枚目と他の写真は保持する。権限設定が再インストールで失われた場合は、テストアプリの公開APIの要求に対し、
 確認済みの「フルアクセスを許可」をXCUITestで操作する。権限の確認前にfixtureを作らない。
-非表示変更するのは別manifestに記録する4枚目だけ。既存写真は変更せず、変更前後の対象外ID集合・revisionを確認する。
+外部非表示変更は別manifestの4枚目、製品非表示変更は別fixtureの5枚目に限定する。既存写真は変更しない。外部変更では対象外ID集合・revisionを照合し、製品effectでもfixtureのexact keyだけを許可する。
 対象外の全原本のハッシュ検査をした意味ではない。3枚目のcontrolは既存の原本署名・メタデータ検査を続ける。
 hiddenの認証設定は変更しない。full accessでも取得できない場合があり、auth OFFを前提にしない。
 native hideの成功はcallbackで確認し、通常scanから消えたことだけを成功の根拠にしない。
 callback不明・明確な失敗・記録保存失敗では段階を失敗として終了し、自動で同じ変更を再送しない。
-各可視性fixtureの記録はUUID別ファイルに保存し、次のrunでも以前のunknown記録を上書きしない。
+外部可視性fixtureの記録はUUID別ファイルへ保存する。製品可視性の操作記録はRust canonical journalに保存し、各phaseの再起動でも保持する。変更には新UUIDを使い、同じ操作記録を再送しない。
 
 CIはVRTの後に同じSimulatorで実行する。成果物は`DerivedData/PhotoKitArtifacts/<日時>-<ID>/`に保存する。
 実行ログ、各起動のスクリーンショットを含むxcresult、プロファイル・Photosサービス検査、メモリと工程時間を保持する。
-15段階がそれぞれ一度通過し、hideのAppliedと可視性回復の結果がそれぞれ一度記録されなければ、coverage gateは失敗する。
+19段階が各1回通過し、外部／製品それぞれのhide Appliedとrestore結果が各1回記録されなければcoverage gateは失敗する。
 `report.json`の`visibility.native_unhide_verified`と`hidden_original_reverified`は実再表示・readback時だけtrue。
 `photos-handoff-required`ではfalseとなり、取得拒否とPhotos案内の境界の証拠に限る。
 restore段階のPASSだけでは再表示成功を意味しない。`product_hide_ui_verified`は常にfalse。
+製品側は別の `product_visibility` で `product_hide_workflow_verified`、`product_native_unhide_verified`、`hidden_original_reverified`、`photos_handoff_required` を記録する。host確認であるため `product_hide_ui_verified` はfalse。VRTのfake PhotoKit effectによる実製品UI操作と、この実native workflowの証拠は別に扱う。
 VRTの基準画像は変更しない。
 
 この証拠の範囲は、固定Simulatorの生成JPEGと製品のcore・アダプター。実機・iCloud・HDR・RAW・Live Photo・
@@ -94,3 +100,11 @@ restoreのPASSは取得拒否とPhotos案内の境界の通過であり、再表
 先行実行はvisibility-hideのOS確認に応答できず失敗した。UITestをphase専用のhost名・期待Hide/Unhide・拒否buttonの照合へ修正し、次のseedが作った新fixtureで上記成功runを実行した。先行fixtureのunknown記録は再送・上書きしない。
 Photosでの実再表示、PhotosPicker後の原assetへのアクセス、製品のhide/unhide操作は別の受入れである。
 最終HEADのhosted CIは未実施、実機/iCloudは未確認。
+
+## PP-02A-2 製品可視性の local native evidence（2026-10-14）
+
+最終runは `DerivedData/PhotoKitArtifacts/20261014T135859Z-22975/report.json`、ログ `/tmp/suwop-visibility-actions-native.log`。スクリプトはexit0、`passed:true`、全19 phaseが各1回通過した。strict VRT→最終Apple build→Nativeを直列で実行した。
+
+別生成JPEGのproduct hideはApplied1で、`product_hide_workflow_verified=true`。実Rust EventとUnknown先行保存、製品adapter経由の実PhotoKit変更、通常取得拒否、再起動後の記録保持／再送なし、明示的facts検査を確認した。product restorationは `photos-handoff-required`1で、`product_native_unhide_verified=false`／`hidden_original_reverified=false`／`product_hide_ui_verified=false`。取得不可のPhotos案内境界を通過したのであり、直接再表示やhidden原本readback成功ではない。
+
+アプリ確認はhost注入で、実製品UIからPhotoKit変更まで一本の受入れを証明しない。別途strict VRTの製品UI3はfake PhotoKit effectで成功している。以前のNative15成功はA-1の歴史的な証拠として保持する。実機／iCloud／OS再起動／Photosでの直接再表示は未確認。

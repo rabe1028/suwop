@@ -12,6 +12,7 @@ struct PhotoViewer: View {
     @State private var reverting = false
     @State private var copyingEdits = false
     @State private var pendingCopy: (AssetKey, EditCopyOptions)?
+    @State private var showVisibility = false
     @Environment(\.dismiss) private var dismiss
     private let collection: AlbumKey?
     init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil) {
@@ -57,6 +58,7 @@ struct PhotoViewer: View {
                     systemImage: "photo",
                     description: Text("写真が削除されたか、アクセス権限が変わった可能性があります。")
                 )
+                Button("非表示変更と再表示案内") { showVisibility = true }
             }
         }.background(.black).foregroundStyle(.white).preferredColorScheme(.dark)
             .onChange(of: photo?.assets.map(\.key), initial: true) {
@@ -69,6 +71,7 @@ struct PhotoViewer: View {
                     PhotoInfo(photo: photo, model: model)
                 }
             }
+            .sheet(isPresented: $showVisibility) { AppleVisibilityView(model: model) }
             .sheet(
                 isPresented: $copyingEdits,
                 onDismiss: {
@@ -194,6 +197,18 @@ struct PhotoViewer: View {
                     Button("原本へ戻す", systemImage: "arrow.uturn.backward") {
                         reverting = true
                         choosingEdit = true
+                    }
+                    Button("この表示元の Apple Photos コピーを非表示", systemImage: "eye.slash") {
+                        if let source = model.displayedSource(photo) {
+                            model.hideOnApple([source.key]) { showVisibility = true }
+                        }
+                    }
+                    .disabled(model
+                        .visibilityHideKeys(in: Set([model.displayedSource(photo)?.key].compactMap(\.self)))
+                        .isEmpty)
+                    .accessibilityIdentifier("hideDisplayedApplePhoto")
+                    Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
+                        showVisibility = true
                     }
                 } label: { Image(systemName: "slider.horizontal.3") }
                     .disabled(model.isBusy).accessibilityLabel("写真を編集")

@@ -236,6 +236,101 @@ public enum AppleVisibility: String, Codable, CaseIterable, Sendable {
     case `hidden`
 }
 
+public struct AppleVisibilityApply: Codable, Sendable {
+    public var action: VisibilityAction
+    public var id: String
+    public var scope: String
+    public var targets: [VisibilityApplyTarget]
+    public init(action: VisibilityAction, id: String, scope: String, targets: [VisibilityApplyTarget] = []) {
+        self.action = action
+        self.id = id
+        self.scope = scope
+        self.targets = targets
+    }
+}
+
+public struct AppleVisibilityFacts: Codable, Sendable {
+    public var canEditProperties: Bool
+    public var freshRevision: String
+    public var fullAccess: Bool
+    public var identity: VisibilityIdentity
+    public var key: AssetKey
+    public var visibility: AppleVisibility
+    public init(canEditProperties: Bool, freshRevision: String, fullAccess: Bool, identity: VisibilityIdentity, key: AssetKey, visibility: AppleVisibility) {
+        self.canEditProperties = canEditProperties
+        self.freshRevision = freshRevision
+        self.fullAccess = fullAccess
+        self.identity = identity
+        self.key = key
+        self.visibility = visibility
+    }
+}
+
+public struct AppleVisibilityInspection: Codable, Sendable {
+    public var assets: [AppleVisibilityFacts]
+    public var fullAccess: Bool
+    public var scope: String
+    public init(assets: [AppleVisibilityFacts] = [], fullAccess: Bool, scope: String) {
+        self.assets = assets
+        self.fullAccess = fullAccess
+        self.scope = scope
+    }
+}
+
+public struct AppleVisibilityOperation: Codable, Sendable {
+    public var action: VisibilityAction
+    public var id: String
+    public var outcome: VisibilityOutcome
+    public var scope: String
+    public var targets: [VisibilityTarget]
+    public init(action: VisibilityAction, id: String, outcome: VisibilityOutcome, scope: String, targets: [VisibilityTarget] = []) {
+        self.action = action
+        self.id = id
+        self.outcome = outcome
+        self.scope = scope
+        self.targets = targets
+    }
+}
+
+public struct AppleVisibilityPrompt: Codable, Sendable {
+    public var action: VisibilityAction
+    public var count: Int64
+    public var id: String
+    public init(action: VisibilityAction, count: Int64, id: String) {
+        self.action = action
+        self.count = count
+        self.id = id
+    }
+}
+
+public struct AppleVisibilityResult: Codable, Sendable {
+    public var outcome: VisibilityOutcome
+    public init(outcome: VisibilityOutcome) {
+        self.outcome = outcome
+    }
+}
+
+public struct AppleVisibilitySummary: Codable, Sendable {
+    public var action: VisibilityAction
+    public var canInspect: Bool
+    public var canUnhide: Bool
+    public var count: Int64
+    public var id: String
+    public var observations: [VisibilityObservation?]
+    public var outcome: VisibilityOutcome
+    public var photosHandoff: Bool
+    public init(action: VisibilityAction, canInspect: Bool, canUnhide: Bool, count: Int64, id: String, observations: [VisibilityObservation?] = [], outcome: VisibilityOutcome, photosHandoff: Bool) {
+        self.action = action
+        self.canInspect = canInspect
+        self.canUnhide = canUnhide
+        self.count = count
+        self.id = id
+        self.observations = observations
+        self.outcome = outcome
+        self.photosHandoff = photosHandoff
+    }
+}
+
 public struct AssetKey: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -856,6 +951,7 @@ public enum Provider: String, Codable, CaseIterable, Sendable {
 public struct PublishedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var appleScope: String
+    public var appleVisibilityOperations: [AppleVisibilitySummary]
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
     public var pendingAppleTrash: [AppleTrashOperation]
@@ -867,9 +963,10 @@ public struct PublishedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilitySummary] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
+        self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
         self.editClipboard = editClipboard
         self.pendingAppleTrash = pendingAppleTrash
@@ -909,6 +1006,7 @@ public struct ReversionPrompt: Codable, Sendable {
 public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var appleScope: String
+    public var appleVisibilityOperations: [AppleVisibilityOperation]
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
     public var pendingAppleTrash: [AppleTrashOperation]
@@ -920,9 +1018,10 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
+        self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
         self.editClipboard = editClipboard
         self.pendingAppleTrash = pendingAppleTrash
@@ -1217,6 +1316,7 @@ public struct Version: Codable, Sendable {
 
 public struct ViewModel: Codable, Sendable {
     public var albums: [AlbumView]
+    public var appleVisibilityHideKeys: [AssetKey]
     public var browser: BrowserView
     public var busy: Bool
     public var canTransfer: Bool
@@ -1233,8 +1333,9 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
+        self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
         self.busy = busy
         self.canTransfer = canTransfer
@@ -1251,5 +1352,71 @@ public struct ViewModel: Codable, Sendable {
         self.serverVersion = serverVersion
         self.state = state
         self.status = status
+    }
+}
+
+public enum VisibilityAction: String, Codable, CaseIterable, Sendable {
+    case `hide`
+    case `unhide`
+}
+
+public struct VisibilityApplyTarget: Codable, Sendable {
+    public var expectedWitness: String
+    public var freshRevision: String
+    public var key: AssetKey
+    public init(expectedWitness: String, freshRevision: String, key: AssetKey) {
+        self.expectedWitness = expectedWitness
+        self.freshRevision = freshRevision
+        self.key = key
+    }
+}
+
+public struct VisibilityIdentity: Codable, Sendable {
+    public var creationDate: Double?
+    public var mediaSubtypes: Int64
+    public var mediaType: Int64
+    public var pixelHeight: Int64
+    public var pixelWidth: Int64
+    public var resources: [VisibilityResource]
+    public init(creationDate: Double? = nil, mediaSubtypes: Int64, mediaType: Int64, pixelHeight: Int64, pixelWidth: Int64, resources: [VisibilityResource] = []) {
+        self.creationDate = creationDate
+        self.mediaSubtypes = mediaSubtypes
+        self.mediaType = mediaType
+        self.pixelHeight = pixelHeight
+        self.pixelWidth = pixelWidth
+        self.resources = resources
+    }
+}
+
+public enum VisibilityObservation: String, Codable, CaseIterable, Sendable {
+    case `observedVisible`
+    case `observedHidden`
+}
+
+public enum VisibilityOutcome: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `applied`
+    case `notApplied`
+}
+
+public struct VisibilityResource: Codable, Sendable {
+    public var id: String
+    public var originalFilename: String
+    public var role: ResourceRole
+    public init(id: String, originalFilename: String, role: ResourceRole) {
+        self.id = id
+        self.originalFilename = originalFilename
+        self.role = role
+    }
+}
+
+public struct VisibilityTarget: Codable, Sendable {
+    public var key: AssetKey
+    public var observation: VisibilityObservation?
+    public var witnessDigest: String
+    public init(key: AssetKey, observation: VisibilityObservation? = nil, witnessDigest: String) {
+        self.key = key
+        self.observation = observation
+        self.witnessDigest = witnessDigest
     }
 }

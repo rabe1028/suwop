@@ -125,6 +125,7 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
         }
         5 => return move_trash_check(input),
         13 => return ordinary_trash_check(input),
+        14 => return apple_visibility_check(input),
         6 => {
             #[derive(serde::Deserialize)]
             struct Origins {
@@ -315,6 +316,17 @@ fn ordinary_trash_check(input: &str) -> Result<Value, String> {
     }
     let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
     suwop_core::trash::validate_ordinary_apple_trash(&check.saved, &check.fresh)?;
+    Ok(Value::Null)
+}
+
+fn apple_visibility_check(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    struct Check {
+        request: suwop_core::apple_visibility::AppleVisibilityApply,
+        fresh: suwop_core::apple_visibility::AppleVisibilityInspection,
+    }
+    let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    suwop_core::apple_visibility::validate_apply(&check.request, &check.fresh)?;
     Ok(Value::Null)
 }
 

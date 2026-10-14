@@ -28,6 +28,34 @@ import XCTest
 }
 
 final class PresentationEpochTests: XCTestCase {
+    @MainActor func testStaleVisibilityConfirmationReturnsFalseWithoutRegisteringNativeAlert() async throws {
+        let host = try NativeVisibilityHost()
+        defer { host.close() }
+        let shell = try AppleShell()
+        let context = shell.beginWorkflow()
+        shell.invalidateContentPresentations()
+        for action in [VisibilityAction.hide, .unhide] {
+            let request = try operation("confirmAppleVisibility", data: .object([
+                "prompt": .from(AppleVisibilityPrompt(
+                    action: action, count: 1, id: "55555555-5555-4555-8555-555555555555"
+                )),
+            ]))
+            let outcome = NativeVisibilityOutcome()
+            let task = Task {
+                do { outcome.confirmed = try await shell.execute(request, context: context).decode(Bool.self)
+                } catch { outcome.record(error) }
+                outcome.finished = true
+            }
+            defer { task.cancel() }
+            try await waitUntil { outcome.finished || host.root.presentedViewController != nil }
+            XCTAssertNil(host.root.presentedViewController)
+            XCTAssertTrue(outcome.finished)
+            XCTAssertFalse(outcome.confirmed)
+            XCTAssertFalse(outcome.cancelled)
+            XCTAssertNil(outcome.failure)
+        }
+    }
+
     @MainActor func testInvalidationDuringReadonlyInspectionBlocksItsResultAndFollowingConfirmation() async throws {
         for type in ["appleEditInspect", "appleReversionInspect"] {
             try await verifyInspectionRace(type)

@@ -10,6 +10,8 @@ import SwiftUI
                 InteractiveCopyHost()
             } else if CommandLine.arguments.contains("--visibility-fixture") {
                 InteractiveVisibilityHost()
+            } else if CommandLine.arguments.contains("--visibility-actions-fixture") {
+                InteractiveVisibilityActionsHost()
             } else if CommandLine.arguments.contains("--trash-fixture") {
                 InteractiveAppleTrashHost()
             } else {

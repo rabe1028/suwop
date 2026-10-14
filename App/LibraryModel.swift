@@ -10,6 +10,7 @@ import SwiftUI
     @Published var showTransfers = false
     @Published var showTrash = false
     @Published var showAppleTrash = false
+    @Published var showAppleVisibility = false
     @Published var showEditPasteRecords = false
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
@@ -46,10 +47,12 @@ import SwiftUI
         init(
             runtime: RustRuntime,
             shell: AppleShell,
+            thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
             executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
         ) {
             self.runtime = runtime
             self.shell = shell
+            self.thumbnailEffect = thumbnailEffect
             self.executeEffect = { operation, context in
                 guard let context else { throw CancellationError() }
                 return try await executeEffect(operation, context)
@@ -284,10 +287,6 @@ import SwiftUI
         view?.canTransfer == true && work == nil
     }
 
-    var pendingAppleCount: Int64 {
-        view?.pendingAppleCount ?? 0
-    }
-
     func disconnect() {
         send(["type": .string("disconnect")])
     }
@@ -340,13 +339,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 3 {
+                if pendingRefresh, view?.state.schemaVersion == 4 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 3 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 4 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 3 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 4 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -444,6 +443,18 @@ private extension LibraryModel {
 }
 
 extension LibraryModel {
+    var pendingAppleCount: Int64 {
+        view?.pendingAppleCount ?? 0
+    }
+
+    var appleVisibilityOperations: [AppleVisibilitySummary] {
+        view?.state.appleVisibilityOperations ?? []
+    }
+
+    var appleVisibilityHideKeys: [AssetKey] {
+        view?.appleVisibilityHideKeys ?? []
+    }
+
     var trashSnapshot: TrashSnapshot? {
         view?.state.trash
     }
@@ -472,6 +483,10 @@ extension LibraryModel {
     }
 
     func refreshAfterAppleTrash() {
+        pendingRefresh = true
+    }
+
+    func refreshAfterAppleVisibility() {
         pendingRefresh = true
     }
 

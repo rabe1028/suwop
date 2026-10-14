@@ -184,7 +184,7 @@ async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Res
         .as_secs_f64();
     let assets = session.list(ctx, now).await?;
     let state = SavedLibrary {
-        schema_version: 3,
+        schema_version: 4,
         apple_scope: "unused-test-library".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Immich,

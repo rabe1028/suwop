@@ -11,6 +11,7 @@ import UIKit
     var cancelEditor = false
     var cancelTrash = false
     var loseNextTrashResponse = false
+    private(set) var visibilityPersistedBeforeApply = false
     private(set) var savedAdjustment: AppleAdjustment?
     private(set) var effects: [String] = []
 
@@ -83,6 +84,8 @@ import UIKit
                 ), draft: cropped.draft
             ))).decode(ImageEditState.self)
             return try .from(edited.draft)
+        case "confirmAppleVisibility", "appleVisibilityApply":
+            return try await executeVisibility(operation, shell: shell, context: context)
         case "confirmAppleTrash": return .bool(context.permits() && !cancelTrash)
         case "appleTrashApply":
             let result = try await shell.execute(operation, context: context)
@@ -104,6 +107,22 @@ import UIKit
         }
     }
 
+    private func executeVisibility(
+        _ operation: ShellOperation, shell: AppleShell, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        if operation.type == "confirmAppleVisibility" {
+            return .bool(context.permits())
+        }
+        let request = try (operation.data ?? .null)["request"].decode(AppleVisibilityApply.self)
+        let read = try JSONValue.object(["type": .string("readState")]).decode(ShellOperation.self)
+        let canonical = try await shell.execute(read, context: context).decode(SavedLibrary.self)
+        guard canonical.appleVisibilityOperations.contains(where: {
+            $0.id == request.id && $0.outcome == .unknown && $0.targets.map(\.key) == request.targets.map(\.key)
+        }) else { throw SuwopError("Native visibility write preceded durable Rust Unknown intent.") }
+        visibilityPersistedBeforeApply = true
+        return try await shell.execute(operation, context: context)
+    }
+
     private func fence(_ operation: ShellOperation) throws {
         let data = operation.data ?? .null
         let assetEffects = [
@@ -117,6 +136,7 @@ import UIKit
             let asset = try data["asset"].decode(StoredAsset.self)
             guard keys.contains(asset.key) else { throw SuwopError("Refusing a non-fixture photo.") }
         }
+        try visibilityFence(operation)
         if operation.type == "appleTrashApply" {
             let requested = try data["assets"].decode([StoredAsset].self).map(\.key)
             guard !requested.isEmpty,
@@ -132,6 +152,21 @@ import UIKit
         }
         guard !["appleTrash", "appleImport", "appleFavorite", "appleMetadata", "http"].contains(operation.type) else {
             throw SuwopError("Unrequested native mutation / network operation.")
+        }
+    }
+
+    private func visibilityFence(_ operation: ShellOperation) throws {
+        let data = operation.data ?? .null
+        if operation.type == "appleVisibilityApply" {
+            let request = try data["request"].decode(AppleVisibilityApply.self)
+            guard !request.targets.isEmpty, request.targets.allSatisfy({ keys.contains($0.key) }) else {
+                throw SuwopError("Refusing a non-fixture visibility mutation.")
+            }
+        }
+        if operation.type == "appleVisibilityInspect" {
+            let requested = try data["keys"].decode([AssetKey].self)
+            guard requested.allSatisfy(keys.contains)
+            else { throw SuwopError("Refusing a non-fixture visibility inspection.") }
         }
     }
 }

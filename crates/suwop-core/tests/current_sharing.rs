@@ -72,7 +72,7 @@ fn facts() -> CurrentImageFacts {
 }
 fn state(asset: StoredAsset) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 3,
+        schema_version: 4,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: asset.key.provider,

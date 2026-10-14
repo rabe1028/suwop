@@ -12,6 +12,7 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedLibrary {
+    pub apple_visibility_operations: Vec<crate::apple_visibility::AppleVisibilitySummary>,
     #[serde(default)]
     pub edit_clipboard: Option<crate::editing::EditClipboard>,
     #[serde(default)]
@@ -108,7 +109,13 @@ impl ContentAccess {
                 }
             }
         }
-        visible.retain(|k| !duplicates.contains(k));
+        visible.retain(|k| {
+            !duplicates.contains(k)
+                && !state
+                    .apple_visibility_operations
+                    .iter()
+                    .any(|o| o.fences(k))
+        });
         hidden.retain(|k| !duplicates.contains(k));
         Self { visible, hidden }
     }
@@ -181,6 +188,11 @@ impl PublishedLibrary {
             c.source_name = "非公開の写真".into();
         }
         Self {
+            apple_visibility_operations: state
+                .apple_visibility_operations
+                .iter()
+                .map(crate::apple_visibility::AppleVisibilityOperation::summary)
+                .collect(),
             edit_clipboard: state.edit_clipboard,
             pending_edit_pastes: state.pending_edit_pastes,
             schema_version: state.schema_version,

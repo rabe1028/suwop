@@ -129,6 +129,7 @@ struct PhotoGrid: View {
                 selected: !selectedKeys.isDisjoint(with: photo.assets.map(\.key)),
                 selecting: selecting
             )
+            .accessibilityElement(children: .ignore)
         }.buttonStyle(.plain)
             .accessibilityLabel("\(photo.name)、\(photo.presence.title)\(photo.isFavorite ? "、お気に入り" : "")")
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
@@ -202,6 +203,7 @@ struct PhotoTile: View {
                 }
             }.clipped()
         }.aspectRatio(1, contentMode: .fit)
+            .contentShape(Rectangle())
             .task(id: model.previewIdentifier(photo)) {
                 image = nil
                 let loaded = try? await model.thumbnail(photo)

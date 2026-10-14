@@ -11,6 +11,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
 mod apple_trash;
+mod apple_visibility;
 mod current_rendering;
 mod current_sharing;
 mod edit_paste;
@@ -151,7 +152,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 3,
+                schema_version: 4,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -174,8 +175,13 @@ impl Runtime<'_> {
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
             Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 3 => {
+            _ if self.state.schema_version != 4 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
+            }
+            Event::HideApple { keys, id } => self.hide_apple(&keys, &id).await,
+            Event::UnhideApple { record_id, id } => self.unhide_apple(&record_id, &id).await,
+            Event::InspectAppleVisibility { record_id } => {
+                self.inspect_visibility_record(&record_id).await
             }
             Event::Refresh { permission, now } => {
                 self.refresh(permission, now).await?;
@@ -557,6 +563,7 @@ impl Runtime<'_> {
             );
         }
         self.check_apple_trash_keys(keys)?;
+        self.check_visibility_keys(keys)?;
         if self
             .state
             .pending_trash
@@ -912,7 +919,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2, 3].contains(&version) {
+    if ![1, 2, 3, 4].contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
     if version == 1 {
@@ -924,9 +931,17 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
             }
         }
     }
-    raw["schemaVersion"] = Value::from(3);
-    serde_json::from_value(raw)
-        .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))
+    raw["schemaVersion"] = Value::from(4);
+    let state: SavedLibrary = serde_json::from_value(raw)
+        .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))?;
+    let mut ids = BTreeSet::new();
+    for op in &state.apple_visibility_operations {
+        crate::apple_visibility::validate_operation(op, &state.apple_scope)?;
+        if !ids.insert(&op.id) {
+            return Err("非表示の操作 UUID が重複しています。".into());
+        }
+    }
+    Ok(state)
 }
 fn convert_dates(value: &mut Value) {
     match value {

@@ -57,6 +57,7 @@ struct GalleryView: View {
         .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
         .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
         .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
+        .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }
         .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
         .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
         .alert("操作を完了できませんでした", isPresented: Binding(
@@ -173,6 +174,9 @@ struct GalleryView: View {
                 .disabled(model.pendingAppleCount == 0 || model.isBusy)
             Button("転送履歴・移動確認", systemImage: "arrow.left.arrow.right") { model.showTransfers = true }
             Button("Apple Photos の削除と復元案内", systemImage: "trash") { model.showAppleTrash = true }.disabled(model.isBusy)
+            Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
+                model.showAppleVisibility = true
+            }.accessibilityIdentifier("appleVisibilityHistory")
             Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)
             Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)
@@ -194,6 +198,10 @@ struct GalleryView: View {
                         }.disabled(model.editClipboard == nil)
                         Button("選択した Apple 側のすべてのコピーを削除", role: .destructive) { model.trashOnApple(selection) }
                             .disabled(!selection.contains { $0.assets.contains { $0.key.provider == .apple } })
+                        Button("選択した Apple Photos のコピーを非表示（\(model.visibilityHideKeys(in: selectedKeys).count) 件）") {
+                            model.hideOnApple(model.visibilityHideKeys(in: selectedKeys))
+                        }.disabled(model.visibilityHideKeys(in: selectedKeys).isEmpty)
+                            .accessibilityIdentifier("hideSelectedApplePhotos")
                         Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich(selection) }
                             .disabled(!selection.contains { $0.providers.contains(.immich) })
                         Button("選択を解除") { selectedKeys.removeAll() }
@@ -226,6 +234,9 @@ struct GalleryView: View {
                 }
                 AlbumsSection(model: model, creating: $creatingAlbum)
                 Section("整理") {
+                    Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
+                        model.showAppleVisibility = true
+                    }.accessibilityIdentifier("appleVisibilityCollectionHistory")
                     Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }
                         .disabled(model.isBusy)
                 }
