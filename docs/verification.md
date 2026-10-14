@@ -160,3 +160,7 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - Native PhotoKit `DerivedData/PhotoKitArtifacts/20261014T152920Z-51867/report.json`: `passed:true`、19 phase各1回。product hide Applied／workflow確認、restoreはPhotos handoff。`product_native_unhide_verified=false`、`hidden_original_reverified=false`、`product_hide_ui_verified=false`。
 
 途中のテストfixture・公開projection・schema期待値の修正、親AX識別子の伝播修正、撮影sessionの分離は[アプリ内保護の検証履歴](app-protected-photos.md)に記録した。OS認証は制御可能なfixture応答で検証したものであり、実Face ID／Touch ID／パスコード、実機・iCloud・複数ウィンドウの手動受入れは未確認。最終pushed HEADのhosted CIは別に確認する。
+
+## PP-02B 切断済みアカウントのローカル保護解除
+
+PR #23 のレビューを受け、端末認証後の匿名記録の表示と、元アカウントへ再接続せずに行うローカルの保護解除を修正した。古い認証は無効で、画像取得やサーバー変更は許可しない。`make check` Rust/FFI252／Swift55、全Apple build、strict VRT31画面／host25／UI15（`20261014T154913Z-61641`、record=false）が成功し、基準31枚のバイト列は保持。ログは `/tmp/suwop-protection-outscope-{check,apple,vrt}.log`。修正後の最終HEAD hosted CIは確認待ち。Native19・実Immich結合の既存ローカル証拠は変更前のBのものであり、今回の再実行とは扱わない。

@@ -1073,3 +1073,165 @@ fn ambiguous_actual_protect_write_cannot_be_overwritten_by_unrelated_work_before
     );
     Ok(())
 }
+
+#[test]
+fn disconnected_protection_records_remain_anonymous_and_locally_removable_after_fresh_auth()
+-> Result<(), String> {
+    let mut initial = saved();
+    let remote = initial.snapshots[1].assets[0].clone();
+    initial.protected_entries.push(PersistentProtectedEntry {
+        id: ENTRY.into(),
+        key: remote.key.clone(),
+    });
+    let c = core(initial);
+    let mut shell = Shell::default();
+    shell.activate(&c)?;
+    shell.authenticate(&c, ProtectedPurpose::View)?;
+    shell.run(&c, Event::Disconnect)?;
+    assert_eq!(c.view().protected_view.state, ProtectedViewState::Locked);
+    let writes = shell.effects.iter().filter(|e| **e == "persist").count();
+    shell.run(
+        &c,
+        Event::UnprotectPhotos {
+            ids: vec![ENTRY.into()],
+            operation_id: OPERATION.into(),
+            grant_id: CHALLENGE.into(),
+        },
+    )?;
+    assert_eq!(
+        shell.effects.iter().filter(|e| **e == "persist").count(),
+        writes
+    );
+    let fresh = "55555555-5555-4555-8555-555555555555";
+    shell.run(
+        &c,
+        Event::BeginProtectedAccess {
+            challenge_id: fresh.into(),
+            scene_id: SCENE.into(),
+            purpose: ProtectedPurpose::View,
+        },
+    )?;
+    let view = c.view();
+    let entries = view
+        .protected_view
+        .entries
+        .as_ref()
+        .ok_or("missing local records")?;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, ENTRY);
+    assert!(entries[0].asset.is_none());
+    let serialized = serde_json::to_string(&view).map_err(|e| e.to_string())?;
+    assert!(!serialized.contains(&remote.name));
+    assert!(!serialized.contains(&remote.revision));
+    assert!(!serialized.contains(&remote.key.asset_id));
+    assert!(
+        serde_json::to_string(&view.protected_view)
+            .map_err(|e| e.to_string())?
+            .contains("\"asset\":null")
+    );
+    shell.run(
+        &c,
+        Event::RequestProtectedImage {
+            entry_id: ENTRY.into(),
+            grant_id: fresh.into(),
+            request_id: "66666666-6666-4666-8666-666666666666".into(),
+            kind: ProtectedImageKind::Preview,
+        },
+    )?;
+    assert!(c.view().protected_view.image.is_none());
+    shell.run(
+        &c,
+        Event::UnprotectPhotos {
+            ids: vec![ENTRY.into()],
+            operation_id: "77777777-7777-4777-8777-777777777777".into(),
+            grant_id: fresh.into(),
+        },
+    )?;
+    assert!(
+        shell
+            .durable
+            .as_ref()
+            .ok_or("no durable local unprotect")?
+            .protected_entries
+            .is_empty()
+    );
+    assert!(
+        c.view()
+            .state
+            .snapshots
+            .iter()
+            .all(|s| s.provider != Provider::Immich)
+    );
+    Ok(())
+}
+
+#[test]
+fn other_account_auth_can_remove_only_local_record_without_exposing_old_provider_content()
+-> Result<(), String> {
+    for connected in [false, true] {
+        let mut initial = saved();
+        let remote = initial.snapshots[1].assets[0].clone();
+        initial.protected_entries.push(PersistentProtectedEntry {
+            id: ENTRY.into(),
+            key: remote.key.clone(),
+        });
+        let c = Core::new_with(
+            Suwop,
+            Model {
+                ready: true,
+                state: initial,
+                session: connected.then(|| Session {
+                    endpoint: "https://other.example/api".into(),
+                    key: "other-key".into(),
+                    scope: "other-account".into(),
+                    user_id: "other-owner".into(),
+                    version: Version {
+                        major: 3,
+                        minor: 2,
+                        patch: 4,
+                    },
+                }),
+                ..Model::default()
+            },
+        );
+        let mut shell = Shell::default();
+        shell.activate(&c)?;
+        shell.authenticate(&c, ProtectedPurpose::View)?;
+        let entries = c
+            .view()
+            .protected_view
+            .entries
+            .ok_or("local record hidden")?;
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].asset.is_none());
+        let serialized =
+            serde_json::to_string(&c.view().protected_view).map_err(|e| e.to_string())?;
+        for private in [
+            &remote.name,
+            &remote.key.scope,
+            &remote.key.asset_id,
+            &remote.revision,
+        ] {
+            assert!(!serialized.contains(private));
+        }
+        shell.run(&c, image_event("66666666-6666-4666-8666-666666666666"))?;
+        assert!(c.view().protected_view.image.is_none());
+        shell.run(
+            &c,
+            Event::UnprotectPhotos {
+                ids: vec![ENTRY.into()],
+                operation_id: OPERATION.into(),
+                grant_id: CHALLENGE.into(),
+            },
+        )?;
+        let durable = shell.durable.as_ref().ok_or("no durable local change")?;
+        assert!(durable.protected_entries.is_empty());
+        assert_eq!(durable.snapshots[1].assets[0].revision, remote.revision);
+        assert_eq!(
+            durable.snapshots[1].assets[0].resources[0].name,
+            remote.resources[0].name
+        );
+        assert!(!shell.effects.contains(&"http"));
+    }
+    Ok(())
+}

@@ -52,3 +52,7 @@ Swiftは新しいLocalAuthenticationの要求を実行し、その結果をRust�
 続くcapture `20261014T150921Z-46711` は31画面を撮影し、既存28基準との比較が成功した。保護のhost回帰6件を含む通常hostテストとUI15件はすべて成功。UIには通常Gallery→viewer→認証→表示元の保護、認証失敗時の書込みなし、他の物理コピーの保持、表示／解除の独立操作を含む。新規3基準が未登録のためcapture全体は `passed:false` であり、基準一致の完了とは区別する。3画面を目視確認後、`20261014T151447Z-47910` の明示的recordが成功した。既存28枚の記録時の画像は同artifactの `recorded-existing-variants` に保持し、基準には元の28枚を復元した。追加3枚も再度目視確認し、上記strict比較が成功した。
 
 PhotoKitの初回 `20261014T152530Z-51050` は15段階を通過した後、製品非表示のcanonical記録検証が旧schema 4を要求して失敗した。schema 5への期待値更新だけを行い、outcome／target／key／witnessおよび私的メタデータを含めない検証は維持した。上記再実行は19段階すべてを通過している。
+
+## PR #23 の切断済みアカウント記録のレビュー
+
+初回HEAD `7648bdd` のレビューで、接続を解除したImmichアカウントの保護記録が認証後の一覧から除かれ、ローカルの保護解除にも再接続を必要としていた点が指摘された。修正では、現在の端末認証後に匿名の記録を表示し、元アカウントへのアクセス権限なしでアプリ内の保護記録を解除できるようにする。解除前の匿名記録には名前・保存先ID・画像を公開せず、元写真の閲覧やサーバー変更を許可するものではない。利用者が明示的に保護を解除した後の、通常のオフラインキャッシュや履歴の表示規則は維持する。修正後は `make check` Rust/FFI252／Swift55、全5 Rust Apple target・XCFramework・iOS／universal macOS build、strict VRT31画面／host25／UI15が成功した。ログは `/tmp/suwop-protection-outscope-check.log`、`/tmp/suwop-protection-outscope-apple.log`、`/tmp/suwop-protection-outscope-vrt.log`。VRT成果物は `20261014T154913Z-61641`、record=falseで、31基準はすべて変更なし。修正後の最終HEAD CIは別に確認する。

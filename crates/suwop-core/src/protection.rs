@@ -201,15 +201,6 @@ fn current_grant(model: &Model, id: &str, purpose: ProtectedPurpose) -> bool {
                 && Some(&g.scene_id) == model.protection.scene_id.as_ref()
         })
 }
-fn current_scope(model: &Model, key: &AssetKey) -> bool {
-    match key.provider {
-        Provider::Apple => key.scope == model.state.apple_scope,
-        Provider::Immich => model
-            .session
-            .as_ref()
-            .is_some_and(|session| session.scope == key.scope),
-    }
-}
 fn current_asset<'a>(model: &'a Model, key: &AssetKey) -> Option<&'a StoredAsset> {
     let snapshots = model
         .state
@@ -290,7 +281,6 @@ pub fn view(model: &Model) -> ProtectedView {
                     .state
                     .protected_entries
                     .iter()
-                    .filter(|entry| current_scope(model, &entry.key))
                     .map(|entry| ProtectedEntryView {
                         id: entry.id.clone(),
                         asset: current_asset(model, &entry.key).cloned(),
@@ -484,7 +474,7 @@ fn mutate(
             .iter()
             .filter_map(|id| model.state.protected_entries.iter().find(|e| e.id == *id))
             .collect::<Vec<_>>();
-        if selected.len() != ids.len() || selected.iter().any(|e| !current_scope(model, &e.key)) {
+        if selected.len() != ids.len() {
             model.protection.error = Some("保護する写真を確認できません。".into());
             return Command::done();
         }
