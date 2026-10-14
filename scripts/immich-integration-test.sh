@@ -25,4 +25,4 @@ fi
 export SUWOP_IMMICH_API_KEY
 
 cd "$ROOT"
-cargo test --locked -p suwop-core --test immich_live -- --ignored
+cargo test --locked -p suwop-core --test immich_live -- --ignored --test-threads=1

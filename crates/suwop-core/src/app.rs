@@ -54,6 +54,41 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    ReadImmichLockedImage {
+        ticket: crate::immich_locked::ImmichLockedImageTicket,
+    },
+    PublishImmichLockedImage {
+        ticket: crate::immich_locked::ImmichLockedImageTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseImmichLockedImage {
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseImmichLockedImages {
+        generation: u64,
+    },
+    ScheduleImmichLockedExpiry {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+        milliseconds: u32,
+        #[serde(rename = "deadlineUnixMilliseconds")]
+        deadline_unix_milliseconds: u64,
+    },
+    ScheduleImmichLockedCheck {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+        milliseconds: u32,
+        #[serde(rename = "deadlineUnixMilliseconds")]
+        deadline_unix_milliseconds: u64,
+    },
     AuthenticateProtected {
         challenge: crate::protection::ProtectedChallenge,
     },
@@ -235,6 +270,72 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    OpenImmichLocked {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        email: crate::immich_locked::Secret,
+        password: crate::immich_locked::Secret,
+        #[serde(rename = "pinCode")]
+        pin_code: crate::immich_locked::Secret,
+    },
+    CloseImmichLocked,
+    ImmichLockedSceneChanged {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        phase: crate::protection::ProtectionScenePhase,
+    },
+    RequestImmichLockedImage {
+        #[serde(rename = "entryID")]
+        entry_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    ExpireImmichLocked {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+    },
+    CheckImmichLockedSession {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+    },
+    #[serde(skip)]
+    ImmichLockedOpened {
+        generation: u64,
+        result: Result<crate::immich_locked::OpenedSession, crate::immich_locked::OpenFailure>,
+    },
+    #[serde(skip)]
+    ImmichLockedClosed {
+        generation: u64,
+        confirmed: bool,
+    },
+    #[serde(skip)]
+    ImmichLockedChecked {
+        grant_id: String,
+        generation: u64,
+        lease_id: u64,
+        result: Option<std::time::Instant>,
+    },
+    #[serde(skip)]
+    ImmichLockedImageRead {
+        ticket: crate::immich_locked::ImmichLockedImageTicket,
+        result: Option<crate::immich_locked::ImmichLockedImageResult>,
+    },
+    #[serde(skip)]
+    ImmichLockedImagePublished {
+        ticket: crate::immich_locked::ImmichLockedImageTicket,
+        staged_id: String,
+        approved: bool,
+    },
     BeginProtectedAccess {
         #[serde(rename = "challengeID")]
         challenge_id: String,
@@ -447,6 +548,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub immich_locked: crate::immich_locked::ImmichLockedModel,
     pub protection: crate::protection::ProtectionModel,
     /// Observation-only token shared with in-flight workflows; never persisted.
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -463,6 +565,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub immich_locked_view: crate::immich_locked::ImmichLockedView,
     pub protected_view: crate::protection::ProtectedView,
     pub apple_visibility_hide_keys: Vec<crate::domain::AssetKey>,
     pub preview_choices: std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>>,
@@ -491,6 +594,22 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Some(command) = crate::immich_locked::update(event.clone(), model) {
+            return command;
+        }
+        let cleanup = if crate::immich_locked::invalidates(&event) {
+            crate::immich_locked::close(model)
+        } else {
+            Command::done()
+        };
+        cleanup.and(Self::update_library(event, model))
+    }
+    fn view(&self, model: &Model) -> ViewModel {
+        Self::library_view(model)
+    }
+}
+impl Suwop {
+    fn update_library(event: Event, model: &mut Model) -> Command<Effect, Event> {
         if let Some(command) = crate::protection::update(event.clone(), model) {
             return command;
         }
@@ -582,7 +701,7 @@ impl crux_core::App for Suwop {
             }
         }
     }
-    fn view(&self, model: &Model) -> ViewModel {
+    fn library_view(model: &Model) -> ViewModel {
         let can_transfer = model.ready
             && model.session.is_some()
             && !model.busy
@@ -610,6 +729,7 @@ impl crux_core::App for Suwop {
         let editing_access =
             crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
         ViewModel {
+            immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
             apple_visibility_hide_keys: if model.ready
                 && !model.busy

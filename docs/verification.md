@@ -164,3 +164,15 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 ## PP-02B 切断済みアカウントのローカル保護解除
 
 PR #23 のレビューを受け、端末認証後の匿名記録の表示と、元アカウントへ再接続せずに行うローカルの保護解除を修正した。古い認証は無効で、画像取得やサーバー変更は許可しない。`make check` Rust/FFI252／Swift55、全Apple build、strict VRT31画面／host25／UI15（`20261014T154913Z-61641`、record=false）が成功し、基準31枚のバイト列は保持。ログは `/tmp/suwop-protection-outscope-{check,apple,vrt}.log`。修正後の最終HEAD hosted CIは確認待ち。Native19・実Immich結合の既存ローカル証拠は変更前のBのものであり、今回の再実行とは扱わない。
+
+PP-02B の初回HEAD `7648bdd435b744eafdfa8e3793ff31e4c5257c91` の hosted CI run `38590944923` は core／Immich integration／apple が成功、VRTは新しいcommitに伴いキャンセルされた。全4成功とは扱わない。修正HEAD `565bacdc7aca6301ec5f0a4d924641af126ade13` の CI run `38593518640` と再レビューは進行中。
+
+PP-02B最終HEAD `565bacdc7aca6301ec5f0a4d924641af126ade13` の [CI run 38593518640](https://github.com/rabe1028/suwop/actions/runs/38593518640) はcore／Immich integration／apple／VRT（Native PhotoKit含む）全4 job成功。レビュー指摘は修正・解決済み、同じHEADの再レビューで追加指摘なし。[PR #23](https://github.com/rabe1028/suwop/pull/23) はmain `4283846ad6ae1a36c1c7c4442c475561b3e83f59` へmerge済み。merge後 [CI run 38596365690](https://github.com/rabe1028/suwop/actions/runs/38596365690) は確認中。実機受入れは別途未確認。
+
+PP-02B merge後CIのImmich jobは、コンテナイメージ取得時の `toomanyrequests`（registry rate limit）でテスト開始前に失敗した。ログは `/tmp/suwop-protection-main-integration.log`。他job実行中は対象jobを再実行できなかったため、workflow終了後に失敗jobを再実行して確認する。未実行の結合テストを成功とは扱わない。
+
+- PP-02B merge後 `4283846` のrun `38596365690` はcore／apple／vrt成功、Immich integrationのみレジストリ取得制限で失敗。GitHub APIの一時制限回復と全job終了を確認後、失敗jobだけの再実行を受理（結果確認中）。
+
+- 上記PP-02B merge後run `38596365690` の失敗job再実行が成功。HEAD `4283846ad6ae1a36c1c7c4442c475561b3e83f59` のcore／apple／vrt／Immich integration全4 job successを確認。初回の取得制限失敗と、C-1で後から再現したBの実画面プレビュー不具合は別記録として保持する。
+
+- PP-02C-1最終ローカル: check Rust/FFI262／Swift57、Apple全5 target／XCFramework／iOS／universal macOS、strict VRT `20261014T171524Z-90713`（record=false、35画面／Host33／UI20）が成功。新規4基準のみ追加、既存31枚保持。実Immich結合2件も成功。PhotoKit19はImmich native画像破棄境界修正前の成功として区別。hosted CI・実機受入れは未完了。

@@ -145,23 +145,32 @@ private struct ProtectedRasterView: View {
     let sceneID: String
     let access: ProtectedImageAccess
     @State private var image: PlatformImage?
+    @State private var failed = false
 
     var body: some View {
-        Group {
+        VStack {
             if !session.shielded, let image {
                 platformImage(image).resizable().scaledToFit()
                     .accessibilityLabel("保護された写真のプレビュー")
                     .accessibilityIdentifier("protectedRaster")
+            } else if failed {
+                Text("写真を表示できませんでした。現在の状態を確認してから、もう一度写真を選んでください。")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("protectedRasterUnavailable")
             } else {
                 ProgressView("写真を確認しています")
             }
         }.task(id: access.requestID) {
             image = nil
+            failed = false
             do {
                 let loaded = try await session.image(access, sceneID: sceneID)
                 try Task.checkCancellation()
                 image = loaded
-            } catch { image = nil }
+            } catch {
+                image = nil
+                failed = !Task.isCancelled && !session.shielded
+            }
         }.onChange(of: session.shielded) { _, shielded in
             if shielded {
                 image = nil

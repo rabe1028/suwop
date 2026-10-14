@@ -921,3 +921,347 @@ fn date_fixture_origin(
         live_id: None,
     }
 }
+
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_dedicated_pin_session_locked_read_and_local_close() -> Result<(), String> {
+    use suwop_core::immich_locked::{ImmichLockedState, Secret};
+    let address = std::env::var("SUWOP_IMMICH_URL").map_err(|_| "missing test URL")?;
+    let key = std::env::var("SUWOP_IMMICH_API_KEY").map_err(|_| "missing test key")?;
+    let email =
+        std::env::var("IMMICH_TEST_EMAIL").unwrap_or_else(|_| "suwop@example.invalid".into());
+    let password =
+        std::env::var("IMMICH_TEST_PASSWORD").unwrap_or_else(|_| "SuwopIntegration123!".into());
+    let pin = std::env::var("IMMICH_TEST_PIN").unwrap_or_else(|_| "123456".into());
+    let directory = std::env::temp_dir().join(format!("suwop-locked-live-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .max_redirects(0)
+        .timeout_global(Some(Duration::from_secs(30)))
+        .build()
+        .into();
+    let (session, id) =
+        live_locked_setup(&agent, address, key, (&email, &password, &pin), &directory)?;
+    let core = live_locked_core(session);
+    live_locked_run(
+        &core,
+        &agent,
+        Event::ImmichLockedSceneChanged {
+            scene_id: "11111111-1111-4111-8111-111111111111".into(),
+            phase: suwop_core::protection::ProtectionScenePhase::Active,
+        },
+        &directory,
+    )?;
+    let open = |request: &str, pin: String| Event::OpenImmichLocked {
+        scene_id: "11111111-1111-4111-8111-111111111111".into(),
+        request_id: request.into(),
+        email: Secret(email.clone()),
+        password: Secret(password.clone()),
+        pin_code: Secret(pin),
+    };
+    live_locked_run(
+        &core,
+        &agent,
+        open("22222222-2222-4222-8222-222222222222", "000000".into()),
+        &directory,
+    )?;
+    assert_eq!(
+        core.view().immich_locked_view.state,
+        ImmichLockedState::Locked
+    );
+    live_locked_run(
+        &core,
+        &agent,
+        open("33333333-3333-4333-8333-333333333333", pin),
+        &directory,
+    )?;
+    assert_eq!(
+        core.view().immich_locked_view.state,
+        ImmichLockedState::Open
+    );
+    assert!(
+        core.view()
+            .immich_locked_view
+            .entries
+            .as_ref()
+            .ok_or("no locked list")?
+            .iter()
+            .any(|e| e.id == id)
+    );
+    assert!(core.view().state.snapshots.is_empty());
+    assert!(core.view().photos.is_empty());
+    live_locked_run(
+        &core,
+        &agent,
+        Event::RequestImmichLockedImage {
+            entry_id: id,
+            grant_id: "33333333-3333-4333-8333-333333333333".into(),
+            request_id: "44444444-4444-4444-8444-444444444444".into(),
+        },
+        &directory,
+    )?;
+    assert!(core.view().immich_locked_view.image.is_some());
+    live_locked_run(&core, &agent, Event::CloseImmichLocked, &directory)?;
+    assert_eq!(
+        core.view().immich_locked_view.state,
+        ImmichLockedState::Locked
+    );
+    assert_eq!(
+        core.view().immich_locked_view.remote_lock_confirmed,
+        Some(true)
+    );
+    assert!(core.view().immich_locked_view.entries.is_none());
+    std::fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn live_locked_core(session: Session) -> crux_core::Core<suwop_core::app::Suwop> {
+    use crux_core::Core;
+    use suwop_core::app::{ConnectionSettings, Model, Suwop};
+    let state = SavedLibrary {
+        schema_version: 5,
+        apple_scope: "apple".into(),
+        connection: Some(ConnectionSettings {
+            address: session.endpoint.clone(),
+            allow_http: true,
+            credential_id: "fixture".into(),
+        }),
+        ..SavedLibrary::default()
+    };
+    Core::new_with(
+        Suwop,
+        Model {
+            state,
+            session: Some(session),
+            ready: true,
+            ..Model::default()
+        },
+    )
+}
+fn live_locked_setup(
+    agent: &ureq::Agent,
+    address: String,
+    key: String,
+    credentials: (&str, &str, &str),
+    directory: &Path,
+) -> Result<(Session, String), String> {
+    let (email, password, pin) = credentials;
+    let setup_directory = directory.to_path_buf();
+    let setup_email = email.to_owned();
+    let setup_password = password.to_owned();
+    let setup_pin = pin.to_owned();
+    let mut command = Command::<Effect, Event>::new(move |ctx| async move {
+        let result = prepare_locked_fixture(
+            &ctx,
+            &address,
+            &key,
+            &setup_email,
+            &setup_password,
+            &setup_pin,
+            &setup_directory,
+        )
+        .await;
+        let (session, status, error) = match result {
+            Ok((session, id)) => (Some(session), id, None),
+            Err(_) => (
+                None,
+                String::new(),
+                Some("locked integration setup failed".into()),
+            ),
+        };
+        ctx.send_event(Event::Finished {
+            state: SavedLibrary::default(),
+            session,
+            status,
+            error,
+            preview_to_select: None,
+        });
+    });
+    loop {
+        let effects: Vec<_> = command.effects().collect();
+        if effects.is_empty() {
+            break;
+        }
+        for Effect::Io(mut request) in effects {
+            let result = match &request.operation {
+                ShellOperation::Http(http) => execute(agent, http),
+                ShellOperation::Wait { milliseconds } => {
+                    std::thread::sleep(Duration::from_millis(u64::from(*milliseconds)));
+                    Ok(Value::Null)
+                }
+                _ => Err("unexpected setup effect".into()),
+            };
+            request
+                .resolve(live_response(result))
+                .map_err(|_| "setup resolve failed")?;
+        }
+    }
+    let Some(Event::Finished {
+        session: Some(session),
+        status: id,
+        error: None,
+        ..
+    }) = command.events().last()
+    else {
+        return Err("locked setup did not complete".into());
+    };
+    Ok((session, id))
+}
+fn live_response(result: Result<Value, String>) -> ShellResponse {
+    match result {
+        Ok(value) => ShellResponse {
+            value: Some(value),
+            error: None,
+        },
+        Err(_) => ShellResponse {
+            value: None,
+            error: Some("fixture request unavailable".into()),
+        },
+    }
+}
+async fn prepare_locked_fixture(
+    ctx: &Context,
+    address: &str,
+    key: &str,
+    email: &str,
+    password: &str,
+    pin: &str,
+    directory: &Path,
+) -> Result<(Session, String), String> {
+    let session = immich::connect(ctx, address, key, true).await?;
+    let rejected: HttpResponse = suwop_core::app::io(
+        ctx,
+        ShellOperation::Http(session.request(
+            "auth/session/unlock",
+            "POST",
+            Some(json!({"pinCode":pin})),
+        )),
+    )
+    .await?;
+    assert!(!(200..300).contains(&rejected.status));
+    let mut login = session.request(
+        "auth/login",
+        "POST",
+        Some(json!({"email":email,"password":password})),
+    );
+    login.headers.remove("x-api-key");
+    let response: HttpResponse = suwop_core::app::io(ctx, ShellOperation::Http(login)).await?;
+    assert_eq!(response.status, 201);
+    let token = response.body["accessToken"]
+        .as_str()
+        .ok_or("missing test session")?;
+    let bearer = |path: &str, method: &str, body: Option<Value>| {
+        let mut request = session.request(path, method, body);
+        request.headers.remove("x-api-key");
+        request
+            .headers
+            .insert("Authorization".into(), format!("Bearer {token}"));
+        request
+    };
+    let unlocked: HttpResponse = suwop_core::app::io(
+        ctx,
+        ShellOperation::Http(bearer(
+            "auth/session/unlock",
+            "POST",
+            Some(json!({"pinCode":pin})),
+        )),
+    )
+    .await?;
+    assert_eq!(unlocked.status, 204);
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode("iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAAEUlEQVR4nGMQMgn7n+qs+B8ADKIDZL3k4KEAAAAASUVORK5CYII=")
+        .map_err(|_| "pixel decode")?;
+    let path = directory.join("locked-fixture.png");
+    std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
+    let resource = PhotoResource {
+        id: "locked-fixture".into(),
+        name: "locked-fixture.png".into(),
+        role: ResourceRole::Image,
+        sha1: None,
+        bytes: Some(bytes.len() as u64),
+    };
+    let file = TransferFile {
+        resource: resource.clone(),
+        path: path.to_string_lossy().into_owned(),
+        signature: FileSignature {
+            sha256: "0".repeat(64),
+            bytes: bytes.len() as u64,
+        },
+    };
+    let metadata = fixture_metadata(resource, 0, 1_760_000_000.0);
+    let id = session
+        .upload(ctx, &file, &metadata, 1_760_000_000.0, None)
+        .await?;
+    let changed: HttpResponse = suwop_core::app::io(
+        ctx,
+        ShellOperation::Http(bearer(
+            "assets",
+            "PUT",
+            Some(json!({"ids":[id],"visibility":"locked"})),
+        )),
+    )
+    .await?;
+    assert_eq!(changed.status, 204);
+    let denied: HttpResponse = suwop_core::app::io(
+        ctx,
+        ShellOperation::Http(session.request(&format!("assets/{id}"), "GET", None)),
+    )
+    .await?;
+    assert!(!(200..300).contains(&denied.status));
+    let logout: HttpResponse = suwop_core::app::io(
+        ctx,
+        ShellOperation::Http(bearer("auth/logout", "POST", None)),
+    )
+    .await?;
+    assert_eq!(logout.body["successful"], true);
+    Ok((session, id))
+}
+fn live_locked_run(
+    core: &crux_core::Core<suwop_core::app::Suwop>,
+    agent: &ureq::Agent,
+    event: Event,
+    directory: &Path,
+) -> Result<(), String> {
+    let mut effects = core.process_event(event);
+    while !effects.is_empty() {
+        let Effect::Io(mut request) = effects.remove(0);
+        let result = match &request.operation {
+            ShellOperation::Http(http) => execute(agent, http),
+            ShellOperation::ReadImmichLockedImage { ticket } => {
+                let mut remote = ticket.request.clone();
+                let path = directory.join("staged-preview.jpg");
+                remote.download_path = Some(path.to_string_lossy().into_owned());
+                let mut success = false;
+                for _ in 0..80 {
+                    let response: HttpResponse = serde_json::from_value(execute(agent, &remote)?)
+                        .map_err(|_| "preview response")?;
+                    if response.status == 200 {
+                        success = true;
+                        break;
+                    }
+                    std::thread::sleep(Duration::from_millis(250));
+                }
+                if !success {
+                    return Err("locked preview unavailable".into());
+                }
+                assert!(
+                    jpeg_dimensions(&std::fs::read(path).map_err(|e| e.to_string())?).is_some()
+                );
+                Ok(json!({"requestID":ticket.request_id,"stagedID":"real-preview-stage"}))
+            }
+            ShellOperation::PublishImmichLockedImage { ticket, staged_id } => {
+                Ok(json!({"requestID":ticket.request_id,"stagedID":staged_id}))
+            }
+            ShellOperation::ReleaseImmichLockedImages { .. }
+            | ShellOperation::ReleaseImmichLockedImage { .. }
+            | ShellOperation::ScheduleImmichLockedCheck { .. }
+            | ShellOperation::ScheduleImmichLockedExpiry { .. } => Ok(Value::Null),
+            _ => Err("unexpected persistence or mutation in locked workflow".into()),
+        };
+        effects.extend(
+            core.resolve(&mut request, live_response(result))
+                .map_err(|_| "locked resolve")?,
+        );
+    }
+    Ok(())
+}

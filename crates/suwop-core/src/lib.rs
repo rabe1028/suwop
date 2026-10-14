@@ -12,3 +12,5 @@ pub mod protection;
 pub mod sharing;
 pub mod trash;
 pub mod workflow;
+
+pub mod immich_locked;
