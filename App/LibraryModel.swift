@@ -14,7 +14,7 @@ import SwiftUI
     @Published var thumbnailGeneration = UUID()
     private var runtime: RustRuntime?
     private var shell: AppleShell?
-    private var executeEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
+    private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
@@ -38,8 +38,22 @@ import SwiftUI
             executeEffect: @escaping @MainActor (ShellOperation) async throws -> JSONValue
         ) {
             self.runtime = runtime
-            self.executeEffect = executeEffect
+            self.executeEffect = { operation, _ in try await executeEffect(operation) }
             self.thumbnailEffect = thumbnailEffect
+            started = true
+        }
+
+        init(
+            runtime: RustRuntime,
+            shell: AppleShell,
+            executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
+        ) {
+            self.runtime = runtime
+            self.shell = shell
+            self.executeEffect = { operation, context in
+                guard let context else { throw CancellationError() }
+                return try await executeEffect(operation, context)
+            }
             started = true
         }
 
@@ -54,7 +68,10 @@ import SwiftUI
         do { runtime = try RustRuntime()
             let nativeShell = try AppleShell()
             shell = nativeShell
-            executeEffect = { try await nativeShell.execute($0) }
+            executeEffect = { operation, context in
+                guard let context else { throw CancellationError() }
+                return try await nativeShell.execute(operation, context: context)
+            }
         } catch { errorMessage = error.localizedDescription }
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
@@ -317,6 +334,9 @@ import SwiftUI
         if !preservingError {
             errorMessage = nil
         }
+        // Native observation and Rust generations count different events. Capture
+        // the shell context once before runtime.update or the first suspension.
+        let presentationContext = shell?.beginWorkflow()
         work = Task {
             defer {
                 work = nil
@@ -339,7 +359,7 @@ import SwiftUI
                     guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
                     let value: JSONValue?
                     let failure: String?
-                    do { value = try await executeEffect(operation)
+                    do { value = try await executeEffect(operation, presentationContext)
                         failure = nil
                     } catch is CancellationError { value = nil
                         failure = "cancelled"

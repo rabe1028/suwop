@@ -75,13 +75,14 @@ final class SharingVisibilityTests: XCTestCase {
             try? FileManager.default.removeItem(at: url)
         }
         let service = SystemSharing()
+        let context = ContentPresentationEpoch().beginWorkflow()
         let probe = PickerProbe()
         service.pickerTestHooks = probe.hooks
         let task = Task { @MainActor in
             do {
                 probe.completed = try await service.present(SharePresentation(
                     files: [ShareFile(name: url.lastPathComponent, path: url.path)], sourceKeys: sourceKeys
-                ))
+                ), context: context)
             } catch {
                 probe.error = error
                 print("SHARING_PRESENTATION_ERROR \(error.localizedDescription)")

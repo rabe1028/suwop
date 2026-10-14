@@ -147,6 +147,7 @@ targets:
     deploymentTarget: '14.0'
     sources:
       - path: App/SystemSharing.swift
+      - path: App/ContentPresentationEpoch.swift
       - path: NativeAcceptance/SharingTests
     dependencies:
       - package: SuwopShell

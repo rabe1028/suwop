@@ -30,6 +30,16 @@ Immich のみと識別できる editor / player は保持する。旧入力な�
 
 これは native 表示の取消であり、`LibraryModel` の work 全体は cancel しない。Rust はその応答を受け、必要な永続化、native 編集 session の close、作業ファイルの cleanup を続ける。書込みがすでに開始済みの場合の結果不明記録や PP-01 の削除 fence を解除する仕組みではない。
 
+### 通知が画面登録より先に来る競合
+
+Swift の `ContentPresentationEpoch` は native 表示の取消だけを管理する。`LibraryModel.send` は user command の Task／`runtime.update` を始める前に shell の文脈を一度取得し、その workflow の全 effectで同じ文脈を使う。PhotoKit 通知と公開 projectionからの key除外は epochを進める。遅延 effectの到着時に新しい文脈を作って、古い操作を有効に戻すことはしない。Rust の観測世代と shell の epochは数えるイベントが異なるため、数値を同期させない。
+
+`AppleShell.execute` と native 表示 APIは文脈を必須とし、別 shell由来の文脈を拒否する。editor／player／shareは実source keyを使い、active登録直前にも文脈を検査する。古い Apple／元キー不明の要求は表示せず取消し、Immichのみの要求は維持する。古い確認要求は名前を描画せず `false` を返す。読取り専用の編集・復元検査は await後にも文脈を検査し、検査中の通知から古いペースト／復元確認を開かない。
+
+これは書込みの再送や native leaseの破棄を指示する仕組みではない。取得済み編集sessionを Rustへ返す経路や、保存後の readbackに一律の表示文脈拒否を追加せず、既存の session close／journal／cleanupを維持する。NativeAcceptance driverも event開始前に文脈を取得して全 effectへ渡す。
+
+P1回帰は、実 `LibraryModel.send` の最初の effect前と Rustが共有 effectを発行した後の競合、Apple／旧形式の共有・編集・再生・確認の登録拒否、読取り検査中の通知からペースト／復元確認へ進む競合、古い文脈でも Immichの表示と完了待ち leaseを保持するケースを追加した。source固定後の check／Apple build／共有componentと strict VRTで通過した。以下で今回と以前の成功結果を区別する。
+
 ## システム共有の残制約
 
 共有 effect の `sourceKeys` は実際に読み出した物理キーだけを含む。macOS の可視性変更による取消は Apple source を含む共有と、元キーを識別できない旧形式に限定する。Immich のみの共有は同じ checksum の Apple コピーがあっても維持する。
@@ -46,7 +56,7 @@ iOS の `UIActivityViewController` は、公開 API から選択前であるこ�
 
 Rust の migration、公開 serialization、canonical 不変、履歴解除の確認文、旧アップロードの再開、stale Apple anchor、共有／再生の遅延、native 通知を含む一括編集の回帰を追加した。Swift ABI の旧 schema 2 → 3 → fresh scan と、製品 `LibraryModel` の cache hit／遅延 thumbnail・preview／復帰を検証する。
 
-2026-10-14 の共有 review 修正後の最終 `make check` は Rust/FFI 216 / Swift 52 tests と全 lint・format・architecture・generated DTO・tool/hook checks を通過した。`make apple-build` は Rust 全5 Apple target、XCFramework、iOS Simulator / universal macOS の両 app build を通過した。ログは `/tmp/suwop-sharing-review-check2.log` と `/tmp/suwop-sharing-review-apple2.log`。修正前の215 / 51件の結果は [検証](verification.md) に別記録する。
+2026-10-14 の共有 review 修正 `ca13f38` 時点（表示登録競合のP1修正前）の `make check` は Rust/FFI 216 / Swift 52 tests と全 lint・format・architecture・generated DTO・tool/hook checks を通過した。`make apple-build` は Rust 全5 Apple target、XCFramework、iOS Simulator / universal macOS の両 app build を通過した。ログは `/tmp/suwop-sharing-review-check2.log` と `/tmp/suwop-sharing-review-apple2.log`。修正前の215 / 51件の結果は [検証](verification.md) に別記録する。
 
 `make sharing-test` は `/tmp/suwop-sharing-review-native7.log` で exit 0、macOS component 回帰2件を通過した。Immich のみの共有保持、Apple／混在／旧形式の選択前取消と、選択後・遅延した取消 callbackでも service完了まで leaseを保持することを確認した。実macOS共有UI・外部serviceへのhandoffの証拠とは区別する。
 
@@ -57,3 +67,7 @@ Native は `DerivedData/PhotoKitArtifacts/20261014T120645Z-66766/report.json` �
 local の統合 check / Apple build / VRT / native 受入れと hosted CI は最終結果を [検証](verification.md)へ記録する。専用生成 fixture の native 非表示変更は受入れ用であり、製品の非表示 UI の完成や、実機・iCloud・ロックした Photos 非表示アルバムの可用性を証明しない。
 
 上記 strict VRT26画面／unit10／UI7と Native15は共有 review修正前 HEAD `9e8f6f7` の検証であり、修正後のローカル再実行結果ではない。共有修正後の基準画像変更はなく、最終 pushed HEADの hosted CIは確認待ち。
+
+P1の表示登録競合修正後は、`/tmp/suwop-presentation-epoch-check2.log` で Rust/FFI216／Swift52と全品質 gate、`/tmp/suwop-presentation-epoch-apple.log` で全5 Rust target／XCFrameworkと両 app build、`/tmp/suwop-presentation-epoch-sharing.log` で共有component2件が exit 0。strict VRTは `DerivedData/VRTArtifacts/20261014T130612Z-3518/report.json` で `passed: true`／`record: false`、26画面／unit15／UI7を通過した。実 sendの文脈保持とペースト／復元両検査の競合回帰を含み、基準画像は追加変更していない。先行VRTの test-only `@escaping` 欠落によるコンパイル失敗とは区別する。
+
+共有修正HEAD `ca13f38` の hosted CI run `38565835960` は全4 job成功。P1修正後の最終 pushed HEADの hosted CIは確認待ちであり、上記Native15を今回再実行したものとは扱わない。実機／iCloud／Photosでの直接再表示／実macOS共有UIと外部service handoffは未確認。

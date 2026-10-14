@@ -6,7 +6,7 @@ import SwiftUI
 import UIKit
 import XCTest
 
-@MainActor private final class NativeVisibilityHost {
+@MainActor final class NativeVisibilityHost {
     let window: UIWindow
     let root = UIViewController()
     private let previousKeyWindow: UIWindow?
@@ -33,7 +33,7 @@ import XCTest
     }
 }
 
-@MainActor private final class NativeVisibilityOutcome {
+@MainActor final class NativeVisibilityOutcome {
     var finished = false
     var cancelled = false
     var confirmed = false
@@ -72,11 +72,13 @@ final class NativePresentationVisibilityTests: XCTestCase {
         await fixture.stop()
         defer { try? FileManager.default.removeItem(atPath: presentation.path) }
         let service = SystemImageEditing()
+        let epoch = ContentPresentationEpoch()
+        let context = epoch.beginWorkflow()
         let appleKey = AssetKey(provider: .apple, scope: "native-visibility", assetID: "generated")
         let remoteKey = AssetKey(provider: .immich, scope: "remote", assetID: "generated")
         let firstOutcome = NativeVisibilityOutcome()
         let firstTask = Task {
-            do { _ = try await service.present(presentation, sourceKey: appleKey)
+            do { _ = try await service.present(presentation, sourceKey: appleKey, context: context)
             } catch { firstOutcome.record(error) }
             firstOutcome.finished = true
         }
@@ -90,6 +92,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         XCTAssertNotNil(first.rootView.model.image)
         XCTAssertNotNil(first.view.window)
         let oldClose = first.rootView.finish
+        epoch.invalidate()
         service.invalidateForContentChange()
         XCTAssertTrue(first.view.isHidden, "Private image must disappear before asynchronous renderer cleanup")
         try await waitUntil { firstOutcome.finished && host.root.presentedViewController == nil }
@@ -98,7 +101,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         XCTAssertNil(first.view.window)
         let nextOutcome = NativeVisibilityOutcome()
         let nextTask = Task {
-            do { _ = try await service.present(presentation, sourceKey: remoteKey)
+            do { _ = try await service.present(presentation, sourceKey: remoteKey, context: context)
             } catch { nextOutcome.record(error) }
             nextOutcome.finished = true
         }
@@ -126,12 +129,14 @@ final class NativePresentationVisibilityTests: XCTestCase {
         let movie = try await generatedMovie()
         defer { try? FileManager.default.removeItem(at: movie) }
         let service = SystemPlayback()
+        let epoch = ContentPresentationEpoch()
+        let context = epoch.beginWorkflow()
         let appleKey = AssetKey(provider: .apple, scope: "native-visibility", assetID: "generated")
         let plan = PlaybackPlan(
             files: [movie.path], kind: .video, name: "Generated private movie", sourceKeys: [appleKey]
         )
         let firstOutcome = NativeVisibilityOutcome()
-        let firstTask = playbackTask(service, plan: plan, outcome: firstOutcome)
+        let firstTask = playbackTask(service, plan: plan, outcome: firstOutcome, context: context)
         defer { firstTask.cancel()
             service.invalidateForContentChange()
         }
@@ -147,6 +152,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         let oldClose = first.rootView.close
         let oldPresentation = try XCTUnwrap(first.presentationController)
         let oldDelegate = try XCTUnwrap(oldPresentation.delegate)
+        epoch.invalidate()
         service.invalidateForContentChange()
         XCTAssertTrue(first.view.isHidden)
         XCTAssertNil(player.currentItem, "Playback must release the private asset immediately")
@@ -156,7 +162,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         let nextOutcome = NativeVisibilityOutcome()
         var remotePlan = plan
         remotePlan.sourceKeys = [AssetKey(provider: .immich, scope: "remote", assetID: "generated")]
-        let nextTask = playbackTask(service, plan: remotePlan, outcome: nextOutcome)
+        let nextTask = playbackTask(service, plan: remotePlan, outcome: nextOutcome, context: context)
         defer { nextTask.cancel() }
         try await waitUntil { host.root.presentedViewController is UIHostingController<MediaPlaybackView> }
         let next = try XCTUnwrap(host.root.presentedViewController as? UIHostingController<MediaPlaybackView>)
@@ -180,12 +186,13 @@ final class NativePresentationVisibilityTests: XCTestCase {
         let movie = try await generatedMovie()
         defer { try? FileManager.default.removeItem(at: movie) }
         let service = SystemPlayback()
+        let epoch = ContentPresentationEpoch()
         let gate = PlaybackPreparationGate()
         service.preparationBarrier = { await gate.pause() }
         let key = AssetKey(provider: .apple, scope: "native-visibility", assetID: "generated")
         let plan = PlaybackPlan(files: [movie.path], kind: .video, name: "Generated delayed movie", sourceKeys: [key])
         let outcome = NativeVisibilityOutcome()
-        let preparing = playbackTask(service, plan: plan, outcome: outcome)
+        let preparing = playbackTask(service, plan: plan, outcome: outcome, context: epoch.beginWorkflow())
         defer { gate.release()
             preparing.cancel()
             service.invalidateForContentChange()
@@ -200,7 +207,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         XCTAssertNil(host.root.presentedViewController, "Cancelled preparation must never open a late player")
         service.preparationBarrier = nil
         let nextOutcome = NativeVisibilityOutcome()
-        let nextTask = playbackTask(service, plan: plan, outcome: nextOutcome)
+        let nextTask = playbackTask(service, plan: plan, outcome: nextOutcome, context: epoch.beginWorkflow())
         defer { nextTask.cancel() }
         try await waitUntil { host.root.presentedViewController is UIHostingController<MediaPlaybackView> }
         let next = try XCTUnwrap(host.root.presentedViewController as? UIHostingController<MediaPlaybackView>)
@@ -215,10 +222,11 @@ final class NativePresentationVisibilityTests: XCTestCase {
         let host = try NativeVisibilityHost()
         defer { host.close() }
         let service = SystemConfirmation()
+        let epoch = ContentPresentationEpoch()
         let key = AssetKey(provider: .apple, scope: "native-visibility", assetID: "generated")
         let prompt = ReversionPrompt(key: key, name: "PRIVATE generated image.jpg")
         let firstOutcome = NativeVisibilityOutcome()
-        let firstTask = confirmationTask(service, prompt: prompt, outcome: firstOutcome)
+        let firstTask = confirmationTask(service, prompt: prompt, outcome: firstOutcome, context: epoch.beginWorkflow())
         defer { firstTask.cancel()
             service.invalidateForContentChange()
         }
@@ -235,7 +243,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         XCTAssertNil(firstOutcome.failure)
         XCTAssertNil(first.view.window)
         let nextOutcome = NativeVisibilityOutcome()
-        let nextTask = confirmationTask(service, prompt: prompt, outcome: nextOutcome)
+        let nextTask = confirmationTask(service, prompt: prompt, outcome: nextOutcome, context: epoch.beginWorkflow())
         defer { nextTask.cancel() }
         try await waitUntil { host.root.presentedViewController is UIAlertController }
         let next = try XCTUnwrap(host.root.presentedViewController as? UIAlertController)
@@ -251,26 +259,32 @@ final class NativePresentationVisibilityTests: XCTestCase {
     }
 
     @MainActor private func playbackTask(
-        _ service: SystemPlayback, plan: PlaybackPlan, outcome: NativeVisibilityOutcome
+        _ service: SystemPlayback,
+        plan: PlaybackPlan,
+        outcome: NativeVisibilityOutcome,
+        context: ContentPresentationContext
     ) -> Task<Void, Never> {
         Task {
-            do { try await service.present(plan)
+            do { try await service.present(plan, context: context)
             } catch { outcome.record(error) }
             outcome.finished = true
         }
     }
 
     @MainActor private func confirmationTask(
-        _ service: SystemConfirmation, prompt: ReversionPrompt, outcome: NativeVisibilityOutcome
+        _ service: SystemConfirmation,
+        prompt: ReversionPrompt,
+        outcome: NativeVisibilityOutcome,
+        context: ContentPresentationContext
     ) -> Task<Void, Never> {
         Task {
-            do { outcome.confirmed = try await service.revertImage(prompt)
+            do { outcome.confirmed = try await service.revertImage(prompt, context: context)
             } catch { outcome.record(error) }
             outcome.finished = true
         }
     }
 
-    @MainActor private func waitForPresentation(
+    @MainActor func waitForPresentation(
         _ controller: UIViewController,
         requiresDelegate: Bool = false
     ) async throws {
@@ -280,7 +294,7 @@ final class NativePresentationVisibilityTests: XCTestCase {
         }
     }
 
-    @MainActor private func waitUntil(_ condition: @MainActor () -> Bool) async throws {
+    @MainActor func waitUntil(_ condition: @escaping @MainActor () -> Bool) async throws {
         for _ in 0 ..< 400 {
             if condition() {
                 return

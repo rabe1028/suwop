@@ -20,7 +20,8 @@ import SuwopShell
         active?.invalidateForContentChange()
     }
 
-    func present(_ request: SharePresentation) async throws -> Bool {
+    func present(_ request: SharePresentation, context: ContentPresentationContext) async throws -> Bool {
+        try context.requireCurrent(sourceKeys: request.sourceKeys)
         guard active == nil else { throw SuwopError("共有がすでに進行中です。") }
         let presentation = NativeSharePresentation(sourceKeys: request.sourceKeys ?? [])
         #if os(macOS) && SUWOP_SHARING_TEST
@@ -28,7 +29,7 @@ import SuwopShell
         #endif
         active = presentation
         defer { active = nil }
-        return try await presentation.present(request.files)
+        return try await presentation.present(request.files, context: context)
     }
 }
 
@@ -68,7 +69,7 @@ import SuwopShell
         #endif
     }
 
-    func present(_ files: [ShareFile]) async throws -> Bool {
+    func present(_ files: [ShareFile], context: ContentPresentationContext) async throws -> Bool {
         try Task.checkCancellation()
         guard pending == nil, !files.isEmpty else { throw SuwopError("共有画面を開けません。") }
         let urls = files.map { URL(fileURLWithPath: $0.path) }
@@ -84,6 +85,11 @@ import SuwopShell
                 presenter = shown
             }
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
                 controller.completionWithItemsHandler = { @Sendable [weak self] _, completed, _, error in
@@ -104,6 +110,11 @@ import SuwopShell
         #else
             let view = try presentationView()
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 let picker = NSSharingServicePicker(items: urls)
                 self.picker = picker

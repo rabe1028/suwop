@@ -31,8 +31,9 @@ import SuwopShell
         cancel(id: id, error: nil)
     }
 
-    func resumeUpload(_ prompt: UploadResumePrompt) async throws -> Bool {
+    func resumeUpload(_ prompt: UploadResumePrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "作成済みコピーへの反映を再開しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -43,8 +44,9 @@ import SuwopShell
         )
     }
 
-    func forgetUpload(_ prompt: UploadForgetPrompt) async throws -> Bool {
+    func forgetUpload(_ prompt: UploadForgetPrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "未完了コピーの再開記録を解除しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -56,8 +58,12 @@ import SuwopShell
         )
     }
 
-    func forgetUploadIntent(_ prompt: UploadIntentForgetPrompt) async throws -> Bool {
+    func forgetUploadIntent(
+        _ prompt: UploadIntentForgetPrompt,
+        context: ContentPresentationContext
+    ) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "アップロード開始記録を解除しますか？",
             message: """
             Immich · \(prompt.name)
@@ -69,8 +75,9 @@ import SuwopShell
         )
     }
 
-    func revertImage(_ prompt: ReversionPrompt) async throws -> Bool {
+    func revertImage(_ prompt: ReversionPrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
+            context: context,
             title: "この保存先の写真を原本へ戻しますか？",
             message: """
             \(prompt.key.provider.title) · \(prompt.name)
@@ -81,10 +88,11 @@ import SuwopShell
         )
     }
 
-    func trashApple(_ prompt: AppleTrashPrompt) async throws -> Bool {
+    func trashApple(_ prompt: AppleTrashPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
         return try await confirm(
+            context: context,
             title: "Apple Photos の写真を削除しますか？",
             message: """
             保存先: Apple Photos · \(prompt.names.count) 件
@@ -97,13 +105,14 @@ import SuwopShell
         )
     }
 
-    func changeTrash(_ prompt: TrashPrompt) async throws -> Bool {
+    func changeTrash(_ prompt: TrashPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 件" : ""
         let policy = prompt.retentionDays.map {
             "現在の保持設定は\($0)日です。期間経過やサーバー設定の変更で復元できなくなる場合があります。"
         } ?? "同じ Immich のライブラリへ戻します。"
         return try await confirm(
+            context: context,
             title: prompt.action == .trash ? "Immich のゴミ箱に移しますか？" : "Immich の写真を復元しますか？",
             message: """
             \(prompt.names.count) 件 · \(prompt.address)
@@ -116,7 +125,7 @@ import SuwopShell
         )
     }
 
-    func pasteEdits(_ prompt: PasteEditsPrompt) async throws -> Bool {
+    func pasteEdits(_ prompt: PasteEditsPrompt, context: ContentPresentationContext) async throws -> Bool {
         let names = prompt.names.prefix(5).joined(separator: "\n")
         let remaining = prompt.names.count > 5 ? "\nほか \(prompt.names.count - 5) 枚" : ""
         let categories = [
@@ -125,6 +134,7 @@ import SuwopShell
             prompt.options.geometry ? "切り抜き・向き" : nil,
         ].compactMap(\.self).joined(separator: "、")
         return try await confirm(
+            context: context,
             title: "\(prompt.names.count) 枚に編集をペーストしますか？",
             message: """
             コピー元: \(prompt.sourceName)
@@ -140,11 +150,13 @@ import SuwopShell
     }
 
     private func confirm(
+        context: ContentPresentationContext,
         title: String,
         message: String,
         action: String,
         destructive: Bool = true
     ) async throws -> Bool {
+        guard context.permits() else { return false }
         guard waiting == nil else { throw SuwopError("確認がすでに開いています。") }
         try Task.checkCancellation()
         let id = UUID()
@@ -152,6 +164,10 @@ import SuwopShell
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
+                guard context.permits() else {
+                    continuation.resume(returning: false)
+                    return
+                }
                 waiting = continuation
                 presentationID = id
                 do { try open(title: title, message: message, action: action, destructive: destructive, id: id)

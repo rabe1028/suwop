@@ -25,7 +25,8 @@ import SwiftUI
         active?.invalidateForContentChange()
     }
 
-    func present(_ plan: PlaybackPlan) async throws {
+    func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
+        try context.requireCurrent(sourceKeys: plan.sourceKeys)
         guard active == nil else { throw SuwopError("再生がすでに進行中です。") }
         let presentation = NativeMediaPresentation()
         #if SUWOP_VRT
@@ -37,7 +38,7 @@ import SwiftUI
             active = nil
             sourceKeys = []
         }
-        try await presentation.present(plan)
+        try await presentation.present(plan, context: context)
     }
 }
 
@@ -69,7 +70,7 @@ import SwiftUI
         close(error: CancellationError())
     }
 
-    func present(_ plan: PlaybackPlan) async throws {
+    func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
         try Task.checkCancellation()
         defer {
             preparing = nil
@@ -93,6 +94,11 @@ import SwiftUI
         guard !invalidated, let content else { throw CancellationError() }
         try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                do { try context.requireCurrent(sourceKeys: plan.sourceKeys)
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 pending = continuation
                 do {
                     try open(content, name: plan.name)

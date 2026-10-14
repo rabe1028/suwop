@@ -12,10 +12,19 @@ import SuwopShell
     private let photoEditing = ApplePhotoEditing()
     private let confirmation = SystemConfirmation()
     private let photoReversion = ApplePhotoReversion()
+    private let presentationEpoch = ContentPresentationEpoch()
+    #if SUWOP_VRT
+        var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
+    #endif
+
+    func beginWorkflow() -> ContentPresentationContext {
+        presentationEpoch.beginWorkflow()
+    }
 
     /// Cancel native presentation leases without cancelling the workflow that
     /// must still persist outcomes and close native sessions / workspaces.
     func invalidateContentPresentations() {
+        presentationEpoch.invalidate()
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
         confirmation.invalidateForContentChange()
@@ -39,7 +48,8 @@ import SuwopShell
         )
     }
 
-    func execute(_ operation: ShellOperation) async throws -> JSONValue {
+    func execute(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
+        try context.requireOwner(presentationEpoch)
         let data = operation.data ?? .null
         if !["persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply"].contains(operation.type) {
             try Task.checkCancellation()
@@ -53,17 +63,23 @@ import SuwopShell
             return .null
         }
         if operation.type == "confirmUploadResume" {
-            return try await .from(confirmation.resumeUpload(data["prompt"].decode(UploadResumePrompt.self)))
+            return try await .from(confirmation.resumeUpload(
+                data["prompt"].decode(UploadResumePrompt.self),
+                context: context
+            ))
         }
         if operation.type == "confirmTrash" {
-            return try await .from(confirmation.changeTrash(data["prompt"].decode(TrashPrompt.self)))
+            return try await .from(confirmation.changeTrash(data["prompt"].decode(TrashPrompt.self), context: context))
         }
         if operation.type == "confirmForgetUpload" {
-            return try await .from(confirmation.forgetUpload(data["prompt"].decode(UploadForgetPrompt.self)))
+            return try await .from(confirmation.forgetUpload(
+                data["prompt"].decode(UploadForgetPrompt.self),
+                context: context
+            ))
         }
         if operation.type == "confirmForgetUploadIntent" {
             return try await .from(confirmation
-                .forgetUploadIntent(data["prompt"].decode(UploadIntentForgetPrompt.self)))
+                .forgetUploadIntent(data["prompt"].decode(UploadIntentForgetPrompt.self), context: context))
         }
         if operation.type == "inspectCurrentImage" {
             return try .from(CurrentImageInspector.facts(requiredString(data, "path")))
@@ -78,14 +94,17 @@ import SuwopShell
                 destination: requiredString(data, "destination")
             ))
         }
-        return try await dispatch(operation, data: data)
+        return try await dispatch(operation, data: data, context: context)
     }
 
-    private func dispatch(_ operation: ShellOperation, data: JSONValue) async throws -> JSONValue {
+    private func dispatch(
+        _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
         switch operation.type {
         case "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleTrashEffect(
                 operation.type,
-                data: data
+                data: data,
+                context: context
             )
         case "readState", "persist": return try stateEffect(operation.type, data: data)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
@@ -94,7 +113,8 @@ import SuwopShell
             )
         case "workspace", "cleanup", "copyFile", "shareFiles", "playMedia": return try await fileEffect(
                 operation.type,
-                data: data
+                data: data,
+                context: context
             )
         case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite", "appleCurrentImage",
              "appleMetadata": return try await photoEffect(
@@ -112,12 +132,14 @@ import SuwopShell
         case "http": return try await .from(http.execute(data.decode(HttpRequest.self)))
         case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage",
              "appleReversionInspect", "appleRevert", "confirmReversion", "confirmPasteEdits", "appleEditInspect":
-            return try await editingEffect(operation.type, data: data)
+            return try await editingEffect(operation.type, data: data, context: context)
         default: throw SuwopError("未知の入出力要求です: \(operation.type)")
         }
     }
 
-    private func editingEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+    private func editingEffect(
+        _ type: String, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
         switch type {
         case "appleEditOpen":
             return try await .from(photoEditing.open(
@@ -136,20 +158,47 @@ import SuwopShell
         case "editImage":
             return try await .from(imageEditing.present(
                 data["presentation"].decode(ImageEditPresentation.self),
-                sourceKey: data["key"].decode(AssetKey.self)
+                sourceKey: data["key"].decode(AssetKey.self),
+                context: context
             ))
-        case "appleReversionInspect":
-            return try .from(photoReversion.inspect(data["asset"].decode(StoredAsset.self)))
+        case "appleReversionInspect", "appleEditInspect":
+            return try await inspectEditing(type, data: data, context: context)
         case "appleRevert":
             return try await .from(photoReversion.revert(data["asset"].decode(StoredAsset.self)))
         case "confirmReversion":
-            return try await .from(confirmation.revertImage(data["prompt"].decode(ReversionPrompt.self)))
+            return try await .from(confirmation.revertImage(
+                data["prompt"].decode(ReversionPrompt.self),
+                context: context
+            ))
         case "confirmPasteEdits":
-            return try await .from(confirmation.pasteEdits(data["prompt"].decode(PasteEditsPrompt.self)))
-        case "appleEditInspect":
-            return try await .from(photoEditing.readBack(data["asset"].decode(StoredAsset.self)))
+            return try await .from(confirmation.pasteEdits(
+                data["prompt"].decode(PasteEditsPrompt.self),
+                context: context
+            ))
         default: throw SuwopError("未知の写真編集入出力です。")
         }
+    }
+
+    private func inspectEditing(
+        _ type: String, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        let asset = try data["asset"].decode(StoredAsset.self)
+        try context.requireCurrent(sourceKeys: [asset.key])
+        #if SUWOP_VRT
+            if let inspectionEffect {
+                let operation = try JSONValue.object(["type": .string(type), "data": data]).decode(ShellOperation.self)
+                let result = try await inspectionEffect(operation)
+                try context.requireCurrent(sourceKeys: [asset.key])
+                return result
+            }
+        #endif
+        let result = if type == "appleEditInspect" {
+            try await JSONValue.from(photoEditing.readBack(asset))
+        } else {
+            try JSONValue.from(photoReversion.inspect(asset))
+        }
+        try context.requireCurrent(sourceKeys: [asset.key])
+        return result
     }
 
     private func photoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
@@ -232,16 +281,21 @@ import SuwopShell
         }
     }
 
-    private func fileEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+    private func fileEffect(
+        _ type: String, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
         switch type {
         case "copyFile":
             let source = try URL(fileURLWithPath: requiredString(data, "source"))
             let destination = try URL(fileURLWithPath: requiredString(data, "destination"))
             try await NativeFileCopy.copy(from: source, to: destination)
             return .null
-        case "shareFiles": return try await .bool(sharing.present(data.decode(SharePresentation.self)))
+        case "shareFiles": return try await .bool(sharing.present(
+                data.decode(SharePresentation.self),
+                context: context
+            ))
         case "playMedia":
-            try await playback.present(data["plan"].decode(PlaybackPlan.self))
+            try await playback.present(data["plan"].decode(PlaybackPlan.self), context: context)
             return .null
         case "workspace":
             let id = try requiredString(data, "id")
@@ -271,10 +325,12 @@ import SuwopShell
         return .null
     }
 
-    private func appleTrashEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+    private func appleTrashEffect(
+        _ type: String, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
         switch type {
         case "confirmAppleTrash": return try await .from(confirmation
-                .trashApple(data["prompt"].decode(AppleTrashPrompt.self)))
+                .trashApple(data["prompt"].decode(AppleTrashPrompt.self), context: context))
         case "appleTrashApply":
             let assets = try data["assets"].decode([StoredAsset].self)
             guard let first = assets.first else { throw SuwopError("写真を選択してください。") }
@@ -304,7 +360,9 @@ import SuwopShell
         apple = store
         return store
     }
+}
 
+extension AppleShell {
     func thumbnail(
         _ key: AssetKey,
         connection: ConnectionSettings?,

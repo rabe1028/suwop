@@ -83,3 +83,19 @@ review 修正後の最終 `make check` は Rust/FFI 202 tests・Swift 50 tests �
 - 先行 sharing-test の失敗は専用 fixture の key window確立に失敗したもので、成功結果とは区別する。最終 component testは test-only の view / show / close hookと実picker delegateを使う。本番の key window guardは保持し、実macOS共有UI／手動操作／外部serviceへのhandoff成功は未検証。
 - 上記26画面・unit10・UI7の strict VRTと Native15は review修正前 HEAD `9e8f6f7` の証拠。共有修正後のローカル再実行結果とは扱わない。基準画像に追加変更はない。
 - 修正後の最終 pushed HEADの hosted CIは確認待ち。実機／iCloudと Photosでの直接再表示は引き続き未確認。
+
+## PR #21 の表示登録競合修正（P1、最終ローカル検証）
+
+`ca13f38` の共有修正後に、Appleの通知が active表示登録より先に来た場合の取消漏れを修正した。Swift shellの文脈を `LibraryModel.send`／NativeAcceptance event開始前に取得し、workflow中に取り直さず全 effectへ渡す。native登録直前と読取り専用検査の await後に検査し、古い Apple／旧形式の表示を拒否する。確認は `false`、その他の表示は取消を返す。Immichのみの sourceは保持し、Rust workflow全体の取消・書込み結果・journal／lease／cleanupの意味は変えない。
+
+追加回帰の sourceは、実 sendの最初の effect前／共有 effect発行後の競合、共有・editor・player・確認の登録拒否、ペースト／復元検査中の通知、古い文脈でも Immichの表示と完了待ち leaseを維持するケースを含む。対象 SwiftFormat／strict SwiftLintと diff checkは通過した。
+
+今回の source固定後の最終ローカル検証は以下の通り。
+
+- `make check`: exit 0、Rust/FFI 216 / Swift 52 testsと全品質 gateを通過。ログ `/tmp/suwop-presentation-epoch-check2.log`。
+- `make apple-build`: exit 0、全5 Rust Apple target／XCFrameworkとiOS Simulator／universal macOS両 app buildを通過。ログ `/tmp/suwop-presentation-epoch-apple.log`。
+- `make sharing-test`: exit 0、macOS component 2件を通過。ログ `/tmp/suwop-presentation-epoch-sharing.log`、結果 `DerivedData/Sharing/Logs/Test/Test-SuwopSharing-2026.10.14_22-04-17-+0900.xcresult`。実macOS共有UI／外部service handoffの成功とは区別する。
+- strict `make vrt`: exit 0、`DerivedData/VRTArtifacts/20261014T130612Z-3518/report.json` は `passed: true`／`record: false`。26画面・unit15・UI7を通過。実 `LibraryModel.send` の固定文脈と、ペースト／復元両方の読取り検査中の競合、Apple／旧形式の登録拒否、Immich表示・lease保持の回帰を含む。基準画像の追加変更はない。
+- 先行VRTはテストhelperの `@escaping` 欠落によるコンパイル失敗。test-only修正後の上記成功runとは区別する。
+
+以前のNative15は `9e8f6f7` の証拠として保持し、P1修正後のローカル再実行とは扱わない。共有修正HEAD `ca13f38` の hosted CI run `38565835960` は全4 job成功確認済み。P1修正後の最終 pushed HEADの hosted CIは確認待ち。実機／iCloud／Photosでの直接再表示／実macOS共有UIは引き続き未確認。

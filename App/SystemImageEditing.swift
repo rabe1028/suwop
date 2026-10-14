@@ -16,7 +16,10 @@ import SwiftUI
         active?.invalidateForContentChange()
     }
 
-    func present(_ input: ImageEditPresentation, sourceKey: AssetKey? = nil) async throws -> ImageEditDraft? {
+    func present(
+        _ input: ImageEditPresentation, sourceKey: AssetKey? = nil, context: ContentPresentationContext
+    ) async throws -> ImageEditDraft? {
+        try context.requireCurrent(sourceKeys: sourceKey.map { [$0] })
         guard active == nil else { throw SuwopError("写真編集がすでに進行中です。") }
         let window = ImageEditWindow()
         active = window
@@ -25,7 +28,7 @@ import SwiftUI
             active = nil
             self.sourceKey = nil
         }
-        return try await window.present(input)
+        return try await window.present(input, sourceKey: sourceKey, context: context)
     }
 }
 
@@ -50,12 +53,19 @@ import SwiftUI
         close(error: CancellationError())
     }
 
-    func present(_ input: ImageEditPresentation) async throws -> ImageEditDraft? {
+    func present(
+        _ input: ImageEditPresentation, sourceKey: AssetKey?, context: ContentPresentationContext
+    ) async throws -> ImageEditDraft? {
         try Task.checkCancellation()
         model = try ImageEditorModel(input)
         return try await withTaskCancellationHandler {
             try Task.checkCancellation()
             return try await withCheckedThrowingContinuation { continuation in
+                do { try context.requireCurrent(sourceKeys: sourceKey.map { [$0] })
+                } catch {
+                    continuation.resume(throwing: error)
+                    return
+                }
                 waiting = continuation
                 do { try open() } catch { close(error: error) }
             }
