@@ -2,6 +2,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BIN="$ROOT/.tools/bin"
+command -v uv >/dev/null || { echo "Install uv before running make setup." >&2; exit 1; }
 mkdir -p "$BIN"
 TEMP="$(mktemp -d)"
 trap 'rm -rf "$TEMP"' EXIT
@@ -35,6 +36,6 @@ if [[ "$ARCH" == "x86_64" ]]; then ACTION_ARCH=amd64; fi
 curl -fsSL "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_${PLATFORM}_${ACTION_ARCH}.tar.gz" -o "$TEMP/actionlint.tar.gz"
 tar -xzf "$TEMP/actionlint.tar.gz" -C "$TEMP" actionlint
 install -m 755 "$TEMP/actionlint" "$BIN/actionlint"
-python3 -m venv "$ROOT/.tools/python"
-"$ROOT/.tools/python/bin/python" -m pip install --quiet ruff==0.17.0
+uv venv --allow-existing "$ROOT/.tools/python"
+uv pip install --python "$ROOT/.tools/python/bin/python" --quiet ruff==0.17.0
 ln -sf "$ROOT/.tools/python/bin/ruff" "$BIN/ruff"

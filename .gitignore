@@ -8,3 +8,4 @@ xcuserdata/
 /target/
 /.tools/
 /.tools
+__pycache__/

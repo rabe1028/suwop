@@ -10,7 +10,7 @@ if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
     echo 'Native acceptance requires Apple Silicon and the pinned Xcode / iOS runtime.' >&2
     exit 1
 fi
-config() { python3 scripts/vrt.py config "$1"; }
+config() { uv run --no-project python scripts/vrt.py config "$1"; }
 EXPECTED_XCODE="$(printf 'Xcode %s\nBuild version %s' "$(config xcode)" "$(config xcode_build)")"
 if [[ "$(xcodebuild -version)" != "$EXPECTED_XCODE" || "$(simslim --version)" != "simslim $(config simslim)" ]]; then
     echo 'Select the pinned environment in VRT/environment.json; run make setup-vrt.' >&2
@@ -20,9 +20,9 @@ mkdir -p DerivedData
 # Same lock and device as VRT; the real Photos scenario must never overlap snapshots.
 mkdir DerivedData/VRT.lock || { echo 'Another simulator test owns the checkout lock.' >&2; exit 1; }
 trap 'rmdir DerivedData/VRT.lock' EXIT
-UDID="$(xcrun simctl list --json | python3 scripts/vrt.py device)"
+UDID="$(xcrun simctl list --json | uv run --no-project python scripts/vrt.py device)"
 if [[ -z "$UDID" ]]; then
-    UDID="$(xcrun simctl create "$(python3 scripts/vrt.py name)" "$(config device)" "$(config runtime)")"
+    UDID="$(xcrun simctl create "$(uv run --no-project python scripts/vrt.py name)" "$(config device)" "$(config runtime)")"
 fi
 ARTIFACTS="$PWD/DerivedData/PhotoKitArtifacts/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$ARTIFACTS"
@@ -30,7 +30,7 @@ touch "$ARTIFACTS/stages.tsv"
 cleanup() {
     local status=$?
     if ! xcrun simctl shutdown "$UDID" > "$ARTIFACTS/shutdown.log" 2>&1; then status=1; fi
-    python3 scripts/native-acceptance.py report "$ARTIFACTS" "$status" "$UDID"
+    uv run --no-project python scripts/native-acceptance.py report "$ARTIFACTS" "$status" "$UDID"
     rmdir DerivedData/VRT.lock
     echo "PhotoKit artifacts: $ARTIFACTS"
     exit "$status"
@@ -63,4 +63,4 @@ stage build xcodebuild "${ARGS[@]}" build-for-testing
 stage install xcrun simctl install "$UDID" DerivedData/PhotoKit/Build/Products/Debug-iphonesimulator/SuwopPhotoKitHost.app
 stage permission xcrun simctl privacy "$UDID" grant photos jp.rabe1028.suwop.photokit.acceptance
 stage native xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
-stage coverage python3 scripts/native-acceptance.py coverage "$ARTIFACTS"
+stage coverage uv run --no-project python scripts/native-acceptance.py coverage "$ARTIFACTS"

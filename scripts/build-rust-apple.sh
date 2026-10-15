@@ -57,13 +57,13 @@ case "${1:-}" in
             *) echo "Unsupported Apple target: $2" >&2; exit 1 ;;
         esac
         build_slice "$2"
-        python3 scripts/apple_slices.py stamp "$2"
+        uv run --no-project python scripts/apple_slices.py stamp "$2"
         exit 0
         ;;
     --package)
         [[ "$#" == 1 ]] || exit 1
         # Require all five slices from this exact clean checkout before replacing output.
-        python3 scripts/apple_slices.py verify
+        uv run --no-project python scripts/apple_slices.py verify
         ;;
     "")
         for triple in "${TARGETS[@]}"; do build_slice "$triple"; done

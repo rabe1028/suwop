@@ -16,9 +16,10 @@ cleanup() {
 trap cleanup EXIT
 
 "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-"${COMPOSE[@]}" up -d
+bash "$ROOT/scripts/pull-test-images.sh" "${COMPOSE[@]}"
+"${COMPOSE[@]}" up -d --pull never
 
-if ! SUWOP_IMMICH_API_KEY="$(python3 "$ROOT/scripts/bootstrap_immich.py")"; then
+if ! SUWOP_IMMICH_API_KEY="$(uv run --no-project python "$ROOT/scripts/bootstrap_immich.py")"; then
   "${COMPOSE[@]}" ps >&2 || true
   "${COMPOSE[@]}" logs --no-color --tail=250 >&2 || true
   exit 1
