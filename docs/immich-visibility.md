@@ -50,6 +50,12 @@ record=false／passed=true、全7stage終了0、基準40枚はHEADとbyte一致�
 末尾のsimctl診断収集警告はテスト結果と区別し、wrapper・shutdown・reportの終了0を確認した。
 新HEADのhosted CIとmergeは未完了である。
 
+HEAD `4a4165c` のCI run `38697149947` はcore・Apple・Immich integrationが成功し、
+VRT比較も成功した。しかしジョブ共通の25分上限に達し、続くPhotoKit native検証中に打ち切られた。
+GitHub annotationの理由は `The job has exceeded the maximum execution time of 25m0s`。
+VRT比較に約22分を要したため、ジョブ全体の上限だけ40分へ変更する。
+各検査・テストのtimeout・比較許容値・基準は保持し、PhotoKitを含む全job成功を引き続き必要とする。
+
 PR #25でレビュー中。初期HEAD `7db5858` のローカル全gateと実Immich v3.2.4結合は成功した。レビューでstack状態が操作候補へ伝わらないP2指摘を修正し、修正後のローカル必須gateも成功した。以下の検証表は初期HEADの結果であり、修正後の必要な検証とhosted CIは別に確認する。C-1の専用PINセッションはPR #24でmerge済みで、最終HEADとmerge後のCI全4 jobが成功している。
 
 最初の増分は、同じ利用者が所有する、関連動画とstackを持たない静止画のtimeline／archiveからlockedへの変更と、lockedから明示的に選択したtimeline／archiveへの変更を扱う。Live Photo、動画、関連状態が不明な写真は対応済みとしない。通常のtimelineとarchiveの相互変更は、PIN不要の別経路として残す。
