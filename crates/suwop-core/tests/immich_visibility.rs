@@ -1425,13 +1425,7 @@ fn ordinary_inspect_preserves_authenticated_locked_roster_and_selected_image() -
     assert_eq!(before.entries.as_ref().ok_or("entries")?.len(), 1);
     assert!(before.image.is_some());
     let before_json = serde_json::to_value(&before).map_err(|e| e.to_string())?;
-    shell.run(
-        &c,
-        Event::ImmichArchiveSceneChanged {
-            scene_id: SCENE.into(),
-            phase: suwop_core::protection::ProtectionScenePhase::Active,
-        },
-    )?;
+    activate_archive(&mut shell, &c)?;
     let status_reads = shell.status_reads;
     let paths = shell.paths.len();
     shell.run(
@@ -1508,13 +1502,7 @@ fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_resta
                 ])),
                 ..Shell::default()
             };
-            shell.run(
-                &c,
-                Event::ImmichArchiveSceneChanged {
-                    scene_id: SCENE.into(),
-                    phase: suwop_core::protection::ProtectionScenePhase::Active,
-                },
-            )?;
+            activate_archive(&mut shell, &c)?;
             shell.run(&c, open(GRANT))?;
             let entries = c.view().immich_locked_view.entries.ok_or("PIN entries")?;
             assert_eq!(
@@ -1560,4 +1548,20 @@ fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_resta
         }
     }
     Ok(())
+}
+
+fn activate_archive(shell: &mut Shell, core: &Core<Suwop>) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: SCENE.into(),
+            phase: suwop_core::protection::ProtectionScenePhase::Active,
+        },
+    )?;
+    shell.run(
+        core,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )
 }

@@ -36,6 +36,11 @@ struct ImmichArchiveViewScreen: View {
                     }
                     Text("確認結果は最後に調べた状態です。変更結果が不明な操作は再実行しません。")
                         .font(.caption).foregroundStyle(.secondary)
+                } else {
+                    Text(unavailableMessage).font(.callout).foregroundStyle(.secondary)
+                    Button("このウインドウで記録を開く") { session.open(sceneID: sceneID) }
+                        .buttonStyle(.borderless).disabled(session.busy || !session.connected)
+                        .accessibilityIdentifier("openImmichArchiveHere")
                 }
             }.navigationTitle("アーカイブの変更")
                 .toolbar {
@@ -48,6 +53,16 @@ struct ImmichArchiveViewScreen: View {
                 }
         }.onAppear { session.open(sceneID: sceneID) }
             .onDisappear { session.close(sceneID: sceneID) }
+    }
+
+    private var unavailableMessage: String {
+        if !session.connected {
+            "Immich に接続すると変更記録を表示できます。"
+        } else if session.busy {
+            "処理が完了してから、このウインドウで記録を開いてください。"
+        } else {
+            "このウインドウで変更記録を開き直してください。"
+        }
     }
 
     private func outcome(_ value: VisibilityOutcome) -> String {

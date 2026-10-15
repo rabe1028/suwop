@@ -80,7 +80,8 @@ import SuwopShell
         model = library
         writes = 0
         library.immichArchive.sceneChanged(sceneID: Self.sceneID, phase: .active)
-        try await settle { library.immichArchive.view(for: Self.sceneID) != nil }
+        library.immichArchive.open(sceneID: Self.sceneID)
+        try await settle { !library.immichArchive.busy && library.immichArchive.view(for: Self.sceneID) != nil }
         return library
     }
 

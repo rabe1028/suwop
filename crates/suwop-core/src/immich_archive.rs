@@ -100,6 +100,7 @@ pub struct ImmichArchiveView {
 pub struct ImmichArchiveModel {
     pub(crate) recovery_proof: Option<Box<RecoveryProof>>,
     pub scene_id: Option<String>,
+    pub active_scenes: std::collections::BTreeSet<String>,
     pub generation: Arc<AtomicU64>,
     pub active_operation: Option<ImmichArchiveAuthorization>,
     pub uncertain: bool,
@@ -430,6 +431,20 @@ pub(crate) fn invalidate(model: &mut Model) {
         .fetch_add(1, Ordering::SeqCst);
     model.immich_archive.active_operation = None;
 }
+fn acquire_owner(model: &mut Model, scene: &str) -> bool {
+    if model.session.is_none()
+        || !model.immich_archive.active_scenes.contains(scene)
+        || model.busy
+        || model.immich_archive.working
+    {
+        return false;
+    }
+    if model.immich_archive.scene_id.as_deref() != Some(scene) {
+        invalidate(model);
+        model.immich_archive.scene_id = Some(scene.into());
+    }
+    true
+}
 fn authority(
     model: &Model,
     scene: &str,
@@ -469,14 +484,18 @@ pub(crate) fn update(
                 return Some(Command::done());
             }
             if phase == crate::protection::ProtectionScenePhase::Active {
-                if model.immich_archive.scene_id.as_deref() != Some(&scene_id) {
+                model.immich_archive.active_scenes.insert(scene_id);
+            } else {
+                model.immich_archive.active_scenes.remove(&scene_id);
+                if model.immich_archive.scene_id.as_deref() == Some(&scene_id) {
                     invalidate(model);
-                    model.immich_archive.scene_id = Some(scene_id);
+                    model.immich_archive.scene_id = None;
                 }
-            } else if model.immich_archive.scene_id.as_deref() == Some(&scene_id) {
-                invalidate(model);
-                model.immich_archive.scene_id = None;
             }
+            Some(Command::done())
+        }
+        Event::OpenImmichArchive { scene_id } => {
+            acquire_owner(model, &scene_id);
             Some(Command::done())
         }
         Event::CloseImmichArchive { scene_id } => {
@@ -522,6 +541,9 @@ fn begin(
     {
         return Command::done();
     }
+    if !allowed(model, &key) || !acquire_owner(model, scene) {
+        return Command::done();
+    }
     let Some(capability) = authority(model, scene, key.clone(), to, id.clone()) else {
         return Command::done();
     };
@@ -559,6 +581,9 @@ fn inspect(model: &mut Model, id: &str, scene: &str) -> Command<crate::app::Effe
     let Ok(to) = operation.to.try_into() else {
         return Command::done();
     };
+    if !acquire_owner(model, scene) {
+        return Command::done();
+    }
     let Some(capability) = authority(
         model,
         scene,
@@ -578,11 +603,10 @@ fn inspect(model: &mut Model, id: &str, scene: &str) -> Command<crate::app::Effe
     })
 }
 fn recover(model: &mut Model, scene: &str) -> Command<crate::app::Effect, Event> {
-    if model.busy
-        || !model.immich_archive.uncertain
-        || model.immich_archive.scene_id.as_deref() != Some(scene)
-        || model.session.is_none()
-    {
+    if model.busy || !model.immich_archive.uncertain || model.session.is_none() {
+        return Command::done();
+    }
+    if !acquire_owner(model, scene) {
         return Command::done();
     }
     let generation = model.immich_archive.generation.clone();

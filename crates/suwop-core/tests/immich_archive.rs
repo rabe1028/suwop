@@ -93,6 +93,7 @@ struct Shell {
     visibility: Option<String>,
     fail_persist: Option<usize>,
     revoke_confirm: bool,
+    confirmation_events: Vec<Event>,
     close_after_write: bool,
     patch: Option<Value>,
     scan_revision: Option<String>,
@@ -145,6 +146,9 @@ impl Shell {
                         })
                         .is_empty()
                     );
+                }
+                for event in std::mem::take(&mut self.confirmation_events) {
+                    assert!(c.process_event(event).is_empty());
                 }
                 Ok(json!(self.confirm))
             }
@@ -258,6 +262,12 @@ fn started(m: Model) -> Result<(Core<Suwop>, Shell), String> {
             phase: ProtectionScenePhase::Active,
         },
     )?;
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
     Ok((c, s))
 }
 #[test]
@@ -314,7 +324,18 @@ fn lost_response_is_unknown_and_new_uuid_cannot_replay_before_inspect() -> Resul
         ),
     )?;
     assert_eq!(s.gets, gets);
+    s.run(
+        &c,
+        Event::CloseImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert!(c.view().immich_archive_view.scene_id.is_none());
     s.run(&c, inspect())?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(SCENE)
+    );
     assert_eq!(s.writes, 1);
     assert_eq!(
         s.disk.as_ref().ok_or("disk")?["immichVisibilityOperations"][0]["observation"],
@@ -502,8 +523,22 @@ fn uncertain_archive_recovery_accepts_before_or_desired_and_retains_proof_on_fai
         s.faults.read_fail = false;
         s.run(
             &c,
-            Event::RecoverImmichArchiveState {
+            Event::CloseImmichArchive {
                 scene_id: SCENE.into(),
+            },
+        )?;
+        s.run(
+            &c,
+            Event::ImmichArchiveSceneChanged {
+                scene_id: OTHER_SCENE.into(),
+                phase: ProtectionScenePhase::Active,
+            },
+        )?;
+        assert!(c.view().immich_archive_view.scene_id.is_none());
+        s.run(
+            &c,
+            Event::RecoverImmichArchiveState {
+                scene_id: OTHER_SCENE.into(),
             },
         )?;
         assert!(c.view().immich_archive_view.persistence_uncertain);
@@ -516,7 +551,7 @@ fn uncertain_archive_recovery_accepts_before_or_desired_and_retains_proof_on_fai
         s.run(
             &c,
             Event::RecoverImmichArchiveState {
-                scene_id: SCENE.into(),
+                scene_id: OTHER_SCENE.into(),
             },
         )?;
         assert!(c.view().immich_archive_view.persistence_uncertain);
@@ -524,10 +559,14 @@ fn uncertain_archive_recovery_accepts_before_or_desired_and_retains_proof_on_fai
         s.run(
             &c,
             Event::RecoverImmichArchiveState {
-                scene_id: SCENE.into(),
+                scene_id: OTHER_SCENE.into(),
             },
         )?;
         assert!(!c.view().immich_archive_view.persistence_uncertain);
+        assert_eq!(
+            c.view().immich_archive_view.scene_id.as_deref(),
+            Some(OTHER_SCENE)
+        );
         assert_eq!(s.writes, 0);
         assert_eq!(s.persists, 1);
     }
@@ -664,6 +703,12 @@ fn retained_snapshots_do_not_advertise_archive_before_readiness_or_schema_valida
             })
             .is_empty()
         );
+        assert!(
+            c.process_event(Event::OpenImmichArchive {
+                scene_id: SCENE.into()
+            })
+            .is_empty()
+        );
         assert_eq!(
             c.view().immich_archive_view.scene_id.as_deref(),
             Some(SCENE)
@@ -684,5 +729,214 @@ fn retained_snapshots_do_not_advertise_archive_before_readiness_or_schema_valida
                 .is_empty()
         );
     }
+    Ok(())
+}
+
+#[test]
+fn durable_unknown_omits_old_snapshot_archive_hint_even_after_restart() -> Result<(), String> {
+    let (c, mut s) = started(model()?)?;
+    s.faults.lost = true;
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 1);
+    assert!(
+        !c.view()
+            .immich_archive_actions
+            .iter()
+            .any(|h| h.key == key())
+    );
+    let disk: SavedLibrary =
+        serde_json::from_value(s.disk.ok_or("durable state")?).map_err(|e| e.to_string())?;
+    assert_eq!(
+        disk.snapshots[0].assets[0].immich_visibility,
+        Some(ImmichVisibility::Timeline)
+    );
+    assert_eq!(
+        disk.immich_visibility_operations[0].outcome,
+        suwop_core::apple_visibility::VisibilityOutcome::Unknown
+    );
+    assert!(disk.immich_visibility_operations[0].observation.is_none());
+    let mut restarted = model()?;
+    restarted.state = disk;
+    let (c, mut shell) = started(restarted)?;
+    assert!(
+        !c.view()
+            .immich_archive_actions
+            .iter()
+            .any(|h| h.key == key())
+    );
+    shell.run(
+        &c,
+        prepare(
+            "44444444-4444-4444-8444-444444444444",
+            ImmichArchiveDestination::Archive,
+        ),
+    )?;
+    assert_eq!(shell.gets, 0);
+    assert_eq!(shell.confirms, 0);
+    assert_eq!(shell.persists, 0);
+    assert_eq!(shell.writes, 0);
+    Ok(())
+}
+
+const OTHER_SCENE: &str = "77777777-7777-4777-8777-777777777777";
+#[test]
+fn other_scene_lifecycle_and_busy_open_cannot_revoke_held_confirmation() -> Result<(), String> {
+    let (c, mut s) = started(model()?)?;
+    let generation = c.view().immich_archive_view.generation;
+    s.confirmation_events = vec![
+        Event::ImmichArchiveSceneChanged {
+            scene_id: OTHER_SCENE.into(),
+            phase: ProtectionScenePhase::Active,
+        },
+        Event::OpenImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+        Event::PrepareImmichArchive {
+            key: key(),
+            to: ImmichArchiveDestination::Archive,
+            operation_id: "88888888-8888-4888-8888-888888888888".into(),
+            scene_id: OTHER_SCENE.into(),
+        },
+        Event::ImmichArchiveSceneChanged {
+            scene_id: OTHER_SCENE.into(),
+            phase: ProtectionScenePhase::Inactive,
+        },
+        Event::CloseImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    ];
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 1);
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(SCENE)
+    );
+    assert_eq!(c.view().immich_archive_view.generation, generation);
+    Ok(())
+}
+#[test]
+fn owner_background_revokes_confirmation_and_rejects_late_open() -> Result<(), String> {
+    let (c, mut s) = started(model()?)?;
+    s.confirmation_events = vec![Event::ImmichArchiveSceneChanged {
+        scene_id: SCENE.into(),
+        phase: ProtectionScenePhase::Background,
+    }];
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 0);
+    assert_eq!(s.persists, 0);
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert!(c.view().immich_archive_view.scene_id.is_none());
+    Ok(())
+}
+#[test]
+fn explicit_idle_claim_and_close_require_fresh_open_without_faking_lifecycle() -> Result<(), String>
+{
+    let (c, mut s) = started(model()?)?;
+    s.run(
+        &c,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: OTHER_SCENE.into(),
+            phase: ProtectionScenePhase::Active,
+        },
+    )?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(SCENE)
+    );
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(OTHER_SCENE)
+    );
+    let generation = c.view().immich_archive_view.generation;
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    assert_eq!(c.view().immich_archive_view.generation, generation);
+    s.run(
+        &c,
+        Event::CloseImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    assert!(c.view().immich_archive_view.scene_id.is_none());
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(OTHER_SCENE)
+    );
+    s.run(
+        &c,
+        Event::CloseImmichArchive {
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    s.run(
+        &c,
+        Event::PrepareImmichArchive {
+            key: key(),
+            to: ImmichArchiveDestination::Archive,
+            operation_id: ID.into(),
+            scene_id: OTHER_SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        s.writes, 1,
+        "direct action atomically acquires the active scene"
+    );
+    Ok(())
+}
+
+#[test]
+fn account_change_revokes_owner_but_retains_actual_active_scene_registration() -> Result<(), String>
+{
+    let m = model()?;
+    let state = m.state.clone();
+    let mut next = m.session.clone().ok_or("session")?;
+    next.scope = "another-account".into();
+    next.user_id = "another-owner".into();
+    let (c, mut s) = started(m)?;
+    let generation = c.view().immich_archive_view.generation;
+    s.run(
+        &c,
+        Event::Finished {
+            state,
+            session: Some(next),
+            status: String::new(),
+            error: None,
+            preview_to_select: None,
+        },
+    )?;
+    assert!(c.view().immich_archive_view.scene_id.is_none());
+    assert!(c.view().immich_archive_view.generation > generation);
+    s.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(SCENE)
+    );
+    assert_eq!(s.writes, 0);
     Ok(())
 }

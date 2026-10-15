@@ -1269,6 +1269,12 @@ fn ambiguous_protection_save_disables_unrelated_archive_hint_until_validated_rec
             phase: ProtectionScenePhase::Active,
         },
     )?;
+    shell.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
     assert_eq!(
         c.view().immich_archive_view.scene_id.as_deref(),
         Some(SCENE)

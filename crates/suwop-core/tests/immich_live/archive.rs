@@ -41,13 +41,7 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         auth_requests: 0,
         diagnostics: ScanDiagnostics::default(),
     };
-    shell.run(
-        &core,
-        Event::ImmichArchiveSceneChanged {
-            scene_id: SCENE.into(),
-            phase: ProtectionScenePhase::Active,
-        },
-    )?;
+    activate_archive(&mut shell, &core)?;
     shell.run(
         &core,
         Event::Refresh {
@@ -618,4 +612,20 @@ fn verify_preserved(
             .map_err(|_| "pixel")?
     );
     Ok(())
+}
+
+fn activate_archive(shell: &mut ArchiveShell<'_>, core: &Core<Suwop>) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: SCENE.into(),
+            phase: ProtectionScenePhase::Active,
+        },
+    )?;
+    shell.run(
+        core,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )
 }

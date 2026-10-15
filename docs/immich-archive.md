@@ -233,3 +233,95 @@ make checkもRust/FFI319件・Swift65件、lint・生成確認が成功した
 （`/tmp/suwop-archive-durable-hints-check-20261015-1.log`）。
 全5 Rustターゲット・XCFramework・iOS/macOSビルドも成功した
 （`/tmp/suwop-archive-durable-hints-apple-20261015-1.log`）。
+
+
+## PR #27 のactive sceneと操作所有権の分離
+
+別ウィンドウBのactive通知で、Aの表示中の確認が失効する問題を追加修正する。
+実際にactiveなscene集合と操作の所有sceneをRustで分離し、lifecycle通知だけでは
+所有権を移さない。履歴を開く操作は明示的なOpenで取得し、Prepare・Inspect・Recoverは
+各イベント内で必要な事前条件を検査してから原子的に取得する。別Openをawaitしてから
+Prepareする二段階構成にはしない。処理中の別sceneは所有権を取得できない。
+所有sceneの非active遷移とCloseは失効させるが、Closeで実際のactive登録は消さない。
+接続scope変更では所有権を破棄し、実際のactive登録を維持して再接続後の操作を可能にする。
+Swiftは実際のphase・command epoch検査を維持し、操作前に偽のactive通知を送らない。
+
+旧実装では、Aの確認中にBのactive・Open通知を受ける回帰が期待したPUT1に対して0となり
+失敗した（`/tmp/suwop-archive-scene-red-20261015-1.log`）。修正後の全検証は別途記録する。
+
+同時に指摘された「応答消失後のUnknown対象に操作hintが残る」件は、既存の
+PublishedLibrary/content accessの写真単位の制限で対象が除外される。
+実際にPUT応答を失わせ、古いTimeline snapshotとUnknown/no-observationを永続化した後、
+現在と再起動後のhint欠落、新しい操作IDでGET・確認・Persist・PUTがすべて0となることを
+旧製品コードのまま確認した（`/tmp/suwop-archive-unknown-hint-proof-20261015-1.log`）。
+重複する製品判定は追加せず、回帰テストを残す。
+
+対象回帰は保護15・通常アーカイブ18・PIN可視性28の61件が成功した
+（`/tmp/suwop-archive-scene-green-20261015-1.log`）。全体`make check`は
+Rust/FFI 324件、Swift 65件、lint・生成整合が成功した。実サーバ用4件はこのコマンドでは
+ignoredであり、結合検証の成功数には含めない
+（`/tmp/suwop-archive-scene-check-20261015-3.log`）。追加したOpen手順により
+既存テストの行数制限を超えたため共通の有効化手順を抽出し、制限は緩和していない。
+Appleビルド・native確認・strict VRT・最新HEADのhosted CIは別途確認する。
+
+全Appleビルドも成功した（`/tmp/suwop-archive-scene-apple-20261015-1.log`）。
+5つのRust release target、XCFramework、iOSとmacOSのビルドを確認した。
+実native確認と全体strict VRTは続けて検証する。
+
+新実装の初回native回帰はfixtureの起動待ちで失敗した
+（`/tmp/suwop-archive-explicit-owner-native1-20261015.log` とxcresult）。
+fixtureがactive通知だけで履歴の所有権を得る旧仕様に依存していたため、
+明示的な履歴Openを使うよう準備処理を修正する。製品の履歴画面は既にonAppearでOpenする。
+直接操作の原子的な取得もnative側で別途確認し、修正後に再実行する。
+
+準備処理修正後のnative回帰6件は成功した
+（`/tmp/suwop-archive-explicit-owner-native2-20261015.log` とxcresult）。
+実際の確認画面を保持したAに対するBのactive・Open・非active・CloseはAを取り消さず、
+A自身の非activeは取り消し、Persist・PUTは0のままだった。
+また、Bの履歴が所有権を持つ状態から、AのPrepare単独で取得できることを確認した。
+全体strict VRTはこのfixture修正を含むsourceで実行する。
+
+先行HEAD `aca17363d031e78212c0ea67fdb7cc01ade701d6` の
+[CI run 38726700446](https://github.com/rabe1028/suwop/actions/runs/38726700446)は
+core・apple・immich-integration・vrtの全4 jobが成功した。
+この結果は追加の明示的scene所有権修正を含まないため、更新後HEADのCIは別途確認する。
+
+このsourceの全体strict VRTは、追加の履歴画面UX修正を入れるため管理側が途中取消しした
+（`/tmp/suwop-archive-explicit-owner-strict1-20261015.log`、
+`DerivedData/VRTArtifacts/20261015T114552Z-16274`、終了130）。製品テスト失敗とは扱わず、
+全体成功の証拠にも含めない。45画像を含む途中成果物は保持した。
+別sceneが操作中に履歴を開く、または別sceneに所有権が移ると、元の画面は説明だけになり、
+処理終了後も閉じて再表示するまで履歴を取得できない経路を確認した。
+自動的な所有権奪取は行わず、表示状態と明示的な「このウインドウで記録を開く」操作を追加する。
+
+明示的Openを含む最新Rust sourceで実Immich結合4件が成功した
+（`/tmp/suwop-archive-scene-integration-20261015-1.log`、17.21秒）。
+専用project `suwop-archive-scene-20261015` / port 22873で実行し、検証後に専用container・
+volume・networkだけを削除した。既存のKukunochiサービスは保持した
+（`/tmp/suwop-archive-scene-cleanup-20261015-1.log`）。
+履歴表示の追加Swift修正はこのRust/API検証とは別にnative/UIと全体VRTで確認する。
+
+履歴の開き直しUIの初回対象実行では、通常文字の実ボタン往復は成功した。
+AX3はテスト専用footerが高さ434ptを占め、List内のボタンが画面外になっていた。
+製品のフォントは変更せず、fixture側の操作欄を小さくし、実Listを有限回スクロールして
+ボタンを表示してから検査する。またfixture.startはOpenによるview取得だけでなく、
+pending commandのbusy解除まで待つよう修正する。初回のnative保護回帰1件はこの
+初期化完了前にPrepareが拒否され、待機条件を満たせなかった。
+記録は`/tmp/suwop-archive-history-target1-20261015.log` とxcresult、
+`/tmp/suwop-archive-history-target1-attachments-20261015`に保持する。
+
+修正後の対象8件（native取消し6件・履歴UI通常/AX3の2件）は成功した
+（`/tmp/suwop-archive-history-target2-20261015.log` とxcresult）。
+処理中の開き直しボタンの無効化、取消し後の明示的なBの取得、A/Bそれぞれの再取得、
+自動的な所有権奪取がないこと、実際のDisconnect後のRust remoteVersion消失と
+ボタン無効化を確認した。変更PUTは0のまま。通常/AX3のスクリーンショットを親レビューで
+目視確認し、スクロール後の案内とボタンが読めることを確認した。
+画像は`/tmp/suwop-archive-history-target2-attachments-20261015`に保持する。
+この検証は同じUIWindowScene内の2つのUIWindowと論理scene IDを使う専用fixtureであり、
+実機の複数UIWindowScene操作の受入れではない。基準画像は追加・変更していない。
+
+履歴の開き直しUIを含む最新sourceのmake checkはRust/FFI 324件・Swift65件、
+lint・生成整合が成功し、全Appleビルドも成功した
+（`/tmp/suwop-archive-history-check1-20261015.log`、
+`/tmp/suwop-archive-history-apple1-20261015.log`）。
+ローカル全体strict VRTと更新後HEADのhosted CIは並行して確認し、両方の結果を得てからマージする。

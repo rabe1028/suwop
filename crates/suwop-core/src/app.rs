@@ -319,6 +319,10 @@ pub enum Event {
         scene_id: String,
         phase: crate::protection::ProtectionScenePhase,
     },
+    OpenImmichArchive {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
     CloseImmichArchive {
         #[serde(rename = "sceneID")]
         scene_id: String,
@@ -699,6 +703,12 @@ impl crux_core::App for Suwop {
             model
                 .ordinary_generation
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let connection_changed = matches!(event, Event::Disconnect | Event::Configure { .. })
+                || matches!(&event, Event::Finished { session, .. }
+                    if model.session.as_ref().map(|s| &s.scope) != session.as_ref().map(|s| &s.scope));
+            if connection_changed {
+                model.immich_archive.scene_id = None;
+            }
             crate::immich_archive::invalidate(model);
         }
         if let Some(command) = crate::immich_archive::update(event.clone(), model) {

@@ -5,6 +5,7 @@ import SuwopShell
 @MainActor final class ImmichArchiveSession: ObservableObject {
     @Published private(set) var projection: ImmichArchiveView?
     @Published private(set) var busy = false
+    @Published private(set) var connected = false
     private var runtime: RustRuntime?
     private var shell: AppleShell?
     private var phases: [String: ProtectionScenePhase] = [:]
@@ -32,6 +33,7 @@ import SuwopShell
     func receive(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= revision else { return }
         revision = snapshot.revision
+        connected = snapshot.view.remoteVersion != nil
         coreBusy = snapshot.view.busy
         busy = coreBusy || pendingCommands > 0
         if let generation = projection?.generation, generation != snapshot.view.immichArchiveView.generation {
@@ -67,6 +69,7 @@ import SuwopShell
     }
 
     func revokeForConnectionChange() {
+        connected = false
         projection = nil
         for sceneID in commandEpochs.keys {
             commandEpochs[sceneID] = UUID()
@@ -119,13 +122,9 @@ import SuwopShell
             }
             guard commandEpochs[sceneID] == epoch, phases[sceneID] == .active, context.permits() else { return }
             await run(
-                ["type": .string("immichArchiveSceneChanged"), "sceneID": .string(sceneID), "phase": .string("active")],
+                event ?? ["type": .string("openImmichArchive"), "sceneID": .string(sceneID)],
                 context: context
             )
-            guard commandEpochs[sceneID] == epoch, phases[sceneID] == .active, context.permits() else { return }
-            if let event {
-                await run(event, context: context)
-            }
         }
     }
 

@@ -12,6 +12,7 @@ final class ImmichArchiveRevocationTests: XCTestCase {
             let owner = ImmichArchivePhotoFixture.sceneID
             let other = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
             model.immichArchive.sceneChanged(sceneID: other, phase: .active)
+            model.immichArchive.open(sceneID: other)
             try await fixture.settle { model.immichArchive.view(for: other) != nil }
             NativeScenePresentationAnchors.shared.register(sceneID: owner, window: host.window)
             defer {
@@ -21,6 +22,10 @@ final class ImmichArchiveRevocationTests: XCTestCase {
                 host.close()
             }
             fixture.shell.archiveAccess.confirmationEffect = nil
+            // Closing A retains its actual active phase; Prepare must acquire A atomically itself.
+            let beforeClose = try await fixture.runtime.snapshot().revision
+            model.immichArchive.close(sceneID: owner)
+            try await waitForUpdates(fixture.runtime, revision: beforeClose + 1)
             fixture.prepare(.archive)
             try await fixture.settle {
                 guard let sheet = host.root.presentedViewController as? ImmichArchiveConfirmationController else {
@@ -30,6 +35,14 @@ final class ImmichArchiveRevocationTests: XCTestCase {
             }
             let sheet = try XCTUnwrap(host.root.presentedViewController as? ImmichArchiveConfirmationController)
             XCTAssertTrue(model.immichArchive.busy)
+            let beforeOtherCommands = try await fixture.runtime.snapshot().revision
+            model.immichArchive.sceneChanged(sceneID: other, phase: .active)
+            model.immichArchive.open(sceneID: other)
+            try await waitForUpdates(fixture.runtime, revision: beforeOtherCommands + 2)
+            XCTAssertEqual(model.immichArchive.projection?.sceneID, owner)
+            XCTAssertTrue(host.root.presentedViewController === sheet)
+            XCTAssertFalse(sheet.isBeingDismissed)
+            XCTAssertTrue(sheet.rootView.ready)
             model.immichArchive.sceneChanged(sceneID: other, phase: phase)
             // Native invalidation is synchronous; an unrelated scene must not begin dismissal.
             XCTAssertTrue(host.root.presentedViewController === sheet, phase.rawValue)
@@ -45,6 +58,18 @@ final class ImmichArchiveRevocationTests: XCTestCase {
             XCTAssertEqual(fixture.server.mutationAttempts, 0)
             XCTAssertTrue(fixture.journal.immichVisibilityOperations.isEmpty)
         }
+    }
+
+    @MainActor private func waitForUpdates(_ runtime: RustRuntime, revision: UInt64) async throws {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        while ContinuousClock.now < deadline {
+            if try await runtime.snapshot().revision >= revision {
+                return
+            }
+            await Task.yield()
+        }
+        XCTFail("Scene commands did not reach the actual core")
+        throw CancellationError()
     }
 
     @MainActor func testQueuedPrepareDoesNotReviveAfterSceneReactivation() async throws {
