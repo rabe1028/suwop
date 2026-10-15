@@ -948,9 +948,10 @@ public struct ImmichVisibilityOperation: Codable, Sendable {
     public var observation: ImmichVisibility?
     public var outcome: VisibilityOutcome
     public var scope: String
+    public var selectedObservation: SelectedVisibilityObservation?
     public var to: ImmichVisibility
     public var witnessDigest: String
-    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, id: String, key: AssetKey, kind: ImmichVisibilityOperationKind, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, scope: String, to: ImmichVisibility, witnessDigest: String) {
+    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, id: String, key: AssetKey, kind: ImmichVisibilityOperationKind, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, scope: String, selectedObservation: SelectedVisibilityObservation? = nil, to: ImmichVisibility, witnessDigest: String) {
         self.albumMembershipObservation = albumMembershipObservation
         self.from = from
         self.id = id
@@ -959,6 +960,7 @@ public struct ImmichVisibilityOperation: Codable, Sendable {
         self.observation = observation
         self.outcome = outcome
         self.scope = scope
+        self.selectedObservation = selectedObservation
         self.to = to
         self.witnessDigest = witnessDigest
     }
@@ -996,13 +998,15 @@ public struct ImmichVisibilitySummary: Codable, Sendable {
     public var observation: ImmichVisibility?
     public var outcome: VisibilityOutcome
     public var recordID: String
+    public var selectedObservation: SelectedVisibilitySummary?
     public var to: ImmichVisibility
-    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, recordID: String, to: ImmichVisibility) {
+    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, recordID: String, selectedObservation: SelectedVisibilitySummary? = nil, to: ImmichVisibility) {
         self.albumMembershipObservation = albumMembershipObservation
         self.from = from
         self.observation = observation
         self.outcome = outcome
         self.recordID = recordID
+        self.selectedObservation = selectedObservation
         self.to = to
     }
 }
@@ -1532,6 +1536,35 @@ public enum ScanAccess: String, Codable, CaseIterable, Sendable {
     case `full`
     case `limited`
     case `unavailable`
+}
+
+public enum SelectedConfiguration: String, Codable, CaseIterable, Sendable {
+    case `unlinked`
+    case `linked`
+    case `stacked`
+    case `unverified`
+}
+
+public struct SelectedVisibilityObservation: Codable, Sendable {
+    public var configuration: SelectedConfiguration
+    public var configurationDigest: String?
+    public var selectedIdentityDigest: String
+    public var visibility: ImmichVisibility
+    public init(configuration: SelectedConfiguration, configurationDigest: String? = nil, selectedIdentityDigest: String, visibility: ImmichVisibility) {
+        self.configuration = configuration
+        self.configurationDigest = configurationDigest
+        self.selectedIdentityDigest = selectedIdentityDigest
+        self.visibility = visibility
+    }
+}
+
+public struct SelectedVisibilitySummary: Codable, Sendable {
+    public var configuration: SelectedConfiguration
+    public var visibility: ImmichVisibility
+    public init(configuration: SelectedConfiguration, visibility: ImmichVisibility) {
+        self.configuration = configuration
+        self.visibility = visibility
+    }
 }
 
 public struct ShareFile: Codable, Sendable {

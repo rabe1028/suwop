@@ -37,6 +37,9 @@ import SwiftUI
                     if CommandLine.arguments.contains("--lost-visibility-response") {
                         created.server.fault = .lostMutationReply
                     }
+                    if CommandLine.arguments.contains("--selected-linked-after-mutation") {
+                        created.server.configurationAfterMutation = .live
+                    }
                     _ = try await created.start()
                     if CommandLine.arguments.contains("--reject-next-intent") {
                         created.persistFault = .nextIntentAfterApplied

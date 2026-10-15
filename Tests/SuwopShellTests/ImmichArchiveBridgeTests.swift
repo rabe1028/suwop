@@ -176,7 +176,7 @@ private final class ArchiveABI {
 @Test func ordinaryArchiveABIUsesOnlyAPIKeyAndPersistsExactIntentBeforeBothDirections() throws {
     let fixture = try ArchiveABI()
     try fixture.ready()
-    #expect(fixture.saved.schemaVersion == 7)
+    #expect(fixture.saved.schemaVersion == 8)
     #expect(try fixture.view().immichArchiveActions.first?.to == .archive)
     try fixture.prepare(.archive)
     let prompt = try #require(fixture.prompts.first)

@@ -145,6 +145,7 @@ pub struct ImmichLockedModel {
     grant_id: Option<String>,
     session: Option<DedicatedSession>,
     entries: Vec<ImmichLockedEntry>,
+    selected_reads: std::collections::BTreeMap<AssetKey, SelectedReadProof>,
     pending: Option<ImmichLockedImageTicket>,
     image: Option<ImmichLockedImageAccess>,
     lease_id: u64,
@@ -211,6 +212,9 @@ impl From<&str> for LockedFailure {
         Self::Authentication
     }
 }
+mod selected_reads;
+pub(crate) use selected_reads::clear_selected_read_proofs;
+use selected_reads::{SelectedReadProof, current_selected_read};
 const ERROR: &str =
     "ロックされた写真を確認できません。接続・パスワード認証・PIN を確認してください。";
 fn epoch(model: &ImmichLockedModel) -> u64 {
@@ -294,6 +298,7 @@ fn denied(model: &Model, key: &AssetKey) -> bool {
             && o.kind == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
             && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
             && o.observation.is_none()
+            && !current_selected_read(model, key)
     }) || model.protection.membership_uncertain
         || model.protection.denied.contains(key)
         || model.immich_visibility.denied.contains(key)
@@ -330,6 +335,22 @@ fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry
         })
     {
         entry.visibility_action = crate::immich_visibility::locked_action(entry.asset.key.clone());
+    }
+    if model
+        .state
+        .immich_visibility_operations
+        .iter()
+        .any(|operation| {
+            operation.key == entry.asset.key && operation.selected_observation.is_some()
+        })
+    {
+        entry.visibility_action.can_lock = false;
+        entry.visibility_action.can_show_timeline = false;
+        entry.visibility_action.can_show_archive = false;
+        if entry.visibility_action.reason.is_none() {
+            entry.visibility_action.reason =
+                Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown);
+        }
     }
     entry
 }
@@ -398,6 +419,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
     locked.scene_id = None;
     locked.grant_id = None;
     locked.entries.clear();
+    locked.selected_reads.clear();
     locked.pending = None;
     locked.image = None;
     locked.remote_lock_confirmed = None;
@@ -713,6 +735,7 @@ async fn fresh(
     generation: &AtomicU64,
     ticket: &ImmichLockedImageTicket,
     session: &DedicatedSession,
+    selected_proof: Option<&SelectedReadProof>,
 ) -> Result<(), String> {
     let value = guarded(
         ctx,
@@ -721,6 +744,9 @@ async fn fresh(
         session.request(&format!("assets/{}", ticket.key.asset_id), "GET", None),
     )
     .await?;
+    if let Some(proof) = selected_proof {
+        proof.verify(&value, session)?;
+    }
     let asset: Asset = serde_json::from_value(value).map_err(|_| ERROR)?;
     if asset.id != ticket.key.asset_id
         || asset.owner_id != session.ordinary.user_id
@@ -737,9 +763,10 @@ async fn read_image(
     generation: &AtomicU64,
     ticket: &ImmichLockedImageTicket,
     session: &DedicatedSession,
+    selected_proof: Option<&SelectedReadProof>,
 ) -> Result<ImmichLockedImageResult, String> {
     status(ctx, generation, ticket.generation, session).await?;
-    fresh(ctx, generation, ticket, session).await?;
+    fresh(ctx, generation, ticket, session, selected_proof).await?;
     let result: ImmichLockedImageResult = io(
         ctx,
         ShellOperation::ReadImmichLockedImage {
@@ -753,7 +780,7 @@ async fn read_image(
         if result.request_id != ticket.request_id || result.staged_id.is_empty() {
             return Err(ERROR.into());
         }
-        fresh(ctx, generation, ticket, session).await?;
+        fresh(ctx, generation, ticket, session, selected_proof).await?;
         status(ctx, generation, ticket.generation, session).await?;
         Ok::<(), String>(())
     }
@@ -796,6 +823,7 @@ fn refresh_inventory(
         .generation
         .fetch_add(1, Ordering::SeqCst);
     model.immich_locked.entries.clear();
+    model.immich_locked.selected_reads.clear();
     clear_visibility_image(model);
     model.immich_locked.error = None;
     Command::new(move |ctx| async move {
@@ -1081,10 +1109,14 @@ fn check_session(
     };
     let shared = model.immich_locked.generation.clone();
     let pending = model.immich_locked.pending.clone();
+    let selected_proof = pending
+        .as_ref()
+        .and_then(|ticket| model.immich_locked.selected_reads.get(&ticket.key))
+        .cloned();
     Command::new(move |ctx| async move {
         let result = async {
             if let Some(ticket) = &pending {
-                fresh(&ctx, &shared, ticket, &session).await?;
+                fresh(&ctx, &shared, ticket, &session, selected_proof.as_ref()).await?;
             }
             status(&ctx, &shared, generation, &session).await
         }
@@ -1147,11 +1179,14 @@ fn request_image(
         expected_revision: entry.asset.revision,
         request,
     };
+    let selected_proof = model.immich_locked.selected_reads.get(&ticket.key).cloned();
     let old = model.immich_locked.image.take();
     model.immich_locked.pending = Some(ticket.clone());
     let shared = model.immich_locked.generation.clone();
     let command = Command::new(move |ctx| async move {
-        let result = read_image(&ctx, &shared, &ticket, &session).await.ok();
+        let result = read_image(&ctx, &shared, &ticket, &session, selected_proof.as_ref())
+            .await
+            .ok();
         ctx.send_event(Event::ImmichLockedImageRead { ticket, result });
     });
     if let Some(old) = old {
@@ -1180,6 +1215,7 @@ fn image_read(
     };
     let shared = model.immich_locked.generation.clone();
     let staged_id = result.staged_id;
+    let selected_proof = model.immich_locked.selected_reads.get(&ticket.key).cloned();
     Command::new(move |ctx| async move {
         let native: Result<ImmichLockedImageResult, _> = io(
             &ctx,
@@ -1191,7 +1227,9 @@ fn image_read(
         .await;
         let approved = native
             .is_ok_and(|r| r.request_id == ticket.request_id && r.staged_id == staged_id)
-            && fresh(&ctx, &shared, &ticket, &session).await.is_ok()
+            && fresh(&ctx, &shared, &ticket, &session, selected_proof.as_ref())
+                .await
+                .is_ok()
             && status(&ctx, &shared, ticket.generation, &session)
                 .await
                 .is_ok();
@@ -1398,6 +1436,7 @@ mod tests {
                     observation: Some(facts.visibility),
                     album_membership_observation:
                         crate::immich_visibility::AlbumMembershipObservation::NotChecked,
+                    selected_observation: None,
                 },
             );
             match invalid {
@@ -1563,7 +1602,8 @@ impl VisibilitySession {
         Ok(value)
     }
 }
-pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
+pub(crate) fn clear_visibility_key_image(model: &mut Model, key: &AssetKey) {
+    model.immich_locked.selected_reads.remove(key);
     // Access carries an entry ID, so resolve its full key before removing rows.
     let image_matches = model.immich_locked.image.as_ref().is_some_and(|image| {
         model
@@ -1572,10 +1612,6 @@ pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
             .iter()
             .any(|entry| entry.id == image.entry_id && entry.asset.key == *key)
     });
-    model
-        .immich_locked
-        .entries
-        .retain(|entry| entry.asset.key != *key);
     if image_matches {
         model.immich_locked.image = None;
     }
@@ -1587,6 +1623,13 @@ pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
     {
         model.immich_locked.pending = None;
     }
+}
+pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
+    clear_visibility_key_image(model, key);
+    model
+        .immich_locked
+        .entries
+        .retain(|entry| entry.asset.key != *key);
 }
 pub(crate) fn publish_visibility_entry(
     model: &mut Model,
@@ -1620,6 +1663,69 @@ pub(crate) fn publish_visibility_entry(
             id: key.asset_id.clone(),
             visibility_action: crate::immich_visibility::hint(&facts.asset, true),
             asset: facts.asset,
+        });
+    }
+}
+pub(crate) fn publish_selected_observation(
+    model: &mut Model,
+    projection: crate::immich_visibility::VerifiedSelectedProjection,
+) {
+    let key = &projection.facts.key;
+    if projection.capability.valid().is_err()
+        || !current(model)
+        || model.immich_locked.grant_id.as_deref() != Some(&projection.capability.grant_id)
+        || model.immich_locked.scene_id.as_deref() != Some(&projection.capability.scene_id)
+        || epoch(&model.immich_locked) != projection.capability.expected
+        || !bound(model, &projection.capability.session)
+        || key.scope != projection.capability.scope()
+        || model.protection.denied.contains(key)
+        || model.state.protected_entries.iter().any(|e| e.key == *key)
+        || !model.state.immich_visibility_operations.iter().any(|o| {
+            o.id == projection.operation_id
+                && o.kind
+                    == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
+                && o.key == *key
+                && o.selected_observation.as_ref() == Some(&projection.facts.observation)
+        })
+    {
+        return;
+    }
+    let original = model
+        .state
+        .immich_visibility_operations
+        .iter()
+        .find(|operation| operation.id == projection.operation_id)
+        .cloned();
+    remove_visibility_entry(model, key);
+    if projection.facts.observation.visibility == crate::immich_visibility::ImmichVisibility::Locked
+    {
+        let mut hint = crate::immich_visibility::hint(&projection.facts.asset, true);
+        hint.can_lock = false;
+        hint.can_show_archive = false;
+        hint.can_show_timeline = false;
+        if hint.reason.is_none() {
+            hint.reason =
+                Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown);
+        }
+        if let Some(operation) = original
+            && projection.facts.observation.configuration_digest.is_some()
+        {
+            model.immich_locked.selected_reads.insert(
+                key.clone(),
+                SelectedReadProof {
+                    operation,
+                    observation: projection.facts.observation.clone(),
+                    grant_id: projection.capability.grant_id.clone(),
+                    scene_id: projection.capability.scene_id.clone(),
+                    generation: projection.capability.expected,
+                    revision: projection.facts.asset.revision.clone(),
+                },
+            );
+        }
+        model.immich_locked.entries.push(ImmichLockedEntry {
+            id: key.asset_id.clone(),
+            asset: projection.facts.asset,
+            visibility_action: hint,
         });
     }
 }
@@ -1751,7 +1857,7 @@ mod keyed_visibility_invalidation_tests {
             },
         };
         model.immich_locked.pending = Some(ticket.clone());
-        remove_visibility_entry(&mut model, &other_scope);
+        clear_visibility_key_image(&mut model, &other_scope);
         assert_eq!(model.immich_locked.image, Some(image));
         assert_eq!(model.immich_locked.entries.len(), 1);
         assert!(model.immich_locked.pending.is_none());
@@ -1759,9 +1865,11 @@ mod keyed_visibility_invalidation_tests {
             key: key.clone(),
             ..ticket
         });
-        remove_visibility_entry(&mut model, &key);
+        clear_visibility_key_image(&mut model, &key);
+        assert_eq!(model.immich_locked.entries.len(), 1);
         assert!(model.immich_locked.image.is_none());
         assert!(model.immich_locked.pending.is_none());
+        remove_visibility_entry(&mut model, &key);
         assert!(model.immich_locked.entries.is_empty());
         Ok(())
     }

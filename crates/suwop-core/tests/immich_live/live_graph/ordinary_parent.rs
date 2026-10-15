@@ -6,20 +6,28 @@ pub(in super::super) async fn ordinary_parent_setup(
     session: &Session,
     directory: &Path,
 ) -> Result<(String, Vec<String>), String> {
-    setup_pair(ctx, session, directory, false).await
+    setup_pair(ctx, session, directory, false, "parent").await
 }
 pub(in super::super) async fn ordinary_native_parent_setup(
     ctx: &Context,
     session: &Session,
     directory: &Path,
 ) -> Result<(String, Vec<String>), String> {
-    setup_pair(ctx, session, directory, true).await
+    setup_pair(ctx, session, directory, true, "parent").await
+}
+pub(super) async fn recovery_native_parent_setup(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+) -> Result<(String, Vec<String>), String> {
+    setup_pair(ctx, session, directory, true, "selected-recovery").await
 }
 async fn setup_pair(
     ctx: &Context,
     session: &Session,
     directory: &Path,
     native: bool,
+    checkpoint: &str,
 ) -> Result<(String, Vec<String>), String> {
     let (still, movie) = if native {
         native_pair_bytes()?
@@ -65,7 +73,7 @@ async fn setup_pair(
     )
     .await?;
     if native {
-        metadata_ready(session, [&parent, &motion, &other], "parent")?;
+        metadata_ready(session, [&parent, &motion, &other], checkpoint)?;
     }
     let mut known = vec![];
     for title in ["Parent placement first", "Parent placement second"] {

@@ -159,7 +159,7 @@ pub fn view(model: &Model) -> ImmichArchiveView {
 // Busy/scene ownership and operation IDs remain request-specific.
 fn durable_state_available(model: &Model) -> bool {
     model.ready
-        && model.state.schema_version == 7
+        && model.state.schema_version == 8
         && !model.immich_visibility.persistence_uncertain
         && !model.protection.membership_uncertain
 }
@@ -310,6 +310,22 @@ impl VisibilityAuthority {
         }
     }
 
+    pub(crate) fn selected_projection(
+        self,
+        operation_id: String,
+        facts: crate::immich_visibility::SelectedObservationFacts,
+    ) -> Option<Box<crate::immich_visibility::VerifiedSelectedProjection>> {
+        match self {
+            Self::Locked(capability) => Some(Box::new(
+                crate::immich_visibility::VerifiedSelectedProjection {
+                    capability,
+                    operation_id,
+                    facts,
+                },
+            )),
+            Self::Ordinary(_) => None,
+        }
+    }
     pub(crate) fn kind(&self) -> ImmichVisibilityOperationKind {
         match self {
             Self::Locked(_) => ImmichVisibilityOperationKind::LockedTransition,
@@ -633,6 +649,7 @@ fn recover(model: &mut Model, scene: &str) -> Command<crate::app::Effect, Event>
     let proof = model.immich_archive.recovery_proof.clone();
     let scope = model.session.as_ref().map(|s| s.scope.clone());
     model.immich_archive.working = true;
+    crate::immich_locked::clear_selected_read_proofs(model);
     model.busy = true;
     Command::new(move |ctx| async move {
         let raw: Result<serde_json::Value, _> =
@@ -652,6 +669,7 @@ fn recover(model: &mut Model, scene: &str) -> Command<crate::app::Effect, Event>
         }
         ctx.send_event(Event::ImmichVisibilityFinished {
             result: crate::immich_visibility::VisibilityCompletion {
+                selected_projection: None,
                 recovery_proof: None,
                 projection: None,
                 state,
@@ -705,7 +723,7 @@ mod recovery_tests {
     fn recovery_accepts_only_exact_transaction_candidates() -> Result<(), serde_json::Error> {
         let before = crate::app::SavedLibrary::default();
         let mut desired = before.clone();
-        desired.schema_version = 7;
+        desired.schema_version = 8;
         assert_ne!(
             serde_json::to_value(&before)?,
             serde_json::to_value(&desired)?

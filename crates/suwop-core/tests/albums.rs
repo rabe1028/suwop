@@ -47,7 +47,7 @@ fn snapshot() -> AlbumSnapshot {
 }
 fn fixture_state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         albums: vec![snapshot()],
         snapshots: vec![LibrarySnapshot {

@@ -21,9 +21,22 @@ struct ImmichVisibilityHistoryView: View {
                 ForEach(view.history ?? [], id: \.recordID) { record in
                     VStack(alignment: .leading, spacing: 8) {
                         Text("\(record.from.title) → \(record.to.title)").font(.headline)
+                        if record.selectedObservation != nil {
+                            Text("操作の結果").font(.caption).foregroundStyle(.secondary)
+                        }
                         Text(outcome(record)).font(.callout)
                         if let observation = record.observation {
-                            Text("最後に確認した表示先: \(observation.title)").font(.caption)
+                            Text(record.selectedObservation == nil
+                                ? "最後に確認した表示先: \(observation.title)"
+                                : "操作の確認記録の表示先: \(observation.title)").font(.caption)
+                        }
+                        if let selected = record.selectedObservation {
+                            Text("選択した原本を最後に確認した表示先: \(selected.visibility.title)")
+                                .font(.callout).accessibilityIdentifier("selectedImmichObservation-\(record.recordID)")
+                                .id("selectedImmichObservation-\(record.recordID)")
+                            Text(selected.configuration.selectedObservationExplanation)
+                                .font(.caption).foregroundStyle(.secondary)
+                                .accessibilityIdentifier("selectedImmichConfiguration-\(record.recordID)")
                         }
                         if record.to == .locked {
                             Text(albumObservation(record.albumMembershipObservation))

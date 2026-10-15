@@ -781,7 +781,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 7;
+                model.ready = model.state.schema_version == 8;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
             }

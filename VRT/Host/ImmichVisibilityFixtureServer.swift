@@ -15,6 +15,8 @@ import SuwopShell
     @Published private(set) var mutations = 0
     @Published private(set) var logins = 0
     @Published private(set) var pinSubmissions = 0
+    private var externalChanges = 0
+    var configurationAfterMutation: SourceKind?
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
@@ -155,10 +157,36 @@ import SuwopShell
             }
         }
         mutations += 1
+        if let configurationAfterMutation {
+            try externallySetConfiguration(configurationAfterMutation)
+        }
         if fault == .lostMutationReply {
             throw SuwopError("Synthetic lost visibility response")
         }
         return response(.null, status: 204)
+    }
+
+    /// Another client changes only relationship facts; never an application visibility retry.
+    func externallySetConfiguration(_ kind: SourceKind) throws {
+        var fields = try record.decode([String: JSONValue].self)
+        switch kind {
+        case .image:
+            fields["livePhotoVideoId"] = .null
+            fields["stack"] = .null
+        case .live:
+            fields["livePhotoVideoId"] = .string(ImmichLockedFixtureData.latestID)
+            fields["stack"] = .null
+        case .stacked:
+            fields["livePhotoVideoId"] = .null
+            fields["stack"] = try ImmichVisibilityFixtureData.stackedSource()["stack"]
+        case .unknownStack:
+            fields["livePhotoVideoId"] = .null
+            fields.removeValue(forKey: "stack")
+        case .video: throw SuwopError("Configuration fixture cannot replace the selected original")
+        }
+        externalChanges += 1
+        fields["updatedAt"] = .string("2026-03-0\(externalChanges)T00:00:00.000Z")
+        record = .object(fields)
     }
 
     private func albums(forAsset: Bool) -> [JSONValue] {

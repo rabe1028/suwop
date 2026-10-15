@@ -32,7 +32,7 @@ fn core(protected: bool) -> Core<Suwop> {
         },
     };
     let state = SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),

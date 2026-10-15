@@ -124,7 +124,7 @@ private func visibilityJSON(_ value: some Encodable) throws -> String {
     ])))
     #expect(shell.applied.count == 1)
     let journal = try #require(shell.journal)
-    #expect(journal.schemaVersion == 7)
+    #expect(journal.schemaVersion == 8)
     let intent = try #require(journal.appleVisibilityOperations.first)
     #expect(intent.id == hideID && intent.outcome == .unknown)
     #expect(intent.targets.first?.witnessDigest.count == 64)

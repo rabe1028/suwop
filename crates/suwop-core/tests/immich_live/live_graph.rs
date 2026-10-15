@@ -31,6 +31,9 @@ pub(super) use ordinary_parent::{
     ordinary_parent_setup,
 };
 
+#[path = "live_graph/selected_recovery.rs"]
+mod selected_recovery;
+
 const PIN: &str = "123456";
 const V: &[u8] = include_bytes!("../fixtures/live_graph/V.mp4");
 const M: &[u8] = include_bytes!("../fixtures/live_graph/M.mp4");

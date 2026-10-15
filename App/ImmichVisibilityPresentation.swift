@@ -24,6 +24,24 @@ extension ImmichVisibilityUnsupportedReason {
     }
 }
 
+extension ImmichVisibilityPrompt {
+    var continuingAccessDisclosure: String? {
+        guard to == .locked else { return nil }
+        return "ロック後も、既存の共有リンクからこの原本を表示・ダウンロードできる場合があります。共有リンクは自動では解除されません。"
+    }
+}
+
+extension SelectedConfiguration {
+    var selectedObservationExplanation: String {
+        switch self {
+        case .unlinked: "この原本から動画への関連付けは確認されていません。ほかの項目からの関連付けや閲覧可否は確認していません。"
+        case .linked: "この原本は動画に関連付けられています。関連する動画やほかの写真の表示先・閲覧可否は確認していません。"
+        case .stacked: "この原本はほかの写真とまとめられています。ほかの写真の状態や閲覧可否は確認していません。"
+        case .unverified: "この原本の関連付けやまとまりを確認できません。表示先の確認だけで、変更できるとは限りません。"
+        }
+    }
+}
+
 /// Ephemeral scene-owned presentation; Rust owns every eligibility and journal decision.
 @MainActor final class ImmichVisibilityPresentation: ObservableObject {
     @Published private(set) var projection: ImmichVisibilityView?

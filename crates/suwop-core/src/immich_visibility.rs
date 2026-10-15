@@ -2,6 +2,13 @@
 use crate::{app::Model, domain::AssetKey};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+mod selected_observation;
+pub use selected_observation::{
+    SelectedConfiguration, SelectedVisibilityObservation, SelectedVisibilitySummary,
+};
+pub(crate) use selected_observation::{
+    SelectedObservationFacts, VerifiedSelectedProjection, selected_facts,
+};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ImmichVisibility {
@@ -63,6 +70,8 @@ pub struct ImmichVisibilityOperation {
     pub observation: Option<ImmichVisibility>,
     #[serde(default)]
     pub album_membership_observation: AlbumMembershipObservation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_observation: Option<SelectedVisibilityObservation>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -75,6 +84,8 @@ pub struct ImmichVisibilitySummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub observation: Option<ImmichVisibility>,
     pub album_membership_observation: AlbumMembershipObservation,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_observation: Option<SelectedVisibilitySummary>,
 }
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -155,6 +166,10 @@ pub fn view(model: &Model) -> ImmichVisibilityView {
                     outcome: o.outcome,
                     observation: o.observation,
                     album_membership_observation: o.album_membership_observation,
+                    selected_observation: o
+                        .selected_observation
+                        .as_ref()
+                        .map(SelectedVisibilityObservation::summary),
                 })
                 .collect()
         }),
@@ -258,7 +273,9 @@ pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVi
     }
 }
 pub fn validate_operation(operation: &ImmichVisibilityOperation) -> Result<(), String> {
-    if crate::apple_visibility::valid_operation_id(&operation.id).is_err()
+    if operation.selected_observation.as_ref().is_some_and(|o| {
+        operation.kind != ImmichVisibilityOperationKind::LockedTransition || !o.valid()
+    }) || crate::apple_visibility::valid_operation_id(&operation.id).is_err()
         || operation.key.provider != crate::domain::Provider::Immich
         || operation.scope.is_empty()
         || operation.scope != operation.key.scope
@@ -298,6 +315,7 @@ pub fn fences(state: &crate::app::SavedLibrary, key: &AssetKey) -> bool {
         .filter(|operation| {
             &operation.key == key
                 && (operation.observation.is_some()
+                    || operation.selected_observation.is_some()
                     || operation.outcome != crate::apple_visibility::VisibilityOutcome::NotApplied)
         })
         .collect::<Vec<_>>();
@@ -305,7 +323,8 @@ pub fn fences(state: &crate::app::SavedLibrary, key: &AssetKey) -> bool {
         return false;
     }
     if related.iter().any(|operation| {
-        operation.observation == Some(ImmichVisibility::Locked)
+        operation.selected_observation.is_some()
+            || operation.observation == Some(ImmichVisibility::Locked)
             || operation.observation.is_none()
                 && operation.outcome != crate::apple_visibility::VisibilityOutcome::NotApplied
     }) {
@@ -552,6 +571,7 @@ pub(crate) struct VerifiedVisibilityProjection {
 pub struct VisibilityCompletion {
     pub(crate) recovery_proof: Option<Box<crate::immich_archive::RecoveryProof>>,
     pub(crate) projection: Option<Box<VerifiedVisibilityProjection>>,
+    pub(crate) selected_projection: Option<Box<VerifiedSelectedProjection>>,
     pub(crate) state: crate::app::SavedLibrary,
     pub(crate) uncertain: bool,
     pub(crate) status: String,
@@ -645,7 +665,8 @@ pub(crate) fn update(
             else {
                 return Some(Command::done());
             };
-            crate::immich_locked::remove_visibility_entry(model, &operation.key);
+            // Keep the row, but revoke only its preview/pending read before fresh inspection.
+            crate::immich_locked::clear_visibility_key_image(model, &operation.key);
             model.busy = true;
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
@@ -674,7 +695,7 @@ fn begin(
 
     if model.busy
         || !model.ready
-        || model.state.schema_version != 7
+        || model.state.schema_version != 8
         || model.immich_visibility.persistence_uncertain
         || model.protection.membership_uncertain
     {
@@ -694,8 +715,9 @@ fn begin(
         || model.protection.denied.contains(&key)
         || model.state.immich_visibility_operations.iter().any(|o| {
             o.key == key
-                && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
-                && o.observation.is_none()
+                && (o.selected_observation.is_some()
+                    || o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
+                        && o.observation.is_none())
         })
         || crate::apple_visibility::valid_operation_id(&operation_id).is_err()
         || model
@@ -726,10 +748,14 @@ fn recover(
     use crate::app::Event;
     use crux_core::Command;
 
-    if model.busy
-        || !model.immich_visibility.persistence_uncertain
-        || model.immich_archive.uncertain
-    {
+    if model.busy || model.immich_archive.uncertain {
+        return Command::done();
+    }
+    if crate::immich_locked::visibility_session(model, grant_id, scene_id).is_none() {
+        return Command::done();
+    }
+    crate::immich_locked::clear_selected_read_proofs(model);
+    if !model.immich_visibility.persistence_uncertain {
         return Command::done();
     }
     model
@@ -740,6 +766,7 @@ fn recover(
     else {
         return Command::done();
     };
+    crate::immich_locked::clear_selected_read_proofs(model);
     model.busy = true;
     let before = model.state.clone();
     Command::new(move |ctx| async move {
@@ -747,7 +774,7 @@ fn recover(
             crate::app::io(&ctx, crate::app::ShellOperation::ReadState).await;
         let state = raw
             .ok()
-            .filter(|v| v["schemaVersion"].as_u64() == Some(7))
+            .filter(|v| v["schemaVersion"].as_u64() == Some(8))
             .and_then(|v| crate::workflow::migrate(v).ok())
             .filter(|s| {
                 serde_json::to_value(&s.connection).ok()
@@ -762,6 +789,7 @@ fn recover(
         }
         ctx.send_event(Event::ImmichVisibilityFinished {
             result: VisibilityCompletion {
+                selected_projection: None,
                 recovery_proof: None,
                 projection: None,
                 state,
@@ -876,6 +904,9 @@ fn finish(
     if !ordinary && let Some(projection) = result.projection {
         crate::immich_locked::publish_visibility_entry(model, *projection);
     }
+    if !ordinary && let Some(projection) = result.selected_projection {
+        crate::immich_locked::publish_selected_observation(model, *projection);
+    }
     if !result.uncertain {
         model.immich_visibility.denied.clear();
     }
@@ -924,6 +955,7 @@ mod prepared_cleanup_tests {
         let _ = finish(
             &mut model,
             VisibilityCompletion {
+                selected_projection: None,
                 recovery_proof: None,
                 projection: None,
                 state: crate::app::SavedLibrary::default(),
