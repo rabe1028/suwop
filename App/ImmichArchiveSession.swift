@@ -46,7 +46,7 @@ import SuwopShell
         shell?.archiveAccess.sceneChanged(sceneID: sceneID, phase: phase)
         if phase != .active {
             commandEpochs[sceneID] = UUID()
-            shell?.archiveConfirmation.invalidate()
+            shell?.archiveConfirmation.invalidate(sceneID: sceneID)
         }
         send([
             "type": .string("immichArchiveSceneChanged"),

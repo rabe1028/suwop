@@ -153,3 +153,44 @@ Unknownの変更操作を許可する修正ではない。通常記録の結果�
 Appleビルドも全5 Rustターゲット・XCFramework・iOS/macOSが成功した
 （`/tmp/suwop-archive-pr27-p2-kind-apple-20261015.log`）。基準45枚はHEADと全hash一致。
 修正後HEADのhosted CIは別途確認する。
+
+
+## PR #27 のsceneごとの確認取消し
+
+共有sessionが別sceneのinactive/background通知を受けると、所有sceneで表示中の確認まで
+全体invalidateしていた。sceneChangedからの取消しにsceneIDを渡す1行の修正で、
+対象sceneだけを失効させる。接続変更・認可世代変更の全体失効は維持する。
+
+回帰は別scene Bをactiveにした後、Aの実際のnative確認画面を表示する。
+fixtureの確認差替えを外し、Bのinactive/background・closeではAの確認を保持し、
+A自身のinactive/backgroundで取消し・保存0・PUT0になることを検査する。
+修正前はBのinactive/backgroundの両方でAのdismissal開始を検出して失敗した
+（`/tmp/suwop-archive-scoped-scene-red3-20261015.log` とxcresult）。
+先行red/red2はSimulatorライブラリ／Xcode生成物の構成問題によるbuild失敗であり、
+動作の再現証拠には使用しない。Simulatorライブラリとprojectを再生成し、別DerivedDataで再現した。
+
+修正後は新規回帰、既存のcommand epoch失効、送信済み応答保持を含むhost13件が成功した
+（`/tmp/suwop-archive-scoped-scene-green-20261015.log` とxcresult）。
+`make check` と全Appleビルドも成功した
+（`/tmp/suwop-archive-scoped-scene-check-20261015.log`、
+`/tmp/suwop-archive-scoped-scene-apple-20261015.log`）。
+最終strict VRTも成功した（`/tmp/suwop-archive-scoped-scene-vrt-20261015.log`、
+`DerivedData/VRTArtifacts/20261015T094015Z-42516/report.json`）。host76件・UI36件が成功し、
+45画像一致・差分0、全7段階の終了コード0、record=falseを確認した。
+基準45枚は開始時・終了時・HEADのSHA256が一致し、更新していない。
+
+先行HEAD `0c21a57` のhosted CIではcore・apple・Immich連携が成功した一方、
+VRTのLive Photo未対応理由の表示領域検査1件が失敗し、PhotoKit段階は未実行だった。
+その実行を成功扱いせず、保存されたxcresultと画面を別途調査する。
+scene修正後HEADのhosted CIは別途確認する。
+
+
+旧CIの録画（`/tmp/suwop-archive-ci-live-reason-20261015/at9s.png`）では、
+Live Photo未対応の文言全体と無効な操作ボタンが表示されている。
+即時に取得したAX firstMatchのframeが空だった一方、後続の同文言の画面内判定は成功した。
+重複要素か一時的なAX状態かは断定せず、完全一致する文言のうち非空・画面内の要素を
+最大5秒待つテストに変更した。無効ボタン・確認画面なし・表示領域の検査は維持し、
+失敗時の画面とAX情報を保存する。製品コード・画像基準の変更は伴わない。
+テスト修正後の対象UI全8件が成功した（`/tmp/suwop-archive-live-reason-ui2-20261015.log`
+とxcresult）。説明表示の検査も成功した。先行ui実行は古いXcode生成物参照によるbuild失敗で、
+動作検証には使用しない。別DerivedDataでビルド・実行した。最新HEADのhosted CIは別途確認する。

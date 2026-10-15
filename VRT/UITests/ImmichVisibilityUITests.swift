@@ -119,10 +119,29 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertFalse(lock.isEnabled)
         // SwiftUI Menu renders this read-only explanation as a native menu
         // element, whose AX type is not necessarily StaticText.
-        let reason = app.descendants(matching: .any).matching(NSPredicate(
+        let reasons = app.descendants(matching: .any).matching(NSPredicate(
             format: "label == %@", "Live Photo の表示先変更には対応していません。"
-        )).firstMatch
-        XCTAssertTrue(reason.exists, app.debugDescription)
+        ))
+        let visibleReason = NSPredicate { _, _ in
+            reasons.allElementsBoundByIndex.contains {
+                $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+            }
+        }
+        let ready = XCTNSPredicateExpectation(predicate: visibleReason, object: nil)
+        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed,
+              let reason = reasons.allElementsBoundByIndex.first(where: {
+                  $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+              })
+        else {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Live-explanation-no-visible-AX-element"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("The exact explanation must have a visible nonempty frame: " + app.debugDescription)
+            app.terminate()
+            return
+        }
+        XCTAssertTrue(reason.exists)
         XCTAssertFalse(reason.frame.isEmpty)
         XCTAssertTrue(app.frame.intersects(reason.frame))
         XCTAssertFalse(app.buttons["confirmImmichVisibility"].exists)

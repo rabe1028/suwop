@@ -1,8 +1,52 @@
 import SuwopShell
 @testable import SuwopVRTHost
+import UIKit
 import XCTest
 
 final class ImmichArchiveRevocationTests: XCTestCase {
+    @MainActor func testUnrelatedSceneCannotDismissTheOwnersActualConfirmation() async throws {
+        for phase in [ProtectionScenePhase.inactive, .background] {
+            let fixture = try ImmichArchivePhotoFixture()
+            let model = try await fixture.start()
+            let host = try NativeVisibilityHost()
+            let owner = ImmichArchivePhotoFixture.sceneID
+            let other = "BBBBBBBB-BBBB-4BBB-8BBB-BBBBBBBBBBBB"
+            model.immichArchive.sceneChanged(sceneID: other, phase: .active)
+            try await fixture.settle { model.immichArchive.view(for: other) != nil }
+            NativeScenePresentationAnchors.shared.register(sceneID: owner, window: host.window)
+            defer {
+                model.immichArchive.close(sceneID: owner)
+                fixture.releaseHeld()
+                NativeScenePresentationAnchors.shared.unregister(sceneID: owner, window: host.window)
+                host.close()
+            }
+            fixture.shell.archiveAccess.confirmationEffect = nil
+            fixture.prepare(.archive)
+            try await fixture.settle {
+                guard let sheet = host.root.presentedViewController as? ImmichArchiveConfirmationController else {
+                    return false
+                }
+                return sheet.rootView.ready && sheet.view.window === host.window && !sheet.isBeingPresented
+            }
+            let sheet = try XCTUnwrap(host.root.presentedViewController as? ImmichArchiveConfirmationController)
+            XCTAssertTrue(model.immichArchive.busy)
+            model.immichArchive.sceneChanged(sceneID: other, phase: phase)
+            // Native invalidation is synchronous; an unrelated scene must not begin dismissal.
+            XCTAssertTrue(host.root.presentedViewController === sheet, phase.rawValue)
+            XCTAssertFalse(sheet.isBeingDismissed, phase.rawValue)
+            XCTAssertTrue(sheet.view.window === host.window, phase.rawValue)
+            model.immichArchive.close(sceneID: other)
+            XCTAssertTrue(host.root.presentedViewController === sheet, "Unrelated close must also remain scoped")
+            model.immichArchive.sceneChanged(sceneID: owner, phase: phase)
+            try await fixture.settle { !model.immichArchive.busy && host.root.presentedViewController == nil }
+            XCTAssertNil(sheet.view.window)
+            XCTAssertEqual(fixture.confirmationRequests, 1)
+            XCTAssertEqual(fixture.writes, 0)
+            XCTAssertEqual(fixture.server.mutationAttempts, 0)
+            XCTAssertTrue(fixture.journal.immichVisibilityOperations.isEmpty)
+        }
+    }
+
     @MainActor func testQueuedPrepareDoesNotReviveAfterSceneReactivation() async throws {
         for phase in [ProtectionScenePhase.inactive, .background] {
             let fixture = try ImmichArchivePhotoFixture()
