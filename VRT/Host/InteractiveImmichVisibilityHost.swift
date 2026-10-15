@@ -34,6 +34,11 @@ import SwiftUI
                     let kind = sourceKind()
                     let visibility = CommandLine.arguments.contains("--initially-locked") ? "locked" : "timeline"
                     let created = try ImmichVisibilityPhotoFixture(visibility: visibility, kind: kind)
+                    if CommandLine.arguments.contains("--unsupported-write-server") {
+                        created.server.serverVersion = .object([
+                            "major": .number(3), "minor": .number(2), "patch": .number(4), "prerelease": .null,
+                        ])
+                    }
                     if CommandLine.arguments.contains("--lost-visibility-response") {
                         created.server.fault = .lostMutationReply
                     }

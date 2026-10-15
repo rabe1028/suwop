@@ -1,4 +1,5 @@
 //! Dedicated ephemeral password session. Never installed in the ordinary API-key session.
+mod write_contract;
 use crate::{
     app::{Context, Event, Model, ShellOperation, io},
     domain::{AssetKey, StoredAsset},
@@ -107,6 +108,7 @@ pub struct ImmichLockedView {
 }
 #[derive(Clone)]
 pub struct DedicatedSession {
+    write_contract: Option<write_contract::LockedVisibilityWriteContract>,
     ordinary: Session,
     token: Secret,
 }
@@ -320,6 +322,17 @@ fn bound(model: &Model, session: &DedicatedSession) -> bool {
         .is_some_and(|c| c.address == session.ordinary.endpoint)
         && !model.protection.membership_uncertain
 }
+pub(crate) fn write_checked(model: &Model) -> bool {
+    current(model)
+}
+pub(crate) fn write_supported(model: &Model) -> bool {
+    current(model)
+        && model.immich_locked.session.as_ref().is_some_and(|s| {
+            s.write_contract
+                .as_ref()
+                .is_some_and(write_contract::LockedVisibilityWriteContract::valid)
+        })
+}
 fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry {
     let mut entry = entry.clone();
     if model
@@ -351,6 +364,12 @@ fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry
             entry.visibility_action.reason =
                 Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown);
         }
+    }
+    if !write_supported(model) {
+        crate::immich_visibility::gate_write_hint(
+            &mut entry.visibility_action,
+            crate::immich_visibility::ImmichVisibilityWriteAvailability::Unsupported,
+        );
     }
     entry
 }
@@ -478,7 +497,8 @@ async fn open_session(
             cleanup_confirmed: Some(false),
         })?
         .to_owned();
-    let session = DedicatedSession {
+    let mut session = DedicatedSession {
+        write_contract: None,
         ordinary,
         token: Secret(token),
     };
@@ -486,12 +506,16 @@ async fn open_session(
     let result =
         open_authenticated(ctx, &session, &generation, expected, &response.body, pin).await;
     match result {
-        Ok((entries, lease_deadline)) => Ok(OpenedSession {
-            session,
-            entries,
-            lease_deadline,
-            hard_deadline,
-        }),
+        Ok((entries, lease_deadline)) => {
+            session.write_contract =
+                write_contract::observe(ctx, &session, &generation, expected).await;
+            Ok(OpenedSession {
+                session,
+                entries,
+                lease_deadline,
+                hard_deadline,
+            })
+        }
         Err(failure) => {
             let confirmed = cleanup(ctx, &session).await;
             Err(OpenFailure {
@@ -1283,6 +1307,7 @@ mod tests {
         model.session = Some(ordinary.clone());
         model.immich_locked.phase = ProtectionScenePhase::Active;
         model.immich_locked.session = Some(DedicatedSession {
+            write_contract: None,
             ordinary,
             token: Secret("secret".into()),
         });
@@ -1562,6 +1587,14 @@ impl VisibilitySession {
         operation: &crate::immich_visibility::ImmichVisibilityOperation,
     ) -> Result<Value, String> {
         self.valid()?;
+        if !self
+            .session
+            .write_contract
+            .as_ref()
+            .is_some_and(write_contract::LockedVisibilityWriteContract::valid)
+        {
+            return Err(ERROR.into());
+        }
         if operation.scope != self.scope() {
             return Err(ERROR.into());
         }
@@ -1745,6 +1778,7 @@ mod visibility_deadline_tests {
             projection_generation: Arc::new(AtomicU64::new(0)),
             expected_projection: 0,
             session: DedicatedSession {
+                write_contract: None,
                 ordinary: Session {
                     ordinary_content_guard: None,
                     ordinary_content_context: None,

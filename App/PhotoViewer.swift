@@ -299,11 +299,17 @@ struct PhotoViewer: View {
     @ViewBuilder private func immichLockAction(_ photo: UnifiedPhoto) -> some View {
         if let source = model.displayedSource(photo), source.key.provider == .immich {
             let hint = model.view?.immichVisibilityActions.first { $0.key == source.key }
-            Button("この表示元を Immich でロック", systemImage: "lock") { lockingSource = source.key }
-                .disabled(hint?.canLock != true)
+            let verificationRequired = hint?.writeAvailability == .verificationRequired
+            Button(
+                verificationRequired ? "Immich の PIN で変更可否を確認" : "この表示元を Immich でロック",
+                systemImage: "lock"
+            ) { lockingSource = source.key }
+                .disabled(hint?.canLock != true && !verificationRequired)
                 .accessibilityIdentifier("lockDisplayedImmichPhoto")
             if let reason = hint?.reason {
                 Text(reason.explanation)
+            } else if let guidance = hint?.writeAvailability.guidance {
+                Text(guidance)
             }
         }
     }

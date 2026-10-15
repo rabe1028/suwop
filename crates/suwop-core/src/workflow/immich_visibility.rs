@@ -49,6 +49,7 @@ pub(crate) async fn prepare(
     to: ImmichVisibility,
     id: String,
 ) -> Result<PreparedVisibility, String> {
+    capability.verify_write_contract(ctx).await?;
     let first = fresh(ctx, &capability, &key).await?;
     let operation = ImmichVisibilityOperation {
         kind: capability.kind(),
@@ -284,7 +285,9 @@ pub(crate) async fn apply(
             facts.witness == prepared.operation.witness_digest
                 && facts.revision == prepared.revision
                 && facts.visibility == prepared.operation.from
-        }) {
+        })
+        && capability.verify_write_contract(ctx).await.is_ok()
+    {
         capability.mutate_visibility(ctx, &prepared.operation).await
     } else {
         if let Some(operation) = desired.immich_visibility_operations.last_mut() {

@@ -88,6 +88,9 @@ struct ImmichVisibilityDestinations: View {
         }.buttonStyle(.borderless)
         if let reason = hint.reason {
             Text(reason.explanation).font(.caption).foregroundStyle(.secondary)
+        } else if let guidance = hint.writeAvailability.guidance {
+            Text(guidance).font(.caption).foregroundStyle(.secondary)
+                .accessibilityIdentifier("immichVisibilityWriteAvailability-\(hint.key.assetID)")
         }
     }
 }

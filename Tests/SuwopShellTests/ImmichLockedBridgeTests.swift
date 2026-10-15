@@ -13,6 +13,7 @@ final class LockedSessionABI {
     let password = "PRIVATE-ABI-PASSWORD"
     let pin = "135790"
     let token = "PRIVATE-ABI-SESSION-TOKEN"
+    var serverVersion: JSONValue = .object(["major": .number(3), "minor": .number(2), "patch": .number(4)])
     var fault = Fault.none
     var saved: SavedLibrary
     var writes = 0
@@ -105,7 +106,7 @@ final class LockedSessionABI {
         }
         let ordinary = request.headers["x-api-key"] == "ordinary-api-key"
         if path == "server/version" {
-            return try response(.from(Version(major: 3, minor: 2, patch: 4)))
+            return response(serverVersion)
         }
         if path == "server/features" {
             #expect(request.headers["x-api-key"] == nil && request.headers["Authorization"] == nil)

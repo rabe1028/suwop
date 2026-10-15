@@ -34,10 +34,26 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Run Rust core against Immich v3.2.4 in Docker
+      - name: Verify old-server ordinary, read, recovery and denied PIN writes
         env:
           IMMICH_VERSION: v3.2.4
+          IMMICH_TEST_PROJECT: suwop-ci-324
+          SUWOP_NATIVE_LIVE_EVIDENCE_DIR: ${{ runner.temp }}/suwop-integration-324
         run: make integration
+      - name: Verify exact stable 3.3.3 PIN write contract and native graph preservation
+        env:
+          IMMICH_VERSION: v3.3.3
+          IMMICH_TEST_PROJECT: suwop-ci-333
+          SUWOP_NATIVE_LIVE_EVIDENCE_DIR: ${{ runner.temp }}/suwop-integration-333
+        run: make integration
+      - name: Preserve safe per-release integration evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: immich-integration-${{ github.sha }}
+          path: ${{ runner.temp }}/suwop-integration-*
+          if-no-files-found: warn
+          retention-days: 14
 
   apple:
     runs-on: macos-15
