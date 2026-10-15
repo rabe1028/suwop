@@ -541,44 +541,20 @@ extension ImmichVisibilityUITests {
             return
         }
         let viewport = frame.insetBy(dx: 0, dy: 12)
-        let visible = {
-            element.exists && !element.frame.isEmpty && viewport.contains(element.frame) &&
-                (!needsHitTarget || element.isHittable)
+        let reached = WriteMenuScrollGesture.reveal(
+            element, in: app, menu: menu, viewport: viewport, needsHitTarget: needsHitTarget
+        )
+        attachWriteMenuGeometry(
+            app,
+            collection: collectionFrame,
+            viewport: viewport,
+            target: element.exists ? element.frame : .zero,
+            action: needsHitTarget
+        )
+        if !reached {
+            attachWriteMenu(app, name: "write-contract-menu-target-not-reached")
         }
-        if visible() {
-            attachWriteMenuGeometry(
-                app,
-                collection: collectionFrame,
-                viewport: viewport,
-                target: element.frame,
-                action: needsHitTarget
-            )
-            return
-        }
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        let top = origin.withOffset(CGVector(dx: frame.midX, dy: frame.minY + 80))
-        let bottom = origin.withOffset(CGVector(dx: frame.midX, dy: frame.maxY - 80))
-        for downward in [true, false] {
-            for _ in 0 ..< 4 {
-                if visible() {
-                    attachWriteMenuGeometry(
-                        app,
-                        collection: collectionFrame,
-                        viewport: viewport,
-                        target: element.frame,
-                        action: needsHitTarget
-                    )
-                    return
-                }
-                if downward {
-                    top.press(forDuration: 0.1, thenDragTo: bottom)
-                } else {
-                    bottom.press(forDuration: 0.1, thenDragTo: top)
-                }
-            }
-        }
-        attachWriteMenu(app, name: "write-contract-menu-target-not-reached")
-        XCTAssertTrue(visible(), "The exact native menu item must be visible before label inspection or tapping")
+        XCTAssertTrue(reached, "The exact native menu item must be visible before label inspection or tapping")
     }
 
     @MainActor private func attachWriteMenuGeometry(
