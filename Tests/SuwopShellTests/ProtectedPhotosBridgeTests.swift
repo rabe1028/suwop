@@ -107,7 +107,7 @@ import Testing
         let effects = ProtectedBridgeEffects(protected: false, schema: 4)
         effects.outcome = outcome
         try await effects.ready(runtime)
-        #expect(effects.journal.schemaVersion == 6)
+        #expect(effects.journal.schemaVersion == 7)
         try await effects.authenticate(runtime, purpose: .protect)
         try await effects.run(runtime, [
             "type": .string("protectPhotos"), "keys": .from([effects.asset.key]),

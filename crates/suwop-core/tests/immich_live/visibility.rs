@@ -587,7 +587,7 @@ fn album_ids(value: &Value) -> Result<Vec<String>, String> {
 }
 
 // Allow background server jobs to settle before a new user intent. Never retry a mutation.
-fn wait_for_stable_asset(
+pub(super) fn wait_for_stable_asset(
     agent: &ureq::Agent,
     request: &HttpRequest,
     key: &AssetKey,

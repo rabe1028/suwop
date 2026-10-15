@@ -1,13 +1,13 @@
 #[path = "immich_visibility/readback.rs"]
-mod readback;
+pub(crate) mod readback;
 use super::{
     AlbumMembershipObservation, AssetKey, ImmichVisibility, ImmichVisibilityOperation,
-    ImmichVisibilityPrompt, PreparedVisibility, SAFE_ERROR, VisibilityCompletion, VisibilityFacts,
-    facts, validate_operation,
+    PreparedVisibility, SAFE_ERROR, VisibilityCompletion, VisibilityFacts, facts,
+    validate_operation,
 };
 async fn fresh(
     ctx: &crate::app::Context,
-    capability: &crate::immich_locked::VisibilitySession,
+    capability: &crate::immich_archive::VisibilityAuthority,
     key: &AssetKey,
 ) -> Result<VisibilityFacts, String> {
     capability
@@ -24,15 +24,16 @@ async fn fresh(
     }
     Ok(result)
 }
-pub(super) async fn prepare(
+pub(crate) async fn prepare(
     ctx: &crate::app::Context,
-    capability: crate::immich_locked::VisibilitySession,
+    capability: crate::immich_archive::VisibilityAuthority,
     key: AssetKey,
     to: ImmichVisibility,
     id: String,
 ) -> Result<PreparedVisibility, String> {
     let first = fresh(ctx, &capability, &key).await?;
     let operation = ImmichVisibilityOperation {
+        kind: capability.kind(),
         id,
         scope: key.scope.clone(),
         key,
@@ -44,23 +45,8 @@ pub(super) async fn prepare(
         album_membership_observation: AlbumMembershipObservation::NotChecked,
     };
     validate_operation(&operation)?;
-    let confirmed: bool = crate::app::io(
-        ctx,
-        crate::app::ShellOperation::ConfirmImmichVisibility {
-            prompt: ImmichVisibilityPrompt {
-                operation_id: operation.id.clone(),
-                grant_id: capability.grant_id.clone(),
-                generation: capability.expected,
-                scene_id: capability.scene_id.clone(),
-                from: operation.from,
-                to,
-                removes_all_album_membership: to == ImmichVisibility::Locked,
-                no_automatic_album_restore: true,
-            },
-        },
-    )
-    .await
-    .map_err(|_| SAFE_ERROR.to_owned())?;
+    let capability = capability.bind(&operation, &first.revision)?;
+    let confirmed = capability.confirm(ctx, &operation).await?;
     if !confirmed {
         return Err("変更をキャンセルしました。".into());
     }
@@ -81,11 +67,17 @@ async fn persist(
     ctx: &crate::app::Context,
     before: &crate::app::SavedLibrary,
     desired: &crate::app::SavedLibrary,
-) -> (crate::app::SavedLibrary, bool, bool) {
+    capability: &crate::immich_archive::VisibilityAuthority,
+) -> (
+    crate::app::SavedLibrary,
+    bool,
+    bool,
+    Option<Box<crate::immich_archive::RecoveryProof>>,
+) {
     let result: Result<serde_json::Value, _> =
         crate::app::io(ctx, crate::app::ShellOperation::Persist(desired.clone())).await;
     if result.is_ok() {
-        return (desired.clone(), false, true);
+        return (desired.clone(), false, true, None);
     }
     let read: Result<serde_json::Value, _> =
         crate::app::io(ctx, crate::app::ShellOperation::ReadState).await;
@@ -94,18 +86,29 @@ async fn persist(
             .ok()
             .is_some_and(|expected| readback::matches(&expected, &raw))
         {
-            return (desired.clone(), false, true);
+            return (desired.clone(), false, true, None);
         }
         if serde_json::to_value(before)
             .ok()
             .is_some_and(|expected| readback::matches(&expected, &raw))
         {
-            return (before.clone(), false, false);
+            return (before.clone(), false, false, None);
         }
     }
-    (before.clone(), true, false)
+    (
+        before.clone(),
+        true,
+        false,
+        (capability.kind() == super::ImmichVisibilityOperationKind::OrdinaryArchive).then(|| {
+            Box::new(crate::immich_archive::RecoveryProof {
+                scope: capability.scope().into(),
+                before: before.clone(),
+                desired: desired.clone(),
+            })
+        }),
+    )
 }
-pub(super) fn invalidate_remote(state: &mut crate::app::SavedLibrary) {
+pub(crate) fn invalidate_remote(state: &mut crate::app::SavedLibrary) {
     for snapshot in &mut state.snapshots {
         if snapshot.provider == crate::domain::Provider::Immich {
             snapshot.access = crate::domain::ScanAccess::Unavailable;
@@ -117,9 +120,16 @@ pub(super) fn invalidate_remote(state: &mut crate::app::SavedLibrary) {
         }
     }
 }
-fn observe(state: &mut crate::app::SavedLibrary, facts: &VisibilityFacts) {
+fn observe(
+    state: &mut crate::app::SavedLibrary,
+    facts: &VisibilityFacts,
+    kind: super::ImmichVisibilityOperationKind,
+) {
     for operation in &mut state.immich_visibility_operations {
-        if operation.key == facts.key && operation.witness_digest == facts.witness {
+        if operation.key == facts.key
+            && operation.witness_digest == facts.witness
+            && operation.kind == kind
+        {
             operation.observation = Some(facts.visibility);
         }
     }
@@ -127,14 +137,15 @@ fn observe(state: &mut crate::app::SavedLibrary, facts: &VisibilityFacts) {
         invalidate_remote(state);
     }
 }
-pub(super) async fn inspect(
+pub(crate) async fn inspect(
     ctx: &crate::app::Context,
     before: crate::app::SavedLibrary,
-    capability: crate::immich_locked::VisibilitySession,
+    capability: crate::immich_archive::VisibilityAuthority,
     operation: ImmichVisibilityOperation,
 ) -> VisibilityCompletion {
     let Ok(facts) = fresh(ctx, &capability, &operation.key).await else {
         return VisibilityCompletion {
+            recovery_proof: None,
             projection: None,
             state: before,
             uncertain: false,
@@ -143,6 +154,7 @@ pub(super) async fn inspect(
     };
     if facts.witness != operation.witness_digest {
         return VisibilityCompletion {
+            recovery_proof: None,
             projection: None,
             state: before,
             uncertain: false,
@@ -150,15 +162,13 @@ pub(super) async fn inspect(
         };
     }
     let mut desired = before.clone();
-    observe(&mut desired, &facts);
-    let (state, uncertain, committed) = persist(ctx, &before, &desired).await;
+    observe(&mut desired, &facts, capability.kind());
+    let (state, uncertain, committed, recovery_proof) =
+        persist(ctx, &before, &desired, &capability).await;
     VisibilityCompletion {
+        recovery_proof,
         projection: if committed && !uncertain {
-            Some(Box::new(super::VerifiedVisibilityProjection {
-                capability,
-                operation_id: operation.id,
-                facts,
-            }))
+            capability.projection(operation.id, facts)
         } else {
             None
         },
@@ -172,7 +182,7 @@ pub(super) async fn inspect(
         .into(),
     }
 }
-pub(super) async fn apply(
+pub(crate) async fn apply(
     ctx: &crate::app::Context,
     before: crate::app::SavedLibrary,
     prepared: PreparedVisibility,
@@ -182,10 +192,12 @@ pub(super) async fn apply(
     desired
         .immich_visibility_operations
         .push(prepared.operation.clone());
-    let (durable, uncertain, committed) = persist(ctx, &before, &desired).await;
+    let (durable, uncertain, committed, recovery_proof) =
+        persist(ctx, &before, &desired, &prepared.capability).await;
     if !committed {
         return VisibilityCompletion {
             projection: None,
+            recovery_proof,
             state: durable,
             uncertain,
             status: SAFE_ERROR.into(),
@@ -206,9 +218,11 @@ pub(super) async fn apply(
         if let Some(operation) = desired.immich_visibility_operations.last_mut() {
             operation.outcome = VisibilityOutcome::NotApplied;
         }
-        let (state, uncertain, _) = persist(ctx, &durable, &desired).await;
+        let (state, uncertain, _, recovery_proof) =
+            persist(ctx, &durable, &desired, &capability).await;
         return VisibilityCompletion {
             projection: None,
+            recovery_proof,
             state,
             uncertain,
             status: "変更は開始されませんでした。".into(),
@@ -224,7 +238,7 @@ pub(super) async fn apply(
             operation.outcome = VisibilityOutcome::Applied;
         }
         if response.is_ok() && facts.visibility == prepared.operation.to {
-            observe(&mut desired, &facts);
+            observe(&mut desired, &facts, capability.kind());
             verified = Some(facts);
         }
         if prepared.operation.to == ImmichVisibility::Locked
@@ -245,16 +259,12 @@ pub(super) async fn apply(
             };
         }
     }
-    let (state, uncertain, committed) = persist(ctx, &durable, &desired).await;
+    let (state, uncertain, committed, recovery_proof) =
+        persist(ctx, &durable, &desired, &capability).await;
     VisibilityCompletion {
+        recovery_proof,
         projection: if committed && !uncertain {
-            verified.map(|facts| {
-                Box::new(super::VerifiedVisibilityProjection {
-                    capability,
-                    operation_id: prepared.operation.id,
-                    facts,
-                })
-            })
+            verified.and_then(|facts| capability.projection(prepared.operation.id, facts))
         } else {
             None
         },

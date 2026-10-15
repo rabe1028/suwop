@@ -21,6 +21,7 @@ const ENTRY: &str = "44444444-4444-4444-8444-444444444444";
 
 fn asset(provider: Provider, id: &str) -> StoredAsset {
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: AppleVisibility::Visible,
         key: AssetKey {
@@ -55,7 +56,7 @@ fn asset(provider: Provider, id: &str) -> StoredAsset {
 
 fn saved() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()

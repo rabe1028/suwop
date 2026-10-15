@@ -1367,6 +1367,7 @@ mod tests {
             let capability = visibility_session(&model, "grant", "scene").ok_or("capability")?;
             model.state.immich_visibility_operations.push(
                 crate::immich_visibility::ImmichVisibilityOperation {
+                    kind: crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition,
                     id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
                     scope: "scope".into(),
                     key: facts.key.clone(),
@@ -1566,6 +1567,8 @@ pub(crate) fn publish_visibility_entry(
         || model.state.protected_entries.iter().any(|e| e.key == *key)
         || !model.state.immich_visibility_operations.iter().any(|o| {
             o.id == projection.operation_id
+                && o.kind
+                    == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
                 && o.key == *key
                 && o.witness_digest == facts.witness
                 && o.observation == Some(facts.visibility)

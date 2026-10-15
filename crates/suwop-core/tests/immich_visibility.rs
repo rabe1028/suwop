@@ -46,7 +46,7 @@ fn core_denials(
     };
     let state = SavedLibrary {
         immich_visibility_operations: operations,
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),
@@ -522,6 +522,7 @@ fn explicit_unlocked_observation_requires_matching_fresh_full_scan() -> Result<(
     state
         .immich_visibility_operations
         .push(ImmichVisibilityOperation {
+            kind: suwop_core::immich_visibility::ImmichVisibilityOperationKind::LockedTransition,
             id: NEXT.into(),
             scope: key().scope,
             key: key(),
@@ -588,7 +589,7 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
     let state = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(state.schema_version, 6);
+    assert_eq!(state.schema_version, 7);
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     let record = raw["immichVisibilityOperations"][0].clone();
     raw["immichVisibilityOperations"]
@@ -1202,7 +1203,7 @@ fn same_session_refresh_recovers_known_unsubmitted_failure_but_not_unknown() -> 
     };
     shell.run(&c, open(GRANT))?;
     let before = SavedLibrary {
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: "https://fixture.example/api".into(),

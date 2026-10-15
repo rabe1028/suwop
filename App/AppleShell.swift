@@ -1,12 +1,13 @@
 import Foundation
 import SuwopShell
 
-/// Executes Rust effects. Decisions and operation order belong to the Crux core.
 @MainActor final class AppleShell {
     private let root: URL
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
+    let archiveAccess = ImmichArchiveNativeAccess()
+    let archiveConfirmation = ImmichArchiveConfirmation()
     private let sharing = SystemSharing()
     private let playback = SystemPlayback()
     private let imageEditing = SystemImageEditing()
@@ -32,18 +33,17 @@ import SuwopShell
         presentationEpoch.beginWorkflow()
     }
 
-    /// Cancel native presentation leases without cancelling the workflow that
-    /// must still persist outcomes and close native sessions / workspaces.
+    /// Cancel presentation leases while preserving outcome persistence and native cleanup.
     func invalidateContentPresentations() {
         presentationEpoch.invalidate()
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
+        archiveConfirmation.invalidate()
         sharing.invalidateForContentChange()
     }
 
-    /// Closing the private C surface must not revoke an ordinary workflow that closes it.
     func invalidateImmichLockedPresentations() {
         immichLockedAccess.invalidate()
         confirmation.invalidateForContentChange()
@@ -56,6 +56,7 @@ import SuwopShell
         playback.invalidateForProtection()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
+        archiveConfirmation.invalidate()
         sharing.invalidateForProtection()
     }
 
@@ -134,7 +135,8 @@ import SuwopShell
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch operation.type {
-        case "confirmImmichVisibility", "confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect",
+        case "confirmImmichArchive", "confirmImmichVisibility", "confirmAppleVisibility", "appleVisibilityApply",
+             "appleVisibilityInspect",
              "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleJournalEffect(
                 operation.type,
                 data: data,
@@ -431,6 +433,7 @@ private extension AppleShell {
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         let visibilityEffects = [
+            "confirmImmichArchive",
             "confirmImmichVisibility",
             "confirmAppleVisibility",
             "appleVisibilityApply",
@@ -456,6 +459,11 @@ private extension AppleShell {
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch type {
+        case "confirmImmichArchive":
+            return try await .bool(confirmImmichArchive(
+                data["prompt"].decode(ImmichArchivePrompt.self),
+                context: context
+            ))
         case "confirmImmichVisibility":
             return try await .bool(confirmImmichVisibility(
                 data["prompt"].decode(ImmichVisibilityPrompt.self),
@@ -533,11 +541,7 @@ extension AppleShell {
 
 private extension AppleShell {
     func executeHTTP(_ request: HttpRequest) async throws -> HttpResponse {
-        let submission: NativeSubmissionPermit? = if let authorization = request.immichVisibilityAuthorization {
-            try await immichLockedAccess.visibilitySubmission(authorization)
-        } else {
-            nil
-        }
+        let submission = try await submissionPermit(for: request)
         #if SUWOP_VRT
             if let httpTransportEffect {
                 try submission?.submit {}
@@ -548,7 +552,7 @@ private extension AppleShell {
     }
 
     func authorizedHTTP(_ request: HttpRequest, context: ContentPresentationContext) async throws -> JSONValue {
-        if request.immichVisibilityAuthorization != nil {
+        if request.immichVisibilityAuthorization != nil || request.immichArchiveAuthorization != nil {
             return try await .from(executeHTTP(request))
         }
         guard let authorization = request.ordinaryContentAuthorization else {

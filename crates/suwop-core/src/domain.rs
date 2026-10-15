@@ -90,6 +90,8 @@ pub enum ImmichStackState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAsset {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_visibility: Option<crate::immich_visibility::ImmichVisibility>,
     #[serde(default)]
     pub immich_stack: ImmichStackState,
     #[serde(default)]
@@ -118,6 +120,7 @@ impl StoredAsset {
     pub fn same_content_evidence(&self, other: &Self) -> bool {
         let mut evidence = self.clone();
         evidence.apple_visibility = other.apple_visibility;
+        evidence.immich_visibility = other.immich_visibility;
         evidence == *other
     }
     pub fn originals(&self) -> impl Iterator<Item = &PhotoResource> {

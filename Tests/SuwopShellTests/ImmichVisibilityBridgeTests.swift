@@ -109,7 +109,7 @@ private final class VisibilityABI {
     let fixture = try VisibilityABI()
     let driver = fixture.driver
     try driver.ready()
-    #expect(driver.saved.schemaVersion == 6 && driver.saved.immichVisibilityOperations.isEmpty)
+    #expect(driver.saved.schemaVersion == 7 && driver.saved.immichVisibilityOperations.isEmpty)
     #expect(try driver.view().ordinaryContentKeys.contains(fixture.key))
     try driver.open()
     try fixture.prepare(.locked)
