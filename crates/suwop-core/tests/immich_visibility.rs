@@ -1700,3 +1700,23 @@ fn ordinary_prepared_preserves_other_key_locked_image() -> Result<(), String> {
 fn ordinary_prepared_preserves_other_key_pending_read() -> Result<(), String> {
     check_ordinary_prepared_preserves_other_key(true)
 }
+
+#[test]
+fn pin_direct_video_lock_and_unlock_never_persist_or_write() -> Result<(), String> {
+    use suwop_core::immich_visibility::ImmichVisibility;
+    for to in [
+        ImmichVisibility::Locked,
+        ImmichVisibility::Timeline,
+        ImmichVisibility::Archive,
+    ] {
+        let (c, mut shell) = opened(false)?;
+        shell.facts_patch = Some(json!({"type":"VIDEO"}));
+        if to != ImmichVisibility::Locked {
+            shell.visibility = Some("locked".into());
+        }
+        shell.run(&c, prepare(OP, to))?;
+        assert_eq!(shell.writes, 0);
+        assert_eq!(shell.persist_calls, 0);
+    }
+    Ok(())
+}

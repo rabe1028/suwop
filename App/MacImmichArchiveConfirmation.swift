@@ -46,7 +46,11 @@
                     finishing = false
                     let sheet = NSAlert()
                     sheet.messageText = prompt.to.title + "へ変更しますか？"
-                    sheet.informativeText = "\(prompt.from.title) → \(prompt.to.title)\nほかの保存先のコピーは変更しません。"
+                    sheet.informativeText = [
+                        "\(prompt.from.title) → \(prompt.to.title)",
+                        prompt.selectedItemDisclosure,
+                        "ほかの保存先のコピーは変更しません。",
+                    ].joined(separator: "\n")
                     sheet.alertStyle = .informational
                     sheet.addButton(withTitle: "キャンセル")
                     sheet.addButton(withTitle: prompt.to.title + "へ変更")

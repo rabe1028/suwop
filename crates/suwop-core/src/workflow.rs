@@ -548,10 +548,11 @@ impl Runtime<'_> {
                         if !tracked.is_empty() {
                             let raw = self.visibility_reconciliation(session, &key).await;
                             let verified = raw.ok().and_then(|v| {
-                                crate::immich_visibility::facts(
+                                crate::immich_visibility::reconciliation_facts(
                                     &v,
                                     &session.scope,
                                     &session.user_id,
+                                    &tracked,
                                 )
                                 .ok()
                             });

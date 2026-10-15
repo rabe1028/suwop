@@ -2,8 +2,7 @@
 pub(crate) mod readback;
 use super::{
     AlbumMembershipObservation, AssetKey, ImmichVisibility, ImmichVisibilityOperation,
-    PreparedVisibility, SAFE_ERROR, VisibilityCompletion, VisibilityFacts, facts,
-    validate_operation,
+    PreparedVisibility, SAFE_ERROR, VisibilityCompletion, VisibilityFacts, validate_operation,
 };
 async fn fresh(
     ctx: &crate::app::Context,
@@ -18,7 +17,7 @@ async fn fresh(
         .json(ctx, &format!("assets/{}", key.asset_id), "GET", None)
         .await
         .map_err(|_| SAFE_ERROR.to_owned())?;
-    let result = facts(&value, capability.scope(), capability.owner())?;
+    let result = capability.facts(&value)?;
     if result.key != *key {
         return Err(SAFE_ERROR.into());
     }

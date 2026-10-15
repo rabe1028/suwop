@@ -35,7 +35,8 @@ import SwiftUI
             }
             .task {
                 do {
-                    let created = try ImmichArchivePhotoFixture()
+                    let created = try ImmichArchivePhotoFixture(video: CommandLine.arguments
+                        .contains("--archive-video"))
                     let lostReply = CommandLine.arguments.contains("--lost-archive-response")
                     if lostReply {
                         created.server.fault = .lostResponse

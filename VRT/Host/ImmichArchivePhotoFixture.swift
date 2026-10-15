@@ -38,6 +38,7 @@ import SuwopShell
 
     init(
         visibility: String = "timeline",
+        video: Bool = false,
         appleCopy: Bool = false,
         protectedSource: Bool = false,
         persisted: SavedLibrary? = nil,
@@ -45,7 +46,7 @@ import SuwopShell
     ) throws {
         runtime = try RustRuntime()
         shell = try AppleShell()
-        server = try sharedServer ?? ImmichArchiveFixtureServer(visibility: visibility)
+        server = try sharedServer ?? ImmichArchiveFixtureServer(visibility: visibility, video: video)
         appleAssets = appleCopy ? [ImmichVisibilityFixtureData.appleCopy()] : []
         journal = persisted ?? SavedLibrary(
             appleScope: ImmichVisibilityFixtureData.appleScope,

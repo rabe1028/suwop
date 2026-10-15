@@ -185,9 +185,23 @@ pub fn locked_action(key: AssetKey) -> ImmichVisibilityActionHint {
     }
 }
 
-pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVisibilityActionHint {
+#[derive(Clone, Copy)]
+enum MediaPolicy {
+    LockedImage,
+    OrdinaryArchive,
+}
+
+pub(crate) fn ordinary_archive_reason(
+    asset: &crate::domain::StoredAsset,
+) -> Option<ImmichVisibilityUnsupportedReason> {
+    unsupported_reason(asset, MediaPolicy::OrdinaryArchive)
+}
+fn unsupported_reason(
+    asset: &crate::domain::StoredAsset,
+    policy: MediaPolicy,
+) -> Option<ImmichVisibilityUnsupportedReason> {
     use crate::domain::{Provider, ResourceRole};
-    let reason = if asset.key.provider != Provider::Immich || asset.is_offline {
+    if asset.key.provider != Provider::Immich || asset.is_offline {
         Some(ImmichVisibilityUnsupportedReason::Unavailable)
     } else if asset
         .resources
@@ -195,10 +209,11 @@ pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVi
         .any(|r| r.role == ResourceRole::LiveVideo)
     {
         Some(ImmichVisibilityUnsupportedReason::Live)
-    } else if asset
-        .resources
-        .iter()
-        .any(|r| r.role == ResourceRole::Video)
+    } else if matches!(policy, MediaPolicy::LockedImage)
+        && asset
+            .resources
+            .iter()
+            .any(|r| r.role == ResourceRole::Video)
     {
         Some(ImmichVisibilityUnsupportedReason::Video)
     } else if asset.immich_stack == crate::domain::ImmichStackState::Stacked {
@@ -206,14 +221,19 @@ pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVi
     } else if asset.immich_stack == crate::domain::ImmichStackState::Unknown
         || !asset.inventory_complete
         || asset.originals().count() != 1
-        || !asset
-            .originals()
-            .any(|r| matches!(r.role, ResourceRole::Image | ResourceRole::RawImage))
+        || !asset.originals().any(|r| {
+            matches!(r.role, ResourceRole::Image | ResourceRole::RawImage)
+                || matches!(policy, MediaPolicy::OrdinaryArchive) && r.role == ResourceRole::Video
+        })
     {
         Some(ImmichVisibilityUnsupportedReason::Unknown)
     } else {
         None
-    };
+    }
+}
+pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVisibilityActionHint {
+    let reason = unsupported_reason(asset, MediaPolicy::LockedImage);
+
     ImmichVisibilityActionHint {
         key: asset.key.clone(),
         can_lock: reason.is_none() && !locked,
@@ -297,23 +317,39 @@ pub(crate) fn asset_witness(asset: &crate::domain::StoredAsset) -> Option<String
     let [original] = originals.as_slice() else {
         return None;
     };
-    if !matches!(original.role, ResourceRole::Image | ResourceRole::RawImage)
-        || asset
-            .resources
-            .iter()
-            .any(|r| r.role == ResourceRole::LiveVideo)
+    let media = match original.role {
+        ResourceRole::Image | ResourceRole::RawImage => IdentityMedia::Image,
+        ResourceRole::Video => IdentityMedia::Video,
+        _ => return None,
+    };
+    if asset
+        .resources
+        .iter()
+        .any(|r| r.role == ResourceRole::LiveVideo)
     {
         return None;
     }
     let checksum = crate::domain::normalize_sha1(original.sha1.as_deref())?;
-    Some(identity_digest(&asset.key, &checksum))
+    Some(identity_digest(&asset.key, &checksum, media))
 }
-fn identity_digest(key: &AssetKey, checksum: &str) -> String {
+#[derive(Clone, Copy)]
+enum IdentityMedia {
+    Image,
+    Video,
+}
+fn identity_digest(key: &AssetKey, checksum: &str, media: IdentityMedia) -> String {
     use sha2::Digest;
+    // Keep IMAGE journal bytes identical. VIDEO's tag asserts own forward-null
+    // shape only; it never claims reverse-parent independence.
+    let identity = match media {
+        IdentityMedia::Image => (key, "IMAGE", checksum, "unlinked", "unstacked"),
+        IdentityMedia::Video => (key, "VIDEO", checksum, "forwardNull", "unstacked"),
+    };
     crate::domain::hex(&sha2::Sha256::digest(
-        serde_json::to_vec(&(key, "IMAGE", checksum, "unlinked", "unstacked")).unwrap_or_default(),
+        serde_json::to_vec(&identity).unwrap_or_default(),
     ))
 }
+
 #[derive(Debug, Clone)]
 pub(crate) struct VisibilityFacts {
     pub asset: crate::domain::StoredAsset,
@@ -327,6 +363,38 @@ pub(crate) fn facts(
     scope: &str,
     owner: &str,
 ) -> Result<VisibilityFacts, String> {
+    facts_with_policy(value, scope, owner, MediaPolicy::LockedImage)
+}
+pub(crate) fn ordinary_facts(
+    value: &serde_json::Value,
+    scope: &str,
+    owner: &str,
+) -> Result<VisibilityFacts, String> {
+    facts_with_policy(value, scope, owner, MediaPolicy::OrdinaryArchive)
+}
+pub(crate) fn reconciliation_facts(
+    value: &serde_json::Value,
+    scope: &str,
+    owner: &str,
+    records: &[&ImmichVisibilityOperation],
+) -> Result<VisibilityFacts, String> {
+    let policy = if !records.is_empty()
+        && records
+            .iter()
+            .all(|r| r.kind == ImmichVisibilityOperationKind::OrdinaryArchive)
+    {
+        MediaPolicy::OrdinaryArchive
+    } else {
+        MediaPolicy::LockedImage
+    };
+    facts_with_policy(value, scope, owner, policy)
+}
+fn facts_with_policy(
+    value: &serde_json::Value,
+    scope: &str,
+    owner: &str,
+    policy: MediaPolicy,
+) -> Result<VisibilityFacts, String> {
     let asset: crate::immich::Asset =
         serde_json::from_value(value.clone()).map_err(|_| "写真の状態を確認できません。")?;
     if asset.owner_id != owner
@@ -336,9 +404,11 @@ pub(crate) fn facts(
     {
         return Err("写真の所有者または状態を確認できません。".into());
     }
-    if asset.media_type != "IMAGE" {
-        return Err("動画の非表示変更はまだ対応していません。".into());
-    }
+    let media = match (asset.media_type.as_str(), policy) {
+        ("IMAGE", _) => IdentityMedia::Image,
+        ("VIDEO", MediaPolicy::OrdinaryArchive) => IdentityMedia::Video,
+        _ => return Err("この形式の可視性変更はまだ対応していません。".into()),
+    };
     if !matches!(value.get("livePhotoVideoId"), Some(serde_json::Value::Null)) {
         return Err(
             "Live Photo または連結状態を確認できない写真の非表示変更はまだ対応していません。"
@@ -353,7 +423,7 @@ pub(crate) fn facts(
     let visibility = match asset.visibility.as_deref() {
         Some("timeline") => ImmichVisibility::Timeline,
         Some("archive") => ImmichVisibility::Archive,
-        Some("locked") => ImmichVisibility::Locked,
+        Some("locked") if matches!(policy, MediaPolicy::LockedImage) => ImmichVisibility::Locked,
         _ => return Err("写真の可視性を確認できません。".into()),
     };
     let checksum = crate::domain::normalize_sha1(Some(&asset.checksum))
@@ -368,7 +438,7 @@ pub(crate) fn facts(
     }
     Ok(VisibilityFacts {
         asset: asset.record(scope, None, None),
-        witness: identity_digest(&key, &checksum),
+        witness: identity_digest(&key, &checksum, media),
         key,
         revision: asset.updated_at,
         visibility,
@@ -775,5 +845,103 @@ mod prepared_cleanup_tests {
             Some("PIN result")
         );
         assert!(model.immich_archive.message.is_none());
+    }
+}
+
+#[cfg(test)]
+mod media_policy_tests {
+    use super::*;
+    use serde_json::json;
+    use sha2::Digest;
+
+    fn video() -> serde_json::Value {
+        json!({"id":"33333333-3333-4333-8333-333333333333","ownerId":"owner","type":"VIDEO","originalFileName":"selected.mp4","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","isFavorite":false,"isOffline":false,"isTrashed":false,"updatedAt":"revision","visibility":"timeline","livePhotoVideoId":null,"stack":null})
+    }
+
+    #[test]
+    fn video_facts_are_ordinary_only_and_require_explicit_forward_null() -> Result<(), String> {
+        let raw = video();
+        assert!(ordinary_facts(&raw, "scope", "owner").is_ok());
+        assert!(facts(&raw, "scope", "owner").is_err());
+        let mut missing = raw.clone();
+        missing
+            .as_object_mut()
+            .ok_or("object")?
+            .remove("livePhotoVideoId");
+        assert!(ordinary_facts(&missing, "scope", "owner").is_err());
+        for patch in [
+            json!({"livePhotoVideoId":"44444444-4444-4444-8444-444444444444"}),
+            json!({"stack":{}}),
+            json!({"visibility":"hidden"}),
+            json!({"visibility":"locked"}),
+        ] {
+            let mut changed = raw.clone();
+            changed
+                .as_object_mut()
+                .ok_or("object")?
+                .extend(patch.as_object().ok_or("patch")?.clone());
+            assert!(ordinary_facts(&changed, "scope", "owner").is_err());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn video_reconciliation_never_borrows_ordinary_policy_for_mixed_history() -> Result<(), String>
+    {
+        let raw = video();
+        let fresh = ordinary_facts(&raw, "scope", "owner")?;
+        let ordinary: ImmichVisibilityOperation = serde_json::from_value(json!({
+            "kind":"ordinaryArchive","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "scope":"scope","key":fresh.key,"witnessDigest":fresh.witness,
+            "from":"timeline","to":"archive","outcome":"applied","observation":"archive"
+        }))
+        .map_err(|e| e.to_string())?;
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[&ordinary]).is_ok());
+        let mut locked = ordinary.clone();
+        locked.kind = ImmichVisibilityOperationKind::LockedTransition;
+        locked.to = ImmichVisibility::Locked;
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[&ordinary, &locked]).is_err());
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[&locked]).is_err());
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[]).is_err());
+        // Refresh tracks observed records only. An unobserved Unknown of
+        // either kind remains an independent canonical content/write fence.
+        locked.outcome = crate::apple_visibility::VisibilityOutcome::Unknown;
+        locked.observation = None;
+        let key = fresh.asset.key.clone();
+        let state = crate::app::SavedLibrary {
+            snapshots: vec![crate::domain::LibrarySnapshot {
+                provider: crate::domain::Provider::Immich,
+                scope: "scope".into(),
+                access: crate::domain::ScanAccess::Full,
+                scanned_at: Some(1.0),
+                assets: vec![fresh.asset],
+            }],
+            immich_visibility_operations: vec![ordinary, locked],
+            ..crate::app::SavedLibrary::default()
+        };
+        assert!(fences(&state, &key));
+        Ok(())
+    }
+
+    #[test]
+    fn image_witness_is_backward_compatible_and_video_is_domain_separated() -> Result<(), String> {
+        let key = AssetKey {
+            provider: crate::domain::Provider::Immich,
+            scope: "scope".into(),
+            asset_id: "asset".into(),
+        };
+        let checksum = "a".repeat(40);
+        let old = serde_json::to_vec(&(&key, "IMAGE", &checksum, "unlinked", "unstacked"))
+            .map_err(|e| e.to_string())?;
+        let expected = crate::domain::hex(&sha2::Sha256::digest(old));
+        assert_eq!(
+            identity_digest(&key, &checksum, IdentityMedia::Image),
+            expected
+        );
+        assert_ne!(
+            identity_digest(&key, &checksum, IdentityMedia::Video),
+            expected
+        );
+        Ok(())
     }
 }

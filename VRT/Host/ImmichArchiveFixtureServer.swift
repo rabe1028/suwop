@@ -24,10 +24,11 @@ import SuwopShell
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
-    init(visibility: String = "timeline") throws {
+    init(visibility: String = "timeline", video: Bool = false) throws {
         var source = try ImmichVisibilityFixtureData.source(visibility: visibility)
             .decode([String: JSONValue].self)
-        source["originalFileName"] = .string("ORDINARY-ARCHIVE.JPG")
+        source["originalFileName"] = .string(video ? "ORDINARY-ARCHIVE.MP4" : "ORDINARY-ARCHIVE.JPG")
+        source["type"] = .string(video ? "VIDEO" : "IMAGE")
         let initial = JSONValue.object(source)
         record = initial
         originalFacts = try Self.originalData(initial)
@@ -60,7 +61,7 @@ import SuwopShell
         switch path {
         case "users/me": return response(.object(["id": .string(currentOwner)]))
         case "search/metadata": return try search(request)
-        case "assets" where request.method == "PUT": return try mutate(request)
+        case "assets/\(Self.sourceID)" where request.method == "PUT": return try mutate(request)
         case "assets/\(Self.sourceID)": return metadata()
         case "asset-files?assetId=\(Self.sourceID)": return response(.array([]))
         default:
@@ -104,8 +105,9 @@ import SuwopShell
     private func mutate(_ request: HttpRequest) throws -> HttpResponse {
         mutationAttempts += 1
         try beforeMutation?(request)
-        let ids = try request.body["ids"].decode([String].self)
-        guard ids == [Self.sourceID], let to = request.body["visibility"].string,
+        let body = try request.body.decode([String: JSONValue].self)
+        guard request.url == Self.endpoint + "/assets/" + Self.sourceID,
+              Set(body.keys) == Set(["visibility"]), let to = request.body["visibility"].string,
               ["timeline", "archive"].contains(to)
         else {
             throw SuwopError("Ordinary archive attempted a locked or aggregate mutation")
@@ -122,7 +124,7 @@ import SuwopShell
         if fault == .lostResponse {
             throw SuwopError("Synthetic lost ordinary archive response")
         }
-        return response(.null, status: 204)
+        return response(record, status: 200)
     }
 
     private func albums() -> [JSONValue] {

@@ -19,7 +19,63 @@ const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGM
 #[test]
 #[ignore = "requires the isolated Docker Immich harness"]
 fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Result<(), String> {
-    let directory = std::env::temp_dir().join(format!("suwop-archive-{}", std::process::id()));
+    ordinary_roundtrip(FixtureMedia::Image)
+}
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_pin_unset_video_archive_roundtrip_preserves_two_albums_and_original() -> Result<(), String>
+{
+    ordinary_roundtrip(FixtureMedia::Video)
+}
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_ordinary_selected_motion_preserves_locked_parent() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::LinkedMotion)
+}
+#[test]
+#[ignore = "isolated Docker and native metadata evidence required"]
+fn real_native_selected_motion_preserves_parents_albums_and_originals() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::NativeMotion)
+}
+#[derive(Clone, Copy)]
+enum FixtureMedia {
+    Image,
+    Video,
+    LinkedMotion,
+    NativeMotion,
+}
+impl FixtureMedia {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Image => "ordinary.png",
+            Self::Video => "ordinary.mp4",
+            Self::LinkedMotion => "linked-motion.mp4",
+            Self::NativeMotion => "synthetic-motion.mov",
+        }
+    }
+    fn role(self) -> ResourceRole {
+        match self {
+            Self::Image => ResourceRole::Image,
+            Self::Video | Self::LinkedMotion | Self::NativeMotion => ResourceRole::Video,
+        }
+    }
+    fn bytes(self) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Image => base64::engine::general_purpose::STANDARD
+                .decode(PIXEL)
+                .map_err(|_| "pixel".into()),
+            Self::Video => Ok(include_bytes!("../fixtures/live_graph/V.mp4").to_vec()),
+            Self::LinkedMotion => Ok(include_bytes!("../fixtures/live_graph/M.mp4").to_vec()),
+            Self::NativeMotion => Ok(super::live_graph::native_pair_bytes()?.1),
+        }
+    }
+}
+fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
+    let directory = std::env::temp_dir().join(format!(
+        "suwop-archive-{}-{}",
+        std::process::id(),
+        media.name()
+    ));
     std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -27,7 +83,7 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         .timeout_global(Some(Duration::from_secs(30)))
         .build()
         .into();
-    let (session, id, albums) = setup(&agent, &directory)?;
+    let (session, id, albums) = setup(&agent, &directory, media)?;
     let key = AssetKey {
         provider: Provider::Immich,
         scope: session.scope.clone(),
@@ -38,17 +94,16 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         agent: &agent,
         directory: &directory,
         writes: 0,
+        confirmations: 0,
         auth_requests: 0,
-        diagnostics: ScanDiagnostics::default(),
-    };
-    activate_archive(&mut shell, &core)?;
-    shell.run(
-        &core,
-        Event::Refresh {
-            permission: false,
-            now: now()?,
+        diagnostics: ScanDiagnostics {
+            selected_target: key.asset_id.clone(),
+            ..ScanDiagnostics::default()
         },
-    )?;
+    };
+    native_controls(&agent, &session, &directory, media, "before")?;
+    activate_archive(&mut shell, &core)?;
+    refresh_initial_hint(&mut shell, &core, &session, &key)?;
     for (index, to) in [
         ImmichArchiveDestination::Archive,
         ImmichArchiveDestination::Timeline,
@@ -91,7 +146,18 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
             operation.outcome,
             suwop_core::apple_visibility::VisibilityOutcome::Applied
         );
-        verify_preserved(&agent, &session, &key, &albums, &directory)?;
+        verify_preserved(&agent, &session, &key, &albums, &directory, media)?;
+        native_controls(
+            &agent,
+            &session,
+            &directory,
+            media,
+            if index == 0 {
+                "after-archive"
+            } else {
+                "after-timeline"
+            },
+        )?;
         let refresh_trace_start = shell.diagnostics.trace.len();
         shell.run(
             &core,
@@ -103,12 +169,53 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         assert!(core.view().ordinary_content_keys.contains(&key));
         recover_scan_revision_race(&mut shell, &core, &session, &key, to, refresh_trace_start)?;
     }
+    finish_roundtrip(&shell, &agent, &session, &directory, media)
+}
+fn refresh_initial_hint(
+    shell: &mut ArchiveShell<'_>,
+    core: &Core<Suwop>,
+    session: &Session,
+    key: &AssetKey,
+) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::Refresh {
+            permission: false,
+            now: now()?,
+        },
+    )?;
+    assert_eq!(shell.writes, 0);
+    assert_eq!(shell.confirmations, 0);
+    assert!(
+        read_state(shell.directory)?
+            .immich_visibility_operations
+            .is_empty()
+    );
+    recover_scan_revision_race(
+        shell,
+        core,
+        session,
+        key,
+        ImmichArchiveDestination::Timeline,
+        0,
+    )
+}
+fn finish_roundtrip(
+    shell: &ArchiveShell<'_>,
+    agent: &ureq::Agent,
+    session: &Session,
+    directory: &Path,
+    media: FixtureMedia,
+) -> Result<(), String> {
     assert_eq!(shell.auth_requests, 0);
     assert_eq!(shell.writes, 2);
-    let journal = serde_json::to_string(&read_state(&directory)?).map_err(|_| "journal")?;
+    let journal = serde_json::to_string(&read_state(directory)?).map_err(|_| "journal")?;
     assert!(!journal.contains("password"));
     assert!(!journal.contains("pinCode"));
-    std::fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
+    if matches!(media, FixtureMedia::LinkedMotion) {
+        super::live_graph::verify_ordinary_linked(agent, session, directory)?;
+    }
+    std::fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
     Ok(())
 }
 fn recover_scan_revision_race(
@@ -116,10 +223,10 @@ fn recover_scan_revision_race(
     core: &Core<Suwop>,
     session: &Session,
     key: &AssetKey,
-    applied: ImmichArchiveDestination,
+    current: ImmichArchiveDestination,
     refresh_trace_start: usize,
 ) -> Result<(), String> {
-    let next = match applied {
+    let next = match current {
         ImmichArchiveDestination::Timeline => ImmichArchiveDestination::Archive,
         ImmichArchiveDestination::Archive => ImmichArchiveDestination::Timeline,
     };
@@ -149,12 +256,12 @@ fn recover_scan_revision_race(
         assert_eq!(asset.originals().count(), 1);
         let trace = shell
             .diagnostics
-            .trace
-            .get(refresh_trace_start..)
-            .and_then(|trace| trace.last())
-            .ok_or("hydration diagnostic")?;
+            .selected_hydration_since(refresh_trace_start)
+            .ok_or("selected hydration diagnostic")?;
         assert_eq!(trace["api"], "assetMetadata");
         assert_eq!(trace["status"], 200);
+        assert_eq!(trace["selectedTarget"], true);
+        assert_eq!(trace["searchCandidate"], true);
         assert_eq!(trace["purpose"], Value::Null);
         assert_eq!(trace["stackShape"], "null");
         for field in [
@@ -171,6 +278,12 @@ fn recover_scan_revision_race(
         }
         assert_eq!(trace["updatedAtInstantMatch"], false);
         let writes = shell.writes;
+        let confirmations = shell.confirmations;
+        let journal =
+            serde_json::to_value(read_state(shell.directory)?.immich_visibility_operations)
+                .map_err(|_| "pre-refresh journal")?;
+        // The disabled hint does not create an intent. Only read-only settling
+        // and one explicit Refresh may reestablish a usable catalog revision.
         super::visibility::wait_for_stable_asset(
             shell.agent,
             &session.request(&format!("assets/{}", key.asset_id), "GET", None),
@@ -185,6 +298,12 @@ fn recover_scan_revision_race(
             },
         )?;
         assert_eq!(shell.writes, writes);
+        assert_eq!(shell.confirmations, confirmations);
+        assert_eq!(
+            serde_json::to_value(read_state(shell.directory)?.immich_visibility_operations)
+                .map_err(|_| "post-refresh journal")?,
+            journal
+        );
     }
     verify_hint(core, key, next, &shell.diagnostics.trace)
 }
@@ -241,14 +360,28 @@ fn read_state(directory: &Path) -> Result<SavedLibrary, String> {
 // enter the assertion trace. Never emit IDs, names, checksums, revisions or headers.
 #[derive(Default)]
 struct ScanDiagnostics {
+    selected_target: String,
     search: Vec<Value>,
     trace: Vec<Value>,
 }
 impl ScanDiagnostics {
+    fn selected_hydration_since(&self, start: usize) -> Option<&Value> {
+        self.trace
+            .get(start..)?
+            .iter()
+            .rev()
+            .find(|trace| trace["selectedTarget"] == true)
+    }
+
     fn observe(&mut self, request: &immich::HttpRequest, response: &Result<Value, String>) {
         let path = request.url.split("/api/").nth(1).unwrap_or("");
+        let selected_target = request.method == "GET"
+            && path
+                .strip_prefix("assets/")
+                .is_some_and(|id| id == self.selected_target);
         let Ok(response) = response else {
-            self.trace.push(json!({"transportOk":false}));
+            self.trace
+                .push(json!({"transportOk":false,"selectedTarget":selected_target}));
             return;
         };
         let status = response["status"].as_u64();
@@ -270,7 +403,7 @@ impl ScanDiagnostics {
                 .iter()
                 .find(|asset| asset["id"].as_str() == Some(id));
             let decode = serde_json::from_value::<immich::Asset>(body.clone()).is_ok();
-            let mut trace = json!({"api":"assetMetadata","status":status,"decode":decode,"stackShape":stack_shape(body),"searchCandidate":source.is_some(),"purpose":request.ordinary_content_authorization.as_ref().map(|a| format!("{:?}",a.purpose))});
+            let mut trace = json!({"api":"assetMetadata","status":status,"decode":decode,"stackShape":stack_shape(body),"searchCandidate":source.is_some(),"selectedTarget":selected_target,"purpose":request.ordinary_content_authorization.as_ref().map(|a| format!("{:?}",a.purpose))});
             if let Some(source) = source {
                 trace["searchStackShape"] = json!(stack_shape(source));
                 for field in ["id", "ownerId", "checksum", "updatedAt", "visibility"] {
@@ -297,6 +430,105 @@ impl ScanDiagnostics {
         }
     }
 }
+#[test]
+fn selected_hydration_diagnostics_never_borrow_unrelated_or_previous_scan_races()
+-> Result<(), String> {
+    let selected = "11111111-1111-4111-8111-111111111111";
+    let unrelated = "22222222-2222-4222-8222-222222222222";
+    let revision = "2026-10-15T00:00:00Z";
+    let mut target = json!({
+        "id":selected,"ownerId":"fixture-owner","type":"VIDEO",
+        "originalFileName":"fixture.mp4","checksum":"fixture-checksum",
+        "fileCreatedAt":revision,"fileModifiedAt":revision,"updatedAt":revision,
+        "isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"timeline",
+        "libraryId":null,"livePhotoVideoId":null
+    });
+    let mut other = target.clone();
+    other["id"] = json!(unrelated);
+    let mut diagnostics = ScanDiagnostics {
+        selected_target: selected.into(),
+        ..ScanDiagnostics::default()
+    };
+    diagnostics.observe(
+        &diagnostic_request("search/metadata", "POST")?,
+        &Ok(json!({"status":200,"body":{"assets":{"items":[target.clone(),other.clone()]}}})),
+    );
+    let start = diagnostics.trace.len();
+    target["stack"] = Value::Null;
+    other["stack"] = Value::Null;
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Ok(json!({"status":200,"body":target})),
+    );
+    other["updatedAt"] = json!("2026-10-15T00:00:01Z");
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert_eq!(
+        diagnostics.trace.last().ok_or("unrelated trace")?["updatedAtInstantMatch"],
+        false
+    );
+    let selected_trace = diagnostics
+        .selected_hydration_since(start)
+        .ok_or("selected trace")?;
+    assert_eq!(selected_trace["updatedAtInstantMatch"], true);
+    assert_eq!(selected_trace["decode"], true);
+    assert_eq!(selected_trace["selectedTarget"], true);
+    let new_scan = diagnostics.trace.len();
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert!(diagnostics.selected_hydration_since(new_scan).is_none());
+    target["updatedAt"] = json!("2026-10-15T00:00:01Z");
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Ok(json!({"status":200,"body":target})),
+    );
+    other["updatedAt"] = json!(revision);
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert_eq!(
+        diagnostics.trace.last().ok_or("unrelated trace")?["updatedAtInstantMatch"],
+        true
+    );
+    let selected_trace = diagnostics
+        .selected_hydration_since(new_scan)
+        .ok_or("new selected trace")?;
+    assert_eq!(selected_trace["updatedAtInstantMatch"], false);
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Err("synthetic transport failure".into()),
+    );
+    let failed = diagnostics
+        .selected_hydration_since(new_scan)
+        .ok_or("selected transport failure")?;
+    assert_eq!(failed["transportOk"], false);
+    assert!(failed["updatedAtInstantMatch"].is_null());
+    let safe = serde_json::to_string(&diagnostics.trace).map_err(|_| "safe trace")?;
+    for private in [
+        selected,
+        unrelated,
+        revision,
+        "2026-10-15T00:00:01Z",
+        "fixture.mp4",
+        "fixture-checksum",
+    ] {
+        assert!(!safe.contains(private));
+    }
+    Ok(())
+}
+fn diagnostic_request(path: &str, method: &str) -> Result<immich::HttpRequest, String> {
+    serde_json::from_value(json!({
+        "url":format!("http://fixture.invalid/api/{path}"),"method":method,
+        "headers":{},"body":null,"fields":{},"files":[],"downloadPath":null
+    }))
+    .map_err(|_| "diagnostic request".into())
+}
+
 fn stack_shape(asset: &Value) -> &'static str {
     match asset.get("stack") {
         None => "absent",
@@ -309,6 +541,7 @@ struct ArchiveShell<'a> {
     agent: &'a ureq::Agent,
     directory: &'a Path,
     writes: usize,
+    confirmations: usize,
     auth_requests: usize,
     diagnostics: ScanDiagnostics,
 }
@@ -338,6 +571,12 @@ impl ArchiveShell<'_> {
                 if let Some(permit) = &request.immich_archive_authorization {
                     assert_eq!(request.url, permit.url);
                     assert_eq!(request.method, "PUT");
+                    assert!(
+                        request
+                            .url
+                            .ends_with(&format!("/assets/{}", permit.key.asset_id))
+                    );
+                    assert_eq!(request.body, Some(json!({"visibility":permit.to})));
                     assert_eq!(
                         core.view().immich_archive_view.active_operation.as_ref(),
                         Some(permit)
@@ -357,6 +596,7 @@ impl ArchiveShell<'_> {
                 response
             }
             ShellOperation::ConfirmImmichArchive { prompt } => {
+                self.confirmations += 1;
                 assert_ne!(prompt.from, prompt.to);
                 assert!(
                     !serde_json::to_string(prompt)
@@ -392,12 +632,20 @@ impl ArchiveShell<'_> {
         }
     }
 }
-fn setup(agent: &ureq::Agent, directory: &Path) -> Result<(Session, String, Vec<String>), String> {
+fn setup(
+    agent: &ureq::Agent,
+    directory: &Path,
+    media: FixtureMedia,
+) -> Result<(Session, String, Vec<String>), String> {
     let address = std::env::var("SUWOP_IMMICH_URL").map_err(|_| "URL")?;
     let key = std::env::var("SUWOP_IMMICH_API_KEY").map_err(|_| "key")?;
     let directory = directory.to_path_buf();
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
-        let result = fixture(&ctx, &address, &key, &directory).await;
+        let result = if matches!(media, FixtureMedia::LinkedMotion) {
+            super::live_graph::ordinary_linked_setup(&ctx, &address, &key, &directory).await
+        } else {
+            fixture(&ctx, &address, &key, &directory, media).await
+        };
         let (session, status, error) = match result {
             Ok((session, id, albums)) => (
                 Some(session),
@@ -476,8 +724,12 @@ fn setup(agent: &ureq::Agent, directory: &Path) -> Result<(Session, String, Vec<
         serde_json::from_value(value["albums"].clone()).map_err(|_| "setup albums")?,
     ))
 }
-async fn pin_unset_session(ctx: &Context, admin: &Session) -> Result<Session, String> {
-    let email = format!("archive-{}@example.invalid", std::process::id());
+async fn pin_unset_session(
+    ctx: &Context,
+    admin: &Session,
+    suffix: &str,
+) -> Result<Session, String> {
+    let email = format!("archive-{}-{suffix}@example.invalid", std::process::id());
     let password = "ArchiveFixtureOnly123!";
     let _: Value = admin
         .json(
@@ -526,22 +778,25 @@ async fn fixture(
     address: &str,
     key: &str,
     directory: &Path,
+    media: FixtureMedia,
 ) -> Result<(Session, String, Vec<String>), String> {
     let admin = immich::connect(ctx, address, key, true)
         .await
         .map_err(|_| "fixture admin connect")?;
-    let session = pin_unset_session(ctx, &admin)
+    let session = pin_unset_session(ctx, &admin, media.name())
         .await
         .map_err(|_| "fixture new user/session")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(PIXEL)
-        .map_err(|_| "pixel")?;
-    let path = directory.join("ordinary.png");
+    if matches!(media, FixtureMedia::NativeMotion) {
+        let (id, albums) = super::live_graph::native_motion_setup(ctx, &session, directory).await?;
+        return Ok((session, id, albums));
+    }
+    let bytes = media.bytes()?;
+    let path = directory.join(media.name());
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     let resource = PhotoResource {
         id: "ordinary".into(),
-        name: "ordinary.png".into(),
-        role: ResourceRole::Image,
+        name: media.name().into(),
+        role: media.role(),
         sha1: None,
         bytes: Some(bytes.len() as u64),
     };
@@ -549,7 +804,10 @@ async fn fixture(
         resource: resource.clone(),
         path: path.to_string_lossy().into_owned(),
         signature: FileSignature {
-            sha256: "0".repeat(64),
+            sha256: {
+                use sha2::Digest;
+                suwop_core::domain::hex(&sha2::Sha256::digest(&bytes))
+            },
             bytes: bytes.len() as u64,
         },
     };
@@ -578,6 +836,7 @@ fn verify_preserved(
     key: &AssetKey,
     albums: &[String],
     directory: &Path,
+    media: FixtureMedia,
 ) -> Result<(), String> {
     let response: HttpResponse = serde_json::from_value(execute(
         agent,
@@ -607,9 +866,7 @@ fn verify_preserved(
     immich::check_status(response.status)?;
     assert_eq!(
         std::fs::read(path).map_err(|e| e.to_string())?,
-        base64::engine::general_purpose::STANDARD
-            .decode(PIXEL)
-            .map_err(|_| "pixel")?
+        media.bytes()?
     );
     Ok(())
 }
@@ -628,4 +885,20 @@ fn activate_archive(shell: &mut ArchiveShell<'_>, core: &Core<Suwop>) -> Result<
             scene_id: SCENE.into(),
         },
     )
+}
+
+fn native_controls(
+    agent: &ureq::Agent,
+    session: &Session,
+    directory: &Path,
+    media: FixtureMedia,
+    stage: &str,
+) -> Result<(), String> {
+    if matches!(media, FixtureMedia::LinkedMotion) {
+        super::live_graph::ordinary_linked_controls(agent, session, directory)?;
+    }
+    if matches!(media, FixtureMedia::NativeMotion) {
+        super::live_graph::native_motion_controls(agent, session, directory, stage)?;
+    }
+    Ok(())
 }

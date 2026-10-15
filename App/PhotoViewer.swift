@@ -16,6 +16,8 @@ struct PhotoViewer: View {
     @State private var protectedSource: AssetKey?
     @State private var lockingSource: AssetKey?
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .title2) private var actionWidth: CGFloat = 44
     @Environment(\.protectionSceneID) private var inheritedSceneID
     private let collection: AlbumKey?
     private let sceneID: String
@@ -162,6 +164,8 @@ struct PhotoViewer: View {
                 Text(photo.flatMap { model.displayedSource($0)?.capturedAt }?
                     .formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
                     .font(.subheadline.bold())
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
                 Text("\(index + 1) / \(pages.count)").font(.caption).foregroundStyle(.secondary)
             }
             Spacer()
@@ -184,67 +188,101 @@ struct PhotoViewer: View {
             if photo.providers.count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }
-            HStack(spacing: 28) {
-                Button { move(-1) } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
-                    .accessibilityLabel("前の写真")
-                    .keyboardShortcut(.leftArrow, modifiers: [])
-                Spacer()
-                if let kind = model.playbackKind(photo) {
-                    Button { model.play(photo) } label: {
-                        Image(systemName: kind == .live ? "livephoto.play" : "play.circle")
-                    }
-                    .disabled(model.isBusy)
-                    .accessibilityLabel(kind == .live ? "Live Photo の原本を再生" : "動画の原本を再生")
-                }
-                Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
-                    .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
-                Menu {
-                    Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
-                    Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
-                        if let source = model.displayedSource(photo) {
-                            model.pastePhotoEdits([source.key])
+            Group {
+                if dynamicTypeSize.isAccessibilitySize {
+                    wrappedActions(photo)
+                } else {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(spacing: 28) {
+                            previousPhoto
+                            Spacer()
+                            mediaActions(photo)
+                            Spacer()
+                            nextPhoto
                         }
-                    }.disabled(model.editClipboard == nil || model.displayedSource(photo)?.key.provider != .apple)
-                    Button("写真を編集", systemImage: "slider.horizontal.3") {
-                        reverting = false
-                        choosingEdit = true
+                        wrappedActions(photo)
                     }
-                    Button("原本へ戻す", systemImage: "arrow.uturn.backward") {
-                        reverting = true
-                        choosingEdit = true
-                    }
-                    Button("この表示元の Apple Photos コピーを非表示", systemImage: "eye.slash") {
-                        if let source = model.displayedSource(photo) {
-                            model.hideOnApple([source.key]) { showVisibility = true }
-                        }
-                    }
-                    .disabled(model
-                        .visibilityHideKeys(in: Set([model.displayedSource(photo)?.key].compactMap(\.self)))
-                        .isEmpty)
-                    .accessibilityIdentifier("hideDisplayedApplePhoto")
-                    Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
-                        showVisibility = true
-                    }
-                    immichArchiveAction(photo)
-                    immichLockAction(photo)
-                    Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
-                        protectedSource = model.displayedSource(photo)?.key
-                    }.disabled(model.displayedSource(photo) == nil)
-                        .accessibilityIdentifier("protectDisplayedSource")
-                } label: { Image(systemName: "slider.horizontal.3") }
-                    .disabled(model.isBusy).accessibilityLabel("写真を編集")
-                Button { model.favorite([photo], value: !photo.isFavorite) } label: {
-                    Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
                 }
-                .foregroundStyle(photo.isFavorite ? Color.red : .white).disabled(model.isBusy)
-                .accessibilityLabel(photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加")
-                Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
-                Spacer()
-                Button { move(1) } label: { Image(systemName: "chevron.right") }.disabled(index + 1 >= pages.count)
-                    .accessibilityLabel("次の写真")
-                    .keyboardShortcut(.rightArrow, modifiers: [])
             }.font(.title2)
         }.padding()
+    }
+
+    private func wrappedActions(_ photo: UnifiedPhoto) -> some View {
+        VStack(spacing: 16) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: actionWidth), spacing: 16)], spacing: 16) {
+                mediaActions(photo)
+            }
+            HStack {
+                previousPhoto
+                Spacer()
+                nextPhoto
+            }
+        }
+    }
+
+    private var previousPhoto: some View {
+        Button { move(-1) } label: { Image(systemName: "chevron.left") }.disabled(index == 0)
+            .accessibilityLabel("前の写真")
+            .keyboardShortcut(.leftArrow, modifiers: [])
+    }
+
+    private var nextPhoto: some View {
+        Button { move(1) } label: { Image(systemName: "chevron.right") }.disabled(index + 1 >= pages.count)
+            .accessibilityLabel("次の写真")
+            .keyboardShortcut(.rightArrow, modifiers: [])
+    }
+
+    @ViewBuilder private func mediaActions(_ photo: UnifiedPhoto) -> some View {
+        if let kind = model.playbackKind(photo) {
+            Button { model.play(photo) } label: {
+                Image(systemName: kind == .live ? "livephoto.play" : "play.circle")
+            }
+            .disabled(model.isBusy)
+            .accessibilityLabel(kind == .live ? "Live Photo の原本を再生" : "動画の原本を再生")
+        }
+        Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
+            .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
+        Menu {
+            Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
+            Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
+                if let source = model.displayedSource(photo) {
+                    model.pastePhotoEdits([source.key])
+                }
+            }.disabled(model.editClipboard == nil || model.displayedSource(photo)?.key.provider != .apple)
+            Button("写真を編集", systemImage: "slider.horizontal.3") {
+                reverting = false
+                choosingEdit = true
+            }
+            Button("原本へ戻す", systemImage: "arrow.uturn.backward") {
+                reverting = true
+                choosingEdit = true
+            }
+            Button("この表示元の Apple Photos コピーを非表示", systemImage: "eye.slash") {
+                if let source = model.displayedSource(photo) {
+                    model.hideOnApple([source.key]) { showVisibility = true }
+                }
+            }
+            .disabled(model
+                .visibilityHideKeys(in: Set([model.displayedSource(photo)?.key].compactMap(\.self)))
+                .isEmpty)
+            .accessibilityIdentifier("hideDisplayedApplePhoto")
+            Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
+                showVisibility = true
+            }
+            immichArchiveAction(photo)
+            immichLockAction(photo)
+            Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
+                protectedSource = model.displayedSource(photo)?.key
+            }.disabled(model.displayedSource(photo) == nil)
+                .accessibilityIdentifier("protectDisplayedSource")
+        } label: { Image(systemName: "slider.horizontal.3") }
+            .disabled(model.isBusy).accessibilityLabel("写真を編集")
+        Button { model.favorite([photo], value: !photo.isFavorite) } label: {
+            Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
+        }
+        .foregroundStyle(photo.isFavorite ? Color.red : .white).disabled(model.isBusy)
+        .accessibilityLabel(photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加")
+        Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
     }
 
     @ViewBuilder private func immichArchiveAction(_ photo: UnifiedPhoto) -> some View {

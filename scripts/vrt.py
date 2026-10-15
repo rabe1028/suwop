@@ -38,6 +38,7 @@ SCREENS = {
     "gallery-dark",
     "selection",
     "viewer",
+    "viewer-video",
     "photo-info",
     "albums",
     "connection",

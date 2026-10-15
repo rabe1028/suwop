@@ -116,12 +116,12 @@ private final class ArchiveABI {
                     "items": .array(visibility == "locked" ? [] : [asset(detail: false)]), "nextCursor": .null,
                 ]),
             ]))
+        case "assets/\(id)" where request.method == "PUT": return try mutate(request)
         case "assets/\(id)": return response(
                 visibility == "locked" ? .null : asset(),
                 status: visibility == "locked" ? 403 : 200
             )
         case "asset-files?assetId=\(id)": return response(.array([]))
-        case "assets" where request.method == "PUT": return try mutate(request)
         default:
             if path == "albums" || path.hasPrefix("albums?") {
                 return response(.array([]))
@@ -133,7 +133,8 @@ private final class ArchiveABI {
     private func mutate(_ request: HttpRequest) throws -> HttpResponse {
         let to = try #require(request.body["visibility"].string)
         #expect(["timeline", "archive"].contains(to))
-        #expect(try request.body["ids"].decode([String].self) == [id])
+        #expect(request.url == endpoint + "/assets/" + id)
+        #expect(try Set(request.body.decode([String: JSONValue].self).keys) == Set(["visibility"]))
         let authorization = try #require(request.immichArchiveAuthorization)
         #expect(authorization.key == key && authorization.to.rawValue == to && authorization.sceneID == scene)
         #expect(authorization.url == request.url)
@@ -143,7 +144,7 @@ private final class ArchiveABI {
         #expect(durableBeforePUT)
         puts += 1
         visibility = to
-        return response(.null, status: loseReply ? 503 : 204)
+        return response(loseReply ? .null : asset(), status: loseReply ? 503 : 200)
     }
 
     private func asset(detail: Bool = true) -> JSONValue {
