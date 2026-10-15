@@ -201,7 +201,7 @@ fn fixture_state(provider: Provider, access: ScanAccess) -> SavedLibrary {
     let local = asset(Provider::Apple);
     let remote = asset(Provider::Immich);
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(provider, access)],
         receipts: vec![TransferReceipt {
@@ -225,6 +225,8 @@ fn core(provider: Provider, access: ScanAccess) -> Core<Suwop> {
             ready: true,
             state: fixture_state(provider, access),
             session: (provider == Provider::Immich).then(|| Session {
+                ordinary_content_guard: None,
+                ordinary_content_context: None,
                 endpoint: "https://server/api".into(),
                 key: "test".into(),
                 scope: "remote".into(),

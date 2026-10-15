@@ -2,7 +2,7 @@ import Foundation
 import SuwopShell
 import Testing
 
-private final class LockedSessionABI {
+final class LockedSessionABI {
     enum Fault { case none, password, pin }
     let bridge: CoreBridge
     let owner = "11111111-1111-4111-8111-111111111111"
@@ -19,6 +19,8 @@ private final class LockedSessionABI {
     var elevated = false
     var nativeReads = 0
     var routes: [String] = []
+    var effectReply: ((ShellOperation) throws -> JSONValue?)?
+    var httpReply: ((HttpRequest) throws -> HttpResponse?)?
 
     init() throws {
         bridge = try CoreBridge()
@@ -71,6 +73,9 @@ private final class LockedSessionABI {
     }
 
     private func reply(_ operation: ShellOperation) throws -> JSONValue {
+        if let result = try effectReply?(operation) {
+            return result
+        }
         let data = operation.data ?? .null
         switch operation.type {
         case "readState": return try .from(saved)
@@ -95,6 +100,9 @@ private final class LockedSessionABI {
     private func http(_ request: HttpRequest) throws -> HttpResponse {
         let path = String(request.url.dropFirst(endpoint.count + 1))
         routes.append(request.method + " " + path)
+        if let result = try httpReply?(request) {
+            return result
+        }
         let ordinary = request.headers["x-api-key"] == "ordinary-api-key"
         if path == "server/version" {
             return try response(.from(Version(major: 3, minor: 2, patch: 4)))

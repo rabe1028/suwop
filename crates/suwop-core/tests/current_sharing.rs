@@ -47,6 +47,8 @@ fn apple() -> StoredAsset {
 }
 fn session() -> Session {
     Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://photos.example/api".into(),
         key: "fixture".into(),
         user_id: OWNER.into(),
@@ -72,7 +74,7 @@ fn facts() -> CurrentImageFacts {
 }
 fn state(asset: StoredAsset) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: asset.key.provider,

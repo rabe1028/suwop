@@ -37,6 +37,7 @@ pub enum ImmichLockedState {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedEntry {
+    pub visibility_action: crate::immich_visibility::ImmichVisibilityActionHint,
     pub id: String,
     pub asset: StoredAsset,
 }
@@ -118,6 +119,7 @@ impl DedicatedSession {
     fn request(&self, path: &str, method: &str, body: Option<Value>) -> HttpRequest {
         let mut request = self.ordinary.request(path, method, body);
         request.headers.remove("x-api-key");
+        request.ordinary_content_authorization = None;
         request
             .headers
             .insert("Authorization".into(), format!("Bearer {}", self.token.0));
@@ -287,6 +289,7 @@ async fn cleanup(ctx: &Context, session: &DedicatedSession) -> bool {
 fn denied(model: &Model, key: &AssetKey) -> bool {
     model.protection.membership_uncertain
         || model.protection.denied.contains(key)
+        || model.immich_visibility.denied.contains(key)
         || model
             .state
             .protected_entries
@@ -521,9 +524,11 @@ async fn open_authenticated(
             if !seen.insert(asset.id.clone()) {
                 return Err(ERROR.into());
             }
+            let record = asset.record(&session.ordinary.scope, None, None);
             entries.push(ImmichLockedEntry {
+                visibility_action: crate::immich_visibility::hint(&record, true),
                 id: asset.id.clone(),
-                asset: asset.record(&session.ordinary.scope, None, None),
+                asset: record,
             });
         }
         let next = page["assets"].get("nextCursor").ok_or(ERROR)?;
@@ -989,6 +994,7 @@ fn request_image(
         return Command::done();
     };
     request.headers.remove("x-api-key");
+    request.ordinary_content_authorization = None;
     request.headers.insert(
         "Authorization".into(),
         format!("Bearer {}", session.token.0),
@@ -1080,6 +1086,8 @@ mod tests {
     use super::*;
     fn open_model() -> Model {
         let ordinary = Session {
+            ordinary_content_guard: None,
+            ordinary_content_context: None,
             endpoint: "https://fixture.example/api".into(),
             key: "key".into(),
             user_id: "owner".into(),
@@ -1215,5 +1223,185 @@ mod tests {
             }
         }
         Ok(())
+    }
+}
+
+#[derive(Clone, Debug)]
+pub(crate) struct VisibilitySession {
+    pub session: DedicatedSession,
+    pub generation: Arc<AtomicU64>,
+    pub expected: u64,
+    pub grant_id: String,
+    pub scene_id: String,
+    hard_deadline: std::time::Instant,
+    lease_deadline: std::time::Instant,
+}
+pub(crate) fn visibility_session(
+    model: &Model,
+    grant: &str,
+    scene: &str,
+) -> Option<VisibilitySession> {
+    if !current(model)
+        || model.immich_locked.grant_id.as_deref() != Some(grant)
+        || model.immich_locked.scene_id.as_deref() != Some(scene)
+    {
+        return None;
+    }
+    Some(VisibilitySession {
+        session: model.immich_locked.session.clone()?,
+        generation: model.immich_locked.generation.clone(),
+        expected: epoch(&model.immich_locked),
+        grant_id: grant.into(),
+        scene_id: scene.into(),
+        hard_deadline: model.immich_locked.hard_deadline?,
+        lease_deadline: model.immich_locked.lease_deadline?,
+    })
+}
+impl VisibilitySession {
+    pub(crate) fn scope(&self) -> &str {
+        &self.session.ordinary.scope
+    }
+    pub(crate) fn owner(&self) -> &str {
+        &self.session.ordinary.user_id
+    }
+    pub(crate) fn valid(&self) -> Result<(), String> {
+        check(&self.generation, self.expected)?;
+        let now = std::time::Instant::now();
+        if now >= self.hard_deadline || now >= self.lease_deadline {
+            return Err("認証の有効時間が終了しました。もう一度認証してください。".into());
+        }
+        Ok(())
+    }
+    pub(crate) async fn status(&self, ctx: &Context) -> Result<(), String> {
+        self.valid()?;
+        status(ctx, &self.generation, self.expected, &self.session).await?;
+        self.valid()
+    }
+    fn visibility_deadline(&self) -> Result<u64, String> {
+        let remaining = self
+            .hard_deadline
+            .min(self.lease_deadline)
+            .checked_duration_since(std::time::Instant::now())
+            .ok_or(ERROR)?;
+        let deadline = std::time::SystemTime::now()
+            .checked_add(remaining)
+            .ok_or(ERROR)?
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|_| ERROR)?
+            .as_millis();
+        u64::try_from(deadline).map_err(|_| ERROR.into())
+    }
+    pub(crate) async fn mutate_visibility(
+        &self,
+        ctx: &Context,
+        operation: &crate::immich_visibility::ImmichVisibilityOperation,
+    ) -> Result<Value, String> {
+        self.valid()?;
+        if operation.scope != self.scope() {
+            return Err(ERROR.into());
+        }
+        crate::immich::valid_id(&operation.key.asset_id)?;
+        let mut request = self.session.request(
+            "assets",
+            "PUT",
+            Some(json!({"ids":[operation.key.asset_id],"visibility":operation.to})),
+        );
+        request.immich_visibility_authorization =
+            Some(crate::immich_visibility::ImmichVisibilityAuthorization {
+                deadline_unix_milliseconds: self.visibility_deadline()?,
+                operation_id: operation.id.clone(),
+                grant_id: self.grant_id.clone(),
+                scene_id: self.scene_id.clone(),
+                generation: self.expected,
+            });
+        let response = guarded(ctx, &self.generation, self.expected, request).await?;
+        self.valid()?;
+        Ok(response)
+    }
+    pub(crate) async fn json(
+        &self,
+        ctx: &Context,
+        path: &str,
+        method: &str,
+        body: Option<Value>,
+    ) -> Result<Value, String> {
+        self.valid()?;
+        let value = guarded(
+            ctx,
+            &self.generation,
+            self.expected,
+            self.session.request(path, method, body),
+        )
+        .await?;
+        self.valid()?;
+        Ok(value)
+    }
+}
+pub(crate) fn clear_visibility_image(model: &mut Model) {
+    model.immich_locked.image = None;
+    model.immich_locked.pending = None;
+}
+
+#[cfg(test)]
+mod visibility_deadline_tests {
+    use super::*;
+    #[test]
+    fn expired_visibility_capability_denies_unchanged_generation() {
+        let generation = Arc::new(AtomicU64::new(7));
+        let now = std::time::Instant::now();
+        let make = |hard_deadline, lease_deadline| VisibilitySession {
+            session: DedicatedSession {
+                ordinary: Session {
+                    ordinary_content_guard: None,
+                    ordinary_content_context: None,
+                    endpoint: "https://fixture.example/api".into(),
+                    key: "key".into(),
+                    user_id: "owner".into(),
+                    scope: "scope".into(),
+                    version: crate::immich::Version {
+                        major: 3,
+                        minor: 2,
+                        patch: 4,
+                    },
+                },
+                token: Secret("token".into()),
+            },
+            generation: generation.clone(),
+            expected: 7,
+            grant_id: "grant".into(),
+            scene_id: "scene".into(),
+            hard_deadline,
+            lease_deadline,
+        };
+        assert!(
+            make(
+                now.checked_sub(std::time::Duration::from_secs(1))
+                    .unwrap_or(now),
+                now + std::time::Duration::from_secs(30)
+            )
+            .valid()
+            .is_err()
+        );
+        assert!(
+            make(
+                now + std::time::Duration::from_mins(15),
+                now.checked_sub(std::time::Duration::from_secs(1))
+                    .unwrap_or(now)
+            )
+            .valid()
+            .is_err()
+        );
+        let expired = make(now, now);
+        let mut command = Command::<crate::app::Effect, Event>::new(move |ctx| async move {
+            let error = expired.status(&ctx).await.err().unwrap_or_default();
+            ctx.send_event(Event::ImmichVisibilityPrepared { result: Err(error) });
+        });
+        assert_eq!(command.effects().count(), 0);
+        assert!(
+            command
+                .events()
+                .any(|event| matches!(event, Event::ImmichVisibilityPrepared { result: Err(_) }))
+        );
+        assert_eq!(generation.load(Ordering::SeqCst), 7);
     }
 }

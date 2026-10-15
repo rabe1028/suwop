@@ -69,6 +69,8 @@ fn upload_with_wait(
 ) -> Result<UploadRun, String> {
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
         let session = Session {
+            ordinary_content_guard: None,
+            ordinary_content_context: None,
             endpoint: "https://photos.example/proxy/api".into(),
             key: "fixture".into(),
             user_id: "owner".into(),

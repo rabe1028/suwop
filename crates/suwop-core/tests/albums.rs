@@ -47,7 +47,7 @@ fn snapshot() -> AlbumSnapshot {
 }
 fn fixture_state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         albums: vec![snapshot()],
         snapshots: vec![LibrarySnapshot {
@@ -471,6 +471,8 @@ fn fenced_remote_album(members: Vec<String>) -> Result<(Core<Suwop>, Native), St
         scanned_at: Some(1.0),
     });
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "test".into(),
         user_id: REMOTE_OWNER.into(),

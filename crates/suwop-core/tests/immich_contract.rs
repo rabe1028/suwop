@@ -35,6 +35,8 @@ fn scan(
     pages: Vec<Value>,
 ) -> Result<(Vec<HttpRequest>, suwop_core::app::ViewModel), String> {
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "test".into(),
         user_id: USER.into(),
@@ -45,7 +47,7 @@ fn scan(
         Suwop,
         Model {
             state: SavedLibrary {
-                schema_version: 5,
+                schema_version: 6,
                 apple_scope: "apple".into(),
                 ..SavedLibrary::default()
             },

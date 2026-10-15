@@ -23,6 +23,8 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub immich_visibility_operations: Vec<crate::immich_visibility::ImmichVisibilityOperation>,
+    #[serde(default)]
     pub protected_entries: Vec<crate::protection::PersistentProtectedEntry>,
     #[serde(default)]
     pub apple_visibility_operations: Vec<crate::apple_visibility::AppleVisibilityOperation>,
@@ -54,6 +56,9 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    ConfirmImmichVisibility {
+        prompt: crate::immich_visibility::ImmichVisibilityPrompt,
+    },
     ReadImmichLockedImage {
         ticket: crate::immich_locked::ImmichLockedImageTicket,
     },
@@ -270,6 +275,30 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    PrepareImmichVisibility {
+        key: crate::domain::AssetKey,
+        to: crate::immich_visibility::ImmichVisibility,
+        #[serde(rename = "operationID")]
+        operation_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    InspectImmichVisibility {
+        #[serde(rename = "recordID")]
+        record_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    RecoverImmichVisibilityState {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
     OpenImmichLocked {
         #[serde(rename = "sceneID")]
         scene_id: String,
@@ -533,6 +562,14 @@ pub enum Event {
     },
     AppleChanged,
     #[serde(skip)]
+    ImmichVisibilityPrepared {
+        result: Result<crate::immich_visibility::PreparedVisibility, String>,
+    },
+    #[serde(skip)]
+    ImmichVisibilityFinished {
+        result: crate::immich_visibility::VisibilityCompletion,
+    },
+    #[serde(skip)]
     Progress {
         state: SavedLibrary,
         status: String,
@@ -548,6 +585,8 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub immich_visibility: crate::immich_visibility::ImmichVisibilityModel,
+    pub ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub immich_locked: crate::immich_locked::ImmichLockedModel,
     pub protection: crate::protection::ProtectionModel,
     /// Observation-only token shared with in-flight workflows; never persisted.
@@ -565,6 +604,10 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub ordinary_content_keys: Vec<crate::domain::AssetKey>,
+    pub private_content_revision: String,
+    pub immich_visibility_actions: Vec<crate::immich_visibility::ImmichVisibilityActionHint>,
+    pub immich_visibility_view: crate::immich_visibility::ImmichVisibilityView,
     pub immich_locked_view: crate::immich_locked::ImmichLockedView,
     pub protected_view: crate::protection::ProtectedView,
     pub apple_visibility_hide_keys: Vec<crate::domain::AssetKey>,
@@ -594,6 +637,21 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if matches!(
+            event,
+            Event::Disconnect
+                | Event::Configure { .. }
+                | Event::ProtectedPersisted { .. }
+                | Event::ProtectedReconciled { .. }
+                | Event::Finished { .. }
+        ) {
+            model
+                .ordinary_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+        if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
+            return command;
+        }
         if let Some(command) = crate::immich_locked::update(event.clone(), model) {
             return command;
         }
@@ -610,20 +668,20 @@ impl crux_core::App for Suwop {
 }
 impl Suwop {
     fn update_library(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if model.immich_visibility.persistence_uncertain
+            && matches!(
+                event,
+                Event::ProtectPhotos { .. } | Event::UnprotectPhotos { .. }
+            )
+        {
+            model.error = Some("非表示変更の保存状態を先に確認してください。".into());
+            return Command::done();
+        }
         if let Some(command) = crate::protection::update(event.clone(), model) {
             return command;
         }
-        if model.protection.membership_uncertain
-            && !matches!(
-                event,
-                Event::AppleChanged
-                    | Event::Progress { .. }
-                    | Event::Finished { .. }
-                    | Event::Browse { .. }
-                    | Event::ChoosePreview { .. }
-            )
-        {
-            model.error = Some("保護の保存状態を先に確認してください。変更は開始しません。".into());
+        if ordinary_event_denied(model, &event) {
+            model.error = Some("保存状態を先に確認してください。変更は開始しません。".into());
             return Command::done();
         }
         match event {
@@ -658,7 +716,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 5;
+                model.ready = model.state.schema_version == 6;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
             }
@@ -679,7 +737,13 @@ impl Suwop {
                 let state = model.state.clone();
                 let session = model.session.clone();
                 let apple_generation = model.apple_generation.clone();
-                let denied_content = model.protection.denied.clone();
+                let denied_content = model
+                    .protection
+                    .denied
+                    .union(&model.immich_visibility.denied)
+                    .cloned()
+                    .collect();
+                let ordinary_generation = model.ordinary_generation.clone();
                 Command::new(move |ctx| async move {
                     let result = crate::workflow::run_guarded(
                         &ctx,
@@ -688,6 +752,7 @@ impl Suwop {
                         session,
                         apple_generation,
                         denied_content,
+                        ordinary_generation,
                     )
                     .await;
                     ctx.send_event(Event::Finished {
@@ -705,7 +770,8 @@ impl Suwop {
         let can_transfer = model.ready
             && model.session.is_some()
             && !model.busy
-            && !model.protection.membership_uncertain;
+            && !model.protection.membership_uncertain
+            && !model.immich_visibility.persistence_uncertain;
         let move_blockers = public_move_blockers(model, can_transfer);
         let public = crate::privacy::PublishedLibrary::from_canonical(
             &crate::protection::ordinary_state(model),
@@ -728,7 +794,18 @@ impl Suwop {
         let displayed_dates = displayed_dates(&preview_choices);
         let editing_access =
             crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
+        let ordinary_content_keys = ordinary_keys(&public);
+        let private_content_revision = ordinary_revision(
+            model.session.as_ref().map(|s| s.scope.as_str()),
+            model
+                .ordinary_generation
+                .load(std::sync::atomic::Ordering::SeqCst),
+        );
         ViewModel {
+            ordinary_content_keys,
+            private_content_revision,
+            immich_visibility_actions: crate::immich_visibility::actions(model),
+            immich_visibility_view: crate::immich_visibility::view(model),
             immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
             apple_visibility_hide_keys: if model.ready
@@ -903,7 +980,7 @@ fn update_preview_preferences(model: &mut Model, selected: Option<crate::domain:
         crate::media::remember_preview(&mut model.preview_preferences, photo, key);
     }
 }
-fn invalidate_apple(state: &mut SavedLibrary) {
+pub(crate) fn invalidate_apple(state: &mut SavedLibrary) {
     for s in state
         .albums
         .iter_mut()
@@ -936,4 +1013,42 @@ impl std::fmt::Debug for EffectFfi {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("EffectFfi::Io")
     }
+}
+
+pub(crate) fn ordinary_revision(scope: Option<&str>, generation: u64) -> String {
+    use sha2::Digest;
+    crate::domain::hex(&sha2::Sha256::digest(
+        serde_json::to_vec(&(generation, scope)).unwrap_or_default(),
+    ))
+}
+
+fn ordinary_keys(public: &crate::privacy::PublishedLibrary) -> Vec<crate::domain::AssetKey> {
+    let keys: Vec<_> = public
+        .snapshots
+        .iter()
+        .filter(|snapshot| snapshot.access != crate::domain::ScanAccess::Unavailable)
+        .flat_map(|snapshot| {
+            snapshot
+                .assets
+                .iter()
+                .filter(|asset| asset.content_visible())
+                .map(|asset| asset.key.clone())
+        })
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect();
+
+    keys
+}
+
+fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
+    (model.protection.membership_uncertain || model.immich_visibility.persistence_uncertain)
+        && !matches!(
+            event,
+            Event::AppleChanged
+                | Event::Progress { .. }
+                | Event::Finished { .. }
+                | Event::Browse { .. }
+                | Event::ChoosePreview { .. }
+        )
 }

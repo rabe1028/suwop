@@ -53,6 +53,8 @@ fn snapshot(assets: Vec<StoredAsset>, access: ScanAccess) -> LibrarySnapshot {
 }
 fn session() -> Session {
     Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "fixture".into(),
         user_id: "owner".into(),
@@ -66,7 +68,7 @@ fn session() -> Session {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![
             snapshot(

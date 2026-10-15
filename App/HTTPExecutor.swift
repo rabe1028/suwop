@@ -34,7 +34,10 @@ actor HTTPExecutor {
         session = URLSession(configuration: config, delegate: RedirectGuard(), delegateQueue: nil)
     }
 
-    func execute(_ operation: HttpRequest) async throws -> HttpResponse {
+    func execute(_ operation: HttpRequest, submission: NativeSubmissionPermit? = nil) async throws -> HttpResponse {
+        if submission != nil {
+            guard operation.files.isEmpty, operation.downloadPath == nil else { throw CancellationError() }
+        }
         var request = try urlRequest(operation)
         if let path = operation.downloadPath {
             let destination = URL(fileURLWithPath: path)
@@ -52,7 +55,10 @@ actor HTTPExecutor {
         }
         let bytes: Data
         let response: URLResponse
-        if operation.files.isEmpty {
+        if let submission {
+            guard operation.files.isEmpty, operation.downloadPath == nil else { throw CancellationError() }
+            (bytes, response) = try await submittedData(request, permit: submission)
+        } else if operation.files.isEmpty {
             (bytes, response) = try await session.data(for: request)
         } else {
             let boundary = "Suwop-\(UUID().uuidString)"
@@ -65,6 +71,32 @@ actor HTTPExecutor {
         let body: JSONValue = (200 ..< 300).contains(status) && !bytes.isEmpty
             ? try Wire.decoder().decode(JSONValue.self, from: bytes) : .null
         return HttpResponse(body: body, path: nil, status: Int64(status))
+    }
+
+    private func submittedData(
+        _ request: URLRequest,
+        permit: NativeSubmissionPermit
+    ) async throws -> (Data, URLResponse) {
+        // Once resumed, preserve the response even if the caller's scene closes.
+        let transportSession = session
+        return try await withCheckedThrowingContinuation { continuation in
+            do {
+                try permit.submit {
+                    let task = transportSession.dataTask(with: request) { data, response, error in
+                        if let error {
+                            continuation.resume(throwing: error)
+                        } else if let data, let response {
+                            continuation.resume(returning: (data, response))
+                        } else {
+                            continuation.resume(throwing: SuwopError("通信結果を確認できません。"))
+                        }
+                    }
+                    task.resume()
+                }
+            } catch {
+                continuation.resume(throwing: error)
+            }
+        }
     }
 
     func thumbnail(_ operation: HttpRequest) async throws -> Data {

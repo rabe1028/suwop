@@ -38,7 +38,14 @@ impl Version {
     }
 }
 #[derive(Debug, Clone)]
+pub struct OrdinarySessionGuard {
+    pub generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub expected: u64,
+}
+#[derive(Debug, Clone)]
 pub struct Session {
+    pub ordinary_content_guard: Option<OrdinarySessionGuard>,
+    pub ordinary_content_context: Option<OrdinaryContentAuthorization>,
     pub endpoint: String,
     pub key: String,
     pub user_id: String,
@@ -52,9 +59,28 @@ pub struct UploadPart {
     pub path: String,
     pub filename: String,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum OrdinaryContentPurpose {
+    Read,
+    DestinationReadback,
+    VisibilityReconciliation,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrdinaryContentAuthorization {
+    pub source_keys: Vec<AssetKey>,
+    pub expected_revision: String,
+    pub purpose: OrdinaryContentPurpose,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_visibility_authorization:
+        Option<crate::immich_visibility::ImmichVisibilityAuthorization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinary_content_authorization: Option<OrdinaryContentAuthorization>,
     pub url: String,
     pub method: String,
     pub headers: BTreeMap<String, String>,
@@ -122,6 +148,32 @@ pub fn valid_id(id: &str) -> Result<(), String> {
     }
 }
 impl Session {
+    pub(crate) fn check_content_guard(&self) -> Result<(), String> {
+        if self
+            .ordinary_content_guard
+            .as_ref()
+            .is_some_and(|g| g.generation.load(std::sync::atomic::Ordering::SeqCst) != g.expected)
+        {
+            return Err("写真へのアクセスが変わりました。処理を中止しました。".into());
+        }
+        Ok(())
+    }
+    fn content_authorization(&self, path: &str) -> Option<OrdinaryContentAuthorization> {
+        let context = self.ordinary_content_context.as_ref()?;
+        let asset_id = path
+            .strip_prefix("assets/")
+            .and_then(|tail| tail.split(['/', '?']).next());
+        let id = asset_id.filter(|id| valid_id(id).is_ok())?;
+        let mut result = context.clone();
+        if result.source_keys.is_empty() {
+            result.source_keys.push(AssetKey {
+                provider: Provider::Immich,
+                scope: self.scope.clone(),
+                asset_id: id.into(),
+            });
+        }
+        Some(result)
+    }
     pub fn preview_request(&self, id: &str, preview: bool) -> Result<HttpRequest, String> {
         valid_id(id)?;
         let size = if preview { "preview" } else { "thumbnail" };
@@ -140,6 +192,10 @@ impl Session {
     #[must_use]
     pub fn request(&self, path: &str, method: &str, body: Option<Value>) -> HttpRequest {
         HttpRequest {
+            immich_visibility_authorization: None,
+            ordinary_content_authorization: (method == "GET")
+                .then(|| self.content_authorization(path))
+                .flatten(),
             url: format!("{}/{path}", self.endpoint),
             method: method.into(),
             headers: BTreeMap::from([
@@ -159,8 +215,12 @@ impl Session {
         method: &str,
         body: Option<Value>,
     ) -> Result<T, String> {
+        self.check_content_guard()?;
         let response: HttpResponse =
             io(ctx, ShellOperation::Http(self.request(path, method, body))).await?;
+        if method == "GET" || method == "POST" && path == "search/metadata" {
+            self.check_content_guard()?;
+        }
         check_status(response.status)?;
         serde_json::from_value(response.body)
             .map_err(|e| format!("Immich の応答形式が不正です: {e}"))
@@ -306,9 +366,11 @@ impl Session {
     }
     pub async fn download(&self, ctx: &Context, id: &str, path: &str) -> Result<(), String> {
         valid_id(id)?;
+        self.check_content_guard()?;
         let mut request = self.request(&format!("assets/{id}/original?edited=false"), "GET", None);
         request.download_path = Some(path.into());
         let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
+        self.check_content_guard()?;
         check_status(response.status)
     }
     pub async fn trash(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
@@ -339,6 +401,8 @@ pub async fn connect(
         return Err("API キーが不正です。".into());
     }
     let mut session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: endpoint(address, allow_http)?,
         key: key.into(),
         user_id: String::new(),

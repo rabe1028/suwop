@@ -1,0 +1,68 @@
+import SuwopShell
+import SwiftUI
+
+/// Actual Gallery/viewer/session navigation backed by one disposable C2 server.
+@MainActor struct InteractiveImmichVisibilityHost: View {
+    @State private var fixture: ImmichVisibilityPhotoFixture?
+    @Environment(\.scenePhase) private var phase
+
+    var body: some View {
+        Group {
+            if let fixture, let model = fixture.model {
+                VisibilityFixtureContent(fixture: fixture, model: model, server: fixture.server)
+            } else {
+                ProgressView("Fixture loading")
+            }
+        }.background(NativeScenePresentationAnchor(sceneID: ImmichLockedFixtureData.sceneID))
+            .environment(\.dynamicTypeSize, CommandLine.arguments.contains("--large-text") ? .accessibility3 : .large)
+            .onAppear {
+                if CommandLine.arguments.contains("--large-text") {
+                    // UIKit dialogs inherit the real accessibility size too;
+                    // SwiftUI-only environment changes are insufficient evidence.
+                    for case let scene as UIWindowScene in UIApplication.shared.connectedScenes {
+                        for window in scene.windows {
+                            window.traitOverrides.preferredContentSizeCategory = .accessibilityExtraLarge
+                        }
+                    }
+                }
+            }.onChange(of: phase) { _, value in
+                let native: ProtectionScenePhase = value == .active ? .active : value == .inactive ? .inactive :
+                    .background
+                fixture?.model?.immichLocked.sceneChanged(sceneID: ImmichLockedFixtureData.sceneID, phase: native)
+            }.task {
+                do {
+                    let kind: ImmichVisibilityFixtureServer.SourceKind = CommandLine.arguments
+                        .contains("--unsupported-live")
+                        ? .live : .image
+                    let created = try ImmichVisibilityPhotoFixture(kind: kind)
+                    if CommandLine.arguments.contains("--lost-visibility-response") {
+                        created.server.fault = .lostMutationReply
+                    }
+                    _ = try await created.start()
+                    // UI acceptance uses the actual native dialog, not an injected answer.
+                    created.shell.immichVisibilityConfirmationEffect = nil
+                    fixture = created
+                } catch { print("IMMICH_VISIBILITY_FIXTURE_FAILED") }
+            }
+    }
+}
+
+@MainActor private struct VisibilityFixtureContent: View {
+    @ObservedObject var fixture: ImmichVisibilityPhotoFixture
+    @ObservedObject var model: LibraryModel
+    @ObservedObject var server: ImmichVisibilityFixtureServer
+
+    var body: some View {
+        VStack {
+            GalleryView(model: model, sceneID: ImmichLockedFixtureData.sceneID)
+                .environment(\.protectionSceneID, ImmichLockedFixtureData.sceneID)
+            HStack {
+                Text("writes=\(fixture.writes)").accessibilityIdentifier("visibilityFixtureWrites")
+                Text("attempts=\(server.mutationAttempts)").accessibilityIdentifier("visibilityFixtureAttempts")
+                Text("mutations=\(server.mutations)").accessibilityIdentifier("visibilityFixtureMutations")
+                Text("source=\(server.record["visibility"].string ?? "unknown")")
+                    .accessibilityIdentifier("visibilityFixtureSource")
+            }.font(.caption2)
+        }
+    }
+}

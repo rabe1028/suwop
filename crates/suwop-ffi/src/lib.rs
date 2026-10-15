@@ -221,6 +221,8 @@ fn thumbnail_request(input: &str) -> Result<Value, String> {
     }
     let request: Thumbnail = serde_json::from_str(input).map_err(|e| e.to_string())?;
     let session = suwop_core::immich::Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: request.address,
         key: request.key,
         user_id: String::new(),

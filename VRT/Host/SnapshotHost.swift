@@ -4,7 +4,9 @@ import SwiftUI
 @main @MainActor struct SnapshotHost: App {
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--immich-locked-fixture") {
+            if CommandLine.arguments.contains("--immich-visibility-fixture") {
+                InteractiveImmichVisibilityHost()
+            } else if CommandLine.arguments.contains("--immich-locked-fixture") {
                 InteractiveImmichLockedHost()
             } else if CommandLine.arguments.contains("--protected-fixture") {
                 InteractiveProtectedPhotosHost()

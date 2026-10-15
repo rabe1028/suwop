@@ -19,6 +19,8 @@ fn asset() -> Value {
 }
 fn core(protected: bool) -> Core<Suwop> {
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://fixture.example/api".into(),
         key: "ordinary-api-secret".into(),
         user_id: OWNER.into(),
@@ -30,7 +32,7 @@ fn core(protected: bool) -> Core<Suwop> {
         },
     };
     let state = SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),

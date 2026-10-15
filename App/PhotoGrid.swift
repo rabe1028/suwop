@@ -164,11 +164,12 @@ struct PhotoTile: View {
     let selected: Bool
     let selecting: Bool
     @State private var image: PlatformImage?
+    @State private var imageIdentifier = ""
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottomLeading) {
                 Rectangle().fill(.secondary.opacity(0.15))
-                if let image {
+                if let image, imageIdentifier == model.previewIdentifier(photo) {
                     platformImage(image).resizable().scaledToFill().frame(
                         width: geometry.size.width,
                         height: geometry.size.height
@@ -206,8 +207,10 @@ struct PhotoTile: View {
             .contentShape(Rectangle())
             .task(id: model.previewIdentifier(photo)) {
                 image = nil
+                let identifier = model.previewIdentifier(photo)
                 let loaded = try? await model.thumbnail(photo)
-                if !Task.isCancelled {
+                if !Task.isCancelled, identifier == model.previewIdentifier(photo) {
+                    imageIdentifier = identifier
                     image = loaded
                 }
             }

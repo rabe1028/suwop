@@ -226,7 +226,9 @@ fn current_asset<'a>(model: &'a Model, key: &AssetKey) -> Option<&'a StoredAsset
     let [asset] = assets.as_slice() else {
         return None;
     };
-    if !asset.content_visible()
+    if crate::immich_visibility::fences(&model.state, key)
+        || model.immich_visibility.denied.contains(key)
+        || !asset.content_visible()
         || model
             .state
             .apple_visibility_operations
@@ -240,7 +242,12 @@ fn current_asset<'a>(model: &'a Model, key: &AssetKey) -> Option<&'a StoredAsset
 #[must_use]
 pub fn ordinary_state(model: &Model) -> SavedLibrary {
     let mut state = model.state.clone();
-    for key in &model.protection.denied {
+    for key in model
+        .protection
+        .denied
+        .iter()
+        .chain(&model.immich_visibility.denied)
+    {
         if !state.protected_entries.iter().any(|e| e.key == *key) {
             state.protected_entries.push(PersistentProtectedEntry {
                 id: entry_id("pending-denial", key),
@@ -878,7 +885,7 @@ fn reconcile_durable(model: &mut Model, grant_id: &str) -> Command<crate::app::E
         let read: Result<serde_json::Value, _> = io(&ctx, ShellOperation::ReadState).await;
         let state = read
             .ok()
-            .filter(|value| value["schemaVersion"].as_u64() == Some(5))
+            .filter(|value| value["schemaVersion"].as_u64() == Some(6))
             .and_then(|value| crate::workflow::migrate(value).ok())
             .filter(|state| {
                 state.apple_scope == expected_scope

@@ -36,6 +36,7 @@ import SuwopShell
 
     private var staged: [String: Staged] = [:]
     private var epoch = UUID()
+    private let submissionGate = NativeSubmissionGate()
     private var sceneID: String?
     private var phase: ProtectionScenePhase = .background
     private var currentView: (@MainActor () async throws -> ImmichLockedView)?
@@ -77,6 +78,7 @@ import SuwopShell
     }
 
     func invalidate() {
+        submissionGate.invalidate()
         epoch = UUID()
         readTask?.cancel()
         latestReadID = nil
@@ -158,6 +160,18 @@ import SuwopShell
               view.image?.requestID == access.requestID, staged[access.stagedID] != nil
         else { throw CancellationError() }
         return item.image
+    }
+
+    func visibilitySubmission(_ authorization: ImmichVisibilityAuthorization) async throws -> NativeSubmissionPermit {
+        guard phase == .active, sceneID == authorization.sceneID, let currentView else { throw CancellationError() }
+        let captured = epoch
+        let view = try await currentView()
+        guard epoch == captured, phase == .active, sceneID == authorization.sceneID,
+              view.state == .open, view.sceneID == authorization.sceneID,
+              view.grantID == authorization.grantID, view.generation == authorization.generation,
+              Int64(Date().timeIntervalSince1970 * 1000) < authorization.deadlineUnixMilliseconds
+        else { throw CancellationError() }
+        return submissionGate.permit(deadline: authorization.deadlineUnixMilliseconds)
     }
 
     func release(stagedID: String) {

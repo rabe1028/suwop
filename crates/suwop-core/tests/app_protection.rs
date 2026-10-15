@@ -54,7 +54,7 @@ fn asset(provider: Provider, id: &str) -> StoredAsset {
 
 fn saved() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()
@@ -87,6 +87,8 @@ fn core(state: SavedLibrary) -> Core<Suwop> {
             ready: true,
             state,
             session: Some(Session {
+                ordinary_content_guard: None,
+                ordinary_content_context: None,
                 endpoint: "https://fixture.example/api".into(),
                 key: "fixture-key".into(),
                 scope: "remote".into(),
@@ -1181,6 +1183,8 @@ fn other_account_auth_can_remove_only_local_record_without_exposing_old_provider
                 ready: true,
                 state: initial,
                 session: connected.then(|| Session {
+                    ordinary_content_guard: None,
+                    ordinary_content_context: None,
                     endpoint: "https://other.example/api".into(),
                     key: "other-key".into(),
                     scope: "other-account".into(),

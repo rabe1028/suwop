@@ -14,6 +14,7 @@ struct ImmichLockedTimer: Sendable {
 /// Shares the ordinary runtime without installing a password session in the
 /// ordinary API-key connection. The form's secrets are passed once to Rust.
 @MainActor final class ImmichLockedLibrarySession: ObservableObject {
+    let visibility = ImmichVisibilityPresentation()
     @Published private(set) var serverAddress: String?
     @Published private(set) var projection: ImmichLockedView?
     @Published private(set) var shielded = true
@@ -40,6 +41,16 @@ struct ImmichLockedTimer: Sendable {
         self.runtime = runtime
         self.shell = shell
         self.publish = publish
+        visibility.currentSession = { [weak self] in self?.view(for: $0) }
+        visibility.sendEvent = { [weak self] in self?.send($0) }
+        shell.immichVisibilityConfirmationCurrent = { [weak self] prompt in
+            guard let self, let current = view(for: prompt.sceneID), let runtime = self.runtime else { return false }
+            guard current.grantID == prompt.grantID, current.generation == prompt.generation else { return false }
+            let live = try await runtime.snapshot().view.immichLockedView
+            return view(for: prompt.sceneID)?.grantID == current.grantID && live.state == .open
+                && live.sceneID == prompt.sceneID && live.grantID == current.grantID && live.generation == current
+                .generation
+        }
         shell.immichLockedAccess.configure(runtime: runtime)
         shell.immichLockedTimerEffect = { [weak self] in self?.schedule($0) }
     }
@@ -58,7 +69,7 @@ struct ImmichLockedTimer: Sendable {
 
     func open(sceneID: String, email: String, password: String, pinCode: String) {
         guard phases[sceneID] == .active, serverAddress != nil, let shell else { return }
-        shield()
+        shield(preservePending: true)
         ownerSceneID = sceneID
         connecting = true
         let id = UUID().uuidString
@@ -77,6 +88,7 @@ struct ImmichLockedTimer: Sendable {
             ], context: context)
             if expectedGrantID == id {
                 connecting = false
+                visibility.preparePending(sceneID: sceneID)
             }
         }
     }
@@ -148,17 +160,22 @@ struct ImmichLockedTimer: Sendable {
         projection = fresh.state == .open && !mayRender ? nil : fresh
         shielded = !mayRender
         error = fresh.error
+        visibility.receive(snapshot, sceneID: mayRender ? ownerSceneID : nil)
+        if mayRender, let ownerSceneID {
+            visibility.preparePending(sceneID: ownerSceneID)
+        }
     }
 
-    private func shield() {
+    private func shield(preservePending: Bool = false) {
+        visibility.clear(preservePending: preservePending)
+        error = nil
         shielded = true
         connecting = false
         projection = nil
         expectedImageID = nil
         expiryTask?.cancel()
         checkTask?.cancel()
-        shell?.immichLockedAccess.invalidate()
-        shell?.invalidateProtectedPresentations()
+        shell?.invalidateImmichLockedPresentations()
     }
 
     private func schedule(_ timer: ImmichLockedTimer) {

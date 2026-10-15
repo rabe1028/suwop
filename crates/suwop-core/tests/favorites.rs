@@ -48,7 +48,7 @@ fn asset(provider: Provider) -> StoredAsset {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()
@@ -69,6 +69,8 @@ fn core(state: SavedLibrary) -> Core<Suwop> {
         Model {
             state,
             session: Some(Session {
+                ordinary_content_guard: None,
+                ordinary_content_context: None,
                 endpoint: "https://test/api".into(),
                 key: "test".into(),
                 user_id: OWNER.into(),

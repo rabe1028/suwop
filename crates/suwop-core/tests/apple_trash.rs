@@ -54,7 +54,7 @@ fn state() -> SavedLibrary {
     counterpart.key.provider = Provider::Immich;
     counterpart.key.scope = "remote".into();
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![
             LibrarySnapshot {
