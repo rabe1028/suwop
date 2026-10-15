@@ -3,6 +3,10 @@ import SuwopShell
 
 /// A separate still-raster authority domain. Stages retain no HTTP request or credential.
 @MainActor final class OrdinarySelectedNativeAccess {
+    @MainActor private final class RasterRead {
+        var image: PlatformImage?
+    }
+
     private struct Slot: Hashable {
         let scene: String
         let key: AssetKey
@@ -50,7 +54,7 @@ import SuwopShell
     private struct ReadJob {
         let id: String
         let generation: Int64
-        let task: Task<PlatformImage, Error>
+        let task: Task<Void, Error>
     }
 
     private var runtime: RustRuntime?
@@ -142,16 +146,22 @@ import SuwopShell
         }
         try await validate(binding, context: context, approved: nil)
         try requireLocal(binding, epoch: captured, sceneEpoch: sceneEpoch, context: context)
-        let task = Task { try await fetch(ticket, http: http, context: context) }
+        let raster = RasterRead()
+        let task = Task { @MainActor in
+            try Task.checkCancellation()
+            raster.image = try await fetch(ticket, http: http, context: context)
+            try Task.checkCancellation()
+        }
         reads[slot] = ReadJob(id: ticket.requestID, generation: ticket.generation, task: task)
         defer {
             if reads[slot]?.id == ticket.requestID {
                 reads.removeValue(forKey: slot)
             }
         }
-        let image = try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
+        try await withTaskCancellationHandler { try await task.value } onCancel: { task.cancel() }
         try await validate(binding, context: context, approved: nil)
         try requireLocal(binding, epoch: captured, sceneEpoch: sceneEpoch, context: context)
+        guard let image = raster.image else { throw CancellationError() }
         let id = UUID().uuidString
         stages[id] = Stage(
             binding: binding,
