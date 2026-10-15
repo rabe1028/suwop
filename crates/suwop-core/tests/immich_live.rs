@@ -1273,3 +1273,6 @@ mod visibility;
 
 #[path = "immich_live/archive.rs"]
 mod archive;
+
+#[path = "immich_live/live_graph.rs"]
+mod live_graph;
