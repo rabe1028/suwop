@@ -86,17 +86,15 @@ fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
         agent: &agent,
         directory: &directory,
         writes: 0,
+        confirmations: 0,
         auth_requests: 0,
-        diagnostics: ScanDiagnostics::default(),
+        diagnostics: ScanDiagnostics {
+            selected_target: key.asset_id.clone(),
+            ..ScanDiagnostics::default()
+        },
     };
     activate_archive(&mut shell, &core)?;
-    shell.run(
-        &core,
-        Event::Refresh {
-            permission: false,
-            now: now()?,
-        },
-    )?;
+    refresh_initial_hint(&mut shell, &core, &session, &key)?;
     for (index, to) in [
         ImmichArchiveDestination::Archive,
         ImmichArchiveDestination::Timeline,
@@ -156,6 +154,35 @@ fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
     }
     finish_roundtrip(&shell, &agent, &session, &directory, media)
 }
+fn refresh_initial_hint(
+    shell: &mut ArchiveShell<'_>,
+    core: &Core<Suwop>,
+    session: &Session,
+    key: &AssetKey,
+) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::Refresh {
+            permission: false,
+            now: now()?,
+        },
+    )?;
+    assert_eq!(shell.writes, 0);
+    assert_eq!(shell.confirmations, 0);
+    assert!(
+        read_state(shell.directory)?
+            .immich_visibility_operations
+            .is_empty()
+    );
+    recover_scan_revision_race(
+        shell,
+        core,
+        session,
+        key,
+        ImmichArchiveDestination::Timeline,
+        0,
+    )
+}
 fn finish_roundtrip(
     shell: &ArchiveShell<'_>,
     agent: &ureq::Agent,
@@ -179,10 +206,10 @@ fn recover_scan_revision_race(
     core: &Core<Suwop>,
     session: &Session,
     key: &AssetKey,
-    applied: ImmichArchiveDestination,
+    current: ImmichArchiveDestination,
     refresh_trace_start: usize,
 ) -> Result<(), String> {
-    let next = match applied {
+    let next = match current {
         ImmichArchiveDestination::Timeline => ImmichArchiveDestination::Archive,
         ImmichArchiveDestination::Archive => ImmichArchiveDestination::Timeline,
     };
@@ -212,12 +239,12 @@ fn recover_scan_revision_race(
         assert_eq!(asset.originals().count(), 1);
         let trace = shell
             .diagnostics
-            .trace
-            .get(refresh_trace_start..)
-            .and_then(|trace| trace.last())
-            .ok_or("hydration diagnostic")?;
+            .selected_hydration_since(refresh_trace_start)
+            .ok_or("selected hydration diagnostic")?;
         assert_eq!(trace["api"], "assetMetadata");
         assert_eq!(trace["status"], 200);
+        assert_eq!(trace["selectedTarget"], true);
+        assert_eq!(trace["searchCandidate"], true);
         assert_eq!(trace["purpose"], Value::Null);
         assert_eq!(trace["stackShape"], "null");
         for field in [
@@ -234,6 +261,12 @@ fn recover_scan_revision_race(
         }
         assert_eq!(trace["updatedAtInstantMatch"], false);
         let writes = shell.writes;
+        let confirmations = shell.confirmations;
+        let journal =
+            serde_json::to_value(read_state(shell.directory)?.immich_visibility_operations)
+                .map_err(|_| "pre-refresh journal")?;
+        // The disabled hint does not create an intent. Only read-only settling
+        // and one explicit Refresh may reestablish a usable catalog revision.
         super::visibility::wait_for_stable_asset(
             shell.agent,
             &session.request(&format!("assets/{}", key.asset_id), "GET", None),
@@ -248,6 +281,12 @@ fn recover_scan_revision_race(
             },
         )?;
         assert_eq!(shell.writes, writes);
+        assert_eq!(shell.confirmations, confirmations);
+        assert_eq!(
+            serde_json::to_value(read_state(shell.directory)?.immich_visibility_operations)
+                .map_err(|_| "post-refresh journal")?,
+            journal
+        );
     }
     verify_hint(core, key, next, &shell.diagnostics.trace)
 }
@@ -304,14 +343,28 @@ fn read_state(directory: &Path) -> Result<SavedLibrary, String> {
 // enter the assertion trace. Never emit IDs, names, checksums, revisions or headers.
 #[derive(Default)]
 struct ScanDiagnostics {
+    selected_target: String,
     search: Vec<Value>,
     trace: Vec<Value>,
 }
 impl ScanDiagnostics {
+    fn selected_hydration_since(&self, start: usize) -> Option<&Value> {
+        self.trace
+            .get(start..)?
+            .iter()
+            .rev()
+            .find(|trace| trace["selectedTarget"] == true)
+    }
+
     fn observe(&mut self, request: &immich::HttpRequest, response: &Result<Value, String>) {
         let path = request.url.split("/api/").nth(1).unwrap_or("");
+        let selected_target = request.method == "GET"
+            && path
+                .strip_prefix("assets/")
+                .is_some_and(|id| id == self.selected_target);
         let Ok(response) = response else {
-            self.trace.push(json!({"transportOk":false}));
+            self.trace
+                .push(json!({"transportOk":false,"selectedTarget":selected_target}));
             return;
         };
         let status = response["status"].as_u64();
@@ -333,7 +386,7 @@ impl ScanDiagnostics {
                 .iter()
                 .find(|asset| asset["id"].as_str() == Some(id));
             let decode = serde_json::from_value::<immich::Asset>(body.clone()).is_ok();
-            let mut trace = json!({"api":"assetMetadata","status":status,"decode":decode,"stackShape":stack_shape(body),"searchCandidate":source.is_some(),"purpose":request.ordinary_content_authorization.as_ref().map(|a| format!("{:?}",a.purpose))});
+            let mut trace = json!({"api":"assetMetadata","status":status,"decode":decode,"stackShape":stack_shape(body),"searchCandidate":source.is_some(),"selectedTarget":selected_target,"purpose":request.ordinary_content_authorization.as_ref().map(|a| format!("{:?}",a.purpose))});
             if let Some(source) = source {
                 trace["searchStackShape"] = json!(stack_shape(source));
                 for field in ["id", "ownerId", "checksum", "updatedAt", "visibility"] {
@@ -360,6 +413,105 @@ impl ScanDiagnostics {
         }
     }
 }
+#[test]
+fn selected_hydration_diagnostics_never_borrow_unrelated_or_previous_scan_races()
+-> Result<(), String> {
+    let selected = "11111111-1111-4111-8111-111111111111";
+    let unrelated = "22222222-2222-4222-8222-222222222222";
+    let revision = "2026-10-15T00:00:00Z";
+    let mut target = json!({
+        "id":selected,"ownerId":"fixture-owner","type":"VIDEO",
+        "originalFileName":"fixture.mp4","checksum":"fixture-checksum",
+        "fileCreatedAt":revision,"fileModifiedAt":revision,"updatedAt":revision,
+        "isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"timeline",
+        "libraryId":null,"livePhotoVideoId":null
+    });
+    let mut other = target.clone();
+    other["id"] = json!(unrelated);
+    let mut diagnostics = ScanDiagnostics {
+        selected_target: selected.into(),
+        ..ScanDiagnostics::default()
+    };
+    diagnostics.observe(
+        &diagnostic_request("search/metadata", "POST")?,
+        &Ok(json!({"status":200,"body":{"assets":{"items":[target.clone(),other.clone()]}}})),
+    );
+    let start = diagnostics.trace.len();
+    target["stack"] = Value::Null;
+    other["stack"] = Value::Null;
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Ok(json!({"status":200,"body":target})),
+    );
+    other["updatedAt"] = json!("2026-10-15T00:00:01Z");
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert_eq!(
+        diagnostics.trace.last().ok_or("unrelated trace")?["updatedAtInstantMatch"],
+        false
+    );
+    let selected_trace = diagnostics
+        .selected_hydration_since(start)
+        .ok_or("selected trace")?;
+    assert_eq!(selected_trace["updatedAtInstantMatch"], true);
+    assert_eq!(selected_trace["decode"], true);
+    assert_eq!(selected_trace["selectedTarget"], true);
+    let new_scan = diagnostics.trace.len();
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert!(diagnostics.selected_hydration_since(new_scan).is_none());
+    target["updatedAt"] = json!("2026-10-15T00:00:01Z");
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Ok(json!({"status":200,"body":target})),
+    );
+    other["updatedAt"] = json!(revision);
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{unrelated}"), "GET")?,
+        &Ok(json!({"status":200,"body":other})),
+    );
+    assert_eq!(
+        diagnostics.trace.last().ok_or("unrelated trace")?["updatedAtInstantMatch"],
+        true
+    );
+    let selected_trace = diagnostics
+        .selected_hydration_since(new_scan)
+        .ok_or("new selected trace")?;
+    assert_eq!(selected_trace["updatedAtInstantMatch"], false);
+    diagnostics.observe(
+        &diagnostic_request(&format!("assets/{selected}"), "GET")?,
+        &Err("synthetic transport failure".into()),
+    );
+    let failed = diagnostics
+        .selected_hydration_since(new_scan)
+        .ok_or("selected transport failure")?;
+    assert_eq!(failed["transportOk"], false);
+    assert!(failed["updatedAtInstantMatch"].is_null());
+    let safe = serde_json::to_string(&diagnostics.trace).map_err(|_| "safe trace")?;
+    for private in [
+        selected,
+        unrelated,
+        revision,
+        "2026-10-15T00:00:01Z",
+        "fixture.mp4",
+        "fixture-checksum",
+    ] {
+        assert!(!safe.contains(private));
+    }
+    Ok(())
+}
+fn diagnostic_request(path: &str, method: &str) -> Result<immich::HttpRequest, String> {
+    serde_json::from_value(json!({
+        "url":format!("http://fixture.invalid/api/{path}"),"method":method,
+        "headers":{},"body":null,"fields":{},"files":[],"downloadPath":null
+    }))
+    .map_err(|_| "diagnostic request".into())
+}
+
 fn stack_shape(asset: &Value) -> &'static str {
     match asset.get("stack") {
         None => "absent",
@@ -372,6 +524,7 @@ struct ArchiveShell<'a> {
     agent: &'a ureq::Agent,
     directory: &'a Path,
     writes: usize,
+    confirmations: usize,
     auth_requests: usize,
     diagnostics: ScanDiagnostics,
 }
@@ -420,6 +573,7 @@ impl ArchiveShell<'_> {
                 response
             }
             ShellOperation::ConfirmImmichArchive { prompt } => {
+                self.confirmations += 1;
                 assert_ne!(prompt.from, prompt.to);
                 assert!(
                     !serde_json::to_string(prompt)

@@ -147,3 +147,33 @@ record=false、全7 stageが終了0、46枚の基準hash不変を独立照合し
 PIN未設定の動画往復、親Pがlockedでも選択動画Mだけを通常権限で変更するケース、
 既存の5契約シナリオを実行した。専用container・volume・networkの削除と
 無関係サービスの保持を確認した（`/tmp/suwop-video-archive-cleanup-20261015-2.log`）。
+
+
+## Initial scan revision race in hosted CI
+
+CI run `38746242765` at `6b8a3f6` failed the selected-motion fixture before its
+first operation: the selected asset had an Unknown stack and no action hint,
+with matching identity/checksum/visibility but different search/detail update
+instants. The log is retained at
+`/tmp/suwop-video-ci-38746242765-integration1.log`. This was an actual assertion
+failure, not a Docker infrastructure failure.
+
+The fixture now applies its existing bounded revision-race recovery to the first
+scan as well as post-write scans. Recovery requires a diagnostic tied to the
+selected target in the current scan, exact unchanged identity facts, Unknown
+eligibility, and the specific revision mismatch. It checks that write counts,
+confirmation counts and the durable operation journal remain unchanged through
+read-only stabilization and one explicit Refresh. A second unresolved scan
+still fails. Product eligibility, mutation rules and timeouts are unchanged.
+
+A deterministic diagnostic regression covers unrelated assets, previous scans,
+and selected-target transport failure without borrowing an older successful
+observation. The targeted regression passed; full check passed Rust/FFI335 and
+Swift65, including lint and generation checks. Real Immich integration passed
+all seven cases in 22.45 seconds, including the original CI-failing scenario.
+Logs are `/tmp/suwop-video-initial-scan-unit1.log`,
+`/tmp/suwop-video-initial-scan-check1.log`, and
+`/tmp/suwop-video-initial-scan-integration1.log`. Dedicated Docker resources were
+removed and the pre-existing service retained. Updated hosted CI remains pending.
+This test-only change does not alter product files, DTOs or the 46 reviewed
+visual baselines; prior Apple and visual evidence remains separately recorded.
