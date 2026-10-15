@@ -31,12 +31,14 @@ private struct LibrarySceneRoot: View {
                 model.protection.sceneChanged(sceneID: sceneID, phase: value)
                 model.immichLocked.sceneChanged(sceneID: sceneID, phase: value)
                 model.immichArchive.sceneChanged(sceneID: sceneID, phase: value)
+                model.ordinarySelected.sceneChanged(sceneID: sceneID, phase: value)
             }
             .onDisappear {
                 model.semanticSearch?.scene(id: sceneID, active: false)
                 model.protection.close(sceneID: sceneID)
                 model.immichLocked.close(sceneID: sceneID)
                 model.immichArchive.close(sceneID: sceneID)
+                model.ordinarySelected.close(sceneID: sceneID)
             }
     }
 }

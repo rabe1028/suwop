@@ -18,6 +18,8 @@ struct Protocol {
     embedding_job: suwop_core::analysis::EmbeddingJob,
     analysis_status: suwop_core::analysis::AnalysisStatus,
     similarity_hit: suwop_core::analysis::SimilarityHit,
+    ordinary_selected_image_ticket: suwop_core::ordinary_selected::OrdinarySelectedImageTicket,
+    ordinary_selected_image_result: suwop_core::ordinary_selected::OrdinarySelectedImageResult,
     immich_archive_prompt: suwop_core::immich_archive::ImmichArchivePrompt,
     immich_visibility_prompt: suwop_core::immich_visibility::ImmichVisibilityPrompt,
     immich_locked_image_result: suwop_core::immich_locked::ImmichLockedImageResult,

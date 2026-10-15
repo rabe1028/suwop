@@ -1270,6 +1270,96 @@ public enum OrdinaryContentPurpose: String, Codable, CaseIterable, Sendable {
     case `read`
     case `destinationReadback`
     case `visibilityReconciliation`
+    case `selectedPresentationMetadata`
+}
+
+public struct OrdinarySelectedImageAccess: Codable, Sendable {
+    public var generation: Int64
+    public var key: AssetKey
+    public var kind: OrdinarySelectedImageKind
+    public var proofID: String
+    public var requestID: String
+    public var sceneID: String
+    public var stagedID: String
+    public init(generation: Int64, key: AssetKey, kind: OrdinarySelectedImageKind, proofID: String, requestID: String, sceneID: String, stagedID: String) {
+        self.generation = generation
+        self.key = key
+        self.kind = kind
+        self.proofID = proofID
+        self.requestID = requestID
+        self.sceneID = sceneID
+        self.stagedID = stagedID
+    }
+}
+
+public enum OrdinarySelectedImageKind: String, Codable, CaseIterable, Sendable {
+    case `thumbnail`
+    case `preview`
+}
+
+public struct OrdinarySelectedImageRequest: Codable, Sendable {
+    public var generation: Int64
+    public var key: AssetKey
+    public var kind: OrdinarySelectedImageKind
+    public var proofID: String
+    public var requestID: String
+    public var sceneID: String
+    public init(generation: Int64, key: AssetKey, kind: OrdinarySelectedImageKind, proofID: String, requestID: String, sceneID: String) {
+        self.generation = generation
+        self.key = key
+        self.kind = kind
+        self.proofID = proofID
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public struct OrdinarySelectedImageResult: Codable, Sendable {
+    public var requestID: String
+    public var stagedID: String
+    public init(requestID: String, stagedID: String) {
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct OrdinarySelectedImageTicket: Codable, Sendable {
+    public var expectedRevision: String
+    public var generation: Int64
+    public var key: AssetKey
+    public var kind: OrdinarySelectedImageKind
+    public var proofID: String
+    public var request: HttpRequest
+    public var requestID: String
+    public var sceneID: String
+    public init(expectedRevision: String, generation: Int64, key: AssetKey, kind: OrdinarySelectedImageKind, proofID: String, request: HttpRequest, requestID: String, sceneID: String) {
+        self.expectedRevision = expectedRevision
+        self.generation = generation
+        self.key = key
+        self.kind = kind
+        self.proofID = proofID
+        self.request = request
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public struct OrdinarySelectedPresentation: Codable, Sendable {
+    public var currentVisibility: OrdinarySelectedVisibility
+    public var generation: Int64
+    public var key: AssetKey
+    public var proofID: String
+    public init(currentVisibility: OrdinarySelectedVisibility, generation: Int64, key: AssetKey, proofID: String) {
+        self.currentVisibility = currentVisibility
+        self.generation = generation
+        self.key = key
+        self.proofID = proofID
+    }
+}
+
+public enum OrdinarySelectedVisibility: String, Codable, CaseIterable, Sendable {
+    case `timeline`
+    case `archive`
 }
 
 public struct PasteEditsPrompt: Codable, Sendable {
@@ -2005,6 +2095,10 @@ public struct ViewModel: Codable, Sendable {
     public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
     public var ordinaryContentKeys: [AssetKey]
+    public var ordinarySelectedGeneration: Int64
+    public var ordinarySelectedImages: [OrdinarySelectedImageAccess]
+    public var ordinarySelectedPending: [OrdinarySelectedImageRequest]
+    public var ordinarySelectedPresentation: [OrdinarySelectedPresentation]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
     public var previewChoices: [String: [PreviewChoice]]
@@ -2015,7 +2109,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -2032,6 +2126,10 @@ public struct ViewModel: Codable, Sendable {
         self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers
         self.ordinaryContentKeys = ordinaryContentKeys
+        self.ordinarySelectedGeneration = ordinarySelectedGeneration
+        self.ordinarySelectedImages = ordinarySelectedImages
+        self.ordinarySelectedPending = ordinarySelectedPending
+        self.ordinarySelectedPresentation = ordinarySelectedPresentation
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
         self.previewChoices = previewChoices

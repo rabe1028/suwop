@@ -135,7 +135,7 @@ struct GalleryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     if selecting {
                         Button("すべて選択") {
-                            selectedKeys.formUnion(model.visiblePhotos.flatMap { $0.assets.map(\.key) })
+                            selectedKeys.formUnion(model.visiblePhotos.flatMap { model.operationKeys($0) })
                         }.disabled(model.visiblePhotos.isEmpty)
                     }
                 }

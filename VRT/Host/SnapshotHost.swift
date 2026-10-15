@@ -6,6 +6,8 @@ import SwiftUI
         WindowGroup {
             if CommandLine.arguments.contains("--semantic-fixture") {
                 InteractiveSemanticHost()
+            } else if CommandLine.arguments.contains("--ordinary-selected-fixture") {
+                InteractiveOrdinarySelectedHost()
             } else if CommandLine.arguments.contains("--archive-busy-fixture") {
                 ImmichArchiveBusyHost()
             } else if CommandLine.arguments.contains("--archive-history-windows") {

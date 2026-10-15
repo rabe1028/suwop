@@ -32,6 +32,7 @@ import SwiftUI
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()
     let immichArchive = ImmichArchiveSession()
+    let ordinarySelected = OrdinarySelectedImageSession()
 
     #if SUWOP_VRT
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
@@ -167,7 +168,7 @@ import SwiftUI
         do {
             try send([
                 "type": .string("setFavorite"),
-                "keys": .from(Array(Set(photos.flatMap { $0.assets.map(\.key) }))),
+                "keys": .from(Array(Set(photos.flatMap { operationKeys($0) }))),
                 "value": .bool(value),
             ])
         } catch { errorMessage = error.localizedDescription }
@@ -177,10 +178,14 @@ import SwiftUI
         do {
             try send([
                 "type": .string("share"),
-                "keys": .from(Array(Set(photos.flatMap { $0.assets.map(\.key) }))),
+                "keys": .from(Array(Set(photos.flatMap { operationKeys($0) }))),
                 "id": .string(UUID().uuidString),
             ])
         } catch { errorMessage = error.localizedDescription }
+    }
+
+    func operationKeys(_ photo: UnifiedPhoto) -> [AssetKey] {
+        photo.assets.map(\.key).filter { view?.ordinaryContentKeys.contains($0) == true }
     }
 
     func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
@@ -401,7 +406,17 @@ private extension LibraryModel {
             shell?.invalidateProtectedPresentations()
         }
         if removed {
-            shell?.invalidateContentPresentations()
+            let removedKeys = previousKeys.subtracting(currentKeys)
+            let priorReadOnly = Set(view?.ordinarySelectedPresentation.map(\.key) ?? [])
+            let priorOperations = Set(view?.ordinaryContentKeys ?? [])
+            let isolatedProofLoss = !contentChanged &&
+                view?.ordinarySelectedGeneration == snapshot.view.ordinarySelectedGeneration &&
+                removedKeys.isSubset(of: priorReadOnly) && removedKeys.isDisjoint(with: priorOperations)
+            // Read-only proof loss is reconciled exactly below. It cannot revoke
+            // a newly issued operation for an independent ordinary source.
+            if !isolatedProofLoss {
+                shell?.invalidateContentPresentations()
+            }
         }
         if contentChanged || removed || view?.previewSources != snapshot.view.previewSources {
             invalidateThumbnails()
@@ -410,6 +425,7 @@ private extension LibraryModel {
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
         immichArchive.receive(snapshot)
+        ordinarySelected.receive(snapshot)
         if let failure = view?.error {
             errorMessage = failure
         }
@@ -419,6 +435,12 @@ private extension LibraryModel {
 private extension LibraryModel {
     func configurePrivateSessions(runtime: RustRuntime, shell: AppleShell) {
         shell.ordinaryContent.configure(runtime: runtime)
+        ordinarySelected.configure(runtime: runtime, shell: shell) { [weak self] event, context in
+            guard let self, let runtime = self.runtime else { throw CancellationError() }
+            let requests = try await runtime.update(.object(event))
+            try await readView()
+            try await resolveRequests(requests, context: context)
+        }
         protection.configure(
             runtime: runtime,
             shell: shell,

@@ -174,6 +174,21 @@ class VerificationTests(unittest.TestCase):
         ):
             verify.signal_group(process, signal.SIGTERM)
 
+    def test_group_probe_permission_error_keeps_bounded_wait_alive(self):
+        process = unittest.mock.Mock(pid=123)
+        process.poll.return_value = None
+        with patch.object(verify.os, "killpg", side_effect=PermissionError):
+            self.assertTrue(verify.signal_group(process, 0))
+
+    def test_actual_group_signal_permission_error_is_not_suppressed(self):
+        process = unittest.mock.Mock(pid=123)
+        process.poll.return_value = None
+        with (
+            patch.object(verify.os, "killpg", side_effect=PermissionError),
+            self.assertRaises(PermissionError),
+        ):
+            verify.signal_group(process, signal.SIGKILL)
+
     def test_sigterm_stops_the_check_group_and_finalizes_report(self):
         self.assert_cancelled(signal.SIGTERM)
 

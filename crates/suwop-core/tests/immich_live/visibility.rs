@@ -601,7 +601,7 @@ fn verify_cycles(
 }
 
 // Catalog cutoff concerns server insertion time, independent of original capture dates.
-fn scan_now() -> Result<f64, String> {
+pub(super) fn scan_now() -> Result<f64, String> {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|duration| duration.as_secs_f64())

@@ -8,6 +8,8 @@ import SuwopShell
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
+    let ordinarySelectedAccess = OrdinarySelectedNativeAccess()
+    var ordinarySelectedInvalidated: (@MainActor () -> Void)?
     let archiveAccess = ImmichArchiveNativeAccess()
     let archiveConfirmation = ImmichArchiveConfirmation()
     private let sharing = SystemSharing()
@@ -30,13 +32,14 @@ import SuwopShell
         ) async throws -> Bool)?
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
-
     func beginWorkflow() -> ContentPresentationContext {
         presentationEpoch.beginWorkflow()
     }
 
     /// Cancel presentation leases while preserving outcome persistence and native cleanup.
     func invalidateContentPresentations() {
+        ordinarySelectedAccess.invalidate()
+        ordinarySelectedInvalidated?()
         presentationEpoch.invalidate()
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
@@ -53,6 +56,8 @@ import SuwopShell
     }
 
     func invalidateProtectedPresentations() {
+        ordinarySelectedAccess.invalidate()
+        ordinarySelectedInvalidated?()
         presentationEpoch.invalidateProtection()
         imageEditing.invalidateForProtection()
         playback.invalidateForProtection()
@@ -86,6 +91,7 @@ import SuwopShell
         let completionEffects = [
             "persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply", "appleVisibilityApply",
             "releaseProtectedImages", "releaseProtectedImage",
+            "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
         ]
         if !completionEffects.contains(operation.type) {
@@ -148,8 +154,9 @@ import SuwopShell
         case "readState", "persist", "authenticateProtected", "readProtectedImage", "publishProtectedImage",
              "releaseProtectedImages", "releaseProtectedImage", "readImmichLockedImage", "publishImmichLockedImage",
              "releaseImmichLockedImages", "releaseImmichLockedImage", "scheduleImmichLockedExpiry",
-             "scheduleImmichLockedCheck":
-            return try await appStateEffect(operation.type, data: data)
+             "scheduleImmichLockedCheck", "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
+             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
+            return try await appStateEffect(operation.type, data: data, context: context)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
                 operation.type,
                 data: data
@@ -359,8 +366,10 @@ import SuwopShell
         default: throw SuwopError("未知のファイル入出力です。")
         }
     }
+}
 
-    private func stateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+private extension AppleShell {
+    func stateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         if type == "readState" {
             return try await localStore.read()
         }
@@ -368,45 +377,24 @@ import SuwopShell
         catalogChanged?()
         return .null
     }
-}
 
-private extension AppleShell {
-    func appStateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+    func appStateEffect(
+        _ type: String,
+        data: JSONValue,
+        context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        if OrdinarySelectedEffects.types.contains(type) {
+            return try await OrdinarySelectedEffects.execute(
+                type, data: data, access: ordinarySelectedAccess, http: http, context: context
+            )
+        }
         if ["readState", "persist"].contains(type) {
             return try await stateEffect(type, data: data)
         }
         if type.contains("ImmichLocked") {
-            return try await immichLockedEffect(type, data: data)
+            return try await immichLockedEffect(type, data: data, http: http)
         }
         return try await protectedEffect(type, data: data)
-    }
-
-    func immichLockedEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
-        switch type {
-        case "readImmichLockedImage": return try await .from(immichLockedAccess.read(
-                data["ticket"].decode(ImmichLockedImageTicket.self), http: http
-            ))
-        case "publishImmichLockedImage": return try await .from(immichLockedAccess.publish(
-                data["ticket"].decode(ImmichLockedImageTicket.self), stagedID: requiredString(data, "stagedID")
-            ))
-        case "releaseImmichLockedImage":
-            try immichLockedAccess.release(stagedID: requiredString(data, "stagedID"))
-            return .null
-        case "releaseImmichLockedImages":
-            try immichLockedAccess.release(generation: data["generation"].decode(Int64.self))
-            return .null
-        case "scheduleImmichLockedExpiry", "scheduleImmichLockedCheck":
-            try immichLockedTimerEffect?(ImmichLockedTimer(
-                expiry: type == "scheduleImmichLockedExpiry",
-                grantID: requiredString(data, "grantID"),
-                generation: data["generation"].decode(Int64.self),
-                leaseID: data["leaseID"].decode(Int64.self),
-                milliseconds: data["milliseconds"].decode(Int64.self),
-                deadlineUnixMilliseconds: data["deadlineUnixMilliseconds"].decode(Int64.self)
-            ))
-            return .null
-        default: throw SuwopError("未知の Immich ロック写真の入出力です。")
-        }
     }
 
     func protectedEffect(_ type: String, data: JSONValue) async throws -> JSONValue {

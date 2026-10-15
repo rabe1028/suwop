@@ -201,14 +201,16 @@ pub fn view(model: &Model) -> ImmichVisibilityView {
 }
 #[must_use]
 pub fn actions(model: &Model) -> Vec<ImmichVisibilityActionHint> {
-    let public =
-        crate::privacy::PublishedLibrary::from_canonical(&crate::protection::ordinary_state(model));
+    let ordinary = crate::protection::ordinary_state(model);
+    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
     public
         .snapshots
         .iter()
         .filter(|snapshot| snapshot.access != crate::domain::ScanAccess::Unavailable)
         .flat_map(|snapshot| &snapshot.assets)
         .filter(|asset| asset.key.provider == crate::domain::Provider::Immich)
+        .filter(|asset| access.can_operate(&asset.key))
         .map(|asset| {
             let mut action = hint(asset, false);
             let supported = crate::immich_locked::write_supported(model);
@@ -475,6 +477,33 @@ pub(crate) fn asset_witness(asset: &crate::domain::StoredAsset) -> Option<String
 enum IdentityMedia {
     Image,
     Video,
+}
+/// A read-only comparison of the known historical own IMAGE encoding.
+/// It never asserts that the historical null/unstacked graph is current.
+pub(crate) fn matches_original_image_identity(
+    value: &serde_json::Value,
+    operation: &ImmichVisibilityOperation,
+    scope: &str,
+    owner: &str,
+) -> Result<bool, String> {
+    validate_operation(operation)?;
+    let asset: crate::immich::Asset =
+        serde_json::from_value(value.clone()).map_err(|_| SAFE_ERROR)?;
+    if operation.scope != scope
+        || asset.id != operation.key.asset_id
+        || asset.owner_id != owner
+        || value["type"] != "IMAGE"
+        || asset.is_offline
+        || asset.is_trashed
+        || asset.updated_at.is_empty()
+    {
+        return Err(SAFE_ERROR.into());
+    }
+    let checksum = crate::domain::normalize_sha1(Some(&asset.checksum)).ok_or(SAFE_ERROR)?;
+    Ok(
+        identity_digest(&operation.key, &checksum, IdentityMedia::Image)
+            == operation.witness_digest,
+    )
 }
 fn identity_digest(key: &AssetKey, checksum: &str, media: IdentityMedia) -> String {
     use sha2::Digest;
