@@ -113,8 +113,12 @@ import SwiftUI
     func pause() async {
         guard !pausing else { return }
         pausing = true
+        busy = true
         selectionRevision += 1
-        defer { pausing = false }
+        defer {
+            pausing = false
+            busy = false
+        }
         needsWork = false
         task?.cancel()
         await task?.value
@@ -197,7 +201,7 @@ import SwiftUI
     }
 
     private func finishOperation() {
-        busy = false
+        busy = pausing
         task = nil
         if needsWork, !suspended {
             wake()
