@@ -29,6 +29,7 @@ import SwiftUI
     private var suspended = false
     private var activeScenes: Set<String> = []
     private var needsWork = false
+    private var selectionTask: Task<InferenceSelection, Error>?
     private var selectionRevision = 0
     private var pausing = false
 
@@ -50,15 +51,14 @@ import SwiftUI
     }
 
     func restore() async {
+        guard task == nil, selectionTask == nil, !pausing else { return }
         let revision = selectionRevision
-        guard let statuses = try? await store.compatibleInferenceStatuses(),
-              let latest = statuses.max(by: { $0.generation < $1.generation }),
-              let value = UInt32(exactly: latest.model.dimensions) else { return }
-        let restored = try? await store.inferenceStatus(key: latest.modelKey)
+        guard let selection = try? await store.selectedInference(),
+              let value = UInt32(exactly: selection.model.dimensions) else { return }
         guard revision == selectionRevision, task == nil, !pausing else { return }
         dimensions = value
-        status = latest
-        inference = restored
+        status = selection.analysis
+        inference = selection.inference
         if let inference {
             budgetMiB = Int(inference.budgetBytes >> 20)
             message = inference.error ?? (inference.state == "paused"
@@ -76,6 +76,9 @@ import SwiftUI
             busy = true
             defer { finishOperation() }
             do {
+                selectionTask?.cancel()
+                _ = try? await selectionTask?.value
+                selectionTask = nil
                 let configured = try await store.configureInference(
                     dimensions: dimensions,
                     budget: UInt64(budgetMiB) << 20
@@ -184,19 +187,32 @@ import SwiftUI
         selectionRevision += 1
         let revision = selectionRevision
         let selectedDimensions = dimensions
-        let selected = try? await store.compatibleInferenceStatuses()
-            .first { $0.model.dimensions == Int64(selectedDimensions) }
-        let restored = if let key = selected?.modelKey {
-            try? await store.inferenceStatus(key: key)
-        } else {
-            nil as InferenceStatus?
+        let previous = selectionTask
+        previous?.cancel()
+        // Drain an already-issued write before persisting a newer picker choice.
+        // Cancelled selections that have not reached SQLite never write at all.
+        let pending = Task {
+            _ = try? await previous?.value
+            try Task.checkCancellation()
+            return try await store.selectInference(dimensions: selectedDimensions)
         }
-        guard revision == selectionRevision, task == nil, !pausing else { return }
-        hits = []
-        status = selected
-        inference = restored
-        if let inference {
-            budgetMiB = Int(inference.budgetBytes >> 20)
+        selectionTask = pending
+        do {
+            let selected = try await pending.value
+            guard revision == selectionRevision, task == nil, !pausing else { return }
+            selectionTask = nil
+            hits = []
+            status = selected.analysis
+            inference = selected.inference
+            if let inference {
+                budgetMiB = Int(inference.budgetBytes >> 20)
+            }
+        } catch {
+            guard revision == selectionRevision, task == nil, !pausing else { return }
+            selectionTask = nil
+            if !(error is CancellationError) {
+                message = error.localizedDescription
+            }
         }
     }
 

@@ -78,4 +78,11 @@ import Testing
     #expect(all.count == 3)
     let compatible = try await store.compatibleInferenceStatuses()
     #expect(Set(compatible.map(\.modelKey)) == Set([first.modelKey, second.modelKey]))
+    try await store.pauseInference(key: first.modelKey)
+    _ = try await store.selectInference(dimensions: 256)
+    let reopened = LocalStore(root: root)
+    let selected = try #require(await reopened.selectedInference())
+    #expect(selected.model.dimensions == 256)
+    #expect(selected.analysis?.modelKey == first.modelKey)
+    #expect(selected.inference?.state == "paused")
 }

@@ -198,3 +198,9 @@ live Immich inference acceptance have not been run for this patch.
 The model card declares Apache-2.0; preserve upstream notices when distributing
 model weights/SDK binaries. COCO image rights remain with their original owners;
 the repository retains IDs, URLs, captions and measurements, not the source photos.
+
+The selected model identity is persisted separately from index generations. Switching
+dimensions does not register a model or resume a paused journal. On startup Rust
+returns the selected model and its analysis/inference state in one SQLite snapshot.
+Catalog schema v3 preserves existing jobs and indexes; catalogs without a recorded
+selection remain unselected until the user chooses or starts a model.

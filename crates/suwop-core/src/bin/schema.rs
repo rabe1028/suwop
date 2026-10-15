@@ -9,6 +9,7 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    inference_selection: suwop_core::inference::InferenceSelection,
     inference_status: suwop_core::inference::InferenceStatus,
     inference_spec: suwop_core::inference::InferenceSpec,
     analysis_model: suwop_core::analysis::AnalysisModel,

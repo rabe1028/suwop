@@ -1,6 +1,15 @@
 import Foundation
 
 public extension LocalStore {
+    func selectedInference() async throws -> InferenceSelection? {
+        try await call(.object(["type": .string("selectedInference")])).decode(InferenceSelection?.self)
+    }
+
+    func selectInference(dimensions: UInt32) async throws -> InferenceSelection {
+        try await call(.object(["type": .string("selectInference"), "dimensions": .number(Double(dimensions))]))
+            .decode(InferenceSelection.self)
+    }
+
     func compatibleInferenceStatuses() async throws -> [AnalysisStatus] {
         try await call(.object(["type": .string("compatibleInferenceStatuses")]))
             .decode([AnalysisStatus].self)

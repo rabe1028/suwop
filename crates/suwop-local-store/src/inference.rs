@@ -6,7 +6,7 @@ use suwop_core::{
     analysis::{AnalysisBudget, AnalysisStatus},
     app::ConnectionSettings,
     domain::{Provider, StoredAsset},
-    inference::{self, InferenceStatus},
+    inference::{self, InferenceSelection, InferenceStatus},
 };
 
 impl Store {
@@ -20,6 +20,49 @@ impl Store {
                     .is_ok_and(|spec| spec.model == status.model)
             })
             .collect())
+    }
+
+    /// A selection is a preference, not permission to start or resume inference.
+    pub fn select_inference(&self, dimensions: u32) -> Result<InferenceSelection> {
+        let model = inference::specification(dimensions)?.model;
+        self.db.execute("INSERT INTO inference_selection VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET model=excluded.model", [serde_json::to_string(&model).map_err(error)?]).map_err(error)?;
+        self.selected_inference()?
+            .ok_or_else(|| "Missing inference selection".into())
+    }
+    /// Read the selected identity and its journals from one `SQLite` snapshot.
+    /// Pre-selection catalogs stay unselected rather than guessing from generation order.
+    pub fn selected_inference(&self) -> Result<Option<InferenceSelection>> {
+        let tx = self.db.unchecked_transaction().map_err(error)?;
+        let json: Option<String> = tx
+            .query_row(
+                "SELECT model FROM inference_selection WHERE id=1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(error)?;
+        let Some(json) = json else {
+            return Ok(None);
+        };
+        let model: suwop_core::analysis::AnalysisModel =
+            serde_json::from_str(&json).map_err(error)?;
+        if !inference::specification(model.dimensions).is_ok_and(|spec| spec.model == model) {
+            return Ok(None);
+        }
+        let analysis = self
+            .status()?
+            .into_iter()
+            .find(|status| status.model == model);
+        let inference = match &analysis {
+            Some(status) => self.inference_status(&status.model_key)?,
+            None => None,
+        };
+        tx.commit().map_err(error)?;
+        Ok(Some(InferenceSelection {
+            model,
+            analysis,
+            inference,
+        }))
     }
 
     pub fn validate_embedding_input(
@@ -65,13 +108,17 @@ impl Store {
     }
     pub fn configure_inference(&mut self, dimensions: u32, budget: u64) -> Result<InferenceStatus> {
         inference::validate_budget(budget)?;
-        let key = self.register(
-            &inference::specification(dimensions)?.model,
-            &AnalysisBudget::default(),
-        )?;
-        // Explicit configuration resumes work; simply opening the app does not unpause it.
-        self.db.execute("INSERT INTO inference_runs VALUES(?1,'running',?2,NULL) ON CONFLICT(model) DO UPDATE SET budget=excluded.budget,state='running',error=NULL",params![key,i64::try_from(budget).map_err(error)?]).map_err(error)?;
-        self.pause(&key, false)?;
+        let model = inference::specification(dimensions)?.model;
+        let key = self.register(&model, &AnalysisBudget::default())?;
+        // Explicit configuration atomically selects and resumes the requested model.
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(error)?;
+        tx.execute("INSERT INTO inference_runs VALUES(?1,'running',?2,NULL) ON CONFLICT(model) DO UPDATE SET budget=excluded.budget,state='running',error=NULL",params![key,i64::try_from(budget).map_err(error)?]).map_err(error)?;
+        tx.execute("UPDATE generations SET state='building',error=NULL WHERE id=(SELECT latest FROM models WHERE id=?1)", [&key]).map_err(error)?;
+        tx.execute("INSERT INTO inference_selection VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET model=excluded.model", [serde_json::to_string(&model).map_err(error)?]).map_err(error)?;
+        tx.commit().map_err(error)?;
         self.inference_status(&key)?
             .ok_or_else(|| "Missing inference state".into())
     }

@@ -476,7 +476,7 @@ fn v1_migration_preserves_queued_vectors_and_library() -> Result {
     )?;
     let mut store = Store::open(root.path())?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    assert_eq!(version, 2);
+    assert_eq!(version, 3);
     assert_eq!(
         store.read()?.ok_or("missing library")?.snapshots[0]
             .assets
@@ -734,6 +734,70 @@ fn unavailable_immich_snapshot_revokes_analysis_until_freshly_available() -> Res
         rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
             .len(),
         1
+    );
+    Ok(())
+}
+
+#[test]
+fn selected_inference_survives_reopen_without_generation_guessing_or_resuming() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let first = store.configure_inference(256, 1536 << 20)?;
+    store.configure_inference(512, 1536 << 20)?;
+    store.configure_inference(256, 1536 << 20)?;
+    store.pause_inference(&first.model_key, None)?;
+    drop(store);
+    let store = Store::open(root.path())?;
+    let selected = store.selected_inference()?.ok_or("missing selection")?;
+    assert_eq!(selected.model.dimensions, 256);
+    assert_eq!(selected.inference.ok_or("missing journal")?.state, "paused");
+    store.select_inference(512)?;
+    let selected = store.select_inference(256)?;
+    assert_eq!(selected.inference.ok_or("missing journal")?.state, "paused");
+    drop(store);
+    // Upgrade an older catalog with multiple journals without guessing its preference.
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    db.execute_batch("DROP TABLE inference_selection; PRAGMA user_version=2;")?;
+    drop(db);
+    let store = Store::open(root.path())?;
+    assert!(store.selected_inference()?.is_none());
+    assert_eq!(
+        store
+            .inference_status(&first.model_key)?
+            .ok_or("missing journal")?
+            .state,
+        "paused"
+    );
+    Ok(())
+}
+
+#[test]
+fn selecting_unconfigured_model_does_not_enqueue_or_resume_work() -> Result {
+    let root = tempfile::tempdir()?;
+    let store = Store::open(root.path())?;
+    let selected = store.select_inference(512)?;
+    assert_eq!(selected.model.dimensions, 512);
+    assert!(selected.analysis.is_none());
+    assert!(selected.inference.is_none());
+    assert!(store.status()?.is_empty());
+    drop(store);
+    let store = Store::open(root.path())?;
+    assert_eq!(
+        store
+            .selected_inference()?
+            .ok_or("missing selection")?
+            .model
+            .dimensions,
+        512
+    );
+    assert!(store.select_inference(768).is_err());
+    assert_eq!(
+        store
+            .selected_inference()?
+            .ok_or("missing selection")?
+            .model
+            .dimensions,
+        512
     );
     Ok(())
 }

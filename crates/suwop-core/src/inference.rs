@@ -9,6 +9,14 @@ pub const MODEL_URL: &str = "https://huggingface.co/litert-community/embeddingge
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
+pub struct InferenceSelection {
+    pub model: AnalysisModel,
+    pub analysis: Option<crate::analysis::AnalysisStatus>,
+    pub inference: Option<InferenceStatus>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
 pub struct InferenceStatus {
     pub model_key: String,
     pub state: String,

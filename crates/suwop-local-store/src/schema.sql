@@ -19,4 +19,6 @@ CREATE TABLE IF NOT EXISTS embedding_vectors (
  job INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE, vector BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS jobs_shard ON jobs(shard,state);
-PRAGMA user_version=2;
+CREATE TABLE IF NOT EXISTS inference_runs (model TEXT PRIMARY KEY REFERENCES models(id), state TEXT NOT NULL, budget INTEGER NOT NULL, error TEXT);
+CREATE TABLE IF NOT EXISTS inference_selection (id INTEGER PRIMARY KEY CHECK(id=1), model TEXT NOT NULL);
+PRAGMA user_version=3;

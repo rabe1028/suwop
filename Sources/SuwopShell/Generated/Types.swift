@@ -876,6 +876,17 @@ public struct ImmichLockedView: Codable, Sendable {
     }
 }
 
+public struct InferenceSelection: Codable, Sendable {
+    public var analysis: AnalysisStatus?
+    public var inference: InferenceStatus?
+    public var model: AnalysisModel
+    public init(analysis: AnalysisStatus? = nil, inference: InferenceStatus? = nil, model: AnalysisModel) {
+        self.analysis = analysis
+        self.inference = inference
+        self.model = model
+    }
+}
+
 public struct InferenceSpec: Codable, Sendable {
     public var bytes: Int64
     public var filename: String

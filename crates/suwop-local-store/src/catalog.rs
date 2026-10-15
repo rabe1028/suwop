@@ -48,7 +48,7 @@ impl Store {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 2 {
+        if version > 3 {
             return Err("Unsupported local catalog version".into());
         }
         if version == 0 {
@@ -77,7 +77,19 @@ impl Store {
             }
             tx.commit().map_err(error)?;
         }
-        db.execute_batch("CREATE TABLE IF NOT EXISTS inference_runs (model TEXT PRIMARY KEY REFERENCES models(id), state TEXT NOT NULL, budget INTEGER NOT NULL, error TEXT);").map_err(error)?;
+        if version <= 2 {
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(error)?;
+            let current: i64 = tx
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .map_err(error)?;
+            if current == 2 {
+                tx.execute_batch(include_str!("migration-v3.sql"))
+                    .map_err(error)?;
+            }
+            tx.commit().map_err(error)?;
+        }
         Ok(Self { root, db })
     }
     /// Reclaim at most 256 free pages between analysis checkpoints, without a full rebuild.

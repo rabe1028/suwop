@@ -20,6 +20,10 @@ pub struct Request {
 )]
 pub enum Command {
     CompatibleInferenceStatuses,
+    SelectedInference,
+    SelectInference {
+        dimensions: u32,
+    },
     InferenceSpec {
         dimensions: u32,
     },
@@ -103,24 +107,28 @@ pub enum Command {
 }
 pub fn dispatch(request: Request) -> Result<Value> {
     let mut store = Store::open(Path::new(&request.root))?;
-    let value = match request.command {
-        Command::CompatibleInferenceStatuses => {
-            serde_json::to_value(store.compatible_inference_statuses()?).map_err(error)?
-        }
+    let value = execute(&mut store, request.command)?;
+    // A worker-start failure must not misreport a durable metadata commit as failed.
+    // Subsequent calls/startup retry. Job state remains durable in SQLite.
+    let _worker = crate::wake(&store.root);
+    Ok(value)
+}
+fn execute(store: &mut Store, command: Command) -> Result<Value> {
+    let value = match command {
+        Command::SelectedInference => json(store.selected_inference()?)?,
+        Command::SelectInference { dimensions } => json(store.select_inference(dimensions)?)?,
+        Command::CompatibleInferenceStatuses => json(store.compatible_inference_statuses()?)?,
         Command::InferenceSpec { dimensions } => {
-            serde_json::to_value(suwop_core::inference::specification(dimensions)?)
-                .map_err(error)?
+            json(suwop_core::inference::specification(dimensions)?)?
         }
         Command::ConfigureInference { dimensions, budget } => {
-            serde_json::to_value(store.configure_inference(dimensions, budget)?).map_err(error)?
+            json(store.configure_inference(dimensions, budget)?)?
         }
         Command::SetInferenceBudget { model_key, budget } => {
             store.set_inference_budget(&model_key, budget)?;
             Value::Null
         }
-        Command::InferenceStatus { model_key } => {
-            serde_json::to_value(store.inference_status(&model_key)?).map_err(error)?
-        }
+        Command::InferenceStatus { model_key } => json(store.inference_status(&model_key)?)?,
         Command::PauseInference { model_key, reason } => {
             store.pause_inference(&model_key, reason.as_deref())?;
             Value::Null
@@ -136,8 +144,7 @@ pub fn dispatch(request: Request) -> Result<Value> {
             store.admit_inference(&model_key, resident, available, loaded, pressure, query)?,
         ),
         Command::ProjectEmbedding { vector, dimensions } => {
-            serde_json::to_value(suwop_core::inference::project(&vector, dimensions)?)
-                .map_err(error)?
+            json(suwop_core::inference::project(&vector, dimensions)?)?
         }
         Command::QueryText { text } => Value::String(suwop_core::inference::query(&text)?),
         Command::ValidateEmbeddingInput {
@@ -150,7 +157,7 @@ pub fn dispatch(request: Request) -> Result<Value> {
         }
         Command::ModelPath => Value::String(store.model_path()?),
         Command::InstallModel { source } => Value::String(store.install_model(Path::new(&source))?),
-        Command::Read => serde_json::to_value(store.read()?).map_err(error)?,
+        Command::Read => json(store.read()?)?,
         Command::Persist { state } => {
             store.persist(&state)?;
             Value::Null
@@ -168,9 +175,7 @@ pub fn dispatch(request: Request) -> Result<Value> {
             store.pause(&model_key, false)?;
             Value::Null
         }
-        Command::Pending { model_key, limit } => {
-            serde_json::to_value(store.pending(&model_key, limit)?).map_err(error)?
-        }
+        Command::Pending { model_key, limit } => json(store.pending(&model_key, limit)?)?,
         Command::Submit {
             model_key,
             embeddings,
@@ -178,8 +183,7 @@ pub fn dispatch(request: Request) -> Result<Value> {
             store.submit(&model_key, &embeddings)?;
             Value::Null
         }
-        Command::Prune => serde_json::to_value(crate::worker::runtime()?.block_on(store.prune())?)
-            .map_err(error)?,
+        Command::Prune => json(crate::worker::runtime()?.block_on(store.prune())?)?,
         Command::Skip {
             model_key,
             job_id,
@@ -188,18 +192,16 @@ pub fn dispatch(request: Request) -> Result<Value> {
             store.skip(&model_key, &job_id, &reason)?;
             Value::Null
         }
-        Command::Status => serde_json::to_value(store.status()?).map_err(error)?,
+        Command::Status => json(store.status()?)?,
         Command::Search {
             model_key,
             vector,
             limit,
-        } => serde_json::to_value(
-            crate::worker::runtime()?.block_on(store.search(&model_key, &vector, limit))?,
-        )
-        .map_err(error)?,
+        } => json(crate::worker::runtime()?.block_on(store.search(&model_key, &vector, limit))?)?,
     };
-    // A worker-start failure must not misreport a durable metadata commit as failed.
-    // Subsequent calls/startup retry. Job state remains durable in SQLite.
-    let _worker = crate::wake(&store.root);
     Ok(value)
+}
+
+fn json(value: impl Serialize) -> Result<Value> {
+    serde_json::to_value(value).map_err(error)
 }
