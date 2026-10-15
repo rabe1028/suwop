@@ -72,11 +72,13 @@ final class ImmichVisibilityTests: XCTestCase {
                     .contains(ImmichLockedFixtureData.key(ImmichVisibilityFixtureData.sourceID)))
                 XCTAssertFalse(after.immichVisibilityView.persistenceUncertain)
             } else {
-                // Fresh scans are not persisted. An older disk cache is neither
-                // the attempted intent nor exact current before-state proof.
-                XCTAssertTrue(after.immichVisibilityView.persistenceUncertain)
-                XCTAssertFalse(after.canTransfer)
-                XCTAssertFalse(after.ordinaryContentKeys
+                // start() completed a persisted refresh before resetting the
+                // write counter. The actual disk readback proves this intent
+                // was not written, even across the native numeric roundtrip.
+                try assertC2KnownBeforeReadback(fixture)
+                XCTAssertFalse(after.immichVisibilityView.persistenceUncertain)
+                XCTAssertTrue(after.canTransfer)
+                XCTAssertTrue(after.ordinaryContentKeys
                     .contains(ImmichLockedFixtureData.key(ImmichVisibilityFixtureData.sourceID)))
             }
         }

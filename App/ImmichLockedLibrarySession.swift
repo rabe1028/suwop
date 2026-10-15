@@ -21,6 +21,7 @@ struct ImmichLockedTimer: Sendable {
     @Published private(set) var ownerSceneID: String?
     @Published private(set) var error: String?
     @Published private(set) var connecting = false
+    @Published private(set) var busy = false
     private var runtime: RustRuntime?
     private var shell: AppleShell?
     private var publish: (@MainActor (RuntimeSnapshot) -> Void)?
@@ -28,11 +29,14 @@ struct ImmichLockedTimer: Sendable {
     private var expectedGrantID: String?
     private var expectedImageID: String?
     private var revision: UInt64 = 0
+    private var coreBusy = false
+    private var pendingRefresh: (id: UUID, grantID: String)?
     private var expiryTask: Task<Void, Never>?
     private var checkTask: Task<Void, Never>?
     #if SUWOP_VRT
         var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue)?
         var timerEffect: (@MainActor (ImmichLockedTimer) async throws -> Void)?
+        var refreshCompleted: (@MainActor (String) -> Void)?
     #endif
 
     func configure(
@@ -120,6 +124,30 @@ struct ImmichLockedTimer: Sendable {
         }
     }
 
+    func refresh(sceneID: String) {
+        guard !busy, let grant = view(for: sceneID)?.grantID, let shell else { return }
+        let refreshID = UUID()
+        pendingRefresh = (refreshID, grant)
+        busy = true
+        let context = shell.beginWorkflow()
+        Task {
+            defer {
+                if pendingRefresh?.id == refreshID {
+                    pendingRefresh = nil
+                }
+                busy = coreBusy || pendingRefresh != nil
+            }
+            guard pendingRefresh?.id == refreshID, pendingRefresh?.grantID == grant,
+                  view(for: sceneID)?.grantID == grant else { return }
+            await run([
+                "type": .string("refreshImmichLocked"), "grantID": .string(grant), "sceneID": .string(sceneID),
+            ], context: context)
+            #if SUWOP_VRT
+                refreshCompleted?(grant)
+            #endif
+        }
+    }
+
     func requestImage(entryID: String, sceneID: String) {
         guard let view = view(for: sceneID), let grant = view.grantID else { return }
         let id = UUID().uuidString
@@ -142,6 +170,8 @@ struct ImmichLockedTimer: Sendable {
     func receive(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= revision else { return }
         revision = snapshot.revision
+        coreBusy = snapshot.view.busy
+        busy = coreBusy || pendingRefresh != nil
         let address = snapshot.view.state.connection?.address
         serverAddress = address?.isEmpty == false ? address : nil
         var fresh = snapshot.view.immichLockedView
@@ -167,6 +197,8 @@ struct ImmichLockedTimer: Sendable {
     }
 
     private func shield(preservePending: Bool = false) {
+        pendingRefresh = nil
+        busy = coreBusy
         visibility.clear(preservePending: preservePending)
         error = nil
         shielded = true

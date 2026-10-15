@@ -82,6 +82,7 @@ fn real_immich_single_image_visibility_removes_two_owned_albums_and_never_restor
         ),
     )?;
     assert_eq!(shell.writes, 1);
+    assert_roster(&core, &key, GRANT, true)?;
     assert_eq!(shell.elevated_memberships.len(), 1);
     assert!(
         albums
@@ -523,6 +524,7 @@ fn verify_cycles(
             "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         };
         shell.run(core, prepare(key, operation, to, current_grant))?;
+        assert_roster(core, key, current_grant, false)?;
         assert!(!core.view().ordinary_content_keys.contains(key));
         assert!(
             journal(directory)?
@@ -728,4 +730,25 @@ fn fixture_lock_stack(agent: &ureq::Agent, session: &Session, id: &str) -> Resul
         serde_json::from_value(execute(agent, &request)?).map_err(|_| "fixture logout response")?;
     immich::check_status(cleanup.status).map_err(|_| "fixture logout rejected")?;
     result
+}
+
+fn assert_roster(
+    core: &Core<Suwop>,
+    key: &AssetKey,
+    grant: &str,
+    locked: bool,
+) -> Result<(), String> {
+    let roster = core.view().immich_locked_view;
+    assert_eq!(roster.grant_id.as_deref(), Some(grant));
+    let entry = roster
+        .entries
+        .ok_or("same-grant roster")?
+        .into_iter()
+        .find(|e| e.id == key.asset_id);
+    assert_eq!(entry.is_some(), locked);
+    if let Some(entry) = entry {
+        assert!(entry.visibility_action.can_show_timeline);
+        assert!(entry.visibility_action.can_show_archive);
+    }
+    Ok(())
 }

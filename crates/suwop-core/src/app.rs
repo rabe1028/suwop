@@ -275,6 +275,24 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    RefreshImmichLocked {
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    #[serde(skip)]
+    ImmichLockedRefreshed {
+        generation: u64,
+        refresh_id: u64,
+        result: Result<
+            (
+                Vec<crate::immich_locked::ImmichLockedEntry>,
+                std::time::Instant,
+            ),
+            String,
+        >,
+    },
     PrepareImmichVisibility {
         key: crate::domain::AssetKey,
         to: crate::immich_visibility::ImmichVisibility,

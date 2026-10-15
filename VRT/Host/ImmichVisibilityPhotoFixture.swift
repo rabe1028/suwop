@@ -4,7 +4,7 @@ import SuwopShell
 /// Runs real Rust, the native HTTP authorization wrapper, the C session and
 /// image cache. Only durable storage, transport and synthetic raster bytes vary.
 @MainActor final class ImmichVisibilityPhotoFixture: ObservableObject {
-    enum PersistFault { case none, beforeWrite, afterWrite }
+    enum PersistFault { case none, beforeWrite, afterWrite, nextIntentAfterApplied }
     let runtime: RustRuntime
     let shell: AppleShell
     let server: ImmichVisibilityFixtureServer
@@ -13,6 +13,8 @@ import SuwopShell
     private(set) var model: LibraryModel?
     private(set) var journal: SavedLibrary
     private var rawJournal = JSONValue.null
+    private(set) var failedPersist: JSONValue?
+    private(set) var persistenceReadback: JSONValue?
     @Published private(set) var writes = 0
     @Published private(set) var ordinaryReads = 0
     @Published private(set) var lockedReads = 0
@@ -35,6 +37,8 @@ import SuwopShell
     var heldQueuedVisibilityPUT: CheckedContinuation<Void, Never>?
     var holdSubmittedVisibilityResponse = false
     var heldSubmittedVisibilityResponse: CheckedContinuation<Void, Never>?
+    var holdLockedSearch = false
+    var heldLockedSearch: CheckedContinuation<Void, Never>?
     private(set) var issuedVisibilityPUTs: [HttpRequest] = []
     private(set) var completedVisibilityStatuses: [Int64] = []
 
@@ -99,6 +103,11 @@ import SuwopShell
         shell.httpTransportEffect = { [weak self] request in
             guard let self else { throw CancellationError() }
             let response = try server.execute(request)
+            let lockedSearch = request.method == "POST" && request.url.hasSuffix("/search/metadata")
+                && request.headers["Authorization"] != nil
+            if holdLockedSearch, lockedSearch {
+                await withCheckedContinuation { heldLockedSearch = $0 }
+            }
             if holdSubmittedVisibilityResponse, request.method == "PUT" {
                 await withCheckedContinuation { heldSubmittedVisibilityResponse = $0 }
             }
@@ -142,6 +151,7 @@ import SuwopShell
             if unavailableReadState {
                 throw SuwopError("Synthetic unavailable storage read")
             }
+            persistenceReadback = rawJournal
             return rawJournal
         case "persist": return try await persistData(operation.data ?? .null)
         case "readCredential": return .string(ImmichLockedFixtureData.ordinaryAPIKey)
@@ -157,10 +167,15 @@ import SuwopShell
     }
 
     private func persistData(_ raw: JSONValue) async throws -> JSONValue {
-        if persistFault == .beforeWrite {
+        let desired = try raw.decode(SavedLibrary.self)
+        let rejectNext = persistFault == .nextIntentAfterApplied && journal.immichVisibilityOperations.last?
+            .outcome == .applied
+            && desired.immichVisibilityOperations.count > journal.immichVisibilityOperations.count
+        if persistFault == .beforeWrite || rejectNext {
+            failedPersist = raw
             throw SuwopError("Synthetic pre-write persistence failure")
         }
-        journal = try raw.decode(SavedLibrary.self)
+        journal = desired
         rawJournal = raw
         writes += 1
         if holdPersist {
@@ -265,6 +280,8 @@ import SuwopShell
         heldQueuedVisibilityPUT = nil
         heldSubmittedVisibilityResponse?.resume()
         heldSubmittedVisibilityResponse = nil
+        heldLockedSearch?.resume()
+        heldLockedSearch = nil
         timerBarrier.releaseAll()
     }
 

@@ -115,8 +115,7 @@ final class ImmichVisibilityGuardTests: XCTestCase {
             ]),
         ] {
             let effects = try await fixture.runtime.update(event)
-            let cleanup = try await fixture.drainDeniedCleanup(effects)
-            print("C2_UNCERTAIN_ALLOWED_CLEANUP \(cleanup.joined(separator: ","))")
+            _ = try await fixture.drainDeniedCleanup(effects)
         }
         XCTAssertEqual(try Wire.encoder().encode(fixture.journal), saved)
         XCTAssertEqual(fixture.writes, writes)

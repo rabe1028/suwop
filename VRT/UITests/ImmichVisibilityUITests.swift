@@ -77,14 +77,18 @@ final class ImmichVisibilityUITests: XCTestCase {
         let inspect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "inspectImmichVisibility-"))
             .firstMatch
         XCTAssertTrue(inspect.exists)
+        XCTAssertFalse(app.buttons["immichLockedPreview-\(sourceID)"].exists)
+        let refresh = app.buttons["refreshImmichLocked"]
+        XCTAssertTrue(refresh.exists)
+        refresh.tap()
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isEnabled == true"), object: refresh)
+        XCTAssertEqual(XCTWaiter.wait(for: [ready], timeout: 10), .completed)
+        XCTAssertFalse(
+            app.buttons["immichLockedPreview-\(sourceID)"].exists,
+            "Refresh cannot resolve an Unknown journal"
+        )
         inspect.tap()
         XCTAssertTrue(app.staticTexts["最後に確認した表示先: ロック"].waitForExistence(timeout: 10))
-        app.buttons["closeImmichLocked"].tap()
-        if app.buttons["写真を閉じる"].exists {
-            app.buttons["写真を閉じる"].tap()
-        }
-        openHistory(app)
-        authenticate(app)
         let preview = app.buttons["immichLockedPreview-\(sourceID)"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
         preview.tap()

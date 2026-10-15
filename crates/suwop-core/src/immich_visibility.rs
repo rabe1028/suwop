@@ -106,6 +106,7 @@ pub struct ImmichVisibilityAuthorization {
 }
 #[derive(Debug, Default)]
 pub struct ImmichVisibilityModel {
+    pub generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub persistence_uncertain: bool,
     pub denied: BTreeSet<AssetKey>,
     pub used_ids: BTreeSet<String>,
@@ -296,6 +297,7 @@ fn identity_digest(key: &AssetKey, checksum: &str) -> String {
 }
 #[derive(Debug, Clone)]
 pub(crate) struct VisibilityFacts {
+    pub asset: crate::domain::StoredAsset,
     pub key: AssetKey,
     pub witness: String,
     pub revision: String,
@@ -340,12 +342,13 @@ pub(crate) fn facts(
     let key = AssetKey {
         provider: crate::domain::Provider::Immich,
         scope: scope.into(),
-        asset_id: asset.id,
+        asset_id: asset.id.clone(),
     };
     if asset.updated_at.is_empty() {
         return Err("写真の更新状態を確認できません。".into());
     }
     Ok(VisibilityFacts {
+        asset: asset.record(scope, None, None),
         witness: identity_digest(&key, &checksum),
         key,
         revision: asset.updated_at,
@@ -360,7 +363,14 @@ pub struct PreparedVisibility {
     pub(crate) revision: String,
 }
 #[derive(Debug, Clone)]
+pub(crate) struct VerifiedVisibilityProjection {
+    pub capability: crate::immich_locked::VisibilitySession,
+    pub operation_id: String,
+    pub facts: VisibilityFacts,
+}
+#[derive(Debug, Clone)]
 pub struct VisibilityCompletion {
+    pub(crate) projection: Option<Box<VerifiedVisibilityProjection>>,
     pub(crate) state: crate::app::SavedLibrary,
     pub(crate) uncertain: bool,
     pub(crate) status: String,
@@ -404,7 +414,7 @@ pub(crate) fn update(
             model
                 .ordinary_generation
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            crate::immich_locked::clear_visibility_image(model);
+            crate::immich_locked::remove_visibility_entry(model, &prepared.operation.key);
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
                 let result = apply(&ctx, before, prepared).await;
@@ -419,6 +429,10 @@ pub(crate) fn update(
             if model.busy || model.immich_visibility.persistence_uncertain {
                 return Some(Command::done());
             }
+            model
+                .immich_visibility
+                .generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let Some(capability) =
                 crate::immich_locked::visibility_session(model, &grant_id, &scene_id)
             else {
@@ -438,6 +452,7 @@ pub(crate) fn update(
             else {
                 return Some(Command::done());
             };
+            crate::immich_locked::remove_visibility_entry(model, &operation.key);
             model.busy = true;
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
@@ -456,6 +471,9 @@ pub(crate) fn update(
             model.busy = false;
             model.immich_visibility.persistence_uncertain = result.uncertain;
             model.immich_visibility.message = Some(result.status);
+            if let Some(projection) = result.projection {
+                crate::immich_locked::publish_visibility_entry(model, *projection);
+            }
             if !result.uncertain {
                 model.immich_visibility.denied.clear();
             }
@@ -487,6 +505,10 @@ fn begin(
     {
         return Command::done();
     }
+    model
+        .immich_visibility
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let Some(capability) = crate::immich_locked::visibility_session(model, grant_id, scene_id)
     else {
         return Command::done();
@@ -532,6 +554,10 @@ fn recover(
     if model.busy || !model.immich_visibility.persistence_uncertain {
         return Command::done();
     }
+    model
+        .immich_visibility
+        .generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
     let Some(capability) = crate::immich_locked::visibility_session(model, grant_id, scene_id)
     else {
         return Command::done();
@@ -558,6 +584,7 @@ fn recover(
         }
         ctx.send_event(Event::ImmichVisibilityFinished {
             result: VisibilityCompletion {
+                projection: None,
                 state,
                 uncertain,
                 status: if uncertain {

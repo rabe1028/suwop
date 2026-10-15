@@ -38,6 +38,9 @@ import SwiftUI
                         created.server.fault = .lostMutationReply
                     }
                     _ = try await created.start()
+                    if CommandLine.arguments.contains("--reject-next-intent") {
+                        created.persistFault = .nextIntentAfterApplied
+                    }
                     // UI acceptance uses the actual native dialog, not an injected answer.
                     created.shell.immichVisibilityConfirmationEffect = nil
                     fixture = created

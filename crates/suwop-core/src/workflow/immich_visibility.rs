@@ -1,3 +1,5 @@
+#[path = "immich_visibility/readback.rs"]
+mod readback;
 use super::{
     AlbumMembershipObservation, AssetKey, ImmichVisibility, ImmichVisibilityOperation,
     ImmichVisibilityPrompt, PreparedVisibility, SAFE_ERROR, VisibilityCompletion, VisibilityFacts,
@@ -88,10 +90,16 @@ async fn persist(
     let read: Result<serde_json::Value, _> =
         crate::app::io(ctx, crate::app::ShellOperation::ReadState).await;
     if let Ok(raw) = read {
-        if serde_json::to_value(desired).ok().as_ref() == Some(&raw) {
+        if serde_json::to_value(desired)
+            .ok()
+            .is_some_and(|expected| readback::matches(&expected, &raw))
+        {
             return (desired.clone(), false, true);
         }
-        if serde_json::to_value(before).ok().as_ref() == Some(&raw) {
+        if serde_json::to_value(before)
+            .ok()
+            .is_some_and(|expected| readback::matches(&expected, &raw))
+        {
             return (before.clone(), false, false);
         }
     }
@@ -127,6 +135,7 @@ pub(super) async fn inspect(
 ) -> VisibilityCompletion {
     let Ok(facts) = fresh(ctx, &capability, &operation.key).await else {
         return VisibilityCompletion {
+            projection: None,
             state: before,
             uncertain: false,
             status: SAFE_ERROR.into(),
@@ -134,6 +143,7 @@ pub(super) async fn inspect(
     };
     if facts.witness != operation.witness_digest {
         return VisibilityCompletion {
+            projection: None,
             state: before,
             uncertain: false,
             status: SAFE_ERROR.into(),
@@ -143,6 +153,15 @@ pub(super) async fn inspect(
     observe(&mut desired, &facts);
     let (state, uncertain, committed) = persist(ctx, &before, &desired).await;
     VisibilityCompletion {
+        projection: if committed && !uncertain {
+            Some(Box::new(super::VerifiedVisibilityProjection {
+                capability,
+                operation_id: operation.id,
+                facts,
+            }))
+        } else {
+            None
+        },
         state,
         uncertain,
         status: if committed {
@@ -166,6 +185,7 @@ pub(super) async fn apply(
     let (durable, uncertain, committed) = persist(ctx, &before, &desired).await;
     if !committed {
         return VisibilityCompletion {
+            projection: None,
             state: durable,
             uncertain,
             status: SAFE_ERROR.into(),
@@ -173,6 +193,7 @@ pub(super) async fn apply(
     }
     let capability = prepared.capability;
     let mut desired = durable.clone();
+    let mut verified = None;
     let response = if fresh(ctx, &capability, &prepared.operation.key)
         .await
         .is_ok_and(|facts| {
@@ -187,6 +208,7 @@ pub(super) async fn apply(
         }
         let (state, uncertain, _) = persist(ctx, &durable, &desired).await;
         return VisibilityCompletion {
+            projection: None,
             state,
             uncertain,
             status: "変更は開始されませんでした。".into(),
@@ -203,6 +225,7 @@ pub(super) async fn apply(
         }
         if response.is_ok() && facts.visibility == prepared.operation.to {
             observe(&mut desired, &facts);
+            verified = Some(facts);
         }
         if prepared.operation.to == ImmichVisibility::Locked
             && let Ok(serde_json::Value::Array(albums)) = capability
@@ -224,6 +247,17 @@ pub(super) async fn apply(
     }
     let (state, uncertain, committed) = persist(ctx, &durable, &desired).await;
     VisibilityCompletion {
+        projection: if committed && !uncertain {
+            verified.map(|facts| {
+                Box::new(super::VerifiedVisibilityProjection {
+                    capability,
+                    operation_id: prepared.operation.id,
+                    facts,
+                })
+            })
+        } else {
+            None
+        },
         state,
         uncertain,
         status: if committed {

@@ -1075,3 +1075,297 @@ fn submitted_put_close_and_late_success_preserve_unknown_without_replay() -> Res
     assert!(c.view().immich_visibility_view.history.is_none());
     Ok(())
 }
+
+#[test]
+fn verified_roster_changes_are_immediate_and_unknown_waits_for_explicit_inspect()
+-> Result<(), String> {
+    use suwop_core::immich_visibility::ImmichVisibility;
+    let (c, mut shell) = opened(false)?;
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("entries")?
+            .is_empty()
+    );
+    shell.run(&c, prepare(OP, ImmichVisibility::Locked))?;
+    let entries = c
+        .view()
+        .immich_locked_view
+        .entries
+        .ok_or("locked entries")?;
+    assert_eq!(entries.len(), 1);
+    assert_eq!(entries[0].id, ASSET);
+    assert!(entries[0].visibility_action.can_show_timeline);
+    shell.run(&c, prepare(NEXT, ImmichVisibility::Archive))?;
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("unlocked entries")?
+            .is_empty()
+    );
+    assert_eq!(shell.writes, 2);
+    let (c, mut shell) = opened(false)?;
+    shell.write_fault = WriteFault::LostApplied;
+    shell.run(&c, prepare(OP, ImmichVisibility::Locked))?;
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("unknown entries")?
+            .is_empty()
+    );
+    shell.run(&c, inspect())?;
+    assert_eq!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("observed entries")?
+            .len(),
+        1
+    );
+    let operation = &shell.disk.as_ref().ok_or("disk")?["immichVisibilityOperations"][0];
+    assert_eq!(operation["outcome"], "unknown");
+    assert_eq!(operation["observation"], "locked");
+    assert_eq!(shell.writes, 1);
+    Ok(())
+}
+#[test]
+fn cancelling_keeps_cached_locked_entry_but_failed_confirmed_change_removes_it()
+-> Result<(), String> {
+    use suwop_core::immich_visibility::ImmichVisibility;
+    for fail in [false, true] {
+        let c = core(false);
+        let mut locked = asset();
+        locked["visibility"] = json!("locked");
+        let mut shell = Shell {
+            confirmed: false,
+            visibility: Some("locked".into()),
+            pages: Some(std::collections::VecDeque::from([
+                json!({"assets":{"items":[locked],"nextCursor":null}}),
+            ])),
+            ..Shell::default()
+        };
+        shell.run(&c, open(GRANT))?;
+        assert_eq!(
+            c.view().immich_locked_view.entries.ok_or("initial")?.len(),
+            1
+        );
+        shell.run(&c, prepare(OP, ImmichVisibility::Timeline))?;
+        assert_eq!(
+            c.view()
+                .immich_locked_view
+                .entries
+                .ok_or("cancelled")?
+                .len(),
+            1
+        );
+        assert_eq!(shell.writes, 0);
+        shell.confirmed = true;
+        if fail {
+            shell.fail_persist = Some(2);
+        }
+        shell.run(&c, prepare(NEXT, ImmichVisibility::Timeline))?;
+        assert!(
+            c.view()
+                .immich_locked_view
+                .entries
+                .ok_or("confirmed")?
+                .is_empty()
+        );
+        assert_eq!(shell.writes, 1);
+    }
+    Ok(())
+}
+
+fn locked_page() -> Value {
+    let mut item = asset();
+    item["visibility"] = json!("locked");
+    json!({"assets":{"items":[item],"nextCursor":null}})
+}
+fn refresh() -> Event {
+    Event::RefreshImmichLocked {
+        grant_id: GRANT.into(),
+        scene_id: SCENE.into(),
+    }
+}
+#[test]
+fn same_session_refresh_recovers_known_unsubmitted_failure_but_not_unknown() -> Result<(), String> {
+    use suwop_core::immich_visibility::ImmichVisibility;
+    let c = core(false);
+    let mut shell = Shell {
+        confirmed: true,
+        visibility: Some("locked".into()),
+        pages: Some(std::collections::VecDeque::from([locked_page()])),
+        ..Shell::default()
+    };
+    shell.run(&c, open(GRANT))?;
+    let before = SavedLibrary {
+        schema_version: 6,
+        apple_scope: "apple".into(),
+        connection: Some(ConnectionSettings {
+            address: "https://fixture.example/api".into(),
+            allow_http: false,
+            credential_id: "ordinary-credential".into(),
+        }),
+        ..SavedLibrary::default()
+    };
+    shell.disk = Some(serde_json::to_value(before).map_err(|_| "before")?);
+    shell.fail_persist = Some(1);
+    shell.run(&c, prepare(OP, ImmichVisibility::Timeline))?;
+    assert_eq!(shell.writes, 0);
+    assert!(!c.view().immich_visibility_view.persistence_uncertain);
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("before refresh")?
+            .is_empty()
+    );
+    shell.pages = Some(std::collections::VecDeque::from([locked_page()]));
+    shell.run(&c, refresh())?;
+    assert_eq!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("refreshed")?
+            .len(),
+        1
+    );
+    assert_eq!(shell.writes, 0);
+    let (c, mut shell) = opened(false)?;
+    shell.write_fault = WriteFault::LostApplied;
+    shell.run(&c, prepare(OP, ImmichVisibility::Locked))?;
+    shell.pages = Some(std::collections::VecDeque::from([locked_page()]));
+    shell.run(&c, refresh())?;
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("unknown refreshed")?
+            .is_empty()
+    );
+    assert!(
+        shell.disk.as_ref().ok_or("disk")?["immichVisibilityOperations"][0]["observation"]
+            .is_null()
+    );
+    shell.run(&c, inspect())?;
+    assert_eq!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("inspected")?
+            .len(),
+        1
+    );
+    assert_eq!(shell.writes, 1);
+    Ok(())
+}
+#[test]
+fn refresh_failure_is_separate_retryable_and_late_response_cannot_publish() -> Result<(), String> {
+    let (c, mut shell) = opened(false)?;
+    shell.fail_status = Some(shell.status_reads + 1);
+    shell.run(&c, refresh())?;
+    assert!(c.view().immich_locked_view.error.is_some());
+    assert!(c.view().immich_visibility_view.status.is_none());
+    shell.pages = Some(std::collections::VecDeque::from([locked_page()]));
+    shell.run(&c, refresh())?;
+    assert_eq!(c.view().immich_locked_view.entries.ok_or("retry")?.len(), 1);
+    shell.pages = Some(std::collections::VecDeque::from([locked_page()]));
+    let mut effects = c.process_event(refresh());
+    let mut held = None;
+    while !effects.is_empty() {
+        let Effect::Io(mut effect) = effects.remove(0);
+        let value = shell.respond(&effect.operation)?;
+        if matches!(&effect.operation,ShellOperation::Http(r) if r.url.ends_with("/search/metadata"))
+        {
+            held = Some((effect, value));
+            break;
+        }
+        effects.extend(
+            c.resolve(
+                &mut effect,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|_| "resolve")?,
+        );
+    }
+    assert!(
+        c.view()
+            .immich_locked_view
+            .entries
+            .ok_or("pending")?
+            .is_empty()
+    );
+    shell.run(&c, Event::CloseImmichLocked)?;
+    let (mut held, value) = held.ok_or("held inventory")?;
+    let effects = c
+        .resolve(
+            &mut held,
+            ShellResponse {
+                value: Some(value),
+                error: None,
+            },
+        )
+        .map_err(|_| "late resolve")?;
+    shell.drain(&c, effects)?;
+    assert!(c.view().immich_locked_view.entries.is_none());
+    assert!(!c.view().busy);
+    assert_eq!(shell.writes, 0);
+    Ok(())
+}
+
+#[test]
+fn old_refresh_completion_never_releases_new_session_work_busy() -> Result<(), String> {
+    let (c, mut shell) = opened(false)?;
+    let mut effects = c.process_event(refresh());
+    let mut old = None;
+    while !effects.is_empty() {
+        let Effect::Io(mut request) = effects.remove(0);
+        let value = shell.respond(&request.operation)?;
+        if matches!(&request.operation,ShellOperation::Http(r) if r.url.ends_with("/search/metadata"))
+        {
+            old = Some((request, value));
+            break;
+        }
+        effects.extend(
+            c.resolve(
+                &mut request,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|_| "resolve")?,
+        );
+    }
+    shell.run(&c, Event::CloseImmichLocked)?;
+    assert!(!c.view().busy);
+    shell.run(&c, open(NEXT))?;
+    assert_eq!(c.view().immich_locked_view.grant_id.as_deref(), Some(NEXT));
+    let new_work = c.process_event(Event::RefreshImmichLocked {
+        grant_id: NEXT.into(),
+        scene_id: SCENE.into(),
+    });
+    assert!(c.view().busy);
+    let (mut old, value) = old.ok_or("old refresh")?;
+    let effects = c
+        .resolve(
+            &mut old,
+            ShellResponse {
+                value: Some(value),
+                error: None,
+            },
+        )
+        .map_err(|_| "old resolve")?;
+    shell.drain(&c, effects)?;
+    assert!(c.view().busy);
+    assert_eq!(c.view().immich_locked_view.grant_id.as_deref(), Some(NEXT));
+    shell.drain(&c, new_work)?;
+    assert!(!c.view().busy);
+    Ok(())
+}

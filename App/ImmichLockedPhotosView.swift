@@ -41,6 +41,14 @@ struct ImmichLockedPhotosView: View {
             }
             .navigationTitle("ロック写真")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    if session.view(for: sceneID) != nil {
+                        Button { session.refresh(sceneID: sceneID) } label: {
+                            Label("一覧を更新", systemImage: "arrow.clockwise")
+                        }.disabled(session.busy)
+                            .accessibilityIdentifier("refreshImmichLocked")
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("閉じる") {
                         clearFields()

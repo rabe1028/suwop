@@ -88,6 +88,10 @@ final class ImmichVisibilityScreensTests: XCTestCase {
         window.traitOverrides.preferredContentSizeCategory = largeText ? .accessibilityExtraLarge : .large
         window.rootViewController = controller
         window.makeKeyAndVisible()
+        XCTAssertEqual(
+            controller.traitCollection.preferredContentSizeCategory,
+            window.traitCollection.preferredContentSizeCategory
+        )
     }
 
     func settle() async throws {
