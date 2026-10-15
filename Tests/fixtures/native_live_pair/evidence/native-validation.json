@@ -1,0 +1,36 @@
+{
+  "audioTrackCount" : 0,
+  "codecFourCCInteger" : [
+    1635148593
+  ],
+  "durationSeconds" : 1,
+  "files" : [
+    {
+      "bytes" : 927,
+      "name" : "synthetic-still.jpg",
+      "sha1" : "2ad1f4d64d8e8d78751e2af0145e4f79382875f4",
+      "sha256" : "c51e647297290608d95331c9a501198852abfacc75304b7a44e69e0f66a6f78d"
+    },
+    {
+      "bytes" : 1963,
+      "name" : "synthetic-motion.mov",
+      "sha1" : "1b00e273230a1f6c9e9eb56dd8acce5f1ff61974",
+      "sha256" : "f45254c2acc9e80027927b34805d45445fbb5ec53510c1ca594dca253c74ef4e"
+    }
+  ],
+  "matchingEmbeddedIdentifier" : "B18D9CC0-335C-4B73-880D-627A3A78D9C3",
+  "scope" : "Structured synthetic native pair metadata validated; no PhotoKit save, device playback or authenticity acceptance claimed",
+  "stillHeight" : 64,
+  "stillWidth" : 64,
+  "timedMetadata" : [
+    {
+      "dataType" : "com.apple.metadata.datatype.int8",
+      "durationSeconds" : 0.20000000000000001,
+      "identifier" : "mdta\/com.apple.quicktime.still-image-time",
+      "startSeconds" : 0.40000000000000002,
+      "value" : 0
+    }
+  ],
+  "videoHeight" : 64,
+  "videoWidth" : 64
+}

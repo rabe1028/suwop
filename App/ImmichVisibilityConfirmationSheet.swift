@@ -27,6 +27,9 @@
                                 .accessibilityIdentifier("immichVisibilityDisclosure")
                         }
                     }
+                    if let disclosure = prompt.continuingAccessDisclosure {
+                        Text(disclosure).accessibilityIdentifier("immichVisibilityContinuingAccess")
+                    }
                     Text("ほかの保存先のコピーは変更しません。")
                 }.fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(24)

@@ -25,6 +25,7 @@ fn state(count: u32) -> SavedLibrary {
             access: ScanAccess::Full,
             assets: (0..count)
                 .map(|i| StoredAsset {
+                    immich_visibility: None,
                     immich_stack: suwop_core::domain::ImmichStackState::Unknown,
                     apple_visibility: suwop_core::domain::AppleVisibility::Visible,
                     key: AssetKey {

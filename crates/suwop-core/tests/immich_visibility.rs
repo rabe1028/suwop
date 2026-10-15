@@ -46,7 +46,7 @@ fn core_denials(
     };
     let state = SavedLibrary {
         immich_visibility_operations: operations,
-        schema_version: 6,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),
@@ -110,6 +110,7 @@ struct Shell {
     confirmed: bool,
     writes: usize,
     ordinary_writes: usize,
+    ordinary_reads: usize,
     write_fault: WriteFault,
     persist_calls: usize,
     fail_persist: Option<usize>,
@@ -118,11 +119,40 @@ struct Shell {
     persist_after_failure: bool,
     relationship: Option<Value>,
     facts_patch: Option<Value>,
+    ordinary_asset: Option<Value>,
     omit_field: Option<String>,
+    asset_failure: Option<u16>,
+    asset_transport_failure: Option<()>,
+    patch_after_stage: Option<Value>,
 }
 impl Shell {
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
+            ShellOperation::ConfirmImmichArchive { .. } => Ok(json!(true)),
+            ShellOperation::Http(request)
+                if request.headers.contains_key("x-api-key")
+                    && self
+                        .ordinary_asset
+                        .as_ref()
+                        .and_then(|a| a["id"].as_str())
+                        .is_some_and(|id| {
+                            request.url == format!("https://fixture.example/api/assets/{id}")
+                        }) =>
+            {
+                assert_eq!(request.method, "GET");
+                assert!(!request.headers.contains_key("Authorization"));
+                Ok(json!({"status":200,"body":self.ordinary_asset}))
+            }
+            ShellOperation::Http(request)
+                if request.headers.contains_key("x-api-key")
+                    && request.method == "GET"
+                    && request.url == format!("https://fixture.example/api/assets/{ASSET}") =>
+            {
+                assert!(!request.headers.contains_key("Authorization"));
+                self.paths.push(format!("assets/{ASSET}"));
+                self.ordinary_reads += 1;
+                Ok(json!({"status":403,"body":null}))
+            }
             ShellOperation::Http(request) => self.http(request),
             ShellOperation::ConfirmImmichVisibility { prompt } => {
                 assert_eq!(prompt.grant_id, GRANT);
@@ -150,6 +180,9 @@ impl Shell {
             }
             ShellOperation::ReadImmichLockedImage { ticket } => {
                 self.stages += 1;
+                if let Some(patch) = self.patch_after_stage.take() {
+                    self.facts_patch = Some(patch);
+                }
                 Ok(json!({"requestID":ticket.request_id,"stagedID":format!("stage{}",self.stages)}))
             }
             ShellOperation::PublishImmichLockedImage { ticket, staged_id } => {
@@ -165,16 +198,30 @@ impl Shell {
             _ => Err("unexpected ordinary/native mutation".into()),
         }
     }
+    fn asset_read_failure(&self, path: &str, method: &str) -> Option<Result<Value, String>> {
+        if path != format!("assets/{ASSET}") || method != "GET" {
+            return None;
+        }
+        if self.asset_transport_failure.is_some() {
+            return Some(Err("fixture transport unavailable".into()));
+        }
+        self.asset_failure
+            .map(|status| Ok(json!({"status":status,"body":null})))
+    }
     fn http(&mut self, request: &suwop_core::immich::HttpRequest) -> Result<Value, String> {
         let path = request
             .url
             .strip_prefix("https://fixture.example/api/")
             .ok_or("unexpected endpoint")?;
         self.paths.push(path.into());
+        if let Some(failure) = self.asset_read_failure(path, &request.method) {
+            return failure;
+        }
         if request.headers.contains_key("x-api-key") && request.method != "GET" {
             self.ordinary_writes += 1;
         }
         assert!(!request.headers.contains_key("Cookie"));
+
         if path == "server/features" {
             return Ok(json!({"status":200,"body":{"passwordLogin":true}}));
         }
@@ -522,6 +569,7 @@ fn explicit_unlocked_observation_requires_matching_fresh_full_scan() -> Result<(
     state
         .immich_visibility_operations
         .push(ImmichVisibilityOperation {
+            kind: suwop_core::immich_visibility::ImmichVisibilityOperationKind::LockedTransition,
             id: NEXT.into(),
             scope: key().scope,
             key: key(),
@@ -531,6 +579,7 @@ fn explicit_unlocked_observation_requires_matching_fresh_full_scan() -> Result<(
             outcome: suwop_core::apple_visibility::VisibilityOutcome::Unknown,
             observation: None,
             album_membership_observation: AlbumMembershipObservation::NotChecked,
+            selected_observation: None,
         });
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     Ok(())
@@ -588,7 +637,7 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
     let state = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(state.schema_version, 6);
+    assert_eq!(state.schema_version, 8);
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     let record = raw["immichVisibilityOperations"][0].clone();
     raw["immichVisibilityOperations"]
@@ -1202,7 +1251,7 @@ fn same_session_refresh_recovers_known_unsubmitted_failure_but_not_unknown() -> 
     };
     shell.run(&c, open(GRANT))?;
     let before = SavedLibrary {
-        schema_version: 6,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: "https://fixture.example/api".into(),
@@ -1369,3 +1418,330 @@ fn old_refresh_completion_never_releases_new_session_work_busy() -> Result<(), S
     assert!(!c.view().busy);
     Ok(())
 }
+
+#[test]
+fn ordinary_inspect_preserves_authenticated_locked_roster_and_selected_image() -> Result<(), String>
+{
+    use suwop_core::immich_visibility::{
+        AlbumMembershipObservation, ImmichVisibility, ImmichVisibilityOperation,
+        ImmichVisibilityOperationKind,
+    };
+    let old = ImmichVisibilityOperation {
+        kind: ImmichVisibilityOperationKind::OrdinaryArchive,
+        id: OP.into(),
+        scope: key().scope,
+        key: key(),
+        witness_digest: "a".repeat(64),
+        from: ImmichVisibility::Timeline,
+        to: ImmichVisibility::Archive,
+        outcome: suwop_core::apple_visibility::VisibilityOutcome::Applied,
+        observation: Some(ImmichVisibility::Archive),
+        album_membership_observation: AlbumMembershipObservation::NotChecked,
+        selected_observation: None,
+    };
+    let c = core_operations(false, vec![old]);
+    let mut locked = asset();
+    locked["visibility"] = json!("locked");
+    let mut shell = Shell {
+        visibility: Some("locked".into()),
+        pages: Some(std::collections::VecDeque::from([
+            json!({"assets":{"items":[locked],"nextCursor":null}}),
+        ])),
+        ..Shell::default()
+    };
+    shell.run(&c, open(GRANT))?;
+    shell.run(
+        &c,
+        Event::RequestImmichLockedImage {
+            entry_id: ASSET.into(),
+            grant_id: GRANT.into(),
+            request_id: NEXT.into(),
+        },
+    )?;
+    let before = c.view().immich_locked_view;
+    assert_eq!(before.entries.as_ref().ok_or("entries")?.len(), 1);
+    assert!(before.image.is_some());
+    let before_json = serde_json::to_value(&before).map_err(|e| e.to_string())?;
+    activate_archive(&mut shell, &c)?;
+    let status_reads = shell.status_reads;
+    let paths = shell.paths.len();
+    shell.run(
+        &c,
+        Event::InspectImmichArchive {
+            record_id: OP.into(),
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        serde_json::to_value(c.view().immich_locked_view).map_err(|e| e.to_string())?,
+        before_json
+    );
+    assert_eq!(shell.ordinary_reads, 1);
+    assert_eq!(shell.status_reads, status_reads);
+    assert_eq!(&shell.paths[paths..], &[format!("assets/{ASSET}")]);
+    assert_eq!(shell.persist_calls, 0);
+    assert_eq!(shell.writes, 0);
+    assert_eq!(shell.ordinary_writes, 0);
+    assert_eq!(shell.stages, 1);
+    assert!(shell.releases.is_empty());
+    assert!(shell.disk.is_none());
+    Ok(())
+}
+
+#[test]
+fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_restart()
+-> Result<(), String> {
+    use suwop_core::immich_visibility::{
+        AlbumMembershipObservation, ImmichVisibility, ImmichVisibilityOperation,
+        ImmichVisibilityOperationKind,
+    };
+    for kind in [
+        ImmichVisibilityOperationKind::OrdinaryArchive,
+        ImmichVisibilityOperationKind::LockedTransition,
+    ] {
+        for restart in [false, true] {
+            let ordinary = kind == ImmichVisibilityOperationKind::OrdinaryArchive;
+            let operation = ImmichVisibilityOperation {
+                kind,
+                id: OP.into(),
+                scope: key().scope,
+                key: key(),
+                witness_digest: "a".repeat(64),
+                from: ImmichVisibility::Timeline,
+                to: if ordinary {
+                    ImmichVisibility::Archive
+                } else {
+                    ImmichVisibility::Locked
+                },
+                outcome: suwop_core::apple_visibility::VisibilityOutcome::Unknown,
+                observation: None,
+                album_membership_observation: AlbumMembershipObservation::NotChecked,
+                selected_observation: None,
+            };
+            let mut operations = vec![operation];
+            if restart {
+                let persisted = SavedLibrary {
+                    schema_version: 8,
+                    immich_visibility_operations: operations,
+                    ..SavedLibrary::default()
+                };
+                let raw = serde_json::to_value(persisted).map_err(|e| e.to_string())?;
+                let loaded = suwop_core::workflow::migrate(raw)?;
+                assert!(suwop_core::immich_visibility::fences(&loaded, &key()));
+                operations = loaded.immich_visibility_operations;
+            }
+            let c = core_operations(false, operations);
+            let mut locked = asset();
+            locked["visibility"] = json!("locked");
+            let mut shell = Shell {
+                visibility: Some("locked".into()),
+                pages: Some(std::collections::VecDeque::from([
+                    json!({"assets":{"items":[locked],"nextCursor":null}}),
+                ])),
+                ..Shell::default()
+            };
+            activate_archive(&mut shell, &c)?;
+            shell.run(&c, open(GRANT))?;
+            let entries = c.view().immich_locked_view.entries.ok_or("PIN entries")?;
+            assert_eq!(
+                entries.len(),
+                usize::from(ordinary),
+                "kind={kind:?}, restart={restart}"
+            );
+            shell.run(
+                &c,
+                Event::RequestImmichLockedImage {
+                    entry_id: ASSET.into(),
+                    grant_id: GRANT.into(),
+                    request_id: NEXT.into(),
+                },
+            )?;
+            assert_eq!(c.view().immich_locked_view.image.is_some(), ordinary);
+            assert_eq!(shell.stages, usize::from(ordinary));
+            if ordinary {
+                let action = &entries[0].visibility_action;
+                assert!(!action.can_show_timeline && !action.can_show_archive && !action.can_lock);
+                assert_eq!(
+                    action.reason,
+                    Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown)
+                );
+                let history = c
+                    .view()
+                    .immich_archive_view
+                    .history
+                    .ok_or("ordinary history")?;
+                assert_eq!(
+                    history[0].outcome,
+                    suwop_core::apple_visibility::VisibilityOutcome::Unknown
+                );
+                assert_eq!(history[0].observation, None);
+            }
+
+            let paths = shell.paths.len();
+            shell.run(&c, prepare(NEXT, ImmichVisibility::Timeline))?;
+            assert_eq!(shell.paths.len(), paths, "unknown write fence must remain");
+            assert_eq!(shell.persist_calls, 0);
+            assert_eq!(shell.writes, 0);
+            assert!(shell.disk.is_none());
+        }
+    }
+    Ok(())
+}
+
+fn activate_archive(shell: &mut Shell, core: &Core<Suwop>) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: SCENE.into(),
+            phase: suwop_core::protection::ProtectionScenePhase::Active,
+        },
+    )?;
+    shell.run(
+        core,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )
+}
+
+fn drain_until(
+    core: &Core<Suwop>,
+    shell: &mut Shell,
+    mut effects: Vec<Effect>,
+    stop: fn(&ShellOperation) -> bool,
+) -> Result<Vec<Effect>, String> {
+    while !effects.is_empty() {
+        let Effect::Io(mut request) = effects.remove(0);
+        if stop(&request.operation) {
+            effects.insert(0, Effect::Io(request));
+            return Ok(effects);
+        }
+        let result = shell.respond(&request.operation);
+        effects.extend(
+            core.resolve(
+                &mut request,
+                ShellResponse {
+                    value: result.as_ref().ok().cloned(),
+                    error: result.err(),
+                },
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+    Err("expected effect boundary".into())
+}
+fn check_ordinary_prepared_preserves_other_key(pending: bool) -> Result<(), String> {
+    let c = core(false);
+    let mut locked = asset();
+    locked["visibility"] = json!("locked");
+    let mut shell = Shell {
+        visibility: Some("locked".into()),
+        pages: Some(std::collections::VecDeque::from([
+            json!({"assets":{"items":[locked],"nextCursor":null}}),
+        ])),
+        ..Shell::default()
+    };
+    shell.run(&c, open(GRANT))?;
+    activate_archive(&mut shell, &c)?;
+    let image_event = Event::RequestImmichLockedImage {
+        entry_id: ASSET.into(),
+        grant_id: GRANT.into(),
+        request_id: NEXT.into(),
+    };
+    let mut held = if pending {
+        drain_until(&c, &mut shell, c.process_event(image_event), |op| {
+            matches!(op, ShellOperation::ReadImmichLockedImage { .. })
+        })?
+    } else {
+        shell.run(&c, image_event)?;
+        vec![]
+    };
+    let before = c.view().immich_locked_view;
+    assert_eq!(before.image.is_some(), !pending);
+    let mut ordinary = asset();
+    ordinary["id"] = json!("99999999-9999-4999-8999-999999999999");
+    let target = AssetKey {
+        asset_id: ordinary["id"].as_str().ok_or("ordinary id")?.into(),
+        ..key()
+    };
+    shell.ordinary_asset = Some(ordinary);
+    let _persist = drain_until(
+        &c,
+        &mut shell,
+        c.process_event(Event::PrepareImmichArchive {
+            key: target,
+            to: suwop_core::immich_archive::ImmichArchiveDestination::Archive,
+            operation_id: OP.into(),
+            scene_id: SCENE.into(),
+        }),
+        |op| matches!(op, ShellOperation::Persist(_)),
+    )?;
+    let after = c.view().immich_locked_view;
+    assert_eq!(after.image, before.image);
+    assert_eq!(
+        serde_json::to_value(after.entries).map_err(|e| e.to_string())?,
+        serde_json::to_value(before.entries).map_err(|e| e.to_string())?
+    );
+    assert_eq!(after.grant_id, before.grant_id);
+    if pending {
+        let Effect::Io(mut read) = held.remove(0);
+        assert!(matches!(
+            read.operation,
+            ShellOperation::ReadImmichLockedImage { .. }
+        ));
+        let value = shell.respond(&read.operation)?;
+        let publication = c
+            .resolve(
+                &mut read,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let publication = drain_until(&c, &mut shell, publication, |op| {
+            matches!(
+                op,
+                ShellOperation::PublishImmichLockedImage { .. }
+                    | ShellOperation::ReleaseImmichLockedImage { .. }
+            )
+        })?;
+        assert!(publication.iter().any(|effect| matches!(effect, Effect::Io(io) if matches!(io.operation, ShellOperation::PublishImmichLockedImage { .. }))), "unrelated pending read must remain authorized for publication");
+    }
+    assert_eq!(shell.persist_calls, 0);
+    assert_eq!(shell.ordinary_writes, 0);
+
+    Ok(())
+}
+
+#[test]
+fn ordinary_prepared_preserves_other_key_locked_image() -> Result<(), String> {
+    check_ordinary_prepared_preserves_other_key(false)
+}
+#[test]
+fn ordinary_prepared_preserves_other_key_pending_read() -> Result<(), String> {
+    check_ordinary_prepared_preserves_other_key(true)
+}
+
+#[test]
+fn pin_direct_video_lock_and_unlock_never_persist_or_write() -> Result<(), String> {
+    use suwop_core::immich_visibility::ImmichVisibility;
+    for to in [
+        ImmichVisibility::Locked,
+        ImmichVisibility::Timeline,
+        ImmichVisibility::Archive,
+    ] {
+        let (c, mut shell) = opened(false)?;
+        shell.facts_patch = Some(json!({"type":"VIDEO"}));
+        if to != ImmichVisibility::Locked {
+            shell.visibility = Some("locked".into());
+        }
+        shell.run(&c, prepare(OP, to))?;
+        assert_eq!(shell.writes, 0);
+        assert_eq!(shell.persist_calls, 0);
+    }
+    Ok(())
+}
+
+#[path = "immich_visibility/selected_observation.rs"]
+mod selected_observation;

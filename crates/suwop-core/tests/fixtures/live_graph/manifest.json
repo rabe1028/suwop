@@ -1,0 +1,47 @@
+{
+  "creator": "OpenAI Codex synthetic fixture generation",
+  "provenance": "Entirely synthetic red/blue solid pixels from FFmpeg lavfi color; no audio or third-party media. API-linked pairing fixture only; not Apple Live Photo metadata.",
+  "generator": "generate.sh",
+  "tools": "FFmpeg/ffprobe 8.1.2; exact build/configuration in tool-versions.txt; x264 core/version in *.encode.log",
+  "files": [
+    {
+      "file": "V.mp4",
+      "bytes": 1522,
+      "sha1": "40cdee87f5b390426c2e9ad8de71568c3aaab199",
+      "sha256": "1b4b416ade2368a1850a3ae1882b63015964623a9af98b9c497d73aad4dee774",
+      "width": 64,
+      "height": 64,
+      "frames": 5,
+      "fps": 5,
+      "durationSeconds": 1,
+      "decodedSolidRGB": [
+        254,
+        0,
+        0
+      ],
+      "decodedBytes": 61440,
+      "decodedSHA256": "720a81f44be2680841be0bb4e7228049dee213b4512c3d8b55dea9bfbc59fcc8"
+    },
+    {
+      "file": "M.mp4",
+      "bytes": 1522,
+      "sha1": "3316d847661646826354da4deaf39291febc54ef",
+      "sha256": "9e44d0adc0a3b19774daac03f2b9648bc758ed8755383cbcc9803a9f4904801e",
+      "width": 64,
+      "height": 64,
+      "frames": 5,
+      "fps": 5,
+      "durationSeconds": 1,
+      "decodedSolidRGB": [
+        0,
+        0,
+        255
+      ],
+      "decodedBytes": 61440,
+      "decodedSHA256": "aed5076d913fbb5454c9828476f63664dfef161930df93b7f4f5973c3f372d64"
+    }
+  ],
+  "validation": "ffprobe frame/stream inspection; ffmpeg -xerror full decode; all decoded RGB pixels across all five frames validated constant per video",
+  "codec": "libx264 core 164, Nix package x264-0-unstable-2025-01-03; linked-library identity in linked-libraries.txt",
+  "reproducibility": "generate.sh rerun with the recorded toolchain produced identical SHA256 for both files."
+}

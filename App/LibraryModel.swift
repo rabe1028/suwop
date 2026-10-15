@@ -31,6 +31,7 @@ import SwiftUI
     let thumbnails = NSCache<NSString, PlatformImage>()
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()
+    let immichArchive = ImmichArchiveSession()
 
     #if SUWOP_VRT
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
@@ -57,6 +58,7 @@ import SwiftUI
             self.thumbnailEffect = thumbnailEffect
             protection.executeEffect = executeEffect
             immichLocked.executeEffect = executeEffect
+            immichArchive.executeEffect = executeEffect
             self.executeEffect = { operation, context in
                 guard let context else { throw CancellationError() }
                 return try await executeEffect(operation, context)
@@ -305,6 +307,7 @@ import SwiftUI
     }
 
     func disconnect() {
+        immichArchive.revokeForConnectionChange()
         immichLocked.close()
         send(["type": .string("disconnect")])
     }
@@ -357,13 +360,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 6 {
+                if pendingRefresh, view?.state.schemaVersion == 8 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 6 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 8 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 6 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 8 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -406,6 +409,7 @@ private extension LibraryModel {
         view = snapshot.view
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
+        immichArchive.receive(snapshot)
         if let failure = view?.error {
             errorMessage = failure
         }
@@ -422,6 +426,7 @@ private extension LibraryModel {
             publish: { [weak self] in self?.publish($0) }
         )
         immichLocked.configure(runtime: runtime, shell: shell) { [weak self] in self?.publish($0) }
+        immichArchive.configure(runtime: runtime, shell: shell) { [weak self] in self?.publish($0) }
     }
 
     func resolveRequests(_ initial: [EffectRequest], context: ContentPresentationContext?) async throws {
@@ -531,6 +536,7 @@ extension LibraryModel {
     }
 
     func configure(address: String, apiKey: String, allowHTTP: Bool) {
+        immichArchive.revokeForConnectionChange()
         immichLocked.close()
         send([
             "type": .string("configure"),

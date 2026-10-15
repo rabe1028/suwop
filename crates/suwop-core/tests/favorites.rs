@@ -16,6 +16,7 @@ const SHA: &str = "1111111111111111111111111111111111111111";
 
 fn asset(provider: Provider) -> StoredAsset {
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
@@ -49,7 +50,7 @@ fn asset(provider: Provider) -> StoredAsset {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 6,
+        schema_version: 8,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()

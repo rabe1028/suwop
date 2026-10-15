@@ -6,6 +6,12 @@ import SwiftUI
         WindowGroup {
             if CommandLine.arguments.contains("--semantic-fixture") {
                 InteractiveSemanticHost()
+            } else if CommandLine.arguments.contains("--archive-busy-fixture") {
+                ImmichArchiveBusyHost()
+            } else if CommandLine.arguments.contains("--archive-history-windows") {
+                ImmichArchiveHistoryRecoveryHost()
+            } else if CommandLine.arguments.contains("--immich-archive-fixture") {
+                InteractiveImmichArchiveHost()
             } else if CommandLine.arguments.contains("--immich-visibility-fixture") {
                 InteractiveImmichVisibilityHost()
             } else if CommandLine.arguments.contains("--immich-locked-fixture") {

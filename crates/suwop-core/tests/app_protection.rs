@@ -21,6 +21,7 @@ const ENTRY: &str = "44444444-4444-4444-8444-444444444444";
 
 fn asset(provider: Provider, id: &str) -> StoredAsset {
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: AppleVisibility::Visible,
         key: AssetKey {
@@ -55,7 +56,7 @@ fn asset(provider: Provider, id: &str) -> StoredAsset {
 
 fn saved() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 6,
+        schema_version: 8,
         apple_scope: "apple".into(),
         snapshots: [Provider::Apple, Provider::Immich]
             .into_iter()
@@ -1238,5 +1239,97 @@ fn other_account_auth_can_remove_only_local_record_without_exposing_old_provider
         );
         assert!(!shell.effects.contains(&"http"));
     }
+    Ok(())
+}
+
+#[test]
+fn ambiguous_protection_save_disables_unrelated_archive_hint_until_validated_recovery()
+-> Result<(), String> {
+    use suwop_core::{
+        immich_archive::ImmichArchiveDestination, immich_visibility::ImmichVisibility,
+    };
+    let mut initial = saved();
+    initial.snapshots[1].assets[0].immich_visibility = Some(ImmichVisibility::Timeline);
+    initial.snapshots[1].assets[0].immich_stack = suwop_core::domain::ImmichStackState::Unstacked;
+    let a = initial.snapshots[0].assets[0].key.clone();
+    let b = initial.snapshots[1].assets[0].key.clone();
+    let c = core(initial);
+    assert_eq!(
+        c.view().immich_archive_actions[0].to,
+        Some(ImmichArchiveDestination::Archive)
+    );
+    let mut shell = Shell {
+        persistence_fault: Some(PersistenceFault::AfterWrite),
+        ..Shell::default()
+    };
+    shell.run(
+        &c,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: SCENE.into(),
+            phase: ProtectionScenePhase::Active,
+        },
+    )?;
+    shell.run(
+        &c,
+        Event::OpenImmichArchive {
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        c.view().immich_archive_view.scene_id.as_deref(),
+        Some(SCENE)
+    );
+    shell.activate(&c)?;
+    shell.authenticate(&c, ProtectedPurpose::Protect)?;
+    shell.run(
+        &c,
+        Event::ProtectPhotos {
+            keys: vec![a],
+            operation_id: OPERATION.into(),
+            grant_id: CHALLENGE.into(),
+        },
+    )?;
+    assert!(c.view().protected_view.persistence_uncertain);
+    let hint = c
+        .view()
+        .immich_archive_actions
+        .into_iter()
+        .find(|h| h.key == b)
+        .ok_or("unrelated retained hint")?;
+    assert_eq!(hint.to, None);
+    assert_eq!(
+        hint.reason,
+        Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Unavailable)
+    );
+    let effects = shell.effects.clone();
+    assert!(
+        c.process_event(Event::PrepareImmichArchive {
+            key: b,
+            to: ImmichArchiveDestination::Archive,
+            operation_id: "55555555-5555-4555-8555-555555555555".into(),
+            scene_id: SCENE.into()
+        })
+        .is_empty()
+    );
+    assert_eq!(shell.effects, effects);
+    let durable = shell.durable.as_ref().ok_or("actual write")?;
+    let mut requests = c.process_event(Event::ReconcileProtectedState {
+        grant_id: CHALLENGE.into(),
+    });
+    let Effect::Io(mut read) = requests.pop().ok_or("recovery read")?;
+    assert!(matches!(read.operation, ShellOperation::ReadState));
+    assert!(
+        c.resolve(
+            &mut read,
+            reply(serde_json::to_value(durable).map_err(|e| e.to_string()))
+        )
+        .map_err(|e| e.to_string())?
+        .is_empty()
+    );
+    assert!(!c.view().protected_view.persistence_uncertain);
+    assert!(
+        c.view().immich_archive_actions.is_empty(),
+        "Recovery invalidates snapshots; only a fresh scan can restore actions"
+    );
     Ok(())
 }

@@ -1,0 +1,36 @@
+{
+  "fixtureVersion": 1,
+  "provenance": "Entirely synthetic solid green pixels; generated locally with ImageIO/AVAssetWriter; no audio, third-party or personal media.",
+  "files": [
+    {
+      "path": "media/synthetic-still.jpg",
+      "bytes": 927,
+      "sha1": "2ad1f4d64d8e8d78751e2af0145e4f79382875f4",
+      "sha256": "c51e647297290608d95331c9a501198852abfacc75304b7a44e69e0f66a6f78d"
+    },
+    {
+      "path": "media/synthetic-motion.mov",
+      "bytes": 1963,
+      "sha1": "1b00e273230a1f6c9e9eb56dd8acce5f1ff61974",
+      "sha256": "f45254c2acc9e80027927b34805d45445fbb5ec53510c1ca594dca253c74ef4e"
+    }
+  ],
+  "expectedContentIdentifier": "B18D9CC0-335C-4B73-880D-627A3A78D9C3",
+  "expectedStillImageTimeSeconds": 0.4,
+  "expectedStillImageTimeDurationSeconds": 0.2,
+  "dimensions": {
+    "width": 64,
+    "height": 64
+  },
+  "video": {
+    "codec": "H.264/avc1",
+    "frameCount": 5,
+    "durationSeconds": 1,
+    "audioTrackCount": 0
+  },
+  "toolVersionsFile": "evidence/tool-versions.txt",
+  "historicalNativeValidation": "evidence/native-validation.json",
+  "historicalIndependentProbe": "evidence/ffprobe.json",
+  "byteIdenticalRegenerationGuaranteed": false,
+  "acceptanceScope": "Structured native pair metadata only; API relation, upload/download, PhotoKit, physical playback and iCloud acceptance are separate."
+}

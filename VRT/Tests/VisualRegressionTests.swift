@@ -34,7 +34,7 @@ final class VisualRegressionTests: XCTestCase {
                 open: { _ in }
             ).navigationTitle("写真を選択")
         })
-        try await capture("viewer", view: PhotoViewer(model: model, key: key), dark: true)
+        try await captureViewers(model: model, key: key)
         try await capture("photo-info", view: PhotoInfo(photo: photo, model: model))
         try await capture("albums", view: NavigationStack {
             List { AlbumsSection(model: model, creating: .constant(false)) }.navigationTitle("コレクション")
@@ -168,6 +168,18 @@ final class VisualRegressionTests: XCTestCase {
             largeText: true,
             scrollToBottom: true
         )
+    }
+
+    @MainActor private func captureViewers(model: LibraryModel, key: AssetKey) async throws {
+        try await capture("viewer", view: PhotoViewer(model: model, key: key), dark: true)
+        let videoFixture = try ImmichArchivePhotoFixture(video: true)
+        let videoModel = try await videoFixture.start()
+        defer {
+            videoModel.immichArchive.close(sceneID: ImmichArchivePhotoFixture.sceneID)
+            videoFixture.releaseHeld()
+        }
+        let videoKey = try XCTUnwrap(videoModel.photos.first?.assets.first?.key)
+        try await capture("viewer-video", view: PhotoViewer(model: videoModel, key: videoKey), dark: true)
     }
 
     @MainActor private func capture(

@@ -2,7 +2,8 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-COMPOSE=(docker compose -p "${IMMICH_TEST_PROJECT:-suwop-rust-test}" -f "$ROOT/docker/immich-test/docker-compose.yml")
+export IMMICH_TEST_PROJECT="${IMMICH_TEST_PROJECT:-suwop-rust-test}"
+COMPOSE=(docker compose -p "$IMMICH_TEST_PROJECT" -f "$ROOT/docker/immich-test/docker-compose.yml")
 export IMMICH_VERSION="${IMMICH_VERSION:-v3.2.4}"
 export IMMICH_TEST_PORT="${IMMICH_TEST_PORT:-2289}"
 export SUWOP_IMMICH_URL="${SUWOP_IMMICH_URL:-http://127.0.0.1:${IMMICH_TEST_PORT}}"
@@ -24,5 +25,7 @@ if ! SUWOP_IMMICH_API_KEY="$(python3 "$ROOT/scripts/bootstrap_immich.py")"; then
 fi
 export SUWOP_IMMICH_API_KEY
 
+export SUWOP_NATIVE_LIVE_EVIDENCE_DIR="${SUWOP_NATIVE_LIVE_EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/suwop-native-live-evidence.XXXXXX")}"
+printf 'Synthetic native Live evidence: %s\n' "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR"
 cd "$ROOT"
 cargo test --locked -p suwop-core --test immich_live -- --ignored --test-threads=1

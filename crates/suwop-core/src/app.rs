@@ -56,6 +56,9 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    ConfirmImmichArchive {
+        prompt: crate::immich_archive::ImmichArchivePrompt,
+    },
     ConfirmImmichVisibility {
         prompt: crate::immich_visibility::ImmichVisibilityPrompt,
     },
@@ -292,6 +295,37 @@ pub enum Event {
             ),
             String,
         >,
+    },
+    PrepareImmichArchive {
+        key: crate::domain::AssetKey,
+        to: crate::immich_archive::ImmichArchiveDestination,
+        #[serde(rename = "operationID")]
+        operation_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    InspectImmichArchive {
+        #[serde(rename = "recordID")]
+        record_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    RecoverImmichArchiveState {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    ImmichArchiveSceneChanged {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        phase: crate::protection::ProtectionScenePhase,
+    },
+    OpenImmichArchive {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    CloseImmichArchive {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
     },
     PrepareImmichVisibility {
         key: crate::domain::AssetKey,
@@ -603,6 +637,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub immich_archive: crate::immich_archive::ImmichArchiveModel,
     pub immich_visibility: crate::immich_visibility::ImmichVisibilityModel,
     pub ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub immich_locked: crate::immich_locked::ImmichLockedModel,
@@ -622,6 +657,8 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub immich_archive_view: crate::immich_archive::ImmichArchiveView,
+    pub immich_archive_actions: Vec<crate::immich_archive::ImmichArchiveActionHint>,
     pub ordinary_content_keys: Vec<crate::domain::AssetKey>,
     pub private_content_revision: String,
     pub immich_visibility_actions: Vec<crate::immich_visibility::ImmichVisibilityActionHint>,
@@ -666,6 +703,16 @@ impl crux_core::App for Suwop {
             model
                 .ordinary_generation
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let connection_changed = matches!(event, Event::Disconnect | Event::Configure { .. })
+                || matches!(&event, Event::Finished { session, .. }
+                    if model.session.as_ref().map(|s| &s.scope) != session.as_ref().map(|s| &s.scope));
+            if connection_changed {
+                model.immich_archive.scene_id = None;
+            }
+            crate::immich_archive::invalidate(model);
+        }
+        if let Some(command) = crate::immich_archive::update(event.clone(), model) {
+            return command;
         }
         if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
             return command;
@@ -734,7 +781,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
-                model.ready = model.state.schema_version == 6;
+                model.ready = model.state.schema_version == 8;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
             }
@@ -785,11 +832,7 @@ impl Suwop {
         }
     }
     fn library_view(model: &Model) -> ViewModel {
-        let can_transfer = model.ready
-            && model.session.is_some()
-            && !model.busy
-            && !model.protection.membership_uncertain
-            && !model.immich_visibility.persistence_uncertain;
+        let can_transfer = can_transfer(model);
         let move_blockers = public_move_blockers(model, can_transfer);
         let public = crate::privacy::PublishedLibrary::from_canonical(
             &crate::protection::ordinary_state(model),
@@ -822,6 +865,8 @@ impl Suwop {
         ViewModel {
             ordinary_content_keys,
             private_content_revision,
+            immich_archive_view: crate::immich_archive::view(model),
+            immich_archive_actions: crate::immich_archive::actions(model),
             immich_visibility_actions: crate::immich_visibility::actions(model),
             immich_visibility_view: crate::immich_visibility::view(model),
             immich_locked_view: crate::immich_locked::view(model),
@@ -1069,4 +1114,12 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
                 | Event::Browse { .. }
                 | Event::ChoosePreview { .. }
         )
+}
+
+fn can_transfer(model: &Model) -> bool {
+    model.ready
+        && model.session.is_some()
+        && !model.busy
+        && !model.protection.membership_uncertain
+        && !model.immich_visibility.persistence_uncertain
 }

@@ -47,7 +47,7 @@ fn snapshot() -> AlbumSnapshot {
 }
 fn fixture_state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 6,
+        schema_version: 8,
         apple_scope: "apple".into(),
         albums: vec![snapshot()],
         snapshots: vec![LibrarySnapshot {
@@ -56,6 +56,7 @@ fn fixture_state() -> SavedLibrary {
             access: ScanAccess::Full,
             scanned_at: None,
             assets: vec![StoredAsset {
+                immich_visibility: None,
                 immich_stack: suwop_core::domain::ImmichStackState::Unknown,
                 apple_visibility: suwop_core::domain::AppleVisibility::Visible,
                 key: photo_key(),

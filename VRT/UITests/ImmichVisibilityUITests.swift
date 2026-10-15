@@ -119,10 +119,29 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertFalse(lock.isEnabled)
         // SwiftUI Menu renders this read-only explanation as a native menu
         // element, whose AX type is not necessarily StaticText.
-        let reason = app.descendants(matching: .any).matching(NSPredicate(
+        let reasons = app.descendants(matching: .any).matching(NSPredicate(
             format: "label == %@", "Live Photo の表示先変更には対応していません。"
-        )).firstMatch
-        XCTAssertTrue(reason.exists, app.debugDescription)
+        ))
+        let visibleReason = NSPredicate { _, _ in
+            reasons.allElementsBoundByIndex.contains {
+                $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+            }
+        }
+        let ready = XCTNSPredicateExpectation(predicate: visibleReason, object: nil)
+        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed,
+              let reason = reasons.allElementsBoundByIndex.first(where: {
+                  $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+              })
+        else {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Live-explanation-no-visible-AX-element"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("The exact explanation must have a visible nonempty frame: " + app.debugDescription)
+            app.terminate()
+            return
+        }
+        XCTAssertTrue(reason.exists)
         XCTAssertFalse(reason.frame.isEmpty)
         XCTAssertTrue(app.frame.intersects(reason.frame))
         XCTAssertFalse(app.buttons["confirmImmichVisibility"].exists)
@@ -139,6 +158,9 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(disclosure.exists)
         XCTAssertTrue(disclosure.label.contains("すべてのアルバム"))
         XCTAssertTrue(disclosure.label.contains("再表示しても所属は自動で戻りません"))
+        let continuing = app.staticTexts["immichVisibilityContinuingAccess"]
+        XCTAssertTrue(continuing.exists)
+        XCTAssertTrue(continuing.label.contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
         let action = app.buttons["confirmImmichVisibility"]
         let cancel = app.buttons["cancelImmichVisibility"]
         for _ in 0 ..< 4 {
@@ -247,10 +269,16 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(app.frame.contains(element.frame), "Native action must remain inside the screen")
     }
 
-    @MainActor private func launch(lost: Bool = false, live: Bool = false, largeText: Bool = false) -> XCUIApplication {
+    @MainActor private func launch(
+        lost: Bool = false,
+        live: Bool = false,
+        largeText: Bool = false,
+        selectedLinked: Bool = false
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--immich-visibility-fixture"]
             + (lost ? ["--lost-visibility-response"] : []) + (live ? ["--unsupported-live"] : [])
+            + (selectedLinked ? ["--selected-linked-after-mutation"] : [])
             + (largeText ? ["--large-text"] : [])
         app.launch()
         return app
@@ -301,6 +329,10 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(disclosure.label.contains("自動で戻りません"))
         if lock {
             XCTAssertTrue(disclosure.label.contains("すべてのアルバム"))
+            XCTAssertTrue(app.staticTexts["immichVisibilityContinuingAccess"].label
+                .contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
+        } else {
+            XCTAssertFalse(app.staticTexts["immichVisibilityContinuingAccess"].exists)
         }
         XCTAssertEqual(action.label, destination + "へ変更")
         action.tap()
@@ -310,5 +342,68 @@ final class ImmichVisibilityUITests: XCTestCase {
     @MainActor private func expect(_ value: String, element: XCUIElement) {
         let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", value), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [expected], timeout: 10), .completed)
+    }
+}
+
+extension ImmichVisibilityUITests {
+    @MainActor func testLinkedSelectedObservationDoesNotReplaceTheUnknownOperationResult() {
+        exerciseSelectedObservation(largeText: false)
+    }
+
+    @MainActor func testAX3LinkedSelectedObservationGuidanceAndActionsRemainReachable() {
+        exerciseSelectedObservation(largeText: true)
+    }
+
+    @MainActor private func exerciseSelectedObservation(largeText: Bool) {
+        let app = launch(lost: true, largeText: largeText, selectedLinked: true)
+        startLockFromViewer(app)
+        authenticate(app)
+        confirm(app, destination: "ロック", lock: true)
+        let unknown = app.staticTexts["変更結果を確認できません。再実行せず、現在の状態を確認してください。"]
+        XCTAssertTrue(unknown.waitForExistence(timeout: 10))
+        let before = XCTAttachment(screenshot: app.screenshot())
+        before.name = largeText ? "selected-original-operation-AX3-before" : "selected-original-operation-normal-before"
+        before.lifetime = .keepAlways
+        add(before)
+        let inspect = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "inspectImmichVisibility-"))
+            .firstMatch
+        inspect.tap()
+        let selected = app.staticTexts["選択した原本を最後に確認した表示先: ロック"]
+        for _ in 0 ..< 4 {
+            if selected.exists, !selected.frame.isEmpty, app.frame.intersects(selected.frame) {
+                break
+            }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertTrue(selected.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.frame.intersects(selected.frame))
+        XCTAssertTrue(unknown.exists)
+        XCTAssertTrue(app.staticTexts["操作の結果"].exists)
+        let configuration = app.staticTexts.matching(NSPredicate(
+            format: "identifier BEGINSWITH %@", "selectedImmichConfiguration-"
+        )).firstMatch
+        for _ in 0 ..< 4 {
+            if configuration.exists, app.frame.contains(configuration.frame), inspect.isHittable {
+                break
+            }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        XCTAssertEqual(configuration.label, "この原本は動画に関連付けられています。関連する動画やほかの写真の表示先・閲覧可否は確認していません。")
+        XCTAssertFalse(configuration.frame.isEmpty)
+        XCTAssertTrue(app.frame.contains(configuration.frame))
+        assertReachable(inspect, in: app)
+        assertReachable(app.buttons["closeImmichLocked"], in: app)
+        XCTAssertFalse(app.buttons["再実行"].exists)
+        let image = XCTAttachment(screenshot: app.screenshot())
+        image.name = largeText ? "selected-original-observation-AX3-after" : "selected-original-observation-normal-after"
+        image.lifetime = .keepAlways
+        add(image)
+        app.buttons["closeImmichLocked"].tap()
+        XCTAssertFalse(selected.exists)
+        if app.buttons["写真を閉じる"].exists {
+            app.buttons["写真を閉じる"].tap()
+        }
+        expect("attempts=1", element: app.staticTexts["visibilityFixtureAttempts"])
+        app.terminate()
     }
 }

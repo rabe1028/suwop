@@ -77,6 +77,8 @@ pub struct OrdinaryContentAuthorization {
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_archive_authorization: Option<crate::immich_archive::ImmichArchiveAuthorization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub immich_visibility_authorization:
         Option<crate::immich_visibility::ImmichVisibilityAuthorization>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -192,6 +194,7 @@ impl Session {
     #[must_use]
     pub fn request(&self, path: &str, method: &str, body: Option<Value>) -> HttpRequest {
         HttpRequest {
+            immich_archive_authorization: None,
             immich_visibility_authorization: None,
             ordinary_content_authorization: (method == "GET")
                 .then(|| self.content_authorization(path))
@@ -666,6 +669,12 @@ impl Asset {
         }
         inventory_sidecars(files, &mut resources, &mut blockers);
         StoredAsset {
+            immich_visibility: match self.visibility.as_deref() {
+                Some("timeline") => Some(crate::immich_visibility::ImmichVisibility::Timeline),
+                Some("archive") => Some(crate::immich_visibility::ImmichVisibility::Archive),
+                Some("locked") => Some(crate::immich_visibility::ImmichVisibility::Locked),
+                _ => None,
+            },
             immich_stack: self.stack.clone(),
             apple_visibility: crate::domain::AppleVisibility::Visible,
             key: AssetKey {
