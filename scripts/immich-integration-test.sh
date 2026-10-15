@@ -25,7 +25,7 @@ if ! SUWOP_IMMICH_API_KEY="$(python3 "$ROOT/scripts/bootstrap_immich.py")"; then
 fi
 export SUWOP_IMMICH_API_KEY
 
-export SUWOP_NATIVE_LIVE_EVIDENCE_DIR="${SUWOP_NATIVE_LIVE_EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/suwop-native-motion-evidence.XXXXXX")}"
-printf 'Synthetic native motion evidence: %s\n' "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR"
+export SUWOP_NATIVE_LIVE_EVIDENCE_DIR="${SUWOP_NATIVE_LIVE_EVIDENCE_DIR:-$(mktemp -d "${TMPDIR:-/tmp}/suwop-native-live-evidence.XXXXXX")}"
+printf 'Synthetic native Live evidence: %s\n' "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR"
 cd "$ROOT"
 cargo test --locked -p suwop-core --test immich_live -- --ignored --test-threads=1

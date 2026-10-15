@@ -3,7 +3,7 @@ use super::*;
 use std::io::{Seek, SeekFrom, Write};
 use std::process::{Command as Process, Stdio};
 
-pub(super) fn metadata_ready(session: &Session, ids: [&str; 3]) -> Result<(), String> {
+pub(super) fn metadata_ready(session: &Session, ids: [&str; 3], kind: &str) -> Result<(), String> {
     for id in std::iter::once(session.user_id.as_str()).chain(ids) {
         let valid = id.len() == 36
             && id.bytes().enumerate().all(|(i, c)| {
@@ -19,7 +19,8 @@ pub(super) fn metadata_ready(session: &Session, ids: [&str; 3]) -> Result<(), St
     }
     let root = std::path::PathBuf::from(
         std::env::var_os("SUWOP_NATIVE_LIVE_EVIDENCE_DIR").ok_or("metadata evidence root")?,
-    );
+    )
+    .join(kind);
     std::fs::create_dir_all(&root).map_err(|_| "metadata evidence directory")?;
     let sql = format!(
         r#"BEGIN READ ONLY;

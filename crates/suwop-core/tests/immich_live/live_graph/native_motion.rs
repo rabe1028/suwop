@@ -62,7 +62,7 @@ pub(in super::super) async fn native_motion_setup(
         Some(&motion),
     )
     .await?;
-    native_metadata::metadata_ready(session, [&parent, &motion, &other])?;
+    native_metadata::metadata_ready(session, [&parent, &motion, &other], "motion")?;
     for (id, to) in [(&motion, "timeline"), (&other, "archive")] {
         let value: Value = session
             .json(
@@ -111,6 +111,7 @@ pub(in super::super) fn native_motion_controls(
     let root = std::path::PathBuf::from(
         std::env::var_os("SUWOP_NATIVE_LIVE_EVIDENCE_DIR").ok_or("native evidence root")?,
     )
+    .join("motion")
     .join(stage);
     std::fs::create_dir(&root).map_err(|_| "native evidence stage exists")?;
     let (still, movie) = native_pair_bytes()?;

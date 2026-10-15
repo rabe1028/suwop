@@ -21,7 +21,15 @@ pub(super) use ordinary_linked::{
 mod native_metadata;
 #[path = "live_graph/native_motion.rs"]
 mod native_motion;
+use native_metadata::metadata_ready;
 pub(super) use native_motion::{native_motion_controls, native_motion_setup, native_pair_bytes};
+
+#[path = "live_graph/ordinary_parent.rs"]
+mod ordinary_parent;
+pub(super) use ordinary_parent::{
+    native_parent_probe, ordinary_native_parent_setup, ordinary_parent_controls,
+    ordinary_parent_setup,
+};
 
 const PIN: &str = "123456";
 const V: &[u8] = include_bytes!("../fixtures/live_graph/V.mp4");

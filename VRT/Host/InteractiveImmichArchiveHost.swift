@@ -35,8 +35,10 @@ import SwiftUI
             }
             .task {
                 do {
-                    let created = try ImmichArchivePhotoFixture(video: CommandLine.arguments
-                        .contains("--archive-video"))
+                    let created = try ImmichArchivePhotoFixture(
+                        video: CommandLine.arguments.contains("--archive-video"),
+                        liveParent: CommandLine.arguments.contains("--archive-live-parent")
+                    )
                     let lostReply = CommandLine.arguments.contains("--lost-archive-response")
                     if lostReply {
                         created.server.fault = .lostResponse
@@ -78,6 +80,10 @@ import SwiftUI
                 Text(server.originalsIntact ? "original=intact" : "original=changed")
                     .accessibilityIdentifier("archiveFixtureOriginal")
             }.font(.caption2)
+            if server.liveParent {
+                Text("related=\(server.relatedAssetsIntact ? "unchanged" : "changed"),reads=\(server.relatedReads)")
+                    .font(.caption2).accessibilityIdentifier("archiveFixtureRelated")
+            }
         }
     }
 }

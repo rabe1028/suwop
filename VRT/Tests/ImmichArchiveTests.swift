@@ -35,7 +35,7 @@ final class ImmichArchiveTests: XCTestCase {
         XCTAssertEqual(fixture.server.authenticationRequests, 0)
         XCTAssertEqual(fixture.deviceAuthCalls, 0)
         XCTAssertTrue(fixture.confirmations.allSatisfy {
-            $0.selectedItemDisclosure.contains("関連する写真の表示先は変わりません。")
+            $0.selectedItemDisclosure.contains("関連する写真や動画の表示先は変わりません。")
         })
         XCTAssertTrue(fixture.confirmations.last?.selectedItemDisclosure.contains("ほかの Immich アプリ") == true)
     }
