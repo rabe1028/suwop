@@ -24,6 +24,7 @@ ORDER = {
         "inventoryComplete",
         "isOffline",
         "deletionBlockers",
+        "immichStack",
     ],
     "LibrarySnapshot": ["provider", "scope", "assets", "access", "scannedAt"],
     "TransferFile": ["resource", "path", "signature"],
@@ -80,7 +81,7 @@ def generate(schema):
         args = []
         for field, kind in fields:
             default = " = nil" if kind.endswith("?") else ""
-            if field == "appleVisibility":
+            if field in {"appleVisibility", "immichStack"}:
                 default = " = .unknown"
             if field in {"isFavorite", "isOffline"}:
                 default = " = false"

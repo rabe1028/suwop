@@ -31,10 +31,9 @@ import SwiftUI
                 fixture?.model?.immichLocked.sceneChanged(sceneID: ImmichLockedFixtureData.sceneID, phase: native)
             }.task {
                 do {
-                    let kind: ImmichVisibilityFixtureServer.SourceKind = CommandLine.arguments
-                        .contains("--unsupported-live")
-                        ? .live : .image
-                    let created = try ImmichVisibilityPhotoFixture(kind: kind)
+                    let kind = sourceKind()
+                    let visibility = CommandLine.arguments.contains("--initially-locked") ? "locked" : "timeline"
+                    let created = try ImmichVisibilityPhotoFixture(visibility: visibility, kind: kind)
                     if CommandLine.arguments.contains("--lost-visibility-response") {
                         created.server.fault = .lostMutationReply
                     }
@@ -44,6 +43,16 @@ import SwiftUI
                     fixture = created
                 } catch { print("IMMICH_VISIBILITY_FIXTURE_FAILED") }
             }
+    }
+
+    private func sourceKind() -> ImmichVisibilityFixtureServer.SourceKind {
+        if CommandLine.arguments.contains("--stacked-source") {
+            return .stacked
+        }
+        if CommandLine.arguments.contains("--unknown-stack-source") {
+            return .unknownStack
+        }
+        return CommandLine.arguments.contains("--unsupported-live") ? .live : .image
     }
 }
 
@@ -62,6 +71,12 @@ import SwiftUI
                 Text("mutations=\(server.mutations)").accessibilityIdentifier("visibilityFixtureMutations")
                 Text("source=\(server.record["visibility"].string ?? "unknown")")
                     .accessibilityIdentifier("visibilityFixtureSource")
+            }.font(.caption2)
+            HStack {
+                Text("logins=\(server.logins)").accessibilityIdentifier("visibilityFixtureLogins")
+                Text("pins=\(server.pinSubmissions)").accessibilityIdentifier("visibilityFixturePINs")
+                Text("confirmations=\(fixture.confirmationRequests)")
+                    .accessibilityIdentifier("visibilityFixtureConfirmations")
             }.font(.caption2)
         }
     }

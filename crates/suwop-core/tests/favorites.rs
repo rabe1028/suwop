@@ -16,6 +16,7 @@ const SHA: &str = "1111111111111111111111111111111111111111";
 
 fn asset(provider: Provider) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,

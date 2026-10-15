@@ -24,6 +24,7 @@ fn key(index: u32) -> AssetKey {
 }
 fn asset(index: u32) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: key(index),
         name: format!("photo-{index}.jpg"),

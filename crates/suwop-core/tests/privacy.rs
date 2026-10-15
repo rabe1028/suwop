@@ -13,6 +13,7 @@ use suwop_core::{
 
 fn asset(provider: Provider, visibility: AppleVisibility) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: visibility,
         key: AssetKey {
             provider,

@@ -56,6 +56,12 @@ fn real_immich_single_image_visibility_removes_two_owned_albums_and_never_restor
         },
     )?;
     assert!(core.view().ordinary_content_keys.contains(&key));
+    assert!(
+        core.view()
+            .immich_visibility_actions
+            .iter()
+            .any(|a| a.key == key && a.can_lock)
+    );
     shell.run(&core, Event::RefreshAlbums)?;
     for album in &albums {
         assert!(album_contains(&agent, &session, album, &key.asset_id)?);
@@ -106,6 +112,7 @@ fn real_immich_single_image_visibility_removes_two_owned_albums_and_never_restor
         &mut shell, &core, &agent, &session, &key, &albums, &directory,
     )?;
     assert_eq!(shell.writes, 4);
+    verify_stacked_hints(&mut shell, &core, &session, &directory)?;
     assert!(
         !serde_json::to_string(&journal(&directory)?.immich_visibility_operations)
             .map_err(|_| "journal encode")?
@@ -265,7 +272,12 @@ impl LiveVisibilityShell<'_> {
                 if request.method == "GET"
                     && let Some(visibility) = value["body"]["visibility"].as_str()
                 {
-                    if let Some(id) = value["body"]["id"].as_str() {
+                    if request
+                        .headers
+                        .get("Authorization")
+                        .is_some_and(|v| v.starts_with("Bearer "))
+                        && let Some(id) = value["body"]["id"].as_str()
+                    {
                         self.fact_requests.insert(id.into(), request.clone());
                     }
                     self.fresh_observations.push((
@@ -424,6 +436,27 @@ async fn prepare_fixture(
     let id = session
         .upload(ctx, &file, &metadata, FILE_CAPTURE_TIME, None)
         .await?;
+    let peers = [
+        "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGMQj179H4YZkDkAm4oMqSLhGnsAAAAASUVORK5CYII=",
+        "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGMo1LH+D8MMyBwAinELCxHIAcEAAAAASUVORK5CYII=",
+    ];
+    for (index, pixel) in peers.iter().enumerate() {
+        let peer_bytes = base64::engine::general_purpose::STANDARD
+            .decode(pixel)
+            .map_err(|_| "peer decode")?;
+        let peer_path = directory.join(format!("stack-peer-{index}.png"));
+        std::fs::write(&peer_path, &peer_bytes).map_err(|e| e.to_string())?;
+        let mut peer_file = file.clone();
+        peer_file.path = peer_path.to_string_lossy().into_owned();
+        peer_file.resource.name = format!("stack-peer-{index}.png");
+        peer_file.resource.bytes = Some(peer_bytes.len() as u64);
+        peer_file.signature.bytes = peer_bytes.len() as u64;
+        let peer = session
+            .upload(ctx, &peer_file, &metadata, FILE_CAPTURE_TIME, None)
+            .await?;
+        std::fs::write(directory.join(format!("stack-peer-id-{index}")), peer)
+            .map_err(|e| e.to_string())?;
+    }
     let mut albums = Vec::new();
     for title in ["C2 owned first", "C2 owned second"] {
         let album = session.create_album(ctx, title).await?;
@@ -468,24 +501,28 @@ fn verify_cycles(
                     .all(|id| !shell.elevated_memberships[1].contains(id))
             );
         }
+        let current_grant = if index == 0 {
+            "88888888-8888-4888-8888-888888888888"
+        } else {
+            "99999999-9999-4999-8999-999999999999"
+        };
+        shell.run(core, open(current_grant))?;
+        let entry = core
+            .view()
+            .immich_locked_view
+            .entries
+            .ok_or("locked entries")?
+            .into_iter()
+            .find(|e| e.id == key.asset_id)
+            .ok_or("locked fixture")?;
+        assert!(entry.visibility_action.can_show_timeline);
+        assert!(entry.visibility_action.can_show_archive);
         let operation = if index == 0 {
             "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
         } else {
             "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
         };
-        shell.run(
-            core,
-            prepare(
-                key,
-                operation,
-                to,
-                if index == 0 {
-                    GRANT
-                } else {
-                    "33333333-3333-4333-8333-333333333333"
-                },
-            ),
-        )?;
+        shell.run(core, prepare(key, operation, to, current_grant))?;
         assert!(!core.view().ordinary_content_keys.contains(key));
         assert!(
             journal(directory)?
@@ -585,4 +622,110 @@ fn wait_for_stable_asset(
         std::thread::sleep(Duration::from_millis(250));
     }
     Err("fixture asset did not settle before a new intent".into())
+}
+
+fn verify_stacked_hints(
+    shell: &mut LiveVisibilityShell<'_>,
+    core: &Core<Suwop>,
+    session: &Session,
+    directory: &Path,
+) -> Result<(), String> {
+    let key = &AssetKey {
+        provider: Provider::Immich,
+        scope: session.scope.clone(),
+        asset_id: std::fs::read_to_string(directory.join("stack-peer-id-0"))
+            .map_err(|e| e.to_string())?,
+    };
+    let peer =
+        std::fs::read_to_string(directory.join("stack-peer-id-1")).map_err(|e| e.to_string())?;
+    let response: HttpResponse = serde_json::from_value(execute(
+        shell.agent,
+        &session.request(
+            "stacks",
+            "POST",
+            Some(json!({"assetIds":[key.asset_id,peer]})),
+        ),
+    )?)
+    .map_err(|_| "stack response")?;
+    immich::check_status(response.status)?;
+    shell.run(
+        core,
+        Event::Refresh {
+            permission: false,
+            now: scan_now()?,
+        },
+    )?;
+    let hint = core
+        .view()
+        .immich_visibility_actions
+        .into_iter()
+        .find(|a| a.key == *key)
+        .ok_or("stack hint")?;
+    assert_eq!(
+        hint.reason,
+        Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Stack)
+    );
+    assert!(!hint.can_lock);
+    // Independent setup session: ordinary Refresh deliberately revokes the product session.
+    fixture_lock_stack(shell.agent, session, &key.asset_id)?;
+    shell.run(core, open("77777777-7777-4777-8777-777777777777"))?;
+    let entry = core
+        .view()
+        .immich_locked_view
+        .entries
+        .ok_or("stack locked entries")?
+        .into_iter()
+        .find(|e| e.id == key.asset_id)
+        .ok_or("stack locked entry")?;
+    assert_eq!(
+        entry.visibility_action.reason,
+        Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Stack)
+    );
+    assert!(!entry.visibility_action.can_show_timeline);
+    assert!(!entry.visibility_action.can_show_archive);
+    assert_eq!(shell.writes, 4);
+    Ok(())
+}
+
+fn fixture_lock_stack(agent: &ureq::Agent, session: &Session, id: &str) -> Result<(), String> {
+    let mut login = session.request("auth/login", "POST", Some(json!({
+        "email":std::env::var("IMMICH_TEST_EMAIL").unwrap_or_else(|_| "suwop@example.invalid".into()),
+        "password":std::env::var("IMMICH_TEST_PASSWORD").unwrap_or_else(|_| "SuwopIntegration123!".into()),
+    })));
+    login.headers.remove("x-api-key");
+    let response: HttpResponse =
+        serde_json::from_value(execute(agent, &login)?).map_err(|_| "fixture login response")?;
+    immich::check_status(response.status).map_err(|_| "fixture login rejected")?;
+    let token = response.body["accessToken"]
+        .as_str()
+        .ok_or("fixture login token missing")?;
+    let mut request = session.request(
+        "auth/session/unlock",
+        "POST",
+        Some(
+            json!({"pinCode":std::env::var("IMMICH_TEST_PIN").unwrap_or_else(|_| "123456".into())}),
+        ),
+    );
+    request.headers.remove("x-api-key");
+    request
+        .headers
+        .insert("Authorization".into(), format!("Bearer {token}"));
+    let result = (|| {
+        let response: HttpResponse = serde_json::from_value(execute(agent, &request)?)
+            .map_err(|_| "fixture PIN response")?;
+        immich::check_status(response.status).map_err(|_| "fixture PIN rejected")?;
+        request.url = format!("{}/assets", session.endpoint);
+        request.method = "PUT".into();
+        request.body = Some(json!({"ids":[id],"visibility":"locked"}));
+        let response: HttpResponse = serde_json::from_value(execute(agent, &request)?)
+            .map_err(|_| "fixture stack lock response")?;
+        immich::check_status(response.status).map_err(|_| "fixture stack lock rejected".to_owned())
+    })();
+    request.url = format!("{}/auth/logout", session.endpoint);
+    request.method = "POST".into();
+    request.body = None;
+    let cleanup: HttpResponse =
+        serde_json::from_value(execute(agent, &request)?).map_err(|_| "fixture logout response")?;
+    immich::check_status(cleanup.status).map_err(|_| "fixture logout rejected")?;
+    result
 }

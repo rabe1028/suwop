@@ -17,6 +17,7 @@ import SuwopShell
     @Published private(set) var ordinaryReads = 0
     @Published private(set) var lockedReads = 0
     @Published private(set) var confirmations: [ImmichVisibilityPrompt] = []
+    @Published private(set) var confirmationRequests = 0
     private(set) var persistedBeforeMutation = false
     private(set) var deviceAuthCalls = 0
     var acceptConfirmation = true
@@ -144,6 +145,9 @@ import SuwopShell
             return rawJournal
         case "persist": return try await persistData(operation.data ?? .null)
         case "readCredential": return .string(ImmichLockedFixtureData.ordinaryAPIKey)
+        case "confirmImmichVisibility":
+            confirmationRequests += 1
+            return try await shell.execute(operation, context: context)
         case "http": return try await executeHTTP(operation, context: context)
         case "appleScan": return try .from(LibrarySnapshot(
                 provider: .apple, scope: journal.appleScope, assets: appleAssets, access: .full

@@ -56,6 +56,7 @@ fn fixture_state() -> SavedLibrary {
             access: ScanAccess::Full,
             scanned_at: None,
             assets: vec![StoredAsset {
+                immich_stack: suwop_core::domain::ImmichStackState::Unknown,
                 apple_visibility: suwop_core::domain::AppleVisibility::Visible,
                 key: photo_key(),
                 name: "photo.jpg".into(),

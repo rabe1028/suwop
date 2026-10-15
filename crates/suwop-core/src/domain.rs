@@ -77,9 +77,21 @@ pub enum AppleVisibility {
     Hidden,
 }
 
+/// Fresh Immich stack knowledge; legacy snapshots do not establish absence.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ImmichStackState {
+    #[default]
+    Unknown,
+    Unstacked,
+    Stacked,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAsset {
+    #[serde(default)]
+    pub immich_stack: ImmichStackState,
     #[serde(default)]
     pub apple_visibility: AppleVisibility,
     pub key: AssetKey,

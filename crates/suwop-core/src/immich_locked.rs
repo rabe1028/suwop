@@ -448,6 +448,31 @@ async fn open_session(
         }
     }
 }
+async fn hydrate_locked_stack(
+    ctx: &Context,
+    generation: &AtomicU64,
+    expected: u64,
+    session: &DedicatedSession,
+    asset: &mut Asset,
+) -> Result<(), String> {
+    if asset.stack == crate::domain::ImmichStackState::Unknown {
+        status(ctx, generation, expected, session).await?;
+        if let Ok(value) = guarded(
+            ctx,
+            generation,
+            expected,
+            session.request(&format!("assets/{}", asset.id), "GET", None),
+        )
+        .await
+            && let Ok(fresh) = serde_json::from_value::<Asset>(value)
+        {
+            asset.adopt_stack(&fresh);
+        }
+        status(ctx, generation, expected, session).await?;
+    }
+    Ok(())
+}
+
 async fn open_authenticated(
     ctx: &Context,
     session: &DedicatedSession,
@@ -513,7 +538,7 @@ async fn open_authenticated(
         .await?;
         let assets: Vec<Asset> =
             serde_json::from_value(page["assets"]["items"].clone()).map_err(|_| ERROR)?;
-        for asset in assets {
+        for mut asset in assets {
             crate::immich::valid_id(&asset.id).map_err(|_| ERROR)?;
             if asset.owner_id != session.ordinary.user_id
                 || asset.is_trashed
@@ -524,6 +549,7 @@ async fn open_authenticated(
             if !seen.insert(asset.id.clone()) {
                 return Err(ERROR.into());
             }
+            hydrate_locked_stack(ctx, generation, expected, session, &mut asset).await?;
             let record = asset.record(&session.ordinary.scope, None, None);
             entries.push(ImmichLockedEntry {
                 visibility_action: crate::immich_visibility::hint(&record, true),

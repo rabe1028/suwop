@@ -838,6 +838,7 @@ async fn upload_sidecar(
 
 fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,

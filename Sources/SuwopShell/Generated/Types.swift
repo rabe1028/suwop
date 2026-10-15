@@ -811,6 +811,12 @@ public struct ImmichLockedView: Codable, Sendable {
     }
 }
 
+public enum ImmichStackState: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `unstacked`
+    case `stacked`
+}
+
 public enum ImmichVisibility: String, Codable, CaseIterable, Sendable {
     case `timeline`
     case `archive`
@@ -1480,7 +1486,8 @@ public struct StoredAsset: Codable, Sendable {
     public var inventoryComplete: Bool
     public var isOffline: Bool
     public var deletionBlockers: [String]
-    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = []) {
+    public var immichStack: ImmichStackState
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown) {
         self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
@@ -1494,6 +1501,7 @@ public struct StoredAsset: Codable, Sendable {
         self.inventoryComplete = inventoryComplete
         self.isOffline = isOffline
         self.deletionBlockers = deletionBlockers
+        self.immichStack = immichStack
     }
 }
 

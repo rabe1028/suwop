@@ -1,8 +1,14 @@
 # Immich のロック移動・再表示（PP-02C-2）
 
-実装・検証中。固定したImmich v3.2.4の実サーバー結合は成功したが、C-2のhosted CIと最終画面検証は未完了。C-1の専用PINセッションはPR #24でmerge済みで、最終HEADとmerge後のCI全4 jobが成功している。
+PR #25でレビュー中。初期HEAD `7db5858` のローカル全gateと実Immich v3.2.4結合は成功した。レビューでstack状態が操作候補へ伝わらないP2指摘を修正し、修正後のローカル必須gateも成功した。以下の検証表は初期HEADの結果であり、修正後の必要な検証とhosted CIは別に確認する。C-1の専用PINセッションはPR #24でmerge済みで、最終HEADとmerge後のCI全4 jobが成功している。
 
 最初の増分は、同じ利用者が所有する、関連動画とstackを持たない静止画のtimeline／archiveからlockedへの変更と、lockedから明示的に選択したtimeline／archiveへの変更を扱う。Live Photo、動画、関連状態が不明な写真は対応済みとしない。通常のtimelineとarchiveの相互変更は、PIN不要の別経路として残す。
+
+## stack操作候補のレビュー修正
+
+PR #25の初期HEADは、検索結果から`StoredAsset`へstack情報を引き継がず、後段では拒否するstack写真にも操作を提示していた。修正では未所属／所属あり／不明を保存し、所属あり・不明の操作を無効にする。旧保存データの欠落は不明として読む。
+
+固定v3.2.4の検索応答はstackを省略するため、欠落を未所属とは扱わない。Rustが新しい列挙結果のexact IDに対して詳細メタデータだけを取得し、ID・owner・checksum・updatedAt・visibilityが一致した場合だけstack情報を補う。通常側は取得前後の世代、PIN側はsession状態と世代を検査する。取得失敗・競合は不明を維持し、原本やプレビュー取得の権限を拡張しない。修正後のRust全291件と追加focused 7件、Clippy、DTO生成が成功。実Immich結合2回目の3件も成功し、通常／PIN一覧の非stack写真の操作候補と、実2画像stackの両一覧での操作禁止を確認した（`/tmp/suwop-stack-integration2.log`）。初回401はテスト中のsession再利用を改め、準備用PIN sessionの取得・logoutを製品sessionから分離して解消した。製品の認証失効は変更していない。修正後の最終 `make check` も終了0で、Rust291件・Swift62件が成功した（`/tmp/suwop-stack-check-final1.log`）。修正後の `make apple-build` もRust全5ターゲット・XCFramework・iOS/macOSが終了0で成功した（`/tmp/suwop-stack-apple-final1.log`）。strict VRTも終了0で成功した。40画面・host54件・UI30件が通過し、record=false／passed=true、全7 stage終了0、基準画像は変更していない（`/tmp/suwop-stack-vrt-final1.log`、`DerivedData/VRTArtifacts/20261015T031020Z-14751`）。テスト後の診断収集にsimctl探索警告があり、診断収集の成功とは区別する。修正HEADのhosted CIは別途確認する。
 
 ## 操作と永続記録
 
@@ -34,9 +40,9 @@ Immich v3.2.4の[asset service](https://github.com/immich-app/immich/blob/v3.2.4
 - 実Immichで所有する複数アルバムからの解除、visibility保存と再取得。Live／動画は無変更で拒否する。
 - make check、Apple build、実Immich結合、固定環境のstrict VRT、最終HEADとmerge後のhosted CI。実機・iCloudは別の証拠とする。
 
-## 検証状況
+## 初期HEADの検証状況
 
-最終HEADの通し検証とhosted CIは未完了。個別に成功した検証を、変更後の全体成功に置き換えない。
+以下は初期HEAD `7db5858` の結果。stack修正後の検証は上記のレビュー修正節に記録する。個別に成功した検証を、変更後の全体成功に置き換えない。
 
 | 対象 | 現在の証拠 | 最終判定 |
 | --- | --- | --- |
@@ -46,7 +52,7 @@ Immich v3.2.4の[asset service](https://github.com/immich-app/immich/blob/v3.2.4
 | native確認sheet | 最終表示タイミング修正後のhost 5件が成功。未登録scene拒否、別key windowではなく所有windowへの表示、表示拒否後の再利用、古いcallback無効化、外部detach取消を確認。 | Simulatorの対象試験は成功。iPad複数windowの実機受入れではない。 |
 | AX3操作・見た目 | 実gesture後に下段説明が固定ボタンより上へ収まることをassert。管理側が出力画像で必須説明・他コピー保持の説明・両ボタンを目視。取消時は意図保存・PUTとも0、続く確定時は変更1回。 | 対象操作・画像は成功。全UI通しは別に確認する。 |
 | 全画面・UI | capture3で40画面を撮影。機能host 51件は成功。snapshot 2件のassertion失敗は新規基準未登録5枚と意図した既存4枚の差分。UI 28件すべて成功。capture自体は想定したsnapshot差分で終了2（内部compare 65）。 | strict VRT成功。40画面・host53件・UI28件が通過し、record=false／passed=true、全stage終了0。 |
-| hosted CI・merge | C-2は未commit／未PR。C-1 PR #24の最終HEAD・merge後CIは全4 job成功。 | C-2の証拠にC-1のCIを流用しない。 |
+| hosted CI・merge | C-2はPR #25、初期HEAD `7db5858` のCI run `38672739985` は全4 job成功。stack操作候補のP2修正を進めている。C-1 PR #24の最終HEAD・merge後CIは全4 job成功。 | C-2の証拠にC-1のCIを流用しない。 |
 | macOS共有 | `make sharing-test` の2件が成功。 | 終了0（`/tmp/suwop-visibility-sharing-final1.log`）。 |
 | PhotoKit native | 最終ソースの生成JPEG fixtureで19段階が成功。製品hideはApplied、restoreはPhotosへの案内。直接unhide・hidden原本再照合・製品hide UI操作は未確認。 | 終了0・report passed=true（`/tmp/suwop-visibility-native-final1.log`、`DerivedData/PhotoKitArtifacts/20261015T024042Z-90974`）。 |
 | 実機・iCloud | 今回の証拠なし。 | 未確認。 |

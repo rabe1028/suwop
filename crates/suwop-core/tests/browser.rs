@@ -6,6 +6,7 @@ fn photo(id: &str, date: Option<f64>, role: ResourceRole, favorite: bool) -> Uni
     UnifiedPhoto {
         presence: Presence::AppleOnly,
         assets: vec![StoredAsset {
+            immich_stack: suwop_core::domain::ImmichStackState::Unknown,
             apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,

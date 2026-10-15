@@ -6,7 +6,7 @@ import SuwopShell
 /// records credentials or headers in diagnostics. C1's read-only fixture stays strict.
 @MainActor final class ImmichVisibilityFixtureServer: ObservableObject {
     enum Fault: Equatable { case none, rejectedMutation, lostMutationReply, unavailableInspection }
-    enum SourceKind { case image, live, video }
+    enum SourceKind { case image, live, video, stacked, unknownStack }
     private var sessions: [String: Bool] = [:]
     private(set) var record: JSONValue
     private(set) var albumMembers: [String: Set<String>]
@@ -14,6 +14,7 @@ import SuwopShell
     @Published private(set) var mutationAttempts = 0
     @Published private(set) var mutations = 0
     @Published private(set) var logins = 0
+    @Published private(set) var pinSubmissions = 0
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
@@ -22,6 +23,8 @@ import SuwopShell
         case .image: try ImmichVisibilityFixtureData.source(visibility: visibility)
         case .live: try ImmichVisibilityFixtureData.unsupportedSource(video: false, visibility: visibility)
         case .video: try ImmichVisibilityFixtureData.unsupportedSource(video: true, visibility: visibility)
+        case .stacked: try ImmichVisibilityFixtureData.stackedSource(visibility: visibility)
+        case .unknownStack: try ImmichVisibilityFixtureData.stackedSource(visibility: visibility, missing: true)
         }
         let members: Set<String> = visibility == "locked" ? [] : [ImmichVisibilityFixtureData.sourceID]
         albumMembers = [
@@ -75,6 +78,7 @@ import SuwopShell
                 "password": .bool(true), "pinCode": .bool(true), "isElevated": .bool(elevated),
             ]))
         case "auth/session/unlock":
+            pinSubmissions += 1
             guard request.method == "POST", request.body["pinCode"].string == ImmichLockedFixtureData.pin else {
                 return response(.null, status: 403)
             }
@@ -99,7 +103,8 @@ import SuwopShell
             guard elevated ? requested == ["locked"] : requested == ["timeline", "archive"] else {
                 throw SuwopError("C2 listing did not keep ordinary and locked visibility separate")
             }
-            let items = requested.contains(record["visibility"].string ?? "") ? [record] : []
+            let items = requested.contains(record["visibility"].string ?? "")
+                ? [ImmichLockedFixtureData.searchRecord(record)] : []
             return response(.object(["assets": .object(["items": .array(items), "nextCursor": .null])]))
         }
         if path == "assets", request.method == "PUT" {

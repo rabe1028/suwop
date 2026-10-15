@@ -31,6 +31,20 @@ enum ImmichVisibilityFixtureData {
         return .object(fields)
     }
 
+    static func stackedSource(visibility: String = "timeline", missing: Bool = false) throws -> JSONValue {
+        var fields = try source(visibility: visibility).decode([String: JSONValue].self)
+        if missing {
+            fields.removeValue(forKey: "stack")
+        } else {
+            fields["stack"] = .object([
+                "id": .string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                "primaryAssetId": .string(sourceID),
+                "assetCount": .number(2),
+            ])
+        }
+        return .object(fields)
+    }
+
     static func appleCopy() -> StoredAsset {
         StoredAsset(
             appleVisibility: .visible,

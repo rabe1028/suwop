@@ -573,8 +573,11 @@ impl Runtime<'_> {
                             None
                         };
                         self.check_content_generation(&[])?;
+                        let mut hydrated = asset.clone();
+                        session.hydrate_stack(self.ctx, &mut hydrated).await;
+                        self.check_content_generation(&[])?;
                         records.push(
-                            asset.record(
+                            hydrated.record(
                                 &session.scope,
                                 asset
                                     .live_photo_video_id

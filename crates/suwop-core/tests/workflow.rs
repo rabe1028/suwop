@@ -68,6 +68,7 @@ impl Shell {
             bytes: Some(12),
         };
         let a = StoredAsset {
+            immich_stack: suwop_core::domain::ImmichStackState::Unknown,
             apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,

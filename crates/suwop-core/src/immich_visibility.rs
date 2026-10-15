@@ -188,7 +188,10 @@ pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVi
         .any(|r| r.role == ResourceRole::Video)
     {
         Some(ImmichVisibilityUnsupportedReason::Video)
-    } else if !asset.inventory_complete
+    } else if asset.immich_stack == crate::domain::ImmichStackState::Stacked {
+        Some(ImmichVisibilityUnsupportedReason::Stack)
+    } else if asset.immich_stack == crate::domain::ImmichStackState::Unknown
+        || !asset.inventory_complete
         || asset.originals().count() != 1
         || !asset
             .originals()
@@ -566,4 +569,72 @@ fn recover(
             },
         });
     })
+}
+
+#[cfg(test)]
+mod stack_hints {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn stack_knowledge_survives_record_and_disables_both_surfaces() -> Result<(), String> {
+        for (stack, expected, reason) in [
+            (
+                Some(json!(null)),
+                crate::domain::ImmichStackState::Unstacked,
+                None,
+            ),
+            (
+                Some(json!({"id":"stack"})),
+                crate::domain::ImmichStackState::Stacked,
+                Some(ImmichVisibilityUnsupportedReason::Stack),
+            ),
+            (
+                None,
+                crate::domain::ImmichStackState::Unknown,
+                Some(ImmichVisibilityUnsupportedReason::Unknown),
+            ),
+            (
+                Some(json!(false)),
+                crate::domain::ImmichStackState::Unknown,
+                Some(ImmichVisibilityUnsupportedReason::Unknown),
+            ),
+        ] {
+            let mut value = json!({"id":"asset","ownerId":"owner","type":"IMAGE","originalFileName":"photo.jpg","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision","isFavorite":false,"isOffline":false,"isTrashed":false,"livePhotoVideoId":null});
+            if let Some(stack) = stack {
+                value["stack"] = stack;
+            }
+            let asset: crate::immich::Asset =
+                serde_json::from_value(value).map_err(|e| e.to_string())?;
+            let encoded = serde_json::to_value(&asset).map_err(|e| e.to_string())?;
+            let decoded: crate::immich::Asset =
+                serde_json::from_value(encoded).map_err(|e| e.to_string())?;
+            assert_eq!(decoded.stack, expected);
+            let record = asset.record("scope", None, None);
+            assert_eq!(record.immich_stack, expected);
+            for locked in [false, true] {
+                let action = hint(&record, locked);
+                assert_eq!(action.reason, reason);
+                assert_eq!(action.can_lock, reason.is_none() && !locked);
+                assert_eq!(action.can_show_timeline, reason.is_none() && locked);
+                assert_eq!(action.can_show_archive, reason.is_none() && locked);
+            }
+            let mut legacy = serde_json::to_value(record).map_err(|e| e.to_string())?;
+            legacy
+                .as_object_mut()
+                .ok_or("record")?
+                .remove("immichStack");
+            let legacy: crate::domain::StoredAsset =
+                serde_json::from_value(legacy).map_err(|e| e.to_string())?;
+            assert_eq!(
+                legacy.immich_stack,
+                crate::domain::ImmichStackState::Unknown
+            );
+            assert_eq!(
+                hint(&legacy, false).reason,
+                Some(ImmichVisibilityUnsupportedReason::Unknown)
+            );
+        }
+        Ok(())
+    }
 }

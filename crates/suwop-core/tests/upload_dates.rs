@@ -13,6 +13,7 @@ const ID: &str = "11111111-1111-4111-8111-111111111111";
 
 fn metadata() -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,

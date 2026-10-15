@@ -151,13 +151,13 @@ final class LockedSessionABI {
 
     private func page(ordinary: Bool) -> JSONValue {
         let assets: JSONValue = .object([
-            "items": .array(ordinary ? [] : [asset()]), "nextCursor": .null,
+            "items": .array(ordinary ? [] : [asset(includeStack: false)]), "nextCursor": .null,
         ])
         return .object(["assets": assets])
     }
 
-    private func asset() -> JSONValue {
-        .object([
+    private func asset(includeStack: Bool = true) -> JSONValue {
+        var fields: [String: JSONValue] = [
             "id": .string(id), "ownerId": .string(owner), "type": .string("IMAGE"),
             "originalFileName": .string("PRIVATE-LOCKED-ABI.JPG"), "checksum": .string(String(
                 repeating: "a",
@@ -167,7 +167,11 @@ final class LockedSessionABI {
             "updatedAt": .string("2026-01-01T00:00:00.000Z"), "visibility": .string("locked"),
             "isFavorite": .bool(false), "isOffline": .bool(false), "isTrashed": .bool(false),
             "isEdited": .bool(false), "isExternal": .bool(false), "libraryId": .null,
-        ])
+        ]
+        if includeStack {
+            fields["stack"] = .null
+        }
+        return .object(fields)
     }
 
     private func response(_ body: JSONValue, status: Int64 = 200) -> HttpResponse {

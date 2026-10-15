@@ -16,6 +16,7 @@ fn asset(kind: PlaybackKind) -> StoredAsset {
         PlaybackKind::Live => vec![ResourceRole::Image, ResourceRole::LiveVideo],
     };
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,

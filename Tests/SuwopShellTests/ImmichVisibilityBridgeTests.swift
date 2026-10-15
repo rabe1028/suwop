@@ -5,6 +5,7 @@ import Testing
 /// Reuses the real C ABI auth driver; only server visibility and confirmation
 /// replies differ. The persisted value is always SavedLibrary, never ViewModel.
 private final class VisibilityABI {
+    enum DetailFault { case none, unavailable, mismatched }
     let driver: LockedSessionABI
     var visibility = "timeline"
     var confirmations: [ImmichVisibilityPrompt] = []
@@ -12,6 +13,9 @@ private final class VisibilityABI {
     var accept = true
     var loseReply = false
     var durableBeforePUT = false
+    var stackFact: JSONValue? = .null
+    var detailFault = DetailFault.none
+    private(set) var detailReads = 0
 
     init(saved: SavedLibrary? = nil, visibility: String = "timeline") throws {
         driver = try LockedSessionABI()
@@ -59,6 +63,15 @@ private final class VisibilityABI {
             return HttpResponse(body: .array([]), status: 200)
         }
         if path == "assets/\(driver.id)" {
+            detailReads += 1
+            if detailFault == .unavailable {
+                return HttpResponse(body: .null, status: 503)
+            }
+            if detailFault == .mismatched {
+                var detail = try asset().decode([String: JSONValue].self)
+                detail["updatedAt"] = .string("2026-02-01T00:00:00.000Z")
+                return HttpResponse(body: .object(detail), status: 200)
+            }
             return HttpResponse(body: asset(), status: 200)
         }
         if path == "albums" || path.hasPrefix("albums?") {
@@ -68,14 +81,14 @@ private final class VisibilityABI {
             let ordinary = request.headers["x-api-key"] != nil
             let present = ordinary ? visibility != "locked" : visibility == "locked"
             return HttpResponse(body: .object([
-                "assets": .object(["items": .array(present ? [asset()] : []), "nextCursor": .null]),
+                "assets": .object(["items": .array(present ? [asset(includeStack: false)] : []), "nextCursor": .null]),
             ]), status: 200)
         }
         return nil
     }
 
-    private func asset() -> JSONValue {
-        .object([
+    private func asset(includeStack: Bool = true) -> JSONValue {
+        var fields: [String: JSONValue] = [
             "id": .string(driver.id), "ownerId": .string(driver.owner), "type": .string("IMAGE"),
             "originalFileName": .string("PRIVATE-C2-ABI.JPG"), "checksum": .string(String(repeating: "b", count: 40)),
             "fileCreatedAt": .string("2026-01-01T00:00:00.000Z"),
@@ -83,8 +96,12 @@ private final class VisibilityABI {
             "updatedAt": .string("2026-01-01T00:00:00.000Z"), "visibility": .string(visibility),
             "isFavorite": .bool(false), "isOffline": .bool(false), "isTrashed": .bool(false),
             "isEdited": .bool(false), "isExternal": .bool(false), "libraryId": .null,
-            "livePhotoVideoId": .null, "stack": .null,
-        ])
+            "livePhotoVideoId": .null,
+        ]
+        if includeStack {
+            fields["stack"] = stackFact
+        }
+        return .object(fields)
     }
 }
 
@@ -141,4 +158,66 @@ private final class VisibilityABI {
     #expect(fixture.confirmations.count == 1 && fixture.puts == 0)
     #expect(fixture.driver.writes == 0 && fixture.driver.saved.immichVisibilityOperations.isEmpty)
     #expect(fixture.visibility == "timeline")
+}
+
+@Test func stackFactsTraverseABIAndDisableOrdinaryAndLockedVisibilityActions() throws {
+    for locked in [false, true] {
+        for missing in [false, true] {
+            let fixture = try VisibilityABI(visibility: locked ? "locked" : "timeline")
+            fixture.stackFact = missing ? nil : .object([
+                "id": .string("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"),
+                "primaryAssetId": .string(fixture.driver.id), "assetCount": .number(2),
+            ])
+            let driver = fixture.driver
+            try driver.ready()
+            if !locked {
+                #expect(fixture.detailReads > 0, "Search omits stack; exact metadata must supply it")
+            }
+            if !locked {
+                let hint = try #require(driver.view().immichVisibilityActions.first { $0.key == fixture.key })
+                #expect(!hint.canLock && !hint.canShowTimeline && !hint.canShowArchive)
+                #expect(hint.reason == (missing ? .unknown : .stack))
+                #expect(driver.routes.isEmpty, "Reading a disabled ordinary hint must not initiate PIN authentication")
+                let record = try #require(driver.saved.snapshots.flatMap(\.assets).first { $0.key == fixture.key })
+                #expect(record.immichStack == (missing ? .unknown : .stacked))
+            }
+            try driver.open()
+            if locked {
+                let entry = try #require(driver.view().immichLockedView.entries?.first)
+                #expect(entry.asset.immichStack == (missing ? .unknown : .stacked))
+                #expect(!entry.visibilityAction.canLock && !entry.visibilityAction.canShowTimeline)
+                #expect(!entry.visibilityAction.canShowArchive)
+                #expect(entry.visibilityAction.reason == (missing ? .unknown : .stack))
+            }
+            let logins = driver.routes.filter { $0 == "POST auth/login" }.count
+            try fixture.prepare(locked ? .timeline : .locked)
+            #expect(fixture.confirmations.isEmpty && fixture.puts == 0)
+            #expect(driver.writes == 0 && driver.saved.immichVisibilityOperations.isEmpty)
+            #expect(driver.routes.filter { $0 == "POST auth/login" }.count == logins)
+        }
+    }
+}
+
+@Test func failedOrMismatchedStackHydrationRetainsTheAssetWithUnknownDisabledHints() throws {
+    for locked in [false, true] {
+        for fault in [VisibilityABI.DetailFault.unavailable, .mismatched] {
+            let fixture = try VisibilityABI(visibility: locked ? "locked" : "timeline")
+            fixture.detailFault = fault
+            try fixture.driver.ready()
+            let hint: ImmichVisibilityActionHint
+            if locked {
+                try fixture.driver.open()
+                let entry = try #require(fixture.driver.view().immichLockedView.entries?.first)
+                #expect(entry.asset.key == fixture.key && entry.asset.immichStack == .unknown)
+                hint = entry.visibilityAction
+            } else {
+                let view = try fixture.driver.view()
+                #expect(view.photos.flatMap(\.assets).contains { $0.key == fixture.key })
+                hint = try #require(view.immichVisibilityActions.first { $0.key == fixture.key })
+            }
+            #expect(fixture.detailReads > 0)
+            #expect(!hint.canLock && !hint.canShowTimeline && !hint.canShowArchive && hint.reason == .unknown)
+            #expect(fixture.confirmations.isEmpty && fixture.puts == 0 && fixture.driver.writes == 0)
+        }
+    }
 }
