@@ -188,7 +188,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 7,
+                schema_version: 8,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -211,7 +211,7 @@ impl Runtime<'_> {
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
             Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 7 => {
+            _ if self.state.schema_version != 8 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
             }
             Event::HideApple { keys, id } => self.hide_apple(&keys, &id).await,
@@ -1106,7 +1106,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2, 3, 4, 5, 6, 7].contains(&version) {
+    if ![1, 2, 3, 4, 5, 6, 7, 8].contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
     if version == 1 {
@@ -1128,7 +1128,19 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     {
         return Err("旧形式に未対応の操作があります。既存ファイルは変更しません。".into());
     }
-    raw["schemaVersion"] = Value::from(7);
+    if version < 8
+        && raw["immichVisibilityOperations"]
+            .as_array()
+            .is_some_and(|ops| {
+                ops.iter().any(|op| {
+                    op.get("selectedObservation")
+                        .is_some_and(|value| !value.is_null())
+                })
+            })
+    {
+        return Err("旧形式に未対応の観測があります。既存ファイルは変更しません。".into());
+    }
+    raw["schemaVersion"] = Value::from(8);
     let state: SavedLibrary = serde_json::from_value(raw)
         .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))?;
     let mut ids = BTreeSet::new();

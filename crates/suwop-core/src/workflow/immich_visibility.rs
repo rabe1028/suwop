@@ -23,6 +23,25 @@ async fn fresh(
     }
     Ok(result)
 }
+async fn fresh_value(
+    ctx: &crate::app::Context,
+    capability: &crate::immich_archive::VisibilityAuthority,
+    key: &AssetKey,
+) -> Result<serde_json::Value, String> {
+    capability
+        .status(ctx)
+        .await
+        .map_err(|_| SAFE_ERROR.to_owned())?;
+    let value = capability
+        .json(ctx, &format!("assets/{}", key.asset_id), "GET", None)
+        .await
+        .map_err(|_| SAFE_ERROR.to_owned())?;
+    capability
+        .status(ctx)
+        .await
+        .map_err(|_| SAFE_ERROR.to_owned())?;
+    Ok(value)
+}
 pub(crate) async fn prepare(
     ctx: &crate::app::Context,
     capability: crate::immich_archive::VisibilityAuthority,
@@ -42,6 +61,7 @@ pub(crate) async fn prepare(
         outcome: crate::apple_visibility::VisibilityOutcome::Unknown,
         observation: None,
         album_membership_observation: AlbumMembershipObservation::NotChecked,
+        selected_observation: None,
     };
     validate_operation(&operation)?;
     let capability = capability.bind(&operation, &first.revision)?;
@@ -130,6 +150,8 @@ fn observe(
             && operation.kind == kind
         {
             operation.observation = Some(facts.visibility);
+            // Only a newer full original-policy proof supersedes fallback evidence.
+            operation.selected_observation = None;
         }
     }
     if facts.visibility != ImmichVisibility::Locked {
@@ -142,8 +164,9 @@ pub(crate) async fn inspect(
     capability: crate::immich_archive::VisibilityAuthority,
     operation: ImmichVisibilityOperation,
 ) -> VisibilityCompletion {
-    let Ok(facts) = fresh(ctx, &capability, &operation.key).await else {
+    let Ok(value) = fresh_value(ctx, &capability, &operation.key).await else {
         return VisibilityCompletion {
+            selected_projection: None,
             recovery_proof: None,
             projection: None,
             state: before,
@@ -151,20 +174,16 @@ pub(crate) async fn inspect(
             status: SAFE_ERROR.into(),
         };
     };
-    if facts.witness != operation.witness_digest {
-        return VisibilityCompletion {
-            recovery_proof: None,
-            projection: None,
-            state: before,
-            uncertain: false,
-            status: SAFE_ERROR.into(),
-        };
-    }
+    let facts = match capability.facts(&value) {
+        Ok(facts) if facts.witness == operation.witness_digest => facts,
+        _ => return inspect_selected(ctx, before, capability, operation, value).await,
+    };
     let mut desired = before.clone();
     observe(&mut desired, &facts, capability.kind());
     let (state, uncertain, committed, recovery_proof) =
         persist(ctx, &before, &desired, &capability).await;
     VisibilityCompletion {
+        selected_projection: None,
         recovery_proof,
         projection: if committed && !uncertain {
             capability.projection(operation.id, facts)
@@ -181,6 +200,59 @@ pub(crate) async fn inspect(
         .into(),
     }
 }
+async fn inspect_selected(
+    ctx: &crate::app::Context,
+    before: crate::app::SavedLibrary,
+    capability: crate::immich_archive::VisibilityAuthority,
+    operation: ImmichVisibilityOperation,
+    value: serde_json::Value,
+) -> VisibilityCompletion {
+    let Ok(facts) = super::selected_facts(&value, &operation, capability.owner()) else {
+        return VisibilityCompletion {
+            selected_projection: None,
+            recovery_proof: None,
+            projection: None,
+            state: before,
+            uncertain: false,
+            status: SAFE_ERROR.into(),
+        };
+    };
+    let mut desired = before.clone();
+    let Some(record) = desired
+        .immich_visibility_operations
+        .iter_mut()
+        .find(|o| o.id == operation.id)
+    else {
+        return VisibilityCompletion {
+            selected_projection: None,
+            recovery_proof: None,
+            projection: None,
+            state: before,
+            uncertain: false,
+            status: SAFE_ERROR.into(),
+        };
+    };
+    record.selected_observation = Some(facts.observation.clone());
+    let (state, uncertain, committed, recovery_proof) =
+        persist(ctx, &before, &desired, &capability).await;
+    let status = if committed {
+        "選択した項目の現在の状態を保存しました。構成が変わっているため、表示先の変更と通常の一覧表示は引き続き利用できません。"
+    } else {
+        "確認した状態を保存できませんでした。変更は再送しないでください。"
+    }.into();
+    VisibilityCompletion {
+        selected_projection: if committed && !uncertain {
+            capability.selected_projection(operation.id, facts)
+        } else {
+            None
+        },
+        recovery_proof,
+        projection: None,
+        state,
+        uncertain,
+        status,
+    }
+}
 pub(crate) async fn apply(
     ctx: &crate::app::Context,
     before: crate::app::SavedLibrary,
@@ -195,6 +267,7 @@ pub(crate) async fn apply(
         persist(ctx, &before, &desired, &prepared.capability).await;
     if !committed {
         return VisibilityCompletion {
+            selected_projection: None,
             projection: None,
             recovery_proof,
             state: durable,
@@ -220,6 +293,7 @@ pub(crate) async fn apply(
         let (state, uncertain, _, recovery_proof) =
             persist(ctx, &durable, &desired, &capability).await;
         return VisibilityCompletion {
+            selected_projection: None,
             projection: None,
             recovery_proof,
             state,
@@ -261,6 +335,7 @@ pub(crate) async fn apply(
     let (state, uncertain, committed, recovery_proof) =
         persist(ctx, &durable, &desired, &capability).await;
     VisibilityCompletion {
+        selected_projection: None,
         recovery_proof,
         projection: if committed && !uncertain {
             verified.and_then(|facts| capability.projection(prepared.operation.id, facts))

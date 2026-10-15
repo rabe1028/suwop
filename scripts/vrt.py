@@ -19,6 +19,8 @@ SCREENS = {
     "immich-visibility-destinations",
     "immich-visibility-unknown",
     "immich-visibility-unsupported",
+    "immich-selected-observation",
+    "immich-selected-observation-large-text",
     "immich-locked-form",
     "immich-locked-open",
     "immich-locked-preview",

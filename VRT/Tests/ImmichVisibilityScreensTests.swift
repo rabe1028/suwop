@@ -37,6 +37,44 @@ final class ImmichVisibilityScreensTests: XCTestCase {
         }
     }
 
+    @MainActor func testSelectedObservationScreens() async throws {
+        UIView.setAnimationsEnabled(false)
+        defer { UIView.setAnimationsEnabled(true) }
+        try await selectedObservation(largeText: false)
+        try await selectedObservation(largeText: true)
+    }
+
+    @MainActor private func selectedObservation(largeText: Bool) async throws {
+        let fixture = try ImmichVisibilityPhotoFixture()
+        let model = try await fixture.start()
+        defer { model.immichLocked.close()
+            fixture.releaseHeld()
+        }
+        try await fixture.open()
+        let operationID = "66666666-6666-4666-8666-666666666666"
+        fixture.server.fault = .lostMutationReply
+        fixture.prepare(.locked, operationID: operationID)
+        try await fixture.settle {
+            !model.immichLocked.visibility.busy && fixture.journal.immichVisibilityOperations.count == 1
+        }
+        try fixture.server.externallySetConfiguration(.live)
+        model.immichLocked.visibility.inspect(recordID: operationID, sceneID: ImmichLockedFixtureData.sceneID)
+        try await fixture.settle {
+            !model.immichLocked.visibility.busy &&
+                model.immichLocked.visibility.projection?.history?.first?.selectedObservation?.configuration == .linked
+        }
+        XCTAssertEqual(model.immichLocked.visibility.projection?.history?.first?.outcome, .unknown)
+        XCTAssertEqual(fixture.server.mutationAttempts, 1)
+        let view = ImmichLockedPhotosView(session: model.immichLocked, sceneID: ImmichLockedFixtureData.sceneID)
+        let host = try VisibilityScreenHost(view: view, largeText: largeText)
+        defer { host.close() }
+        try await host.settle()
+        try await host.scrollToHistory(largeText: largeText)
+        let name = largeText ? "immich-selected-observation-large-text" : "immich-selected-observation"
+        let image = try await SnapshotComparison.stabilizedImage(named: name) { host.image() }
+        try SnapshotComparison.verify(image, named: name)
+    }
+
     @MainActor private func confirmation(largeText: Bool) async throws {
         let fixture = try ImmichVisibilityPhotoFixture()
         let model = try await fixture.start()
@@ -101,6 +139,53 @@ final class ImmichVisibilityScreensTests: XCTestCase {
         controller.view.layoutIfNeeded()
         try await Task.sleep(for: .milliseconds(600))
         controller.view.layoutIfNeeded()
+    }
+
+    func scrollToHistory(largeText: Bool) async throws {
+        let list = try XCTUnwrap(collectionView(in: controller.view))
+        let section = list.numberOfSections - 1
+        XCTAssertGreaterThanOrEqual(section, 0)
+        let last = IndexPath(item: list.numberOfItems(inSection: section) - 1, section: section)
+        XCTAssertGreaterThanOrEqual(last.item, 0)
+        let record = IndexPath(item: max(0, last.item - 1), section: section)
+        let framing = largeText ? list.bounds.height * 0.2 : 0
+        var settled = 0
+        for _ in 0 ..< 40 {
+            controller.view.layoutIfNeeded()
+            let bottom = max(
+                -list.adjustedContentInset.top,
+                list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom - framing
+            )
+            list.setContentOffset(CGPoint(x: 0, y: bottom), animated: false)
+            await Task.yield()
+            controller.view.layoutIfNeeded()
+            let finalBottom = max(
+                -list.adjustedContentInset.top,
+                list.contentSize.height - list.bounds.height + list.adjustedContentInset.bottom - framing
+            )
+            let ready = abs(finalBottom - bottom) < 1 && abs(list.contentOffset.y - bottom) < 1 &&
+                list.indexPathsForVisibleItems.contains(record)
+            settled = ready ? settled + 1 : 0
+            if settled == 3 {
+                return
+            }
+        }
+        XCTFail("History's record did not become visible at a settled content offset")
+        throw CaptureReadinessError.historyNotVisible
+    }
+
+    private enum CaptureReadinessError: Error { case historyNotVisible }
+
+    private func collectionView(in view: UIView) -> UICollectionView? {
+        if let list = view as? UICollectionView {
+            return list
+        }
+        for child in view.subviews {
+            if let list = collectionView(in: child) {
+                return list
+            }
+        }
+        return nil
     }
 
     func image() -> UIImage {

@@ -184,7 +184,7 @@ async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Res
         .as_secs_f64();
     let assets = session.list(ctx, now).await?;
     let state = SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "unused-test-library".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Immich,
@@ -1021,7 +1021,7 @@ fn live_locked_core(session: Session) -> crux_core::Core<suwop_core::app::Suwop>
     use crux_core::Core;
     use suwop_core::app::{ConnectionSettings, Model, Suwop};
     let state = SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),

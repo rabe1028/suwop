@@ -203,7 +203,7 @@ fn fixture_state(provider: Provider, access: ScanAccess) -> SavedLibrary {
     let local = asset(Provider::Apple);
     let remote = asset(Provider::Immich);
     SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(provider, access)],
         receipts: vec![TransferReceipt {

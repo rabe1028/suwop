@@ -43,7 +43,7 @@ fn model() -> Result<Model, String> {
         session: Some(session),
         ready: true,
         state: SavedLibrary {
-            schema_version: 7,
+            schema_version: 8,
             connection: Some(ConnectionSettings {
                 address: "https://fixture.example/api".into(),
                 allow_http: false,
@@ -432,7 +432,7 @@ fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> 
     raw["schemaVersion"] = json!(6);
     raw["immichVisibilityOperations"] = json!([{"id":ID,"scope":"scope","key":key(),"witnessDigest":"a".repeat(64),"from":"timeline","to":"locked","outcome":"unknown"}]);
     let migrated = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(migrated.schema_version, 7);
+    assert_eq!(migrated.schema_version, 8);
     assert_eq!(
         migrated.immich_visibility_operations[0].kind,
         ImmichVisibilityOperationKind::LockedTransition
@@ -461,6 +461,7 @@ fn ordinary_history_inspect_and_recovery_cannot_change_locked_journal() -> Resul
         observation: None,
         album_membership_observation:
             suwop_core::immich_visibility::AlbumMembershipObservation::default(),
+        selected_observation: None,
     };
     m.state.immich_visibility_operations.push(op);
     m.immich_archive.uncertain = true;
@@ -522,6 +523,7 @@ fn uncertain_archive_recovery_accepts_before_or_desired_and_retains_proof_on_fai
                 observation: None,
                 album_membership_observation:
                     suwop_core::immich_visibility::AlbumMembershipObservation::NotChecked,
+                selected_observation: None,
             },
         );
         let before = serde_json::to_value(&m.state).map_err(|e| e.to_string())?;

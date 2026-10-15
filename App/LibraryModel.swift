@@ -353,13 +353,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 7 {
+                if pendingRefresh, view?.state.schemaVersion == 8 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 7 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 8 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 7 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 8 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }

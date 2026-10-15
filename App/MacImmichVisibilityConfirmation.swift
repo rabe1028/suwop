@@ -53,6 +53,9 @@
                     if prompt.noAutomaticAlbumRestore {
                         message += "\n再表示してもアルバム所属は自動で戻りません。"
                     }
+                    if let disclosure = prompt.continuingAccessDisclosure {
+                        message += "\n" + disclosure
+                    }
                     message += "\nほかの保存先のコピーは変更しません。"
                     sheet.informativeText = message
                     sheet.alertStyle = .informational

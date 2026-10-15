@@ -46,7 +46,7 @@ fn core_denials(
     };
     let state = SavedLibrary {
         immich_visibility_operations: operations,
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),
@@ -121,6 +121,9 @@ struct Shell {
     facts_patch: Option<Value>,
     ordinary_asset: Option<Value>,
     omit_field: Option<String>,
+    asset_failure: Option<u16>,
+    asset_transport_failure: Option<()>,
+    patch_after_stage: Option<Value>,
 }
 impl Shell {
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
@@ -177,6 +180,9 @@ impl Shell {
             }
             ShellOperation::ReadImmichLockedImage { ticket } => {
                 self.stages += 1;
+                if let Some(patch) = self.patch_after_stage.take() {
+                    self.facts_patch = Some(patch);
+                }
                 Ok(json!({"requestID":ticket.request_id,"stagedID":format!("stage{}",self.stages)}))
             }
             ShellOperation::PublishImmichLockedImage { ticket, staged_id } => {
@@ -192,12 +198,25 @@ impl Shell {
             _ => Err("unexpected ordinary/native mutation".into()),
         }
     }
+    fn asset_read_failure(&self, path: &str, method: &str) -> Option<Result<Value, String>> {
+        if path != format!("assets/{ASSET}") || method != "GET" {
+            return None;
+        }
+        if self.asset_transport_failure.is_some() {
+            return Some(Err("fixture transport unavailable".into()));
+        }
+        self.asset_failure
+            .map(|status| Ok(json!({"status":status,"body":null})))
+    }
     fn http(&mut self, request: &suwop_core::immich::HttpRequest) -> Result<Value, String> {
         let path = request
             .url
             .strip_prefix("https://fixture.example/api/")
             .ok_or("unexpected endpoint")?;
         self.paths.push(path.into());
+        if let Some(failure) = self.asset_read_failure(path, &request.method) {
+            return failure;
+        }
         if request.headers.contains_key("x-api-key") && request.method != "GET" {
             self.ordinary_writes += 1;
         }
@@ -560,6 +579,7 @@ fn explicit_unlocked_observation_requires_matching_fresh_full_scan() -> Result<(
             outcome: suwop_core::apple_visibility::VisibilityOutcome::Unknown,
             observation: None,
             album_membership_observation: AlbumMembershipObservation::NotChecked,
+            selected_observation: None,
         });
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     Ok(())
@@ -617,7 +637,7 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
     let state = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(state.schema_version, 7);
+    assert_eq!(state.schema_version, 8);
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     let record = raw["immichVisibilityOperations"][0].clone();
     raw["immichVisibilityOperations"]
@@ -1231,7 +1251,7 @@ fn same_session_refresh_recovers_known_unsubmitted_failure_but_not_unknown() -> 
     };
     shell.run(&c, open(GRANT))?;
     let before = SavedLibrary {
-        schema_version: 7,
+        schema_version: 8,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: "https://fixture.example/api".into(),
@@ -1417,6 +1437,7 @@ fn ordinary_inspect_preserves_authenticated_locked_roster_and_selected_image() -
         outcome: suwop_core::apple_visibility::VisibilityOutcome::Applied,
         observation: Some(ImmichVisibility::Archive),
         album_membership_observation: AlbumMembershipObservation::NotChecked,
+        selected_observation: None,
     };
     let c = core_operations(false, vec![old]);
     let mut locked = asset();
@@ -1495,11 +1516,12 @@ fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_resta
                 outcome: suwop_core::apple_visibility::VisibilityOutcome::Unknown,
                 observation: None,
                 album_membership_observation: AlbumMembershipObservation::NotChecked,
+                selected_observation: None,
             };
             let mut operations = vec![operation];
             if restart {
                 let persisted = SavedLibrary {
-                    schema_version: 7,
+                    schema_version: 8,
                     immich_visibility_operations: operations,
                     ..SavedLibrary::default()
                 };
@@ -1720,3 +1742,6 @@ fn pin_direct_video_lock_and_unlock_never_persist_or_write() -> Result<(), Strin
     }
     Ok(())
 }
+
+#[path = "immich_visibility/selected_observation.rs"]
+mod selected_observation;

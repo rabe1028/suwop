@@ -83,6 +83,8 @@ final class LockedVisibilitySceneConfirmationTests: XCTestCase {
         XCTAssertNil(other.attachedSheet)
         XCTAssertTrue(alert.informativeText.contains("すべてのアルバム"))
         XCTAssertTrue(alert.informativeText.contains("自動で戻りません"))
+        XCTAssertTrue(alert.informativeText.contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
+        XCTAssertTrue(alert.informativeText.contains("共有リンクは自動では解除されません"))
         owner.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
         try await wait { outcome.finished }
         XCTAssertEqual(outcome.answer, true)

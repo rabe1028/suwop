@@ -885,7 +885,7 @@ fn reconcile_durable(model: &mut Model, grant_id: &str) -> Command<crate::app::E
         let read: Result<serde_json::Value, _> = io(&ctx, ShellOperation::ReadState).await;
         let state = read
             .ok()
-            .filter(|value| value["schemaVersion"].as_u64() == Some(7))
+            .filter(|value| value["schemaVersion"].as_u64() == Some(8))
             .and_then(|value| crate::workflow::migrate(value).ok())
             .filter(|state| {
                 state.apple_scope == expected_scope
