@@ -19,9 +19,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Isolate Rust toolchains from the runner image
         run: |
-          suwop_rustup_dir="$(mktemp -d "$RUNNER_TEMP/suwop-rustup.XXXXXX")"
+          suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
           echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
           RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
+      - name: Cache Rust dependencies and target builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
+          key: ${{ runner.os }}-${{ runner.arch }}
+          cache-bin: false
+          env-vars: DEVELOPER_DIR SDKROOT
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Rust, script, workflow and architecture rules
@@ -34,6 +41,18 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Isolate the pinned Rust toolchain
+        run: |
+          suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
+          echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
+          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Cache Rust dependencies and target builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
+          key: ${{ runner.os }}-${{ runner.arch }}
+          cache-bin: false
+          env-vars: DEVELOPER_DIR SDKROOT
       - name: Run Rust core against Immich v3.2.4 in Docker
         env:
           IMMICH_VERSION: v3.2.4
@@ -46,9 +65,16 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Isolate Rust toolchains from the runner image
         run: |
-          suwop_rustup_dir="$(mktemp -d "$RUNNER_TEMP/suwop-rustup.XXXXXX")"
+          suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
           echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
           RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
+      - name: Cache Rust dependencies and target builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
+          key: ${{ runner.os }}-${{ runner.arch }}
+          cache-bin: false
+          env-vars: DEVELOPER_DIR SDKROOT
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Swift formatting and strict lint
@@ -60,10 +86,15 @@ jobs:
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
 
-  vrt:
+  simulator:
     runs-on: macos-26
-    # Budget for full VRT and PhotoKit acceptance on a cold CI runner.
-    timeout-minutes: 40
+    name: simulator (${{ matrix.suite }})
+    # Independent runners keep PhotoKit service changes away from screenshot tests.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [vrt, apple-native-test]
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       CARGO_BUILD_JOBS: '2'
@@ -74,24 +105,40 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Isolate the pinned Rust toolchain
         run: |
-          suwop_rustup_dir="$(mktemp -d "$RUNNER_TEMP/suwop-vrt-rustup.XXXXXX")"
+          suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
           echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
           RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Cache Rust dependencies and target builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
+          key: ${{ runner.os }}-${{ runner.arch }}
+          cache-bin: false
+          env-vars: DEVELOPER_DIR SDKROOT
       - name: Install XcodeGen and pinned SimSlim
         run: |
           brew install xcodegen
           make setup-vrt
-      - name: Compare native SwiftUI screenshots on one slim Simulator
-        run: make vrt
-      - name: Verify real PhotoKit edits, restart, lost-response reconciliation and reversion
-        run: make apple-native-test
+      - name: Run the complete pinned simulator suite
+        run: make "${{ matrix.suite }}"
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vrt-${{ github.sha }}
+          name: ${{ matrix.suite }}-${{ github.sha }}
           path: |
             DerivedData/VRTArtifacts/
             DerivedData/PhotoKitArtifacts/
           if-no-files-found: warn
           retention-days: 14
+
+  # Preserve the required check name; skipped/cancelled/failed suites never pass.
+  vrt:
+    runs-on: ubuntu-latest
+    needs: simulator
+    if: always()
+    steps:
+      - name: Require both screenshot and PhotoKit acceptance
+        env:
+          SIMULATOR_RESULT: ${{ needs.simulator.result }}
+        run: test "$SIMULATOR_RESULT" = success

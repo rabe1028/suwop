@@ -7,3 +7,4 @@ Suwop.xcodeproj/
 xcuserdata/
 /target/
 /.tools/
+__pycache__/

@@ -35,6 +35,7 @@ format:
 	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests VRT NativeAcceptance --config .swiftformat; fi
 
 test:
+	$(MAKE) test-infra
 	bash scripts/test-tools.sh
 	bash scripts/test-hooks.sh
 	env cargo test --locked --workspace --all-features
@@ -87,3 +88,7 @@ apple-native-test:
 sharing-test:
 	xcodegen generate
 	xcodebuild -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
+
+.PHONY: test-infra
+test-infra:
+	python3 -m unittest discover -s scripts -p 'test_*.py' -v
