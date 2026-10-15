@@ -249,14 +249,12 @@ struct PhotoViewer: View {
 
     @ViewBuilder private func immichArchiveAction(_ photo: UnifiedPhoto) -> some View {
         if let source = model.displayedSource(photo), source.key.provider == .immich {
-            let hint = model.view?.immichArchiveActions.first { $0.key == source.key }
-            if let to = hint?.to {
-                Button("この表示元を" + to.title + "へ変更", systemImage: "archivebox") {
-                    model.immichArchive.prepare(key: source.key, to: to, sceneID: protectionOwner)
-                }.accessibilityIdentifier("changeDisplayedImmichArchive")
-            } else if let reason = hint?.reason {
-                Text(reason.explanation)
-            }
+            ImmichArchivePhotoAction(
+                session: model.immichArchive,
+                key: source.key,
+                hint: model.view?.immichArchiveActions.first { $0.key == source.key },
+                sceneID: protectionOwner
+            )
         }
     }
 

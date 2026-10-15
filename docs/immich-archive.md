@@ -324,4 +324,50 @@ pending commandのbusy解除まで待つよう修正する。初回のnative保�
 lint・生成整合が成功し、全Appleビルドも成功した
 （`/tmp/suwop-archive-history-check1-20261015.log`、
 `/tmp/suwop-archive-history-apple1-20261015.log`）。
-ローカル全体strict VRTと更新後HEADのhosted CIは並行して確認し、両方の結果を得てからマージする。
+HEAD `50984e5672a5fc2e67090264eddcc2021f97c5b1` のローカル全体strict VRTは成功した
+（`/tmp/suwop-archive-history-strict2-20261015.log`、
+`DerivedData/VRTArtifacts/20261015T120542Z-23673/report.json`）。
+record=false、全7 stageが終了0、45画面に画像差分なし、UI38件成功。
+45枚の基準画像は変更していない。
+
+追加レビューでは、通常Prepareが別のロック写真の画像・pending読込みを消す経路と、
+通常アーカイブのメニュー項目がセッション処理中も有効な問題を確認した。
+対象key単位の無効化とセッションbusyの直接監視を追加し、その修正後の検証を別途行う。
+上記VRT成功はこの追加修正前のHEADに対する証拠である。
+
+key単位の無効化は、画像のentry IDを削除前の一覧から完全なAssetKeyへ対応づけ、
+pending ticketは自身のAssetKeyを比較して、それぞれ独立に行う。
+一覧の全体Refreshや認可失効による全画像の無効化は維持する。
+実際の通常Prepare・確認から最初のPersist直前まで進める回帰2件では、旧helperで
+別写真の画像消失と、pending読込みが公開されず破棄される問題を再現した
+（`/tmp/suwop-archive-keyed-image-red-20261015-5.log`）。
+修正後はPIN表示関連30件と、同一asset IDの別scope・同key失効を扱う境界unitが成功した
+（`/tmp/suwop-archive-keyed-image-green-20261015-2.log`、
+`/tmp/suwop-archive-keyed-image-unit-20261015-1.log`）。
+pending読込みはnative読込み直後でなく、その後の再確認HTTPを経た公開／破棄境界で検査する。
+初期のgreen実行1件はこのテスト側の境界設定が誤っていたため、上記の修正版で再検証した。
+
+通常アーカイブのメニュー項目は独立したViewでImmichArchiveSessionを直接監視し、
+session.busy中は無効化する。Rustの操作候補・理由表示はそのまま使う。
+UI回帰では、コマンド登録後かつRust更新前をVRT専用barrierで保持し、
+core busy=false / session busy=trueの状態を実メニューで検査する。
+無効化だけを外した旧挙動ではisEnabledの検査だけが失敗した
+（`/tmp/suwop-archive-busy-old-red1-20261015.log` とxcresult）。
+確認画面やPUTを発生させず、待機解除後に操作可能へ戻ることも検査対象とする。
+
+修正版はnative確認・取消し11件、UI7件（busy2件・履歴2件・通常往復等3件）が成功した
+（`/tmp/suwop-archive-busy-target-green1-20261015.log` とxcresult）。
+pending commandだけのbusyと実HTTP待機中のcore busyの両方で実メニューが無効になり、
+タップしても追加コマンド・Persist・PUTが発生せず、解放後は再び有効になることを確認した。
+
+修正前HEAD `50984e5672a5fc2e67090264eddcc2021f97c5b1` の
+[CI run 38732047272](https://github.com/rabe1028/suwop/actions/runs/38732047272)は全4 job成功。
+Immich結合jobの初回はDocker image取得時のtoomanyrequestsでテスト前に失敗し、
+run終了後にそのjobだけを再実行して成功した。このCI結果は追加のkey単位無効化・busy UI修正を含まない。
+
+追加修正後のmake checkはRust/FFI 327件・Swift65件、lint・生成整合が成功した
+（`/tmp/suwop-archive-busy-final-check1-20261015.log`）。
+通常実行でignoreされる実Immich結合4件は、この件数に含めない。
+全5 Rust Appleターゲット・XCFramework・iOS/macOSビルドも成功した
+（`/tmp/suwop-archive-busy-final-apple1-20261015.log`）。
+追加修正を含むstrict VRTと更新後HEADのCIを確認してからマージする。

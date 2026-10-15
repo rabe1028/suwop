@@ -119,11 +119,27 @@ struct Shell {
     persist_after_failure: bool,
     relationship: Option<Value>,
     facts_patch: Option<Value>,
+    ordinary_asset: Option<Value>,
     omit_field: Option<String>,
 }
 impl Shell {
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
+            ShellOperation::ConfirmImmichArchive { .. } => Ok(json!(true)),
+            ShellOperation::Http(request)
+                if request.headers.contains_key("x-api-key")
+                    && self
+                        .ordinary_asset
+                        .as_ref()
+                        .and_then(|a| a["id"].as_str())
+                        .is_some_and(|id| {
+                            request.url == format!("https://fixture.example/api/assets/{id}")
+                        }) =>
+            {
+                assert_eq!(request.method, "GET");
+                assert!(!request.headers.contains_key("Authorization"));
+                Ok(json!({"status":200,"body":self.ordinary_asset}))
+            }
             ShellOperation::Http(request)
                 if request.headers.contains_key("x-api-key")
                     && request.method == "GET"
@@ -1564,4 +1580,123 @@ fn activate_archive(shell: &mut Shell, core: &Core<Suwop>) -> Result<(), String>
             scene_id: SCENE.into(),
         },
     )
+}
+
+fn drain_until(
+    core: &Core<Suwop>,
+    shell: &mut Shell,
+    mut effects: Vec<Effect>,
+    stop: fn(&ShellOperation) -> bool,
+) -> Result<Vec<Effect>, String> {
+    while !effects.is_empty() {
+        let Effect::Io(mut request) = effects.remove(0);
+        if stop(&request.operation) {
+            effects.insert(0, Effect::Io(request));
+            return Ok(effects);
+        }
+        let result = shell.respond(&request.operation);
+        effects.extend(
+            core.resolve(
+                &mut request,
+                ShellResponse {
+                    value: result.as_ref().ok().cloned(),
+                    error: result.err(),
+                },
+            )
+            .map_err(|e| e.to_string())?,
+        );
+    }
+    Err("expected effect boundary".into())
+}
+fn check_ordinary_prepared_preserves_other_key(pending: bool) -> Result<(), String> {
+    let c = core(false);
+    let mut locked = asset();
+    locked["visibility"] = json!("locked");
+    let mut shell = Shell {
+        visibility: Some("locked".into()),
+        pages: Some(std::collections::VecDeque::from([
+            json!({"assets":{"items":[locked],"nextCursor":null}}),
+        ])),
+        ..Shell::default()
+    };
+    shell.run(&c, open(GRANT))?;
+    activate_archive(&mut shell, &c)?;
+    let image_event = Event::RequestImmichLockedImage {
+        entry_id: ASSET.into(),
+        grant_id: GRANT.into(),
+        request_id: NEXT.into(),
+    };
+    let mut held = if pending {
+        drain_until(&c, &mut shell, c.process_event(image_event), |op| {
+            matches!(op, ShellOperation::ReadImmichLockedImage { .. })
+        })?
+    } else {
+        shell.run(&c, image_event)?;
+        vec![]
+    };
+    let before = c.view().immich_locked_view;
+    assert_eq!(before.image.is_some(), !pending);
+    let mut ordinary = asset();
+    ordinary["id"] = json!("99999999-9999-4999-8999-999999999999");
+    let target = AssetKey {
+        asset_id: ordinary["id"].as_str().ok_or("ordinary id")?.into(),
+        ..key()
+    };
+    shell.ordinary_asset = Some(ordinary);
+    let _persist = drain_until(
+        &c,
+        &mut shell,
+        c.process_event(Event::PrepareImmichArchive {
+            key: target,
+            to: suwop_core::immich_archive::ImmichArchiveDestination::Archive,
+            operation_id: OP.into(),
+            scene_id: SCENE.into(),
+        }),
+        |op| matches!(op, ShellOperation::Persist(_)),
+    )?;
+    let after = c.view().immich_locked_view;
+    assert_eq!(after.image, before.image);
+    assert_eq!(
+        serde_json::to_value(after.entries).map_err(|e| e.to_string())?,
+        serde_json::to_value(before.entries).map_err(|e| e.to_string())?
+    );
+    assert_eq!(after.grant_id, before.grant_id);
+    if pending {
+        let Effect::Io(mut read) = held.remove(0);
+        assert!(matches!(
+            read.operation,
+            ShellOperation::ReadImmichLockedImage { .. }
+        ));
+        let value = shell.respond(&read.operation)?;
+        let publication = c
+            .resolve(
+                &mut read,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let publication = drain_until(&c, &mut shell, publication, |op| {
+            matches!(
+                op,
+                ShellOperation::PublishImmichLockedImage { .. }
+                    | ShellOperation::ReleaseImmichLockedImage { .. }
+            )
+        })?;
+        assert!(publication.iter().any(|effect| matches!(effect, Effect::Io(io) if matches!(io.operation, ShellOperation::PublishImmichLockedImage { .. }))), "unrelated pending read must remain authorized for publication");
+    }
+    assert_eq!(shell.persist_calls, 0);
+    assert_eq!(shell.ordinary_writes, 0);
+
+    Ok(())
+}
+
+#[test]
+fn ordinary_prepared_preserves_other_key_locked_image() -> Result<(), String> {
+    check_ordinary_prepared_preserves_other_key(false)
+}
+#[test]
+fn ordinary_prepared_preserves_other_key_pending_read() -> Result<(), String> {
+    check_ordinary_prepared_preserves_other_key(true)
 }

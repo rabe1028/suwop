@@ -4,7 +4,9 @@ import SwiftUI
 @main @MainActor struct SnapshotHost: App {
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--archive-history-windows") {
+            if CommandLine.arguments.contains("--archive-busy-fixture") {
+                ImmichArchiveBusyHost()
+            } else if CommandLine.arguments.contains("--archive-history-windows") {
                 ImmichArchiveHistoryRecoveryHost()
             } else if CommandLine.arguments.contains("--immich-archive-fixture") {
                 InteractiveImmichArchiveHost()

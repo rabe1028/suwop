@@ -15,6 +15,7 @@ import SuwopShell
     private var pendingCommands = 0
     private var coreBusy = false
     #if SUWOP_VRT
+        var beforeCommand: (@MainActor () async -> Void)?
         var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue)?
     #endif
 
@@ -121,6 +122,10 @@ import SuwopShell
                 busy = coreBusy || pendingCommands > 0
             }
             guard commandEpochs[sceneID] == epoch, phases[sceneID] == .active, context.permits() else { return }
+            #if SUWOP_VRT
+                await beforeCommand?()
+                guard commandEpochs[sceneID] == epoch, phases[sceneID] == .active, context.permits() else { return }
+            #endif
             await run(
                 event ?? ["type": .string("openImmichArchive"), "sceneID": .string(sceneID)],
                 context: context

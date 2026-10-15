@@ -1564,11 +1564,29 @@ impl VisibilitySession {
     }
 }
 pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
+    // Access carries an entry ID, so resolve its full key before removing rows.
+    let image_matches = model.immich_locked.image.as_ref().is_some_and(|image| {
+        model
+            .immich_locked
+            .entries
+            .iter()
+            .any(|entry| entry.id == image.entry_id && entry.asset.key == *key)
+    });
     model
         .immich_locked
         .entries
         .retain(|entry| entry.asset.key != *key);
-    clear_visibility_image(model);
+    if image_matches {
+        model.immich_locked.image = None;
+    }
+    if model
+        .immich_locked
+        .pending
+        .as_ref()
+        .is_some_and(|ticket| ticket.key == *key)
+    {
+        model.immich_locked.pending = None;
+    }
 }
 pub(crate) fn publish_visibility_entry(
     model: &mut Model,
@@ -1673,5 +1691,78 @@ mod visibility_deadline_tests {
                 .any(|event| matches!(event, Event::ImmichVisibilityPrepared { result: Err(_) }))
         );
         assert_eq!(generation.load(Ordering::SeqCst), 7);
+    }
+}
+
+#[cfg(test)]
+mod keyed_visibility_invalidation_tests {
+    use super::*;
+    #[test]
+    fn same_asset_id_in_another_scope_does_not_clear_image_and_pending_is_independent()
+    -> Result<(), String> {
+        let raw: Asset = serde_json::from_value(serde_json::json!({
+            "id":"asset","ownerId":"owner","type":"IMAGE","originalFileName":"a.jpg",
+            "checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z",
+            "fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision",
+            "isFavorite":false,"isOffline":false,"isTrashed":false,
+            "visibility":"locked","livePhotoVideoId":null,"stack":null
+        }))
+        .map_err(|e| e.to_string())?;
+        let asset = raw.record("scope-a", None, None);
+        let key = asset.key.clone();
+        let other_scope = AssetKey {
+            scope: "scope-b".into(),
+            ..key.clone()
+        };
+        let mut model = Model::default();
+        model.immich_locked.entries.push(ImmichLockedEntry {
+            id: key.asset_id.clone(),
+            visibility_action: crate::immich_visibility::locked_action(key.clone()),
+            asset,
+        });
+        let image = ImmichLockedImageAccess {
+            request_id: "image-request".into(),
+            entry_id: key.asset_id.clone(),
+            grant_id: "grant".into(),
+            scene_id: "scene".into(),
+            generation: 1,
+            staged_id: "staged".into(),
+        };
+        model.immich_locked.image = Some(image.clone());
+        let ticket = ImmichLockedImageTicket {
+            request_id: "pending-request".into(),
+            entry_id: key.asset_id.clone(),
+            grant_id: "grant".into(),
+            scene_id: "scene".into(),
+            generation: 1,
+            key: other_scope.clone(),
+            expected_revision: "revision".into(),
+            request: HttpRequest {
+                url: "https://fixture.example/api/assets/asset/thumbnail".into(),
+                method: "GET".into(),
+                headers: std::collections::BTreeMap::new(),
+                body: None,
+                download_path: None,
+                fields: std::collections::BTreeMap::new(),
+                files: vec![],
+                ordinary_content_authorization: None,
+                immich_visibility_authorization: None,
+                immich_archive_authorization: None,
+            },
+        };
+        model.immich_locked.pending = Some(ticket.clone());
+        remove_visibility_entry(&mut model, &other_scope);
+        assert_eq!(model.immich_locked.image, Some(image));
+        assert_eq!(model.immich_locked.entries.len(), 1);
+        assert!(model.immich_locked.pending.is_none());
+        model.immich_locked.pending = Some(ImmichLockedImageTicket {
+            key: key.clone(),
+            ..ticket
+        });
+        remove_visibility_entry(&mut model, &key);
+        assert!(model.immich_locked.image.is_none());
+        assert!(model.immich_locked.pending.is_none());
+        assert!(model.immich_locked.entries.is_empty());
+        Ok(())
     }
 }
