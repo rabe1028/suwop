@@ -135,7 +135,9 @@ import SuwopShell
         }
         server.beforeMutation = { [weak self] request in
             guard let self else { throw CancellationError() }
-            let key = ImmichLockedFixtureData.key(ImmichVisibilityFixtureData.sourceID)
+            let ids = try request.body["ids"].decode([String].self)
+            guard ids.count == 1, let selected = ids.first else { throw CancellationError() }
+            let key = ImmichLockedFixtureData.key(selected)
             let exactIntent = journal.immichVisibilityOperations.contains {
                 $0.key == key && $0.outcome == .unknown && !$0.witnessDigest.isEmpty
                     && $0.to.rawValue == request.body["visibility"].string

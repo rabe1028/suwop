@@ -41,6 +41,12 @@ pub(super) use write_contract::{
     native_cid_setup,
 };
 
+#[path = "live_graph/derivative_headers.rs"]
+mod derivative_headers;
+
+#[path = "live_graph/ordinary_selected_read.rs"]
+mod ordinary_selected_read;
+
 const PIN: &str = "123456";
 const V: &[u8] = include_bytes!("../fixtures/live_graph/V.mp4");
 const M: &[u8] = include_bytes!("../fixtures/live_graph/M.mp4");

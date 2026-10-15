@@ -15,19 +15,20 @@ pub(in super::super) async fn ordinary_native_parent_setup(
 ) -> Result<(String, Vec<String>), String> {
     setup_pair(ctx, session, directory, true, "parent").await
 }
-pub(super) async fn recovery_native_parent_setup(
-    ctx: &Context,
-    session: &Session,
-    directory: &Path,
-) -> Result<(String, Vec<String>), String> {
-    setup_pair(ctx, session, directory, true, "selected-recovery").await
-}
 pub(super) async fn write_contract_native_setup(
     ctx: &Context,
     session: &Session,
     directory: &Path,
 ) -> Result<(String, Vec<String>), String> {
     setup_pair(ctx, session, directory, true, "write-contract").await
+}
+pub(super) async fn native_checkpoint_setup(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+    checkpoint: &str,
+) -> Result<(String, Vec<String>), String> {
+    setup_pair(ctx, session, directory, true, checkpoint).await
 }
 async fn setup_pair(
     ctx: &Context,

@@ -9,6 +9,7 @@ import SuwopShell
     enum SourceKind { case image, live, video, stacked, unknownStack }
     private var sessions: [String: Bool] = [:]
     private(set) var record: JSONValue
+    var additionalRecords: [String: JSONValue] = [:]
     private(set) var albumMembers: [String: Set<String>]
     private(set) var routes: [String] = []
     @Published private(set) var mutationAttempts = 0
@@ -108,8 +109,9 @@ import SuwopShell
             guard elevated ? requested == ["locked"] : requested == ["timeline", "archive"] else {
                 throw SuwopError("C2 listing did not keep ordinary and locked visibility separate")
             }
-            let items = requested.contains(record["visibility"].string ?? "")
-                ? [ImmichLockedFixtureData.searchRecord(record)] : []
+            let items = ([record] + Array(additionalRecords.values)).filter {
+                requested.contains($0["visibility"].string ?? "")
+            }.map { ImmichLockedFixtureData.searchRecord($0) }
             return response(.object(["assets": .object(["items": .array(items), "nextCursor": .null])]))
         }
         if path == "assets", request.method == "PUT" {
@@ -128,6 +130,12 @@ import SuwopShell
     }
 
     private func assetMetadata(_ request: HttpRequest, path: String, elevated: Bool) throws -> HttpResponse? {
+        for (id, extra) in additionalRecords {
+            if request.method == "GET", path == "assets/\(id)" || path == "asset-files?assetId=\(id)" {
+                guard elevated || extra["visibility"].string != "locked" else { return response(.null, status: 403) }
+                return response(path.hasPrefix("asset-files?") ? .array([]) : extra)
+            }
+        }
         let asset = path == "assets/\(ImmichVisibilityFixtureData.sourceID)"
         let inventory = path == "asset-files?assetId=\(ImmichVisibilityFixtureData.sourceID)"
         guard request.method == "GET", asset || inventory else { return nil }
@@ -144,19 +152,25 @@ import SuwopShell
         mutationAttempts += 1
         try beforeMutation?(request)
         let ids = try request.body["ids"].decode([String].self)
-        guard ids == [ImmichVisibilityFixtureData.sourceID], let to = request.body["visibility"].string,
+        guard ids.count == 1, let selected = ids.first,
+              selected == ImmichVisibilityFixtureData.sourceID || additionalRecords[selected] != nil,
+              let to = request.body["visibility"].string,
               ["timeline", "archive", "locked"].contains(to)
         else { throw SuwopError("C2 mutation was not one exact physical source") }
         if fault == .rejectedMutation {
             return response(.null, status: 403)
         }
-        var fields = try record.decode([String: JSONValue].self)
+        var fields = try (additionalRecords[selected] ?? record).decode([String: JSONValue].self)
         fields["visibility"] = .string(to)
         fields["updatedAt"] = .string("2026-01-02T00:00:00.000Z")
-        record = .object(fields)
+        if selected == ImmichVisibilityFixtureData.sourceID {
+            record = .object(fields)
+        } else {
+            additionalRecords[selected] = .object(fields)
+        }
         if to == "locked" {
             for id in albumMembers.keys {
-                albumMembers[id]?.remove(ImmichVisibilityFixtureData.sourceID)
+                albumMembers[id]?.remove(selected)
             }
         }
         mutations += 1
@@ -189,6 +203,13 @@ import SuwopShell
         }
         externalChanges += 1
         fields["updatedAt"] = .string("2026-03-0\(externalChanges)T00:00:00.000Z")
+        record = .object(fields)
+    }
+
+    /// Synthetic external-client change; does not execute the product write route.
+    func externallySetVisibility(_ visibility: String) throws {
+        var fields = try record.decode([String: JSONValue].self)
+        fields["visibility"] = .string(visibility)
         record = .object(fields)
     }
 

@@ -26,8 +26,10 @@ mod trash_fence;
 mod upload_intents;
 mod uploads;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Outcome {
+    pub(crate) refresh_persist_issued: bool,
+    pub(crate) ordinary_selected: Vec<crate::ordinary_selected::VerifiedPresentation>,
     pub preview_to_select: Option<AssetKey>,
     pub state: SavedLibrary,
     pub session: Option<Session>,
@@ -35,6 +37,8 @@ pub struct Outcome {
     pub error: Option<String>,
 }
 struct Runtime<'a> {
+    refresh_persist_issued: bool,
+    ordinary_selected: Vec<crate::ordinary_selected::VerifiedPresentation>,
     denied_content: BTreeSet<AssetKey>,
     ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     started_ordinary_generation: u64,
@@ -106,6 +110,8 @@ pub async fn run_guarded(
         );
     }
     let mut runtime = Runtime {
+        refresh_persist_issued: false,
+        ordinary_selected: Vec::new(),
         ordinary_generation,
         started_ordinary_generation,
         ordinary_revision: revision.clone(),
@@ -157,6 +163,8 @@ pub async fn run_guarded(
     }
     match result {
         Ok(status) => Outcome {
+            refresh_persist_issued: runtime.refresh_persist_issued,
+            ordinary_selected: runtime.ordinary_selected,
             preview_to_select: runtime.preferred_preview,
             state: runtime.state,
             session: runtime.session,
@@ -164,6 +172,8 @@ pub async fn run_guarded(
             error: None,
         },
         Err(error) => Outcome {
+            refresh_persist_issued: runtime.refresh_persist_issued,
+            ordinary_selected: Vec::new(),
             preview_to_select: runtime.preferred_preview,
             state: runtime.state,
             session: runtime.session,
@@ -520,7 +530,11 @@ impl Runtime<'_> {
             }
         }
         self.refresh_immich(now, &mut errors).await?;
-        self.persist().await?;
+        self.check_content_generation(&[])?;
+        self.refresh_persist_issued = true;
+        let _: Value = io(self.ctx, ShellOperation::Persist(self.state.clone())).await?;
+        self.check_content_generation(&[])?;
+        self.progress("記録を保存しました。");
         if errors.is_empty() {
             Ok(())
         } else {
@@ -539,6 +553,18 @@ impl Runtime<'_> {
                             scope: session.scope.clone(),
                             asset_id: asset.id.clone(),
                         };
+                        if self
+                            .state
+                            .immich_visibility_operations
+                            .iter()
+                            .any(|o| o.key == key && o.selected_observation.is_some())
+                        {
+                            if let Some(proof) = self.selected_candidate(session, &key).await {
+                                records.push(proof.asset.clone());
+                                self.ordinary_selected.push(proof);
+                            }
+                            continue;
+                        }
                         let tracked = self
                             .state
                             .immich_visibility_operations
@@ -604,6 +630,56 @@ impl Runtime<'_> {
             }
         }
         Ok(())
+    }
+    async fn selected_candidate(
+        &self,
+        session: &Session,
+        key: &AssetKey,
+    ) -> Option<crate::ordinary_selected::VerifiedPresentation> {
+        if self.denied_content.contains(key)
+            || self.state.protected_entries.iter().any(|e| e.key == *key)
+        {
+            return None;
+        }
+        let raw = self.selected_reconciliation(session, key).await.ok()?;
+        let proof = crate::ordinary_selected::VerifiedPresentation::from_fresh(
+            &raw,
+            &self.state,
+            session,
+            self.started_ordinary_generation,
+        )
+        .ok()?;
+        (proof.asset.key == *key).then_some(proof)
+    }
+    async fn selected_reconciliation(
+        &self,
+        session: &Session,
+        key: &AssetKey,
+    ) -> Result<Value, String> {
+        self.check_content_generation(std::slice::from_ref(key))?;
+        crate::immich::valid_id(&key.asset_id)?;
+        if key.provider != Provider::Immich
+            || key.scope != session.scope
+            || !self
+                .state
+                .immich_visibility_operations
+                .iter()
+                .any(|o| o.key == *key && o.selected_observation.is_some())
+        {
+            return Err("確認記録がありません。".into());
+        }
+        let mut request = session.request(&format!("assets/{}", key.asset_id), "GET", None);
+        request.ordinary_content_authorization =
+            Some(crate::immich::OrdinaryContentAuthorization {
+                source_keys: vec![key.clone()],
+                expected_revision: self.ordinary_revision.clone(),
+                purpose: crate::immich::OrdinaryContentPurpose::SelectedPresentationMetadata,
+            });
+        let response: crate::immich::HttpResponse =
+            io(self.ctx, ShellOperation::Http(request)).await?;
+        self.check_content_generation(std::slice::from_ref(key))?;
+        crate::immich::check_status(response.status)?;
+        Ok(response.body)
     }
     async fn visibility_reconciliation(
         &self,

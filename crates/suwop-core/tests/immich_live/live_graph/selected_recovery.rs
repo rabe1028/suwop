@@ -11,7 +11,7 @@ use suwop_core::{
 mod fixture;
 #[path = "selected_recovery_shell.rs"]
 mod shell;
-use fixture::Fixture;
+pub(super) use fixture::Fixture;
 use shell::RecoveryShell;
 const SCENE: &str = "11111111-1111-4111-8111-111111111111";
 const GRANT: &str = "22222222-2222-4222-8222-222222222222";
@@ -85,7 +85,7 @@ fn evidence(label: &str, value: &Value) -> Result<(), String> {
         .and_then(|mut f| f.write_all(&encoded))
         .map_err(|_| "recovery evidence write".into())
 }
-fn legacy(key: &AssetKey, session: &Session, outcome: &str) -> Result<Value, String> {
+pub(super) fn legacy(key: &AssetKey, session: &Session, outcome: &str) -> Result<Value, String> {
     // Frozen schema-7 IMAGE identity codec; no current relationship authority is invented.
     let witness = legacy_witness(key)?;
     let operation = json!({"kind":"lockedTransition","id":OP,"scope":key.scope,"key":key,

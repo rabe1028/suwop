@@ -65,6 +65,7 @@ pub enum OrdinaryContentPurpose {
     Read,
     DestinationReadback,
     VisibilityReconciliation,
+    SelectedPresentationMetadata,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
