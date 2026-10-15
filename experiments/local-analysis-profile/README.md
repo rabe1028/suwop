@@ -31,8 +31,8 @@ the catalog. The measured process includes index creation, one query and a 2.5 s
 idle interval to let the native worker close. Timings are single warm-filesystem
 runs, not a distribution or real-device acceptance.
 
-Current analysis fixtures use SQLite schema 2 with temporary payloads in
-`embedding_vectors` and incremental vacuum; catalog JSON uses schema 5.
+Current analysis fixtures use SQLite schema 4 with temporary payloads in
+`embedding_vectors`, durable asset identities and incremental vacuum; catalog JSON uses schema 5.
 The earlier worktree's measurement artifacts were not recovered and are not
 evidence for the current implementation. Large fixture databases and binaries
 are ignored. The actual-model comparison is in `docs/evidence/embeddinggemma2-20261015`.

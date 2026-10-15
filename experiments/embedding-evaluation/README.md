@@ -8,7 +8,7 @@ never reads the user's photo library. Results and photos are ignored by Git.
    `PROTOC=/path/to/protoc bash scripts/build-rust-apple.sh --host`.
 2. Create `experiments/embedding-evaluation/results/`. Download
    `http://images.cocodataset.org/annotations/annotations_trainval2017.zip` to
-   `results/annotations.zip`, then run `python3.12 prepare.py` from this directory.
+   `results/annotations.zip`, then run `uv run --no-project python prepare.py` from this directory.
    The deterministic sample uses seed 20261015 and the first caption by annotation
    ID. HTTP is the public dataset's endpoint, not a credential-bearing service.
 3. Download the immutable model URL in `crates/suwop-core/src/inference.rs` to a
@@ -26,7 +26,7 @@ for dims in 256 512; do
     /absolute/model.litertlm "$PWD/results/manifest.json" "$PWD/results/d$dims" \
     > "results/d$dims/index.log" 2> "results/d$dims/index.time"
 done
-python3.12 summarize.py
+uv run --no-project python summarize.py
 ```
 
 Use fresh output catalogs for a new measurement: this harness measures initial
@@ -59,6 +59,6 @@ Run `embed` on those 20 entries into `results/japanese256` / `japanese512` and r
 the resulting file as `translated-vectors.json`. Copy the original 100 image vectors
 into each directory's `vectors.json`, replacing only the corresponding 20 query
 vectors with the Japanese versions; keep all 100 images. Run `index` there, then
-`python3.12 summarize_japanese.py`. Only the 20 translated queries contribute to the
+`uv run --no-project python summarize_japanese.py`. Only the 20 translated queries contribute to the
 Japanese metrics. Source captions/translation ambiguities and the small sample
 limit interpretation.

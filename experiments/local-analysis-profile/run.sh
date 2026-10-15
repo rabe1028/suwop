@@ -9,6 +9,6 @@ if [[ -e "$DIRECTORY" ]]; then
     exit 1
 fi
 "$BINARY" prepare "$DIRECTORY" "$ROWS"
-python3 "$SCRIPT_DIR/profile.py" seed "$DIRECTORY" "$ROWS"
+uv run --no-project python "$SCRIPT_DIR/profile.py" seed "$DIRECTORY" "$ROWS"
 /usr/bin/time -l "$BINARY" index "$DIRECTORY" 2> "$DIRECTORY/time.txt"
-python3 "$SCRIPT_DIR/profile.py" summarize "$DIRECTORY" "$BINARY"
+uv run --no-project python "$SCRIPT_DIR/profile.py" summarize "$DIRECTORY" "$BINARY"

@@ -1,4 +1,6 @@
 {
+  "scope": "Historical initial implementation measurements from 2026-10-15. Not validation of later review fixes or the current tree. Source hashes below describe only the measured snapshot.",
+  "current_validation": "Use PR #26 checks for the exact HEAD and source-bound scripts/verify.py result records; this archived evidence is never updated to claim a later source passed.",
   "local_checks": {
     "make_check": {
       "status": "passed",

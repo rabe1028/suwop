@@ -28,6 +28,9 @@ struct SemanticSearchView: View {
                         Text("1.5 GB").tag(1536)
                         Text("2 GB").tag(2048)
                     }.disabled(search.busy)
+                        .onChange(of: search.budgetMiB) { _, _ in
+                            Task { await search.persistBudget() }
+                        }
                     if let status = search.status {
                         Text(
                             "索引作成済み \(status.indexed)枚 · 未解析 \(status.awaitingEmbeddings)枚 · 保存待ち \(status.queuedVectors)枚"

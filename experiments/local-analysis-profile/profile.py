@@ -57,6 +57,7 @@ elif phase == "summarize":
                 category = "lance_data"
             components[category] += path.stat().st_size
     with sqlite3.connect(database_uri + "?mode=rw", uri=True) as connection:
+        schema_version = connection.execute("PRAGMA user_version").fetchone()[0]
         page_size = connection.execute("PRAGMA page_size").fetchone()[0]
         free_pages = connection.execute("PRAGMA freelist_count").fetchone()[0]
         shards = connection.execute("SELECT count(*) FROM shards WHERE state='ready'").fetchone()[0]
@@ -79,7 +80,8 @@ elif phase == "summarize":
     components["catalog_reusable_freelist"] = free_pages * page_size
     report.update(
         {
-            "implementation": "schema 2; separate temporary vector payloads; incremental vacuum",
+            "schema_version": schema_version,
+            "implementation": f"schema {schema_version}; separate temporary vector payloads; incremental vacuum",
             "sqlite_pages": layout,
             "max_rss_bytes": int(
                 re.search(

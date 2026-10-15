@@ -248,6 +248,41 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         XCTAssertEqual(search.inference?.state, "running")
     }
 
+    @MainActor func testBudgetChangeIsPersistedBeforeAutomaticInference() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LocalStore(root: root)
+        let configured = try await store.configureInference(dimensions: 256, budget: 2048 << 20)
+        var observedBudget: Int64?
+        let search = SemanticSearchModel(
+            store: store,
+            prepareModel: {
+                observedBudget = try await store.inferenceStatus(key: configured.modelKey)?.budgetBytes
+                throw CancellationError()
+            },
+            image: { _ in throw SuwopError("No image expected") }
+        )
+        await search.restore()
+        try await settle { !search.busy }
+        search.budgetMiB = 1536
+        await search.persistBudget()
+        let selected = try await store.inferenceStatus(key: configured.modelKey)
+        XCTAssertEqual(selected?.budgetBytes, 1536 << 20)
+        try await store.persist(Wire.decoder().decode(
+            JSONValue.self,
+            from: Data(InteractiveSemanticHost.failedPhoto.utf8)
+        ))
+        search.budgetMiB = 1024
+        // Wake immediately, before the view's onChange task can persist the picker.
+        search.wake()
+        try await settle { !search.busy }
+        XCTAssertEqual(observedBudget, 1024 << 20)
+        let reopened = try LocalStore(root: root)
+        let persisted = try await reopened.inferenceStatus(key: configured.modelKey)
+        XCTAssertEqual(persisted?.budgetBytes, 1024 << 20)
+        XCTAssertEqual(persisted?.state, "running")
+    }
+
     @MainActor private func settle(_ condition: () -> Bool) async throws {
         for _ in 0 ..< 200 {
             if condition() {

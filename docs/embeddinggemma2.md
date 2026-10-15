@@ -172,6 +172,16 @@ and [reproduction instructions](../experiments/embedding-evaluation/README.md).
 
 ## Validation scope
 
+The following counts and archived hashes describe the **initial 2026-10-15
+implementation only**. They predate review fixes, schema 4 and newer main-branch
+screens. They do not establish acceptance of the current source tree.
+Current validation is tied to the exact PR HEAD in [PR #26 checks](https://github.com/rabe1028/suwop/pull/26/checks).
+Local gates use `uv run --no-project python scripts/verify.py run --label NAME -- make TARGET`;
+the result records the command, HEAD, full source hashes, exit status and log.
+Do not reuse a result with `source_changed` or compare an archived file hash to a
+later checkout as evidence of a pass.
+
+
 `make check` passed 285 Rust tests and 59 Swift tests, including the real C ABI,
 job replay, stale revisions, generation publication and current connection binding.
 `make vrt` passed 34 unit tests and 21 UI tests with 37 screenshot comparisons on
@@ -186,8 +196,9 @@ The installed-model lifecycle probe verifies atomic installation, budget rejecti
 persisted pause and five engine cycles. This is not physical-device acceptance.
 
 [Machine-readable validation and source hashes](evidence/embeddinggemma2-20261015/validation.json)
-record each gate separately. Hosted CI, physical iPhone/PhotoKit inference and
-live Immich inference acceptance have not been run for this patch.
+record each historical gate separately. Physical iPhone/PhotoKit inference and
+live Immich inference acceptance remain unverified. Hosted CI status must be read
+for the current HEAD from the PR, separately from these historical measurements.
 
 ## Upstream references
 

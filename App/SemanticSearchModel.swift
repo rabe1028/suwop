@@ -224,6 +224,15 @@ import SwiftUI
         }
     }
 
+    func persistBudget() async {
+        guard let key = inference?.modelKey else { return }
+        do {
+            try await store.setInferenceBudget(key: key, budget: UInt64(budgetMiB) << 20)
+        } catch {
+            message = error.localizedDescription
+        }
+    }
+
     func selectDimensions() async {
         guard task == nil, !pausing else { return }
         selectionRevision += 1
@@ -310,6 +319,9 @@ extension SemanticSearchModel {
 
     private func runPending() async throws {
         guard let key = inference?.modelKey else { return }
+        // A catalog wake can race the picker's asynchronous persistence task.
+        // Apply the displayed budget before any automatic model work or admission.
+        try await store.setInferenceBudget(key: key, budget: UInt64(budgetMiB) << 20)
         while !suspended {
             try Task.checkCancellation()
             guard let job = try await store.pending(modelKey: key, limit: 1).first else { break }
