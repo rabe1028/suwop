@@ -16,6 +16,7 @@ fn asset(kind: PlaybackKind) -> StoredAsset {
         PlaybackKind::Live => vec![ResourceRole::Image, ResourceRole::LiveVideo],
     };
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
@@ -61,6 +62,8 @@ fn snapshot(asset: StoredAsset, access: ScanAccess) -> LibrarySnapshot {
 }
 fn session() -> suwop_core::immich::Session {
     suwop_core::immich::Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "fixture".into(),
         user_id: "user".into(),
@@ -102,7 +105,7 @@ fn core(kind: PlaybackKind) -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 5,
+                schema_version: 6,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(kind), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -232,7 +235,7 @@ fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 5,
+                schema_version: 6,
                 apple_scope: "apple".into(),
                 snapshots: snapshots.clone(),
                 ..SavedLibrary::default()
@@ -422,12 +425,14 @@ fn remote_playback_reads_the_authenticated_original_and_never_mutates_the_server
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 5,
+                schema_version: 6,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(video, ScanAccess::Full)],
                 ..SavedLibrary::default()
             },
             session: Some(suwop_core::immich::Session {
+                ordinary_content_guard: None,
+                ordinary_content_context: None,
                 endpoint: "https://server/api".into(),
                 key: "test-key".into(),
                 user_id: "22222222-2222-4222-8222-222222222222".into(),

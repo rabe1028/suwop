@@ -1,6 +1,10 @@
 # Immich の PIN 認証付き閲覧（PP-02C-1）
 
+PR #24は2026-10-14 18:08 UTCにmain `dfd1eb2`へmerge済み。最終HEAD `dde851e`のレビュー指摘2件を修正し、再レビューで追加指摘なし、[CI 38609755156](https://github.com/rabe1028/suwop/actions/runs/38609755156)のcore／Immich結合／Apple／VRT・PhotoKit全4 jobが成功した。merge後の[CI 38612638334](https://github.com/rabe1028/suwop/actions/runs/38612638334)も全4 job成功を確認済み。実機・iCloud・実時間15分の検証は未完了。以下の提出・修正記録は各実行時点の履歴。
+
 ## PR #24 のレビュー修正
+
+merge後CIの初回実行はcore／Immich結合／AppleとVRT比較・PhotoKit検証が成功したが、成果物保存の`CreateArtifact`要求が5回timeoutしてジョブが失敗した。失敗ジョブのみ再実行し、VRT比較・PhotoKit検証・成果物保存まで成功した。最終的に全4 job成功を確認した（初回失敗: `/tmp/suwop-locked-main-ci-failed.log`、再実行: `/tmp/suwop-locked-main-ci-rerun.log`）。
 
 - `8a339cf` のレビューで、閉じた後に届く認証成功の後始末結果が表示へ届かない点と、100ページで一覧取得を打ち切る点を指摘された。遅延ログインの失敗経路も含めて、実際のlock／logout結果を内部イベントへ引き継ぐ。結果を反映できるのは直前の認証試行を閉じた世代だけで、後から開いたセッションやその終了結果を上書きしない。
 - ページ取得はカーソルの循環を検出し、通常一覧と同じ10,000ページ上限を持つ。終了は明示的なnullに限り、欠落・不正・空のカーソルや途中の取得失敗を完全な一覧として公開しない。

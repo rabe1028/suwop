@@ -15,10 +15,12 @@ const GRANT: &str = "22222222-2222-4222-8222-222222222222";
 const ASSET: &str = "33333333-3333-4333-8333-333333333333";
 const OWNER: &str = "44444444-4444-4444-8444-444444444444";
 fn asset() -> Value {
-    json!({"id":ASSET,"ownerId":OWNER,"type":"IMAGE","originalFileName":"PRIVATE-LOCKED.jpg","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision1","isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"locked","isExternal":false})
+    json!({"id":ASSET,"ownerId":OWNER,"type":"IMAGE","originalFileName":"PRIVATE-LOCKED.jpg","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision1","isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"locked","isExternal":false,"stack":null})
 }
 fn core(protected: bool) -> Core<Suwop> {
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://fixture.example/api".into(),
         key: "ordinary-api-secret".into(),
         user_id: OWNER.into(),
@@ -30,7 +32,7 @@ fn core(protected: bool) -> Core<Suwop> {
         },
     };
     let state = SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),

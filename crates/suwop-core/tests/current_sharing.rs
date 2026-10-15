@@ -20,6 +20,7 @@ const OWNER: &str = "22222222-2222-4222-8222-222222222222";
 const FILE: &str = "33333333-3333-4333-8333-333333333333";
 fn apple() -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
@@ -47,6 +48,8 @@ fn apple() -> StoredAsset {
 }
 fn session() -> Session {
     Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://photos.example/api".into(),
         key: "fixture".into(),
         user_id: OWNER.into(),
@@ -72,7 +75,7 @@ fn facts() -> CurrentImageFacts {
 }
 fn state(asset: StoredAsset) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: asset.key.provider,

@@ -18,6 +18,7 @@ struct Protocol {
     embedding_job: suwop_core::analysis::EmbeddingJob,
     analysis_status: suwop_core::analysis::AnalysisStatus,
     similarity_hit: suwop_core::analysis::SimilarityHit,
+    immich_visibility_prompt: suwop_core::immich_visibility::ImmichVisibilityPrompt,
     immich_locked_image_result: suwop_core::immich_locked::ImmichLockedImageResult,
     immich_locked_image_ticket: suwop_core::immich_locked::ImmichLockedImageTicket,
     protected_scene_phase: suwop_core::protection::ProtectionScenePhase,

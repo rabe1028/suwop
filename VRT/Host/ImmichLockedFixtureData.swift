@@ -34,6 +34,7 @@ enum ImmichLockedFixtureData {
             "isExternal": .bool(false),
             "libraryId": .null,
             "livePhotoVideoId": .null,
+            "stack": .null,
             "exifInfo": .object([
                 "fileSizeInByte": .number(12345),
                 "latitude": .number(37.12345),
@@ -44,5 +45,13 @@ enum ImmichLockedFixtureData {
 
     static func key(_ id: String) -> AssetKey {
         AssetKey(provider: .immich, scope: "\(endpoint)#\(ownerID)", assetID: id)
+    }
+
+    /// The real search DTO omits stack; only the exact detail response can
+    /// establish a fresh stack fact for visibility actions.
+    static func searchRecord(_ record: JSONValue) -> JSONValue {
+        guard case var .object(fields) = record else { return record }
+        fields.removeValue(forKey: "stack")
+        return .object(fields)
     }
 }

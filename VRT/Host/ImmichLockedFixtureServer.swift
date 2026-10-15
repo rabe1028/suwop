@@ -132,7 +132,11 @@ import SuwopShell
     }
 
     private func page(_ items: [JSONValue]) -> JSONValue {
-        .object(["assets": .object(["items": .array(items), "nextCursor": .null])])
+        .object([
+            "assets": .object([
+                "items": .array(items.map(ImmichLockedFixtureData.searchRecord)), "nextCursor": .null,
+            ]),
+        ])
     }
 
     private func response(_ body: JSONValue, status: Int64 = 200) -> HttpResponse {

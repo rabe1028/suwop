@@ -115,6 +115,10 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: root) }
         let store = LocalStore(root: root)
         let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        try await store.persist(Wire.decoder().decode(
+            JSONValue.self,
+            from: Data(InteractiveSemanticHost.failedPhoto.utf8)
+        ))
         var preparations = 0
         let search = SemanticSearchModel(
             store: store,
@@ -123,6 +127,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
                 if preparations == 1 {
                     do { try await Task.sleep(for: .seconds(60)) } catch { throw URLError(.cancelled) }
                 }
+                throw CancellationError()
             },
             image: { _ in throw SuwopError("No image expected") }
         )
@@ -192,6 +197,27 @@ final class SemanticSearchSchedulingTests: XCTestCase {
             return XCTFail("Original catalog disappeared")
         }
         XCTAssertEqual(assets.count, 1)
+    }
+
+    @MainActor func testEmptyJournalWakeDoesNotReadOrPrepareTheModel() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        _ = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        var preparations = 0
+        let search = SemanticSearchModel(
+            store: store,
+            prepareModel: { preparations += 1 },
+            image: { _ in throw SuwopError("No image expected") }
+        )
+        await search.restore()
+        try await settle { !search.busy }
+        for _ in 0 ..< 3 {
+            search.wake()
+            try await settle { !search.busy }
+        }
+        XCTAssertEqual(preparations, 0, "Catalog-only wakes must not hash or download the model")
+        XCTAssertEqual(search.inference?.state, "running")
     }
 
     @MainActor private func settle(_ condition: () -> Bool) async throws {

@@ -53,6 +53,40 @@ import XCTest
         )
     }
 
+    /// Observe rendered pixels only, without consulting any baseline. Retain
+    /// the accepted image so verification cannot accidentally draw a later frame.
+    static func stabilizedImage(named name: String, render: @MainActor () -> UIImage) async throws -> UIImage {
+        var accepted = render()
+        var previous = try normalizedPixels(accepted)
+        var stable = 0
+        var samples = 1
+        let deadline = ContinuousClock.now.advanced(by: .seconds(4))
+        while ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(200))
+            let current = render()
+            let currentPixels = try normalizedPixels(current)
+            stable = previous.count == currentPixels.count && changedPixels(previous, currentPixels).isEmpty
+                ? stable + 1 : 0
+            previous = currentPixels
+            accepted = current
+            samples += 1
+            if stable == 3 {
+                return accepted
+            }
+        }
+        try diagnostic(accepted, named: name + "-render-unstable")
+        XCTFail("Rendered pixels did not settle for three consecutive observations: \(name), samples=\(samples)")
+        throw RenderReadinessError.unstable
+    }
+
+    private enum RenderReadinessError: Error { case unstable }
+
+    private static func normalizedPixels(_ image: UIImage) throws -> [UInt8] {
+        let png = try XCTUnwrap(image.pngData())
+        let decoded = try XCTUnwrap(UIImage(data: png)?.cgImage)
+        return try pixels(decoded)
+    }
+
     /// A failed readiness check never compares or records this diagnostic image.
     static func diagnostic(_ image: UIImage, named name: String) throws {
         let folder = try XCTUnwrap(ProcessInfo.processInfo.environment["SUWOP_VRT_ARTIFACTS"])

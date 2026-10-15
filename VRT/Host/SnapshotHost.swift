@@ -6,6 +6,8 @@ import SwiftUI
         WindowGroup {
             if CommandLine.arguments.contains("--semantic-fixture") {
                 InteractiveSemanticHost()
+            } else if CommandLine.arguments.contains("--immich-visibility-fixture") {
+                InteractiveImmichVisibilityHost()
             } else if CommandLine.arguments.contains("--immich-locked-fixture") {
                 InteractiveImmichLockedHost()
             } else if CommandLine.arguments.contains("--protected-fixture") {

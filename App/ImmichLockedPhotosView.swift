@@ -17,11 +17,18 @@ import SwiftUI
 struct ImmichLockedPhotosView: View {
     @ObservedObject var session: ImmichLockedLibrarySession
     let sceneID: String
+    @State private var lockingSource: AssetKey?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
     @State private var email = ""
     @State private var password = ""
     @State private var pinCode = ""
+
+    init(session: ImmichLockedLibrarySession, sceneID: String, lockingSource: AssetKey? = nil) {
+        self.session = session
+        self.sceneID = sceneID
+        _lockingSource = State(initialValue: lockingSource)
+    }
 
     var body: some View {
         NavigationStack {
@@ -34,6 +41,14 @@ struct ImmichLockedPhotosView: View {
             }
             .navigationTitle("ロック写真")
             .toolbar {
+                ToolbarItem(placement: .primaryAction) {
+                    if session.view(for: sceneID) != nil {
+                        Button { session.refresh(sceneID: sceneID) } label: {
+                            Label("一覧を更新", systemImage: "arrow.clockwise")
+                        }.disabled(session.busy)
+                            .accessibilityIdentifier("refreshImmichLocked")
+                    }
+                }
                 ToolbarItem(placement: .cancellationAction) {
                     Button("閉じる") {
                         clearFields()
@@ -43,9 +58,17 @@ struct ImmichLockedPhotosView: View {
                 }
             }
         }
+        .onAppear {
+            if let lockingSource {
+                self.lockingSource = nil
+                session.visibility.stageLock(key: lockingSource, sceneID: sceneID)
+                session.visibility.preparePending(sceneID: sceneID)
+            }
+        }
         .onChange(of: phase) { _, phase in
             if phase != .active {
                 clearFields()
+                lockingSource = nil
             }
         }
         .onDisappear {
@@ -94,7 +117,8 @@ struct ImmichLockedPhotosView: View {
             Section {
                 Text("パスワード認証が無効、OAuth のみ、または PIN が未設定のアカウントは、この画面から認証できません。Immich 側の設定を確認してください。")
                     .font(.caption).foregroundStyle(.secondary)
-                Text("写真の閲覧専用です。保存先の公開状態やアルバム所属は変更しません。閉じるとこの画面の閲覧許可を破棄します。")
+                ImmichVisibilityRecoveryNotice(presentation: session.visibility)
+                Text("表示先の変更は、対象と変更先を確認してから行います。閉じるとこの画面の閲覧許可を破棄します。")
                     .font(.caption).foregroundStyle(.secondary)
                 if session.projection?.remoteLockConfirmed == false {
                     Text("この画面はロックしました。サーバー側のロックやログアウトの完了は確認できていません。")
@@ -124,12 +148,18 @@ struct ImmichLockedPhotosView: View {
                 ForEach(view.entries ?? [], id: \.id) { entry in
                     VStack(alignment: .leading, spacing: 10) {
                         Text(entry.asset.name).font(.headline)
+                        ImmichVisibilityDestinations(
+                            presentation: session.visibility,
+                            hint: entry.visibilityAction,
+                            sceneID: sceneID
+                        )
                         Button("写真を表示") { session.requestImage(entryID: entry.id, sceneID: sceneID) }
                             .buttonStyle(.borderless)
                             .accessibilityIdentifier("immichLockedPreview-\(entry.id)")
                     }.padding(.vertical, 4)
                 }
             }
+            ImmichVisibilityHistoryView(presentation: session.visibility, sceneID: sceneID)
             if let error = session.error {
                 Text(error).foregroundStyle(.red)
             }

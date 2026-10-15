@@ -14,6 +14,7 @@ struct PhotoViewer: View {
     @State private var pendingCopy: (AssetKey, EditCopyOptions)?
     @State private var showVisibility = false
     @State private var protectedSource: AssetKey?
+    @State private var lockingSource: AssetKey?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.protectionSceneID) private var inheritedSceneID
     private let collection: AlbumKey?
@@ -80,6 +81,9 @@ struct PhotoViewer: View {
                 }
             }
             .sheet(isPresented: $showVisibility) { AppleVisibilityView(model: model) }
+            .sheet(item: $lockingSource) { key in
+                ImmichLockedPhotosView(session: model.immichLocked, sceneID: protectionOwner, lockingSource: key)
+            }
             .sheet(item: $protectedSource) { key in
                 ProtectedPhotosView(session: model.protection, sceneID: protectionOwner, protectingKeys: [key])
             }
@@ -221,6 +225,7 @@ struct PhotoViewer: View {
                     Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
                         showVisibility = true
                     }
+                    immichLockAction(photo)
                     Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
                         protectedSource = model.displayedSource(photo)?.key
                     }.disabled(model.displayedSource(photo) == nil)
@@ -241,6 +246,18 @@ struct PhotoViewer: View {
         }.padding()
     }
 
+    @ViewBuilder private func immichLockAction(_ photo: UnifiedPhoto) -> some View {
+        if let source = model.displayedSource(photo), source.key.provider == .immich {
+            let hint = model.view?.immichVisibilityActions.first { $0.key == source.key }
+            Button("この表示元を Immich でロック", systemImage: "lock") { lockingSource = source.key }
+                .disabled(hint?.canLock != true)
+                .accessibilityIdentifier("lockDisplayedImmichPhoto")
+            if let reason = hint?.reason {
+                Text(reason.explanation)
+            }
+        }
+    }
+
     private func move(_ step: Int) {
         let next = index + step
         if pages.indices.contains(next), let key = pages[next].assets.first?.key {
@@ -255,6 +272,7 @@ private struct ZoomablePhoto: View {
     let move: (Int) -> Void
     let toggleChrome: () -> Void
     @State private var image: PlatformImage?
+    @State private var imageIdentifier = ""
     @State private var error: String?
     @State private var retry = UUID()
     @State private var scale: CGFloat = 1
@@ -264,7 +282,7 @@ private struct ZoomablePhoto: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if let image {
+                if let image, imageIdentifier == model.previewIdentifier(photo) {
                     platformImage(image).resizable().scaledToFit().frame(
                         width: geometry.size.width,
                         height: geometry.size.height
@@ -319,6 +337,7 @@ private struct ZoomablePhoto: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
         }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
+            let identifier = model.previewIdentifier(photo)
             error = nil
             scale = 1
             settledScale = 1
@@ -326,6 +345,8 @@ private struct ZoomablePhoto: View {
             settledOffset = .zero
             do { let loaded = try await model.preview(photo)
                 try Task.checkCancellation()
+                guard identifier == model.previewIdentifier(photo) else { throw CancellationError() }
+                imageIdentifier = identifier
                 image = loaded
             } catch is CancellationError { return } catch {
                 if !Task.isCancelled {

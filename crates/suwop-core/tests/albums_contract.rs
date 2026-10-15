@@ -22,6 +22,8 @@ enum Action {
 }
 fn run(action: Action, bodies: Vec<Value>) -> Result<(Vec<HttpRequest>, Option<String>), String> {
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "test".into(),
         user_id: USER.into(),

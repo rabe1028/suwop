@@ -121,7 +121,6 @@ import SwiftUI
                     try await store.rebuild(modelKey: configured.modelKey, budget: selected.budget)
                 }
                 await refresh()
-                try await ensureModel()
                 try await runPending()
             } catch { await failed(error) }
             await unload()
@@ -138,7 +137,6 @@ import SwiftUI
             busy = true
             defer { finishOperation() }
             do {
-                try await ensureModel()
                 try await runPending()
             } catch { await failed(error) }
             await unload()
@@ -265,14 +263,14 @@ import SwiftUI
 
 /// Native execution and checkpoint scheduling; all job decisions are persisted by Rust.
 extension SemanticSearchModel {
-    private func ensureModel() async throws {
+    private func ensureModel() async throws -> String {
         try Task.checkCancellation()
         if let prepareModel {
             try await prepareModel()
-            return
+            return ""
         }
-        if await (try? store.modelPath()) != nil {
-            return
+        if let path = await (try? store.modelPath()) {
+            return path
         }
         let spec = try await store.inferenceSpec(dimensions: dimensions)
         guard let url = URL(string: spec.url) else { throw SuwopError("モデルのURLが不正です。") }
@@ -284,22 +282,23 @@ extension SemanticSearchModel {
         defer { try? FileManager.default.removeItem(at: file) }
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SuwopError("モデルを取得できません。") }
         try Task.checkCancellation()
-        _ = try await store.installModel(from: file)
+        return try await store.installModel(from: file)
     }
 
     private func loadIfAdmitted(key: String, query: Bool = false) async throws {
-        guard try await store.admitInference(key: key, runtime: runtime, loaded: loaded, query: query) else {
-            throw SuwopError("メモリ予算またはメモリ不足のため停止しました。")
-        }
         if !loaded {
             let spec = try await store.inferenceSpec(dimensions: dimensions)
-            let path = try await store.modelPath()
+            let path = try await ensureModel()
             try Task.checkCancellation()
+            // Verification/download streams to disk; reserve native working memory immediately before loading.
+            guard try await store.admitInference(key: key, runtime: runtime, loaded: false, query: query) else {
+                throw SuwopError("メモリ予算またはメモリ不足のため停止しました。")
+            }
             try await runtime.load(path: path, spec: spec)
             loaded = true
-            guard try await store.admitInference(key: key, runtime: runtime, loaded: true, query: query) else {
-                throw SuwopError("モデルの読み込みでメモリ予算に達しました。")
-            }
+        }
+        guard try await store.admitInference(key: key, runtime: runtime, loaded: true, query: query) else {
+            throw SuwopError("メモリ予算またはメモリ不足のため停止しました。")
         }
     }
 

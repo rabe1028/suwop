@@ -125,6 +125,13 @@ impl ContentAccess {
                 .protected_entries
                 .iter()
                 .map(|e| e.key.clone())
+                .chain(
+                    state
+                        .immich_visibility_operations
+                        .iter()
+                        .filter(|o| crate::immich_visibility::fences(state, &o.key))
+                        .map(|o| o.key.clone()),
+                )
                 .collect(),
         }
     }
@@ -231,6 +238,16 @@ impl PublishedLibrary {
             }
         }
         for s in &mut state.albums {
+            if s.access == ScanAccess::Unavailable {
+                for album in &mut s.albums {
+                    album.members.retain(|key| {
+                        !canonical
+                            .immich_visibility_operations
+                            .iter()
+                            .any(|o| o.key == *key)
+                    });
+                }
+            }
             s.albums
                 .iter_mut()
                 .for_each(|a| a.members.retain(|k| access.visible(k)));

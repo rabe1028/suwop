@@ -11,6 +11,11 @@ BASELINES = ROOT / "VRT/Baselines"
 SCREENS = {
     "semantic-search",
     "semantic-search-paused-large-text",
+    "immich-visibility-lock-confirmation",
+    "immich-visibility-lock-confirmation-large-text",
+    "immich-visibility-destinations",
+    "immich-visibility-unknown",
+    "immich-visibility-unsupported",
     "immich-locked-form",
     "immich-locked-open",
     "immich-locked-preview",

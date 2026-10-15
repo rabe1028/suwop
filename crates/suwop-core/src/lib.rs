@@ -16,3 +16,5 @@ pub mod trash;
 pub mod workflow;
 
 pub mod immich_locked;
+
+pub mod immich_visibility;

@@ -36,6 +36,9 @@ pub struct Outcome {
 }
 struct Runtime<'a> {
     denied_content: BTreeSet<AssetKey>,
+    ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    started_ordinary_generation: u64,
+    ordinary_revision: String,
     // A generation comparison is a cancellation fence, not cross-thread data synchronization.
     // Capture once at workflow start; refresh must never renew an already granted read.
     apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -73,6 +76,7 @@ pub async fn run_observed(
         session,
         apple_generation,
         BTreeSet::new(),
+        std::sync::Arc::default(),
     )
     .await
 }
@@ -84,9 +88,27 @@ pub async fn run_guarded(
     session: Option<Session>,
     apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     denied_content: BTreeSet<AssetKey>,
+    ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
 ) -> Outcome {
     let started_generation = apple_generation.load(std::sync::atomic::Ordering::Relaxed);
+    let started_ordinary_generation = ordinary_generation.load(std::sync::atomic::Ordering::SeqCst);
+    let revision = crate::app::ordinary_revision(
+        session.as_ref().map(|s| s.scope.as_str()),
+        started_ordinary_generation,
+    );
+    let mut session = session;
+    if let Some(session) = &mut session {
+        bind_ordinary_context(
+            session,
+            &ordinary_generation,
+            started_ordinary_generation,
+            &revision,
+        );
+    }
     let mut runtime = Runtime {
+        ordinary_generation,
+        started_ordinary_generation,
+        ordinary_revision: revision.clone(),
         denied_content,
         apple_generation,
         started_generation,
@@ -98,18 +120,7 @@ pub async fn run_guarded(
         workspace: None,
         editing_token: None,
     };
-    let metadata_change = matches!(
-        event,
-        Event::SetFavorite { .. }
-            | Event::SetMetadata { .. }
-            | Event::CreateAlbum { .. }
-            | Event::EditAlbum { .. }
-            | Event::EditImage { .. }
-            | Event::RevertImage { .. }
-            | Event::PastePhotoEdits { .. }
-            | Event::PasteSelectedPhotoEdits { .. }
-            | Event::ResolveEditPaste { .. }
-    );
+    let metadata_change = metadata_event(&event);
     let sharing = matches!(event, Event::Share { .. } | Event::ShareCurrentImage { .. });
     let playback = matches!(event, Event::Play { .. });
     let reverting = matches!(event, Event::RevertImage { .. });
@@ -139,6 +150,10 @@ pub async fn run_guarded(
         {
             result = Err(format!("作業ファイルを片付けられませんでした: {error}"));
         }
+    }
+    if let Some(session) = &mut runtime.session {
+        session.ordinary_content_context = None;
+        session.ordinary_content_guard = None;
     }
     match result {
         Ok(status) => Outcome {
@@ -173,7 +188,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 5,
+                schema_version: 6,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -196,7 +211,7 @@ impl Runtime<'_> {
     async fn execute(&mut self, event: Event) -> Result<String, String> {
         match event {
             Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 5 => {
+            _ if self.state.schema_version != 6 => {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
             }
             Event::HideApple { keys, id } => self.hide_apple(&keys, &id).await,
@@ -435,12 +450,24 @@ impl Runtime<'_> {
                 },
             )
             .await?;
-            self.session =
-                Some(connect(self.ctx, &connection.address, &key, connection.allow_http).await?);
+            let mut session =
+                connect(self.ctx, &connection.address, &key, connection.allow_http).await?;
+            self.check_ordinary_generation()?;
+            session.ordinary_content_guard = Some(crate::immich::OrdinarySessionGuard {
+                generation: self.ordinary_generation.clone(),
+                expected: self.started_ordinary_generation,
+            });
+            session.ordinary_content_context = Some(crate::immich::OrdinaryContentAuthorization {
+                source_keys: vec![],
+                expected_revision: self.ordinary_revision.clone(),
+                purpose: crate::immich::OrdinaryContentPurpose::Read,
+            });
+            self.session = Some(session);
         }
         Ok(())
     }
     async fn refresh(&mut self, permission: bool, now: f64) -> Result<(), String> {
+        self.check_content_generation(&[])?;
         let mut errors = Vec::new();
         match io::<LibrarySnapshot>(
             self.ctx,
@@ -492,19 +519,65 @@ impl Runtime<'_> {
                 errors.push(e);
             }
         }
+        self.refresh_immich(now, &mut errors).await?;
+        self.persist().await?;
+        if errors.is_empty() {
+            Ok(())
+        } else {
+            Err(errors.join("\n"))
+        }
+    }
+    async fn refresh_immich(&mut self, now: f64, errors: &mut Vec<String>) -> Result<(), String> {
         if let Some(session) = &self.session {
             match session.list(self.ctx, now).await {
                 Ok(assets) => {
                     let by_id: BTreeMap<_, _> = assets.iter().map(|a| (&a.id, a)).collect();
                     let mut records = Vec::new();
                     for asset in &assets {
+                        let key = AssetKey {
+                            provider: Provider::Immich,
+                            scope: session.scope.clone(),
+                            asset_id: asset.id.clone(),
+                        };
+                        let tracked = self
+                            .state
+                            .immich_visibility_operations
+                            .iter()
+                            .filter(|o| o.key == key && o.observation.is_some())
+                            .collect::<Vec<_>>();
+                        if !tracked.is_empty() {
+                            let raw = self.visibility_reconciliation(session, &key).await;
+                            let verified = raw.ok().and_then(|v| {
+                                crate::immich_visibility::facts(
+                                    &v,
+                                    &session.scope,
+                                    &session.user_id,
+                                )
+                                .ok()
+                            });
+                            if !verified.is_some_and(|f| {
+                                f.key == key
+                                    && f.visibility
+                                        != crate::immich_visibility::ImmichVisibility::Locked
+                                    && tracked.iter().all(|o| {
+                                        o.witness_digest == f.witness
+                                            && o.observation == Some(f.visibility)
+                                    })
+                            }) {
+                                continue;
+                            }
+                        }
                         let files = if session.version.uses_cursor() {
                             session.files(self.ctx, &asset.id).await.ok()
                         } else {
                             None
                         };
+                        self.check_content_generation(&[])?;
+                        let mut hydrated = asset.clone();
+                        session.hydrate_stack(self.ctx, &mut hydrated).await;
+                        self.check_content_generation(&[])?;
                         records.push(
-                            asset.record(
+                            hydrated.record(
                                 &session.scope,
                                 asset
                                     .live_photo_video_id
@@ -514,6 +587,7 @@ impl Runtime<'_> {
                             ),
                         );
                     }
+                    self.check_content_generation(&[])?;
                     self.replace(LibrarySnapshot {
                         provider: Provider::Immich,
                         scope: session.scope.clone(),
@@ -528,12 +602,46 @@ impl Runtime<'_> {
                 }
             }
         }
-        self.persist().await?;
-        if errors.is_empty() {
-            Ok(())
-        } else {
-            Err(errors.join("\n"))
+        Ok(())
+    }
+    async fn visibility_reconciliation(
+        &self,
+        session: &Session,
+        key: &AssetKey,
+    ) -> Result<Value, String> {
+        self.check_content_generation(std::slice::from_ref(key))?;
+        crate::immich::valid_id(&key.asset_id)?;
+        if key.scope != session.scope
+            || key.provider != Provider::Immich
+            || !self.state.immich_visibility_operations.iter().any(|o| {
+                o.key == *key
+                    && matches!(
+                        o.observation,
+                        Some(
+                            crate::immich_visibility::ImmichVisibility::Timeline
+                                | crate::immich_visibility::ImmichVisibility::Archive
+                        )
+                    )
+            })
+        {
+            return Err("現在の状態を確認できません。".into());
         }
+        let mut request = session.request(&format!("assets/{}", key.asset_id), "GET", None);
+        let context = session
+            .ordinary_content_context
+            .as_ref()
+            .ok_or("読み出しの許可を確認できません。")?;
+        request.ordinary_content_authorization =
+            Some(crate::immich::OrdinaryContentAuthorization {
+                source_keys: vec![key.clone()],
+                expected_revision: context.expected_revision.clone(),
+                purpose: crate::immich::OrdinaryContentPurpose::VisibilityReconciliation,
+            });
+        let response: crate::immich::HttpResponse =
+            io(self.ctx, ShellOperation::Http(request)).await?;
+        self.check_content_generation(std::slice::from_ref(key))?;
+        crate::immich::check_status(response.status)?;
+        Ok(response.body)
     }
     fn replace(&mut self, snapshot: LibrarySnapshot) {
         self.state
@@ -555,7 +663,18 @@ impl Runtime<'_> {
         self.check_content_keys(keys)?;
         self.check_identity_keys(keys)
     }
+    fn check_ordinary_generation(&self) -> Result<(), String> {
+        if self.started_ordinary_generation
+            != self
+                .ordinary_generation
+                .load(std::sync::atomic::Ordering::SeqCst)
+        {
+            return Err("写真へのアクセスが変わりました。処理を中止しました。".into());
+        }
+        Ok(())
+    }
     fn check_content_generation(&self, keys: &[AssetKey]) -> Result<(), String> {
+        self.check_ordinary_generation()?;
         if keys.iter().any(|k| k.provider == Provider::Apple)
             && self.started_generation
                 != self
@@ -569,6 +688,7 @@ impl Runtime<'_> {
         Ok(())
     }
     fn check_content_keys(&self, keys: &[AssetKey]) -> Result<(), String> {
+        self.check_ordinary_generation()?;
         if keys.iter().any(|key| self.denied_content.contains(key)) {
             return Err("保護する写真を通常の操作から利用できません。".into());
         }
@@ -580,8 +700,10 @@ impl Runtime<'_> {
     }
     // Scope, exact set and pending-write fences also apply to newly created copies.
     fn check_identity_keys(&self, keys: &[AssetKey]) -> Result<Provider, String> {
+        self.check_ordinary_generation()?;
         if keys.iter().any(|key| {
             self.denied_content.contains(key)
+                || crate::immich_visibility::fences(&self.state, key)
                 || self
                     .state
                     .protected_entries
@@ -631,7 +753,14 @@ impl Runtime<'_> {
         Ok(first.provider)
     }
     async fn immich_record(&self, asset: &Asset) -> Result<StoredAsset, String> {
-        let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
+        let mut session = self.session.clone().ok_or("Immich に接続してください。")?;
+        if let Some(context) = &mut session.ordinary_content_context {
+            context.source_keys = vec![AssetKey {
+                provider: Provider::Immich,
+                scope: session.scope.clone(),
+                asset_id: asset.id.clone(),
+            }];
+        }
         let companion = match &asset.live_photo_video_id {
             Some(id) => Some(session.asset(self.ctx, id).await?),
             None => None,
@@ -645,13 +774,27 @@ impl Runtime<'_> {
     }
     async fn export(&self, keys: &[AssetKey], name: &str) -> Result<TransferBundle, String> {
         self.check_content_keys(keys)?;
-        self.export_readback(keys, name).await
+        self.export_authorized(keys, name, crate::immich::OrdinaryContentPurpose::Read)
+            .await
     }
     /// Only fresh keys returned by this operation's import may bypass catalog membership.
     async fn export_readback(
         &self,
         keys: &[AssetKey],
         name: &str,
+    ) -> Result<TransferBundle, String> {
+        self.export_authorized(
+            keys,
+            name,
+            crate::immich::OrdinaryContentPurpose::DestinationReadback,
+        )
+        .await
+    }
+    async fn export_authorized(
+        &self,
+        keys: &[AssetKey],
+        name: &str,
+        purpose: crate::immich::OrdinaryContentPurpose,
     ) -> Result<TransferBundle, String> {
         let provider = self.check_identity_keys(keys)?;
         let directory = self.directory(name)?;
@@ -667,7 +810,11 @@ impl Runtime<'_> {
                 .await?
             }
             Provider::Immich => {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
+                let mut session = self.session.clone().ok_or("Immich に接続してください。")?;
+                if let Some(context) = &mut session.ordinary_content_context {
+                    context.source_keys = keys.to_vec();
+                    context.purpose = purpose;
+                }
                 let mut assets = Vec::new();
                 let mut files = Vec::new();
                 for (n, key) in keys.iter().enumerate() {
@@ -715,6 +862,7 @@ impl Runtime<'_> {
         {
             return Err("転送元の一覧が変わりました。".into());
         }
+        self.check_content_generation(keys)?;
         Ok(bundle)
     }
     async fn import(
@@ -957,7 +1105,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2, 3, 4, 5].contains(&version) {
+    if ![1, 2, 3, 4, 5, 6].contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
     if version == 1 {
@@ -969,13 +1117,19 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
             }
         }
     }
-    raw["schemaVersion"] = Value::from(5);
+    raw["schemaVersion"] = Value::from(6);
     let state: SavedLibrary = serde_json::from_value(raw)
         .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))?;
     let mut ids = BTreeSet::new();
     for op in &state.apple_visibility_operations {
         crate::apple_visibility::validate_operation(op, &state.apple_scope)?;
         if !ids.insert(&op.id) {
+            return Err("非表示の操作 UUID が重複しています。".into());
+        }
+    }
+    for operation in &state.immich_visibility_operations {
+        crate::immich_visibility::validate_operation(operation)?;
+        if !ids.insert(&operation.id) {
             return Err("非表示の操作 UUID が重複しています。".into());
         }
     }
@@ -1002,4 +1156,36 @@ fn convert_dates(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+fn bind_ordinary_context(
+    session: &mut Session,
+    generation: &std::sync::Arc<std::sync::atomic::AtomicU64>,
+    expected: u64,
+    revision: &str,
+) {
+    session.ordinary_content_guard = Some(crate::immich::OrdinarySessionGuard {
+        generation: generation.clone(),
+        expected,
+    });
+    session.ordinary_content_context = Some(crate::immich::OrdinaryContentAuthorization {
+        source_keys: vec![],
+        expected_revision: revision.into(),
+        purpose: crate::immich::OrdinaryContentPurpose::Read,
+    });
+}
+
+fn metadata_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::SetFavorite { .. }
+            | Event::SetMetadata { .. }
+            | Event::CreateAlbum { .. }
+            | Event::EditAlbum { .. }
+            | Event::EditImage { .. }
+            | Event::RevertImage { .. }
+            | Event::PastePhotoEdits { .. }
+            | Event::PasteSelectedPhotoEdits { .. }
+            | Event::ResolveEditPaste { .. }
+    )
 }

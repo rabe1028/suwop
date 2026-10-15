@@ -173,6 +173,11 @@ final class VisualRegressionTests: XCTestCase {
     @MainActor private func capture(
         _ name: String, view: some View, dark: Bool = false, largeText: Bool = false, scrollToBottom: Bool = false
     ) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let sceneTraits = SceneCaptureTraits(
+            scene: scene, category: largeText ? .accessibilityExtraLarge : .large
+        )
+        defer { sceneTraits.restore() }
         let raster = RasterMountObservation()
         let root = view
             .environment(\.immichLockedRasterGeometry) { frame in raster.frame = frame }
@@ -184,10 +189,10 @@ final class VisualRegressionTests: XCTestCase {
             .environment(\.dynamicTypeSize, largeText ? .accessibility3 : .large)
         let controller = UIHostingController(rootView: root)
         controller.overrideUserInterfaceStyle = dark ? .dark : .light
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         window.overrideUserInterfaceStyle = dark ? .dark : .light
+        window.traitOverrides.preferredContentSizeCategory = largeText ? .accessibilityExtraLarge : .large
         window.rootViewController = controller
         window.makeKeyAndVisible()
         defer { window.isHidden = true
@@ -198,6 +203,7 @@ final class VisualRegressionTests: XCTestCase {
         // Allow SwiftUI's immediate fixture-image tasks and navigation layout to complete.
         try await Task.sleep(for: .milliseconds(600))
         controller.view.layoutIfNeeded()
+        assertCaptureTraits(window: window, controller: controller, name: name, largeText: largeText)
         if scrollToBottom {
             let scroll = try XCTUnwrap(scrollView(in: controller.view))
             XCTAssertGreaterThan(scroll.contentSize.height, scroll.bounds.height)
@@ -238,7 +244,31 @@ final class VisualRegressionTests: XCTestCase {
                 throw SuwopError("Mounted Image branch did not report visible geometry")
             }
         }
-        try SnapshotComparison.verify(render(window), named: name)
+        let image = try await SnapshotComparison.stabilizedImage(named: name) { render(window) }
+        try SnapshotComparison.verify(image, named: name)
+    }
+
+    @MainActor private func assertCaptureTraits(
+        window: UIWindow, controller: UIViewController, name: String, largeText: Bool
+    ) {
+        let expected: UIContentSizeCategory = largeText ? .accessibilityExtraLarge : .large
+        XCTAssertEqual(window.traitCollection.preferredContentSizeCategory, expected, name)
+        XCTAssertEqual(controller.traitCollection.preferredContentSizeCategory, expected, name)
+        XCTAssertEqual(controller.view.traitCollection.preferredContentSizeCategory, expected, name)
+        let bars = navigationBars(in: controller.view)
+        for bar in bars {
+            XCTAssertEqual(bar.traitCollection.preferredContentSizeCategory, expected, name)
+        }
+        if name == "immich-locked-large-text" {
+            XCTAssertFalse(bars.isEmpty, "The large-text toolbar must be observed for its native trait assertion")
+        }
+    }
+
+    @MainActor private func navigationBars(in view: UIView) -> [UINavigationBar] {
+        if let bar = view as? UINavigationBar {
+            return [bar]
+        }
+        return view.subviews.flatMap { navigationBars(in: $0) }
     }
 
     @MainActor private func render(_ window: UIWindow) -> UIImage {

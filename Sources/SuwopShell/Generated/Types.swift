@@ -44,6 +44,12 @@ public struct AlbumKey: Codable, Sendable {
     }
 }
 
+public enum AlbumMembershipObservation: String, Codable, CaseIterable, Sendable {
+    case `notChecked`
+    case `noAccessibleMemberships`
+    case `accessibleMembershipsRemain`
+}
+
 public struct AlbumPermissions: Codable, Sendable {
     public var add: Bool
     public var delete: Bool
@@ -668,15 +674,19 @@ public struct HttpRequest: Codable, Sendable {
     public var fields: [String: String]
     public var files: [UploadPart]
     public var headers: [String: String]
+    public var immichVisibilityAuthorization: ImmichVisibilityAuthorization?
     public var method: String
+    public var ordinaryContentAuthorization: OrdinaryContentAuthorization?
     public var url: String
-    public init(body: JSONValue, downloadPath: String? = nil, fields: [String: String] = [:], files: [UploadPart] = [], headers: [String: String] = [:], method: String, url: String) {
+    public init(body: JSONValue, downloadPath: String? = nil, fields: [String: String] = [:], files: [UploadPart] = [], headers: [String: String] = [:], immichVisibilityAuthorization: ImmichVisibilityAuthorization? = nil, method: String, ordinaryContentAuthorization: OrdinaryContentAuthorization? = nil, url: String) {
         self.body = body
         self.downloadPath = downloadPath
         self.fields = fields
         self.files = files
         self.headers = headers
+        self.immichVisibilityAuthorization = immichVisibilityAuthorization
         self.method = method
+        self.ordinaryContentAuthorization = ordinaryContentAuthorization
         self.url = url
     }
 }
@@ -794,9 +804,11 @@ public struct ImageTransform: Codable, Sendable {
 public struct ImmichLockedEntry: Codable, Sendable {
     public var asset: StoredAsset
     public var id: String
-    public init(asset: StoredAsset, id: String) {
+    public var visibilityAction: ImmichVisibilityActionHint
+    public init(asset: StoredAsset, id: String, visibilityAction: ImmichVisibilityActionHint) {
         self.asset = asset
         self.id = id
+        self.visibilityAction = visibilityAction
     }
 }
 
@@ -873,6 +885,132 @@ public struct ImmichLockedView: Codable, Sendable {
         self.remoteLockConfirmed = remoteLockConfirmed
         self.sceneID = sceneID
         self.state = state
+    }
+}
+
+public enum ImmichStackState: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `unstacked`
+    case `stacked`
+}
+
+public enum ImmichVisibility: String, Codable, CaseIterable, Sendable {
+    case `timeline`
+    case `archive`
+    case `locked`
+}
+
+public struct ImmichVisibilityActionHint: Codable, Sendable {
+    public var canLock: Bool
+    public var canShowArchive: Bool
+    public var canShowTimeline: Bool
+    public var key: AssetKey
+    public var reason: ImmichVisibilityUnsupportedReason?
+    public init(canLock: Bool, canShowArchive: Bool, canShowTimeline: Bool, key: AssetKey, reason: ImmichVisibilityUnsupportedReason? = nil) {
+        self.canLock = canLock
+        self.canShowArchive = canShowArchive
+        self.canShowTimeline = canShowTimeline
+        self.key = key
+        self.reason = reason
+    }
+}
+
+public struct ImmichVisibilityAuthorization: Codable, Sendable {
+    public var deadlineUnixMilliseconds: Int64
+    public var generation: Int64
+    public var grantID: String
+    public var operationID: String
+    public var sceneID: String
+    public init(deadlineUnixMilliseconds: Int64, generation: Int64, grantID: String, operationID: String, sceneID: String) {
+        self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
+        self.generation = generation
+        self.grantID = grantID
+        self.operationID = operationID
+        self.sceneID = sceneID
+    }
+}
+
+public struct ImmichVisibilityOperation: Codable, Sendable {
+    public var albumMembershipObservation: AlbumMembershipObservation
+    public var from: ImmichVisibility
+    public var id: String
+    public var key: AssetKey
+    public var observation: ImmichVisibility?
+    public var outcome: VisibilityOutcome
+    public var scope: String
+    public var to: ImmichVisibility
+    public var witnessDigest: String
+    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, id: String, key: AssetKey, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, scope: String, to: ImmichVisibility, witnessDigest: String) {
+        self.albumMembershipObservation = albumMembershipObservation
+        self.from = from
+        self.id = id
+        self.key = key
+        self.observation = observation
+        self.outcome = outcome
+        self.scope = scope
+        self.to = to
+        self.witnessDigest = witnessDigest
+    }
+}
+
+public struct ImmichVisibilityPrompt: Codable, Sendable {
+    public var from: ImmichVisibility
+    public var generation: Int64
+    public var grantID: String
+    public var noAutomaticAlbumRestore: Bool
+    public var operationID: String
+    public var removesAllAlbumMembership: Bool
+    public var sceneID: String
+    public var to: ImmichVisibility
+    public init(from: ImmichVisibility, generation: Int64, grantID: String, noAutomaticAlbumRestore: Bool, operationID: String, removesAllAlbumMembership: Bool, sceneID: String, to: ImmichVisibility) {
+        self.from = from
+        self.generation = generation
+        self.grantID = grantID
+        self.noAutomaticAlbumRestore = noAutomaticAlbumRestore
+        self.operationID = operationID
+        self.removesAllAlbumMembership = removesAllAlbumMembership
+        self.sceneID = sceneID
+        self.to = to
+    }
+}
+
+public struct ImmichVisibilitySummary: Codable, Sendable {
+    public var albumMembershipObservation: AlbumMembershipObservation
+    public var from: ImmichVisibility
+    public var observation: ImmichVisibility?
+    public var outcome: VisibilityOutcome
+    public var recordID: String
+    public var to: ImmichVisibility
+    public init(albumMembershipObservation: AlbumMembershipObservation, from: ImmichVisibility, observation: ImmichVisibility? = nil, outcome: VisibilityOutcome, recordID: String, to: ImmichVisibility) {
+        self.albumMembershipObservation = albumMembershipObservation
+        self.from = from
+        self.observation = observation
+        self.outcome = outcome
+        self.recordID = recordID
+        self.to = to
+    }
+}
+
+public enum ImmichVisibilityUnsupportedReason: String, Codable, CaseIterable, Sendable {
+    case `live`
+    case `video`
+    case `stack`
+    case `unknown`
+    case `unavailable`
+}
+
+public struct ImmichVisibilityView: Codable, Sendable {
+    public var canRecover: Bool
+    public var history: [ImmichVisibilitySummary]?
+    public var persistenceUncertain: Bool
+    public var sceneID: String?
+    public var status: String?
+    public init(canRecover: Bool, history: [ImmichVisibilitySummary]? = [], persistenceUncertain: Bool, sceneID: String? = nil, status: String? = nil) {
+        self.canRecover = canRecover
+        self.history = history
+        self.persistenceUncertain = persistenceUncertain
+        self.sceneID = sceneID
+        self.status = status
     }
 }
 
@@ -1010,6 +1148,23 @@ public struct NativeColorPlan: Codable, Sendable {
         self.filter = filter
         self.saturation = saturation
     }
+}
+
+public struct OrdinaryContentAuthorization: Codable, Sendable {
+    public var expectedRevision: String
+    public var purpose: OrdinaryContentPurpose
+    public var sourceKeys: [AssetKey]
+    public init(expectedRevision: String, purpose: OrdinaryContentPurpose, sourceKeys: [AssetKey] = []) {
+        self.expectedRevision = expectedRevision
+        self.purpose = purpose
+        self.sourceKeys = sourceKeys
+    }
+}
+
+public enum OrdinaryContentPurpose: String, Codable, CaseIterable, Sendable {
+    case `read`
+    case `destinationReadback`
+    case `visibilityReconciliation`
 }
 
 public struct PasteEditsPrompt: Codable, Sendable {
@@ -1375,6 +1530,7 @@ public struct SavedLibrary: Codable, Sendable {
     public var appleVisibilityOperations: [AppleVisibilityOperation]
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
+    public var immichVisibilityOperations: [ImmichVisibilityOperation]
     public var pendingAppleTrash: [AppleTrashOperation]
     public var pendingEditPastes: [PendingEditPaste]
     public var pendingTrash: [TrashOperation]
@@ -1385,12 +1541,13 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.appleScope = appleScope
         self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
         self.editClipboard = editClipboard
+        self.immichVisibilityOperations = immichVisibilityOperations
         self.pendingAppleTrash = pendingAppleTrash
         self.pendingEditPastes = pendingEditPastes
         self.pendingTrash = pendingTrash
@@ -1466,7 +1623,8 @@ public struct StoredAsset: Codable, Sendable {
     public var inventoryComplete: Bool
     public var isOffline: Bool
     public var deletionBlockers: [String]
-    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = []) {
+    public var immichStack: ImmichStackState
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown) {
         self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
@@ -1480,6 +1638,7 @@ public struct StoredAsset: Codable, Sendable {
         self.inventoryComplete = inventoryComplete
         self.isOffline = isOffline
         self.deletionBlockers = deletionBlockers
+        self.immichStack = immichStack
     }
 }
 
@@ -1702,19 +1861,23 @@ public struct ViewModel: Codable, Sendable {
     public var editingTargets: [String: [EditingTarget]]
     public var error: String?
     public var immichLockedView: ImmichLockedView
+    public var immichVisibilityActions: [ImmichVisibilityActionHint]
+    public var immichVisibilityView: ImmichVisibilityView
     public var media: [String: PlaybackKind]
     public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
+    public var ordinaryContentKeys: [AssetKey]
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
     public var previewChoices: [String: [PreviewChoice]]
     public var previewSources: [String: AssetKey]
+    public var privateContentRevision: String
     public var protectedView: ProtectedView
     public var remoteVersion: Version?
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichLockedView: ImmichLockedView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -1723,13 +1886,17 @@ public struct ViewModel: Codable, Sendable {
         self.editingTargets = editingTargets
         self.error = error
         self.immichLockedView = immichLockedView
+        self.immichVisibilityActions = immichVisibilityActions
+        self.immichVisibilityView = immichVisibilityView
         self.media = media
         self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers
+        self.ordinaryContentKeys = ordinaryContentKeys
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
         self.previewChoices = previewChoices
         self.previewSources = previewSources
+        self.privateContentRevision = privateContentRevision
         self.protectedView = protectedView
         self.remoteVersion = remoteVersion
         self.serverVersion = serverVersion

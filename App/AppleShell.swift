@@ -8,19 +8,35 @@ import SuwopShell
     var catalogChanged: (@MainActor () -> Void)?
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
+    let ordinaryContent = OrdinaryContentAccess()
     private let sharing = SystemSharing()
     private let playback = SystemPlayback()
     private let imageEditing = SystemImageEditing()
     private let photoEditing = ApplePhotoEditing()
     private let confirmation = SystemConfirmation()
+    private let visibilityConfirmation = ImmichVisibilityConfirmation()
     private let photoReversion = ApplePhotoReversion()
     private let presentationEpoch = ContentPresentationEpoch()
     let protectedAccess = ProtectedNativeAccess()
     let immichLockedAccess = ImmichLockedNativeAccess()
+    var immichVisibilityConfirmationCurrent: (@MainActor (ImmichVisibilityPrompt) async throws -> Bool)?
     var immichLockedTimerEffect: (@MainActor (ImmichLockedTimer) -> Void)?
     #if SUWOP_VRT
+        var httpTransportEffect: (@MainActor (HttpRequest) async throws -> HttpResponse)?
+        var immichVisibilityConfirmationEffect: (@MainActor (
+            ImmichVisibilityPrompt,
+            ContentPresentationContext
+        ) async throws -> Bool)?
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
+
+    func embeddingAppleStore(scope: String) -> ApplePhotosStore {
+        appleStore(scope: scope)
+    }
+
+    func embeddingThumbnail(_ request: HttpRequest) async throws -> Data {
+        try await http.thumbnail(request)
+    }
 
     func beginWorkflow() -> ContentPresentationContext {
         presentationEpoch.beginWorkflow()
@@ -33,7 +49,15 @@ import SuwopShell
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
         confirmation.invalidateForContentChange()
+        visibilityConfirmation.invalidate()
         sharing.invalidateForContentChange()
+    }
+
+    /// Closing the private C surface must not revoke an ordinary workflow that closes it.
+    func invalidateImmichLockedPresentations() {
+        immichLockedAccess.invalidate()
+        confirmation.invalidateForContentChange()
+        visibilityConfirmation.invalidate()
     }
 
     func invalidateProtectedPresentations() {
@@ -41,6 +65,7 @@ import SuwopShell
         imageEditing.invalidateForProtection()
         playback.invalidateForProtection()
         confirmation.invalidateForContentChange()
+        visibilityConfirmation.invalidate()
         sharing.invalidateForProtection()
     }
 
@@ -120,7 +145,7 @@ import SuwopShell
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch operation.type {
-        case "confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect",
+        case "confirmImmichVisibility", "confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect",
              "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleJournalEffect(
                 operation.type,
                 data: data,
@@ -153,7 +178,7 @@ import SuwopShell
                 data,
                 "path"
             ))))
-        case "http": return try await .from(http.execute(data.decode(HttpRequest.self)))
+        case "http": return try await authorizedHTTP(data.decode(HttpRequest.self), context: context)
         case "appleEditOpen", "appleEditSave", "appleEditClose", "editImage",
              "appleReversionInspect", "appleRevert", "confirmReversion", "confirmPasteEdits", "appleEditInspect":
             return try await editingEffect(operation.type, data: data, context: context)
@@ -180,6 +205,7 @@ import SuwopShell
             try photoEditing.close(requiredString(data, "token"))
             return .null
         case "editImage":
+            _ = try await ordinaryContent.validate(keys: [data["key"].decode(AssetKey.self)], context: context)
             return try await .from(imageEditing.present(
                 data["presentation"].decode(ImageEditPresentation.self),
                 sourceKey: data["key"].decode(AssetKey.self),
@@ -314,12 +340,14 @@ import SuwopShell
             let destination = try URL(fileURLWithPath: requiredString(data, "destination"))
             try await NativeFileCopy.copy(from: source, to: destination)
             return .null
-        case "shareFiles": return try await .bool(sharing.present(
-                data.decode(SharePresentation.self),
-                context: context
-            ))
+        case "shareFiles":
+            let request = try data.decode(SharePresentation.self)
+            _ = try await ordinaryContent.validate(keys: request.sourceKeys ?? [], context: context)
+            return try await .bool(sharing.present(request, context: context))
         case "playMedia":
-            try await playback.present(data["plan"].decode(PlaybackPlan.self), context: context)
+            let plan = try data["plan"].decode(PlaybackPlan.self)
+            _ = try await ordinaryContent.validate(keys: plan.sourceKeys, context: context)
+            try await playback.present(plan, context: context)
             return .null
         case "workspace":
             let id = try requiredString(data, "id")
@@ -411,7 +439,13 @@ private extension AppleShell {
     func appleJournalEffect(
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
-        if ["confirmAppleVisibility", "appleVisibilityApply", "appleVisibilityInspect"].contains(type) {
+        let visibilityEffects = [
+            "confirmImmichVisibility",
+            "confirmAppleVisibility",
+            "appleVisibilityApply",
+            "appleVisibilityInspect",
+        ]
+        if visibilityEffects.contains(type) {
             return try await appleVisibilityEffect(type, data: data, context: context)
         }
         switch type {
@@ -431,6 +465,11 @@ private extension AppleShell {
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch type {
+        case "confirmImmichVisibility":
+            return try await .bool(confirmImmichVisibility(
+                data["prompt"].decode(ImmichVisibilityPrompt.self),
+                context: context
+            ))
         case "confirmAppleVisibility": return try await .from(confirmation
                 .changeAppleVisibility(data["prompt"].decode(AppleVisibilityPrompt.self), context: context))
         case "appleVisibilityApply":
@@ -464,12 +503,16 @@ extension AppleShell {
         version: Version? = nil,
         preview: Bool = false
     ) async throws -> PlatformImage {
+        let context = beginWorkflow()
+        let revision = try await ordinaryContent.validate(keys: [key], context: context)
         if key.provider == .apple {
-            return try await appleStore(scope: key.scope).thumbnail(
+            let image = try await appleStore(scope: key.scope).thumbnail(
                 key,
                 edge: preview ? 2048 : 360,
                 preview: preview
             )
+            _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
+            return image
         }
         guard let connection else {
             throw SuwopError("プレビューを取得できません。")
@@ -483,60 +526,68 @@ extension AppleShell {
             "version": .from(version),
         ])
         let request = try CoreBridge.utility(7, input: input).decode(HttpRequest.self)
+        _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         let bytes = try await http.thumbnail(request)
+        _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         guard let image = PlatformImage(data: bytes) else { throw SuwopError("プレビューを表示できません。") }
         return image
     }
 }
 
-extension AppleShell {
-    func embeddingImage(_ job: EmbeddingJob, connection: ConnectionSettings?, version: Version?) async throws -> Data {
-        try Task.checkCancellation()
-        let key = job.asset.key
-        guard let dimensions = UInt32(exactly: job.model.dimensions) else { throw SuwopError("モデルの次元数が不正です。") }
-        let spec = try await localStore.inferenceSpec(dimensions: dimensions)
-        let edge = Int(spec.imageEdge)
-        if key.provider == .apple {
-            let store = appleStore(scope: key.scope)
-            let before = try ApplePhotosStore.describe(
-                ApplePhotosStore.fetch(key.assetID),
-                scope: key.scope,
-                fullAccess: false
-            )
-            try await localStore.validateEmbeddingInput(expected: job.asset, fresh: before)
-            let native = try await store.thumbnail(key, edge: CGFloat(edge), preview: true)
-            let after = try ApplePhotosStore.describe(
-                ApplePhotosStore.fetch(key.assetID),
-                scope: key.scope,
-                fullAccess: false
-            )
-            try await localStore.validateEmbeddingInput(expected: job.asset, fresh: after)
-            #if os(iOS)
-                // Keep UIImage orientation metadata until ImageIO applies its thumbnail transform.
-                guard let image = native.cgImage, image.width <= 1024, image.height <= 1024,
-                      let bytes = native.jpegData(compressionQuality: 0.9)
-                else {
-                    throw SuwopError("解析用画像を取得できません。")
-                }
-                return try await EmbeddingImage.prepare(bytes, edge: edge)
-            #else
-                guard let image = native.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
-                    throw SuwopError("解析用画像を取得できません。")
-                }
-                return try await EmbeddingImage.prepare(EmbeddingImage.jpeg(image), edge: edge)
-            #endif
+private extension AppleShell {
+    func executeHTTP(_ request: HttpRequest) async throws -> HttpResponse {
+        let submission: NativeSubmissionPermit? = if let authorization = request.immichVisibilityAuthorization {
+            try await immichLockedAccess.visibilitySubmission(authorization)
+        } else {
+            nil
         }
-        guard key.provider == .immich, let connection, let version else {
-            throw SuwopError("保存先に再接続してください。")
+        #if SUWOP_VRT
+            if let httpTransportEffect {
+                try submission?.submit {}
+                return try await httpTransportEffect(request)
+            }
+        #endif
+        return try await http.execute(request, submission: submission)
+    }
+
+    func authorizedHTTP(_ request: HttpRequest, context: ContentPresentationContext) async throws -> JSONValue {
+        if request.immichVisibilityAuthorization != nil {
+            return try await .from(executeHTTP(request))
         }
-        try await localStore.validateEmbeddingInput(expected: job.asset, fresh: job.asset, connection: connection)
-        let credential = try Credentials.read(connection.credentialID)
-        let request = try CoreBridge.utility(7, input: .object([
-            "address": .string(connection.address), "key": .string(credential),
-            "assetID": .string(key.assetID), "preview": .bool(true), "version": .from(version),
-        ])).decode(HttpRequest.self)
-        let bytes = try await http.thumbnail(request)
-        try await localStore.validateEmbeddingInput(expected: job.asset, fresh: job.asset, connection: connection)
-        return try await EmbeddingImage.prepare(bytes, edge: edge)
+        guard let authorization = request.ordinaryContentAuthorization else {
+            return try await .from(executeHTTP(request))
+        }
+        _ = try await ordinaryContent.validate(
+            keys: authorization.sourceKeys,
+            context: context,
+            expectedRevision: authorization.expectedRevision,
+            purpose: authorization.purpose
+        )
+        let response = try await executeHTTP(request)
+        _ = try await ordinaryContent.validate(
+            keys: authorization.sourceKeys,
+            context: context,
+            expectedRevision: authorization.expectedRevision,
+            purpose: authorization.purpose
+        )
+        return try .from(response)
+    }
+
+    func confirmImmichVisibility(
+        _ prompt: ImmichVisibilityPrompt, context: ContentPresentationContext
+    ) async throws -> Bool {
+        guard context.permits(), try await immichVisibilityConfirmationCurrent?(prompt) == true else { return false }
+        let result: Bool
+        #if SUWOP_VRT
+            if let immichVisibilityConfirmationEffect {
+                result = try await immichVisibilityConfirmationEffect(prompt, context)
+            } else {
+                result = try await visibilityConfirmation.present(prompt, context: context)
+            }
+        #else
+            result = try await visibilityConfirmation.present(prompt, context: context)
+        #endif
+        guard context.permits(), try await immichVisibilityConfirmationCurrent?(prompt) == true else { return false }
+        return result
     }
 }

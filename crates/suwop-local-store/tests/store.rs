@@ -25,6 +25,7 @@ fn state(count: u32) -> SavedLibrary {
             access: ScanAccess::Full,
             assets: (0..count)
                 .map(|i| StoredAsset {
+                    immich_stack: suwop_core::domain::ImmichStackState::Unknown,
                     apple_visibility: suwop_core::domain::AppleVisibility::Visible,
                     key: AssetKey {
                         provider: Provider::Apple,
@@ -889,5 +890,43 @@ fn failed_photo_actions_reject_other_models_and_stale_revisions() -> Result {
     );
     assert_eq!(store.pending(&first, 32)?.len(), 1);
     assert_eq!(store.status()?.iter().map(|s| s.skipped).sum::<u64>(), 0);
+    Ok(())
+}
+
+#[test]
+fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let mut catalog = state(1);
+    catalog.snapshots[0].provider = Provider::Immich;
+    catalog.snapshots[0].assets[0].key.provider = Provider::Immich;
+    store.persist(&catalog)?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .len(),
+        1
+    );
+    let asset = catalog.snapshots[0].assets[0].clone();
+    catalog
+        .immich_visibility_operations
+        .push(serde_json::from_value(serde_json::json!({
+            "id":"lock-intent", "scope":"test", "key":asset.key, "witnessDigest":"fixture",
+            "from":"timeline", "to":"locked", "outcome":"unknown"
+        }))?);
+    store.persist(&catalog)?;
+    assert!(store.pending(&key, 32)?.is_empty());
+    assert!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .is_empty()
+    );
+    assert!(
+        store
+            .validate_embedding_input(&asset, &asset, None)
+            .is_err()
+    );
     Ok(())
 }

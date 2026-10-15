@@ -4,7 +4,7 @@ import SuwopShell
 import SwiftUI
 
 @MainActor final class LibraryModel: ObservableObject {
-    @Published private var view: ViewModel?
+    @Published private(set) var view: ViewModel?
     @Published var errorMessage: String?
     @Published var showSettings = false
     @Published var showTransfers = false
@@ -13,8 +13,8 @@ import SwiftUI
     @Published var showAppleVisibility = false
     @Published var showEditPasteRecords = false
     @Published var thumbnailGeneration = UUID()
-    private var runtime: RustRuntime?
-    private var shell: AppleShell?
+    private(set) var runtime: RustRuntime?
+    private(set) var shell: AppleShell?
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
@@ -28,13 +28,13 @@ import SwiftUI
     private var pendingAlbumsRefresh = false
     private var pendingTrashRefresh = false
     private var albumsRequested = false
-    private let thumbnails = NSCache<NSString, PlatformImage>()
+    let thumbnails = NSCache<NSString, PlatformImage>()
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()
 
     #if SUWOP_VRT
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
-        private var snapshotImages: [AssetKey: PlatformImage] = [:]
+        private(set) var snapshotImages: [AssetKey: PlatformImage] = [:]
         init(
             runtime: RustRuntime,
             thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
@@ -357,13 +357,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 5 {
+                if pendingRefresh, view?.state.schemaVersion == 6 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 5 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 6 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 5 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 6 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -393,10 +393,14 @@ private extension LibraryModel {
         let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
         let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
         let removed = !previousKeys.isSubset(of: currentKeys)
+        let contentChanged = view != nil && view?.privateContentRevision != snapshot.view.privateContentRevision
+        if contentChanged {
+            shell?.invalidateProtectedPresentations()
+        }
         if removed {
             shell?.invalidateContentPresentations()
         }
-        if removed || view?.previewSources != snapshot.view.previewSources {
+        if contentChanged || removed || view?.previewSources != snapshot.view.previewSources {
             invalidateThumbnails()
         }
         view = snapshot.view
@@ -410,6 +414,7 @@ private extension LibraryModel {
 
 private extension LibraryModel {
     func configurePrivateSessions(runtime: RustRuntime, shell: AppleShell) {
+        shell.ordinaryContent.configure(runtime: runtime)
         protection.configure(
             runtime: runtime,
             shell: shell,
@@ -447,23 +452,6 @@ private extension LibraryModel {
         thumbnails.removeAllObjects()
         if errorMessage != nil {
             errorMessage = "写真へのアクセスが変わりました。処理結果を確認してください。"
-        }
-    }
-
-    func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
-        #if SUWOP_VRT
-            if let thumbnailEffect {
-                return try await thumbnailEffect(key, preview)
-            }
-        #endif
-        guard let shell else { throw SuwopError("入出力が利用できません。") }
-        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: preview)
-    }
-
-    func validatePreview(_ id: String, key: AssetKey, generation: UUID) throws {
-        try Task.checkCancellation()
-        guard generation == thumbnailGeneration, view?.previewSources[id] == key else {
-            throw SuwopError("写真の可視性が変わりました。一覧を更新してください。")
         }
     }
 
@@ -557,35 +545,20 @@ extension LibraryModel {
 }
 
 extension LibraryModel {
-    func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
+    func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
         #if SUWOP_VRT
-            if let key = view?.previewSources[photo.id], let image = snapshotImages[key] {
-                return image
+            if let thumbnailEffect {
+                return try await thumbnailEffect(key, preview)
             }
         #endif
-        guard let key = view?.previewSources[photo.id] else { throw SuwopError("プレビューの保存先にアクセスできません。") }
-        let generation = thumbnailGeneration
-        let image = try await loadThumbnail(key, preview: true)
-        try validatePreview(photo.id, key: key, generation: generation)
-        return image
+        guard let shell else { throw SuwopError("入出力が利用できません。") }
+        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: preview)
     }
 
-    func thumbnail(_ photo: UnifiedPhoto) async throws -> PlatformImage {
-        guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
-        #if SUWOP_VRT
-            if let image = snapshotImages[key] {
-                return image
-            }
-        #endif
-        let generation = thumbnailGeneration
-        try validatePreview(photo.id, key: key, generation: generation)
-        let cacheKey = previewIdentifier(photo) as NSString
-        if let image = thumbnails.object(forKey: cacheKey) {
-            return image
+    func validatePreview(_ id: String, key: AssetKey, generation: UUID) throws {
+        try Task.checkCancellation()
+        guard generation == thumbnailGeneration, view?.previewSources[id] == key else {
+            throw SuwopError("写真の可視性が変わりました。一覧を更新してください。")
         }
-        let image = try await loadThumbnail(key, preview: false)
-        try validatePreview(photo.id, key: key, generation: generation)
-        thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
-        return image
     }
 }
