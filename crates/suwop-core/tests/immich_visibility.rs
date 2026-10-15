@@ -1456,3 +1456,108 @@ fn ordinary_inspect_preserves_authenticated_locked_roster_and_selected_image() -
     assert!(shell.disk.is_none());
     Ok(())
 }
+
+#[test]
+fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_restart()
+-> Result<(), String> {
+    use suwop_core::immich_visibility::{
+        AlbumMembershipObservation, ImmichVisibility, ImmichVisibilityOperation,
+        ImmichVisibilityOperationKind,
+    };
+    for kind in [
+        ImmichVisibilityOperationKind::OrdinaryArchive,
+        ImmichVisibilityOperationKind::LockedTransition,
+    ] {
+        for restart in [false, true] {
+            let ordinary = kind == ImmichVisibilityOperationKind::OrdinaryArchive;
+            let operation = ImmichVisibilityOperation {
+                kind,
+                id: OP.into(),
+                scope: key().scope,
+                key: key(),
+                witness_digest: "a".repeat(64),
+                from: ImmichVisibility::Timeline,
+                to: if ordinary {
+                    ImmichVisibility::Archive
+                } else {
+                    ImmichVisibility::Locked
+                },
+                outcome: suwop_core::apple_visibility::VisibilityOutcome::Unknown,
+                observation: None,
+                album_membership_observation: AlbumMembershipObservation::NotChecked,
+            };
+            let mut operations = vec![operation];
+            if restart {
+                let persisted = SavedLibrary {
+                    schema_version: 7,
+                    immich_visibility_operations: operations,
+                    ..SavedLibrary::default()
+                };
+                let raw = serde_json::to_value(persisted).map_err(|e| e.to_string())?;
+                let loaded = suwop_core::workflow::migrate(raw)?;
+                assert!(suwop_core::immich_visibility::fences(&loaded, &key()));
+                operations = loaded.immich_visibility_operations;
+            }
+            let c = core_operations(false, operations);
+            let mut locked = asset();
+            locked["visibility"] = json!("locked");
+            let mut shell = Shell {
+                visibility: Some("locked".into()),
+                pages: Some(std::collections::VecDeque::from([
+                    json!({"assets":{"items":[locked],"nextCursor":null}}),
+                ])),
+                ..Shell::default()
+            };
+            shell.run(
+                &c,
+                Event::ImmichArchiveSceneChanged {
+                    scene_id: SCENE.into(),
+                    phase: suwop_core::protection::ProtectionScenePhase::Active,
+                },
+            )?;
+            shell.run(&c, open(GRANT))?;
+            let entries = c.view().immich_locked_view.entries.ok_or("PIN entries")?;
+            assert_eq!(
+                entries.len(),
+                usize::from(ordinary),
+                "kind={kind:?}, restart={restart}"
+            );
+            shell.run(
+                &c,
+                Event::RequestImmichLockedImage {
+                    entry_id: ASSET.into(),
+                    grant_id: GRANT.into(),
+                    request_id: NEXT.into(),
+                },
+            )?;
+            assert_eq!(c.view().immich_locked_view.image.is_some(), ordinary);
+            assert_eq!(shell.stages, usize::from(ordinary));
+            if ordinary {
+                let action = &entries[0].visibility_action;
+                assert!(!action.can_show_timeline && !action.can_show_archive && !action.can_lock);
+                assert_eq!(
+                    action.reason,
+                    Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown)
+                );
+                let history = c
+                    .view()
+                    .immich_archive_view
+                    .history
+                    .ok_or("ordinary history")?;
+                assert_eq!(
+                    history[0].outcome,
+                    suwop_core::apple_visibility::VisibilityOutcome::Unknown
+                );
+                assert_eq!(history[0].observation, None);
+            }
+
+            let paths = shell.paths.len();
+            shell.run(&c, prepare(NEXT, ImmichVisibility::Timeline))?;
+            assert_eq!(shell.paths.len(), paths, "unknown write fence must remain");
+            assert_eq!(shell.persist_calls, 0);
+            assert_eq!(shell.writes, 0);
+            assert!(shell.disk.is_none());
+        }
+    }
+    Ok(())
+}

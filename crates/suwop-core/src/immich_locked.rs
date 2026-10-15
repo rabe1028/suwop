@@ -291,6 +291,7 @@ async fn cleanup(ctx: &Context, session: &DedicatedSession) -> bool {
 fn denied(model: &Model, key: &AssetKey) -> bool {
     model.state.immich_visibility_operations.iter().any(|o| {
         o.key == *key
+            && o.kind == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
             && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
             && o.observation.is_none()
     }) || model.protection.membership_uncertain
@@ -314,6 +315,25 @@ fn bound(model: &Model, session: &DedicatedSession) -> bool {
         .is_some_and(|c| c.address == session.ordinary.endpoint)
         && !model.protection.membership_uncertain
 }
+fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry {
+    let mut entry = entry.clone();
+    if model
+        .state
+        .immich_visibility_operations
+        .iter()
+        .any(|operation| {
+            operation.key == entry.asset.key
+                && operation.kind
+                    == crate::immich_visibility::ImmichVisibilityOperationKind::OrdinaryArchive
+                && operation.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
+                && operation.observation.is_none()
+        })
+    {
+        entry.visibility_action = crate::immich_visibility::locked_action(entry.asset.key.clone());
+    }
+    entry
+}
+
 #[must_use]
 pub fn view(model: &Model) -> ImmichLockedView {
     let locked = &model.immich_locked;
@@ -335,7 +355,7 @@ pub fn view(model: &Model) -> ImmichLockedView {
                 .entries
                 .iter()
                 .filter(|e| !denied(model, &e.asset.key))
-                .cloned()
+                .map(|entry| entry_for_view(model, entry))
                 .collect()
         }),
         image: open

@@ -130,3 +130,26 @@ App・Swift DTO・基準画像に変更はない。上記45画面／host75／UI3
 hosted CIで再確認する。
 修正後のAppleビルドも全5 Rustターゲット・XCFramework・iOS/macOSが成功した
 （`/tmp/suwop-archive-pr27-p2-apple-20261015.log`）。基準45枚はHEADと全hash一致。
+
+
+## PR #27 の結果不明記録とPIN閲覧の分離
+
+通常アーカイブの応答消失で残るUnknown記録が、後で外部からロックされた同じ写真の
+PIN認証済み一覧と画像取得まで拒否していた。永続記録によるPIN閲覧拒否は
+LockedTransitionに限定し、OrdinaryArchiveのUnknownでは認証済み閲覧を許可する。
+アプリ内保護・一時的な拒否・PIN操作自体のUnknownによる保護は維持する。
+
+Unknownの変更操作を許可する修正ではない。通常記録の結果不明が残る間は
+書込みを引き続き拒否し、PIN一覧の変更候補も無効として表示する。
+通常履歴をPIN履歴へ移したり、観測済みに書き換えたりはしない。
+
+回帰テストはOrdinaryArchive／LockedTransitionと、メモリ上の状態／schema 7の保存・読込みの
+4組でPIN認証、最新一覧、画像取得を実行する。旧コードでは通常Unknownの一覧が0件となり失敗した
+（`/tmp/suwop-archive-pr27-p2-kind-red-20261015.log`）。修正後は通常Unknownのみ閲覧でき、
+解除候補は無効、記録はUnknown・未観測のまま、変更要求によるHTTP・保存・PUTは0回だった
+（`/tmp/suwop-archive-pr27-p2-kind-green-20261015.log`）。
+最終 `make check` はRust316件・Swift65件とlint・生成確認が成功した
+（`/tmp/suwop-archive-pr27-p2-kind-check2-20261015.log`）。
+Appleビルドも全5 Rustターゲット・XCFramework・iOS/macOSが成功した
+（`/tmp/suwop-archive-pr27-p2-kind-apple-20261015.log`）。基準45枚はHEADと全hash一致。
+修正後HEADのhosted CIは別途確認する。
