@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --script
 """Emit owner-filtered read-only fixture SQL or check its result; no DB connection."""
 
 import argparse

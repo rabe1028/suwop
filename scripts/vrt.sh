@@ -24,7 +24,7 @@ mkdir -p DerivedData
 # Atomic, per-checkout lock prevents simultaneous builds/profile changes. A stale lock fails visibly.
 mkdir DerivedData/VRT.lock || { echo 'Another VRT run owns DerivedData/VRT.lock.' >&2; exit 1; }
 trap 'rmdir DerivedData/VRT.lock' EXIT
-config() { python3 scripts/vrt.py config "$1"; }
+config() { uv run --no-project python scripts/vrt.py config "$1"; }
 XCODE_VERSION="$(config xcode)"
 XCODE_BUILD="$(config xcode_build)"
 SIMSLIM_VERSION="$(config simslim)"
@@ -37,15 +37,15 @@ if [[ "$(simslim --version)" != "simslim $SIMSLIM_VERSION" ]]; then
     echo 'Run make setup-vrt to install the pinned simslim.' >&2
     exit 1
 fi
-if [[ "$RECORD" == 0 && "$CAPTURE" == 0 ]]; then python3 scripts/vrt.py baseline-check; fi
-UDID="$(xcrun simctl list --json | python3 scripts/vrt.py device)"
+if [[ "$RECORD" == 0 && "$CAPTURE" == 0 ]]; then uv run --no-project python scripts/vrt.py baseline-check; fi
+UDID="$(xcrun simctl list --json | uv run --no-project python scripts/vrt.py device)"
 if [[ -z "$UDID" ]]; then
-    UDID="$(xcrun simctl create "$(python3 scripts/vrt.py name)" "$(config device)" "$(config runtime)")"
+    UDID="$(xcrun simctl create "$(uv run --no-project python scripts/vrt.py name)" "$(config device)" "$(config runtime)")"
 fi
 ARTIFACTS="$PWD/DerivedData/VRTArtifacts/$(date -u +%Y%m%dT%H%M%SZ)-$$"
 mkdir -p "$ARTIFACTS" VRT/Baselines
 touch "$ARTIFACTS/stages.tsv"
-BEFORE="$(python3 scripts/vrt.py hashes)"
+BEFORE="$(uv run --no-project python scripts/vrt.py hashes)"
 PASSED=0
 cleanup() {
     local status=$?
@@ -54,7 +54,7 @@ cleanup() {
         status=1
         PASSED=0
     fi
-    python3 scripts/vrt.py report "$ARTIFACTS" "$RECORD" "$PASSED" "$UDID"
+    uv run --no-project python scripts/vrt.py report "$ARTIFACTS" "$RECORD" "$PASSED" "$UDID"
     rmdir DerivedData/VRT.lock
     echo "VRT artifacts: $ARTIFACTS"
     exit "$status"
@@ -85,8 +85,8 @@ ARGS=(
 )
 stage build xcodebuild "${ARGS[@]}" build-for-testing
 stage compare xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
-python3 scripts/vrt.py coverage "$ARTIFACTS"
-if [[ "$RECORD" == 0 && "$(python3 scripts/vrt.py hashes)" != "$BEFORE" ]]; then
+uv run --no-project python scripts/vrt.py coverage "$ARTIFACTS"
+if [[ "$RECORD" == 0 && "$(uv run --no-project python scripts/vrt.py hashes)" != "$BEFORE" ]]; then
     echo 'Comparison modified baseline images.' >&2
     exit 1
 fi

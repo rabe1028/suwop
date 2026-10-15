@@ -20,9 +20,10 @@ cleanup() {
 trap cleanup EXIT
 
 "${COMPOSE[@]}" down -v --remove-orphans >/dev/null 2>&1 || true
-"${COMPOSE[@]}" up -d
+bash "$ROOT/scripts/pull-test-images.sh" "${COMPOSE[@]}"
+"${COMPOSE[@]}" up -d --pull never
 
-if ! SUWOP_IMMICH_API_KEY="$(python3 "$ROOT/scripts/bootstrap_immich.py")"; then
+if ! SUWOP_IMMICH_API_KEY="$(uv run --no-project python "$ROOT/scripts/bootstrap_immich.py")"; then
   "${COMPOSE[@]}" ps >&2 || true
   "${COMPOSE[@]}" logs --no-color --tail=250 >&2 || true
   exit 1
@@ -33,7 +34,7 @@ export SUWOP_NATIVE_LIVE_EVIDENCE_DIR="${SUWOP_NATIVE_LIVE_EVIDENCE_DIR:-$(mktem
 printf 'Synthetic native Live evidence: %s\n' "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR"
 cd "$ROOT"
 # Verify the actual raw release, not merely the requested container tag. No credentials saved.
-python3 - <<'VERSION'
+uv run --no-project python - <<'VERSION'
 import json
 import os
 from pathlib import Path
@@ -61,7 +62,7 @@ if [[ "$IMMICH_VERSION" == v3.2.4 ]]; then
   TEST_ARGS+=(--skip visibility::real_immich_single_image_visibility_removes_two_owned_albums_and_never_restores_them)
 fi
 cargo test --locked -p suwop-core --test immich_live -- "${TEST_ARGS[@]}" --list > "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR/applicable-tests.txt"
-python3 - <<'LIST'
+uv run --no-project python - <<'LIST'
 import os
 from pathlib import Path
 
