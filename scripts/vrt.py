@@ -9,6 +9,11 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = json.loads((ROOT / "VRT/environment.json").read_text())
 BASELINES = ROOT / "VRT/Baselines"
 SCREENS = {
+    "immich-archive-confirmation",
+    "immich-archive-confirmation-large-text",
+    "immich-archive-empty",
+    "immich-archive-applied",
+    "immich-archive-unknown",
     "immich-visibility-lock-confirmation",
     "immich-visibility-lock-confirmation-large-text",
     "immich-visibility-destinations",

@@ -225,6 +225,7 @@ struct PhotoViewer: View {
                     Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
                         showVisibility = true
                     }
+                    immichArchiveAction(photo)
                     immichLockAction(photo)
                     Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
                         protectedSource = model.displayedSource(photo)?.key
@@ -244,6 +245,17 @@ struct PhotoViewer: View {
                     .keyboardShortcut(.rightArrow, modifiers: [])
             }.font(.title2)
         }.padding()
+    }
+
+    @ViewBuilder private func immichArchiveAction(_ photo: UnifiedPhoto) -> some View {
+        if let source = model.displayedSource(photo), source.key.provider == .immich {
+            ImmichArchivePhotoAction(
+                session: model.immichArchive,
+                key: source.key,
+                hint: model.view?.immichArchiveActions.first { $0.key == source.key },
+                sceneID: protectionOwner
+            )
+        }
     }
 
     @ViewBuilder private func immichLockAction(_ photo: UnifiedPhoto) -> some View {

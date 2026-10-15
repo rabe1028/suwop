@@ -25,6 +25,7 @@ ORDER = {
         "isOffline",
         "deletionBlockers",
         "immichStack",
+        "immichVisibility",
     ],
     "LibrarySnapshot": ["provider", "scope", "assets", "access", "scannedAt"],
     "TransferFile": ["resource", "path", "signature"],

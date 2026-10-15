@@ -16,6 +16,7 @@ fn asset(kind: PlaybackKind) -> StoredAsset {
         PlaybackKind::Live => vec![ResourceRole::Image, ResourceRole::LiveVideo],
     };
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
@@ -105,7 +106,7 @@ fn core(kind: PlaybackKind) -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 6,
+                schema_version: 7,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(kind), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -235,7 +236,7 @@ fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 6,
+                schema_version: 7,
                 apple_scope: "apple".into(),
                 snapshots: snapshots.clone(),
                 ..SavedLibrary::default()
@@ -425,7 +426,7 @@ fn remote_playback_reads_the_authenticated_original_and_never_mutates_the_server
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 6,
+                schema_version: 7,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(video, ScanAccess::Full)],
                 ..SavedLibrary::default()

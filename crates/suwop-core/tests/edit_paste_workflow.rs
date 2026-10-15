@@ -24,6 +24,7 @@ fn key(index: u32) -> AssetKey {
 }
 fn asset(index: u32) -> StoredAsset {
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: key(index),
@@ -85,7 +86,7 @@ fn core(mut state: SavedLibrary) -> Core<Suwop> {
 }
 fn state() -> Result<SavedLibrary, String> {
     Ok(SavedLibrary {
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "apple".into(),
         edit_clipboard: Some(clipboard()?),
         snapshots: vec![LibrarySnapshot {

@@ -149,3 +149,21 @@ Immich v3.2.4の[asset service](https://github.com/immich-app/immich/blob/v3.2.4
 - 旧UIAlertのAX3文字切れは実XCUIApplication画像でも再現したため専用sheetへ変更した。scene/window照合追加後のfocused 3・4では表示完了前のwindow照合が正常表示をキャンセルしていた。UIKitの表示完了後に照合し、それまではUIと直接callbackの両方で確定を拒否するよう修正した。
 - UI6のスクロールassertionは実際にスクロールせず通っていたことを画像レビューで発見した。その結果だけを全文可読の証拠にせず、UI7で実gesture・footer境界・出力画像を再検証した。一時診断出力は除去済み。
 - capture2は容量不足でUI runnerのインストールとreport作成にも失敗し、受入れに数えない。利用者の指示で使用済みSuwop Simulator 2台を削除し、マージ済みworktree 3つを復元可能にアーカイブして再開した。現在のworktree、共有ビルド出力、検証結果、使用中のSimulatorは保持した。
+
+## PR #25 のマージ
+
+最終HEAD `c8304ad8a922abb732077f31e3973e05d84bd1af` の
+[CI run 38700443274](https://github.com/rabe1028/suwop/actions/runs/38700443274)は
+core・Apple・Immich結合・VRT/PhotoKitの全4 jobが成功した。レビュー3件は解消済み。
+expected-headを指定してsquash mergeし、mainは `23fa2f8ef25e26ef06306a8b0a13a4ffe67589cc`。
+両commitのtree `fac5cf630a9598ded6af2a9a056d044ecb4d6b22` は完全一致した。
+[main CI run 38704081295](https://github.com/rabe1028/suwop/actions/runs/38704081295)も全4 job成功。
+成果物も取得して照合した。VRTはrecord=false・passed=true・全7stage終了0・基準40枚、
+PhotoKitは全11stage終了0・19phase完了・passed=true。PhotoKitの範囲は生成JPEGを使う
+Simulator検証で、直接unhide・hidden原本再検証・実機/iCloudは未検証のまま。
+取得先は `/tmp/suwop-c2-ci-c8304ad-artifacts`。
+
+マージ済みC-2 worktreeは作業差分なし・merged PR HEAD一致を確認後に管理アーカイブへ移した。
+ignored検証ファイル4,686件を全hash照合して
+`/Users/rabe1028/disk-cleanup-20261015/preserved/immich-visibility-actions-174356` に退避し、
+ソースarchive・path/branch/HEAD manifest・削除前後のworktree一覧を保持した。

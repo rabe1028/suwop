@@ -2,7 +2,7 @@
 //! f64 field as an integer, but must not change any field, shape, or value.
 use serde_json::{Number, Value};
 
-pub(super) fn matches(expected: &Value, actual: &Value) -> bool {
+pub(crate) fn matches(expected: &Value, actual: &Value) -> bool {
     match (expected, actual) {
         (Value::Number(left), Value::Number(right)) => {
             left == right
@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn nested_readback_keeps_every_field_type_and_array_position_strict() -> Result<(), String> {
-        let expected = json!({"schemaVersion":6,"snapshots":[{"assets":[{"capturedAt":1_767_225_600.0,"bytes":u64::MAX,"key":"exact","optional":null}]}]});
+        let expected = json!({"schemaVersion":7,"snapshots":[{"assets":[{"capturedAt":1_767_225_600.0,"bytes":u64::MAX,"key":"exact","optional":null}]}]});
         let mut actual = expected.clone();
         actual["snapshots"][0]["assets"][0]["capturedAt"] = json!(1_767_225_600_u64);
         assert!(matches(&expected, &actual));

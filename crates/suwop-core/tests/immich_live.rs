@@ -172,7 +172,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
             .iter()
             .any(|b| b.contains("sidecar"))
     );
-    exercise_trash(ctx, &session, &ids).await
+    Box::pin(exercise_trash(ctx, &session, &ids)).await
 }
 
 async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Result<(), String> {
@@ -184,7 +184,7 @@ async fn exercise_trash(ctx: &Context, session: &Session, ids: &[String]) -> Res
         .as_secs_f64();
     let assets = session.list(ctx, now).await?;
     let state = SavedLibrary {
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "unused-test-library".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Immich,
@@ -838,6 +838,7 @@ async fn upload_sidecar(
 
 fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
     StoredAsset {
+        immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
@@ -1020,7 +1021,7 @@ fn live_locked_core(session: Session) -> crux_core::Core<suwop_core::app::Suwop>
     use crux_core::Core;
     use suwop_core::app::{ConnectionSettings, Model, Suwop};
     let state = SavedLibrary {
-        schema_version: 6,
+        schema_version: 7,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),
@@ -1269,3 +1270,6 @@ fn live_locked_run(
 
 #[path = "immich_live/visibility.rs"]
 mod visibility;
+
+#[path = "immich_live/archive.rs"]
+mod archive;

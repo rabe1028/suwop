@@ -111,7 +111,7 @@ import SuwopShell
         let canonical = try await shell
             .execute(JSONValue.object(["type": .string("readState")]).decode(ShellOperation.self), context: context)
         let saved = try canonical.decode(SavedLibrary.self)
-        guard saved.schemaVersion == 6,
+        guard saved.schemaVersion == 7,
               let record = saved.appleVisibilityOperations.first(where: { $0.id == fixture.id.uuidString }),
               record.outcome == fixture.hideOutcome, record.targets.count == 1,
               record.targets[0].key == fixture.key, record.targets[0].witnessDigest.count == 64

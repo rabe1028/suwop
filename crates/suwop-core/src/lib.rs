@@ -16,3 +16,5 @@ pub mod workflow;
 pub mod immich_locked;
 
 pub mod immich_visibility;
+
+pub mod immich_archive;

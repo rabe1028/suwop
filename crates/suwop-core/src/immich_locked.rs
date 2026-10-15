@@ -291,6 +291,7 @@ async fn cleanup(ctx: &Context, session: &DedicatedSession) -> bool {
 fn denied(model: &Model, key: &AssetKey) -> bool {
     model.state.immich_visibility_operations.iter().any(|o| {
         o.key == *key
+            && o.kind == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
             && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
             && o.observation.is_none()
     }) || model.protection.membership_uncertain
@@ -314,6 +315,25 @@ fn bound(model: &Model, session: &DedicatedSession) -> bool {
         .is_some_and(|c| c.address == session.ordinary.endpoint)
         && !model.protection.membership_uncertain
 }
+fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry {
+    let mut entry = entry.clone();
+    if model
+        .state
+        .immich_visibility_operations
+        .iter()
+        .any(|operation| {
+            operation.key == entry.asset.key
+                && operation.kind
+                    == crate::immich_visibility::ImmichVisibilityOperationKind::OrdinaryArchive
+                && operation.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
+                && operation.observation.is_none()
+        })
+    {
+        entry.visibility_action = crate::immich_visibility::locked_action(entry.asset.key.clone());
+    }
+    entry
+}
+
 #[must_use]
 pub fn view(model: &Model) -> ImmichLockedView {
     let locked = &model.immich_locked;
@@ -335,7 +355,7 @@ pub fn view(model: &Model) -> ImmichLockedView {
                 .entries
                 .iter()
                 .filter(|e| !denied(model, &e.asset.key))
-                .cloned()
+                .map(|entry| entry_for_view(model, entry))
                 .collect()
         }),
         image: open
@@ -1367,6 +1387,7 @@ mod tests {
             let capability = visibility_session(&model, "grant", "scene").ok_or("capability")?;
             model.state.immich_visibility_operations.push(
                 crate::immich_visibility::ImmichVisibilityOperation {
+                    kind: crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition,
                     id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
                     scope: "scope".into(),
                     key: facts.key.clone(),
@@ -1543,11 +1564,29 @@ impl VisibilitySession {
     }
 }
 pub(crate) fn remove_visibility_entry(model: &mut Model, key: &AssetKey) {
+    // Access carries an entry ID, so resolve its full key before removing rows.
+    let image_matches = model.immich_locked.image.as_ref().is_some_and(|image| {
+        model
+            .immich_locked
+            .entries
+            .iter()
+            .any(|entry| entry.id == image.entry_id && entry.asset.key == *key)
+    });
     model
         .immich_locked
         .entries
         .retain(|entry| entry.asset.key != *key);
-    clear_visibility_image(model);
+    if image_matches {
+        model.immich_locked.image = None;
+    }
+    if model
+        .immich_locked
+        .pending
+        .as_ref()
+        .is_some_and(|ticket| ticket.key == *key)
+    {
+        model.immich_locked.pending = None;
+    }
 }
 pub(crate) fn publish_visibility_entry(
     model: &mut Model,
@@ -1566,6 +1605,8 @@ pub(crate) fn publish_visibility_entry(
         || model.state.protected_entries.iter().any(|e| e.key == *key)
         || !model.state.immich_visibility_operations.iter().any(|o| {
             o.id == projection.operation_id
+                && o.kind
+                    == crate::immich_visibility::ImmichVisibilityOperationKind::LockedTransition
                 && o.key == *key
                 && o.witness_digest == facts.witness
                 && o.observation == Some(facts.visibility)
@@ -1650,5 +1691,78 @@ mod visibility_deadline_tests {
                 .any(|event| matches!(event, Event::ImmichVisibilityPrepared { result: Err(_) }))
         );
         assert_eq!(generation.load(Ordering::SeqCst), 7);
+    }
+}
+
+#[cfg(test)]
+mod keyed_visibility_invalidation_tests {
+    use super::*;
+    #[test]
+    fn same_asset_id_in_another_scope_does_not_clear_image_and_pending_is_independent()
+    -> Result<(), String> {
+        let raw: Asset = serde_json::from_value(serde_json::json!({
+            "id":"asset","ownerId":"owner","type":"IMAGE","originalFileName":"a.jpg",
+            "checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z",
+            "fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision",
+            "isFavorite":false,"isOffline":false,"isTrashed":false,
+            "visibility":"locked","livePhotoVideoId":null,"stack":null
+        }))
+        .map_err(|e| e.to_string())?;
+        let asset = raw.record("scope-a", None, None);
+        let key = asset.key.clone();
+        let other_scope = AssetKey {
+            scope: "scope-b".into(),
+            ..key.clone()
+        };
+        let mut model = Model::default();
+        model.immich_locked.entries.push(ImmichLockedEntry {
+            id: key.asset_id.clone(),
+            visibility_action: crate::immich_visibility::locked_action(key.clone()),
+            asset,
+        });
+        let image = ImmichLockedImageAccess {
+            request_id: "image-request".into(),
+            entry_id: key.asset_id.clone(),
+            grant_id: "grant".into(),
+            scene_id: "scene".into(),
+            generation: 1,
+            staged_id: "staged".into(),
+        };
+        model.immich_locked.image = Some(image.clone());
+        let ticket = ImmichLockedImageTicket {
+            request_id: "pending-request".into(),
+            entry_id: key.asset_id.clone(),
+            grant_id: "grant".into(),
+            scene_id: "scene".into(),
+            generation: 1,
+            key: other_scope.clone(),
+            expected_revision: "revision".into(),
+            request: HttpRequest {
+                url: "https://fixture.example/api/assets/asset/thumbnail".into(),
+                method: "GET".into(),
+                headers: std::collections::BTreeMap::new(),
+                body: None,
+                download_path: None,
+                fields: std::collections::BTreeMap::new(),
+                files: vec![],
+                ordinary_content_authorization: None,
+                immich_visibility_authorization: None,
+                immich_archive_authorization: None,
+            },
+        };
+        model.immich_locked.pending = Some(ticket.clone());
+        remove_visibility_entry(&mut model, &other_scope);
+        assert_eq!(model.immich_locked.image, Some(image));
+        assert_eq!(model.immich_locked.entries.len(), 1);
+        assert!(model.immich_locked.pending.is_none());
+        model.immich_locked.pending = Some(ImmichLockedImageTicket {
+            key: key.clone(),
+            ..ticket
+        });
+        remove_visibility_entry(&mut model, &key);
+        assert!(model.immich_locked.image.is_none());
+        assert!(model.immich_locked.pending.is_none());
+        assert!(model.immich_locked.entries.is_empty());
+        Ok(())
     }
 }

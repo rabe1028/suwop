@@ -38,9 +38,20 @@ pub enum AlbumMembershipObservation {
     NoAccessibleMemberships,
     AccessibleMembershipsRemain,
 }
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema,
+)]
+#[serde(rename_all = "camelCase")]
+pub enum ImmichVisibilityOperationKind {
+    #[default]
+    LockedTransition,
+    OrdinaryArchive,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichVisibilityOperation {
+    #[serde(default)]
+    pub kind: ImmichVisibilityOperationKind,
     pub id: String,
     pub scope: String,
     pub key: AssetKey,
@@ -132,7 +143,8 @@ pub fn view(model: &Model) -> ImmichVisibilityView {
                 .immich_visibility_operations
                 .iter()
                 .filter(|o| {
-                    o.scope == c.scope()
+                    o.kind == ImmichVisibilityOperationKind::LockedTransition
+                        && o.scope == c.scope()
                         && !model.state.protected_entries.iter().any(|e| e.key == o.key)
                         && !model.protection.denied.contains(&o.key)
                 })
@@ -221,16 +233,23 @@ pub fn validate_operation(operation: &ImmichVisibilityOperation) -> Result<(), S
             .witness_digest
             .bytes()
             .all(|b| b.is_ascii_hexdigit())
-        || !matches!(
-            (operation.from, operation.to),
-            (
-                ImmichVisibility::Timeline | ImmichVisibility::Archive,
-                ImmichVisibility::Locked
-            ) | (
-                ImmichVisibility::Locked,
-                ImmichVisibility::Timeline | ImmichVisibility::Archive
-            )
-        )
+        || !match operation.kind {
+            ImmichVisibilityOperationKind::OrdinaryArchive => matches!(
+                (operation.from, operation.to),
+                (ImmichVisibility::Timeline, ImmichVisibility::Archive)
+                    | (ImmichVisibility::Archive, ImmichVisibility::Timeline)
+            ),
+            ImmichVisibilityOperationKind::LockedTransition => matches!(
+                (operation.from, operation.to),
+                (
+                    ImmichVisibility::Timeline | ImmichVisibility::Archive,
+                    ImmichVisibility::Locked
+                ) | (
+                    ImmichVisibility::Locked,
+                    ImmichVisibility::Timeline | ImmichVisibility::Archive
+                )
+            ),
+        }
     {
         return Err("非表示変更の記録が不正です。既存ファイルは変更しません。".into());
     }
@@ -358,7 +377,7 @@ pub(crate) fn facts(
 
 #[derive(Debug, Clone)]
 pub struct PreparedVisibility {
-    pub(crate) capability: crate::immich_locked::VisibilitySession,
+    pub(crate) capability: crate::immich_archive::VisibilityAuthority,
     pub(crate) operation: ImmichVisibilityOperation,
     pub(crate) revision: String,
 }
@@ -370,13 +389,14 @@ pub(crate) struct VerifiedVisibilityProjection {
 }
 #[derive(Debug, Clone)]
 pub struct VisibilityCompletion {
+    pub(crate) recovery_proof: Option<Box<crate::immich_archive::RecoveryProof>>,
     pub(crate) projection: Option<Box<VerifiedVisibilityProjection>>,
     pub(crate) state: crate::app::SavedLibrary,
     pub(crate) uncertain: bool,
     pub(crate) status: String,
 }
 #[path = "workflow/immich_visibility.rs"]
-mod workflow;
+pub(crate) mod workflow;
 use workflow::{apply, inspect, invalidate_remote, prepare};
 const SAFE_ERROR: &str = "写真の状態を確認できません。変更は再送せず状態を確認してください。";
 
@@ -399,21 +419,32 @@ pub(crate) fn update(
                 Ok(prepared) => prepared,
                 Err(message) => {
                     model.busy = false;
-                    model.immich_visibility.message = Some(message);
+                    if model.immich_archive.working {
+                        model.immich_archive.message = Some(message);
+                    } else {
+                        model.immich_visibility.message = Some(message);
+                    }
+                    model.immich_archive.working = false;
+                    model.immich_archive.active_operation = None;
                     return Some(Command::done());
                 }
             };
+            let mut prepared = prepared;
             if prepared.capability.valid().is_err() {
-                model.busy = false;
+                abandon_prepared(model);
+                return Some(Command::done());
+            }
+            let previous = model
+                .ordinary_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if prepared.capability.advance_own_fence(previous).is_err() {
+                abandon_prepared(model);
                 return Some(Command::done());
             }
             model
                 .immich_visibility
                 .denied
                 .insert(prepared.operation.key.clone());
-            model
-                .ordinary_generation
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             crate::immich_locked::remove_visibility_entry(model, &prepared.operation.key);
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
@@ -444,6 +475,7 @@ pub(crate) fn update(
                 .iter()
                 .find(|o| {
                     o.id == record_id
+                        && o.kind == ImmichVisibilityOperationKind::LockedTransition
                         && o.scope == capability.scope()
                         && !model.state.protected_entries.iter().any(|e| e.key == o.key)
                         && !model.protection.denied.contains(&o.key)
@@ -456,32 +488,14 @@ pub(crate) fn update(
             model.busy = true;
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
-                let result = inspect(&ctx, before, capability, operation).await;
+                let result = inspect(&ctx, before, capability.into(), operation).await;
                 ctx.send_event(Event::ImmichVisibilityFinished { result });
             }))
         }
         Event::RecoverImmichVisibilityState { grant_id, scene_id } => {
             Some(recover(model, &grant_id, &scene_id))
         }
-        Event::ImmichVisibilityFinished { mut result } => {
-            if model.changed_during_work {
-                crate::app::invalidate_apple(&mut result.state);
-            }
-            model.state = result.state;
-            model.busy = false;
-            model.immich_visibility.persistence_uncertain = result.uncertain;
-            model.immich_visibility.message = Some(result.status);
-            if let Some(projection) = result.projection {
-                crate::immich_locked::publish_visibility_entry(model, *projection);
-            }
-            if !result.uncertain {
-                model.immich_visibility.denied.clear();
-            }
-            model
-                .ordinary_generation
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Some(crate::protection::reconcile(model))
-        }
+        Event::ImmichVisibilityFinished { result } => Some(finish(model, result)),
         _ => None,
     }
 }
@@ -499,7 +513,7 @@ fn begin(
 
     if model.busy
         || !model.ready
-        || model.state.schema_version != 6
+        || model.state.schema_version != 7
         || model.immich_visibility.persistence_uncertain
         || model.protection.membership_uncertain
     {
@@ -538,7 +552,7 @@ fn begin(
     }
     model.busy = true;
     Command::new(move |ctx| async move {
-        let result = prepare(&ctx, capability, key, to, operation_id).await;
+        let result = prepare(&ctx, capability.into(), key, to, operation_id).await;
         ctx.send_event(Event::ImmichVisibilityPrepared { result });
     })
 }
@@ -551,7 +565,10 @@ fn recover(
     use crate::app::Event;
     use crux_core::Command;
 
-    if model.busy || !model.immich_visibility.persistence_uncertain {
+    if model.busy
+        || !model.immich_visibility.persistence_uncertain
+        || model.immich_archive.uncertain
+    {
         return Command::done();
     }
     model
@@ -569,7 +586,7 @@ fn recover(
             crate::app::io(&ctx, crate::app::ShellOperation::ReadState).await;
         let state = raw
             .ok()
-            .filter(|v| v["schemaVersion"].as_u64() == Some(6))
+            .filter(|v| v["schemaVersion"].as_u64() == Some(7))
             .and_then(|v| crate::workflow::migrate(v).ok())
             .filter(|s| {
                 serde_json::to_value(&s.connection).ok()
@@ -584,6 +601,7 @@ fn recover(
         }
         ctx.send_event(Event::ImmichVisibilityFinished {
             result: VisibilityCompletion {
+                recovery_proof: None,
                 projection: None,
                 state,
                 uncertain,
@@ -663,5 +681,99 @@ mod stack_hints {
             );
         }
         Ok(())
+    }
+}
+
+fn finish(
+    model: &mut Model,
+    mut result: VisibilityCompletion,
+) -> crux_core::Command<crate::app::Effect, crate::app::Event> {
+    if model.changed_during_work {
+        crate::app::invalidate_apple(&mut result.state);
+    }
+    model.state = result.state;
+    model.busy = false;
+    model.immich_visibility.persistence_uncertain = result.uncertain;
+    let ordinary = model.immich_archive.working;
+    if ordinary {
+        model.immich_archive.uncertain = result.uncertain;
+        if result.uncertain {
+            if result.recovery_proof.is_some() {
+                model.immich_archive.recovery_proof = result.recovery_proof;
+            }
+        } else {
+            model.immich_archive.recovery_proof = None;
+        }
+        model.immich_archive.active_operation = None;
+    }
+    if ordinary {
+        model.immich_archive.message = Some(result.status);
+    } else {
+        model.immich_visibility.message = Some(result.status);
+    }
+    model.immich_archive.working = false;
+    if !ordinary && let Some(projection) = result.projection {
+        crate::immich_locked::publish_visibility_entry(model, *projection);
+    }
+    if !result.uncertain {
+        model.immich_visibility.denied.clear();
+    }
+    model
+        .ordinary_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    crate::protection::reconcile(model)
+}
+
+// Both validation exits precede durable intent and must retire the pending
+// native permit as well as its result-routing origin.
+fn abandon_prepared(model: &mut Model) {
+    model.busy = false;
+    model.immich_archive.working = false;
+    model.immich_archive.active_operation = None;
+}
+
+#[cfg(test)]
+mod prepared_cleanup_tests {
+    use super::*;
+    #[test]
+    fn failed_fence_advance_retires_native_permit_and_next_result_origin() {
+        let mut model = Model {
+            busy: true,
+            ..Model::default()
+        };
+        model.immich_archive.working = true;
+        model.immich_archive.active_operation =
+            Some(crate::immich_archive::ImmichArchiveAuthorization {
+                operation_id: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into(),
+                scene_id: "scene".into(),
+                generation: 0,
+                scope: "scope".into(),
+                key: AssetKey {
+                    provider: crate::domain::Provider::Immich,
+                    scope: "scope".into(),
+                    asset_id: "asset".into(),
+                },
+                to: crate::immich_archive::ImmichArchiveDestination::Archive,
+                url: "https://fixture/api/assets".into(),
+            });
+        abandon_prepared(&mut model);
+        assert!(!model.busy);
+        assert!(!model.immich_archive.working);
+        assert!(model.immich_archive.active_operation.is_none());
+        let _ = finish(
+            &mut model,
+            VisibilityCompletion {
+                recovery_proof: None,
+                projection: None,
+                state: crate::app::SavedLibrary::default(),
+                uncertain: false,
+                status: "PIN result".into(),
+            },
+        );
+        assert_eq!(
+            model.immich_visibility.message.as_deref(),
+            Some("PIN result")
+        );
+        assert!(model.immich_archive.message.is_none());
     }
 }
