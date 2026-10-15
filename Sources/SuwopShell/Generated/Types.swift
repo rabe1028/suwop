@@ -913,11 +913,13 @@ public struct InferenceSpec: Codable, Sendable {
 public struct InferenceStatus: Codable, Sendable {
     public var budgetBytes: Int64
     public var error: String?
+    public var failedJob: String?
     public var modelKey: String
     public var state: String
-    public init(budgetBytes: Int64, error: String? = nil, modelKey: String, state: String) {
+    public init(budgetBytes: Int64, error: String? = nil, failedJob: String? = nil, modelKey: String, state: String) {
         self.budgetBytes = budgetBytes
         self.error = error
+        self.failedJob = failedJob
         self.modelKey = modelKey
         self.state = state
     }

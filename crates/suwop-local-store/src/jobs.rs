@@ -162,20 +162,12 @@ impl Store {
     }
     /// Providers explicitly exclude unsupported or undecodable media from a generation.
     pub fn skip(&mut self, key: &str, job: &str, reason: &str) -> Result<()> {
-        if reason.is_empty() || reason.len() > 512 || reason.chars().any(char::is_control) {
-            return Err("A short exclusion reason is required".into());
-        }
         let id = job.parse::<i64>().map_err(error)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
-        let changed = tx.execute("UPDATE jobs SET state='skipped',reason=?3 WHERE id=?1 AND state IN ('awaiting','queued') AND generation=(SELECT latest FROM models WHERE id=?2) AND EXISTS(SELECT 1 FROM assets a WHERE a.id=jobs.asset AND a.revision=jobs.revision)", params![id,key,reason]).map_err(error)?;
-        if changed != 1 {
-            return Err("Job cannot be excluded in its current state".into());
-        }
-        tx.execute("DELETE FROM embedding_vectors WHERE job=?1", [id])
-            .map_err(error)?;
+        exclude_job(&tx, key, id, reason)?;
         tx.commit().map_err(error)
     }
     pub fn status(&self) -> Result<Vec<AnalysisStatus>> {
@@ -240,4 +232,18 @@ pub(crate) fn normalized(vector: &[f32], dimensions: u32) -> Result<Vec<f32>> {
         .iter()
         .map(|v| (f64::from(*v) / length) as f32)
         .collect())
+}
+
+/// Common exclusion policy for providers and an explicit failed-photo recovery action.
+pub(crate) fn exclude_job(tx: &Transaction<'_>, key: &str, id: i64, reason: &str) -> Result<()> {
+    if reason.is_empty() || reason.len() > 512 || reason.chars().any(char::is_control) {
+        return Err("A short exclusion reason is required".into());
+    }
+    let changed = tx.execute("UPDATE jobs SET state='skipped',reason=?3 WHERE id=?1 AND state IN ('awaiting','queued') AND generation=(SELECT latest FROM models WHERE id=?2) AND EXISTS(SELECT 1 FROM assets a WHERE a.id=jobs.asset AND a.revision=jobs.revision)", params![id,key,reason]).map_err(error)?;
+    if changed != 1 {
+        return Err("Job cannot be excluded in its current state".into());
+    }
+    tx.execute("DELETE FROM embedding_vectors WHERE job=?1", [id])
+        .map_err(error)?;
+    Ok(())
 }

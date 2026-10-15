@@ -38,6 +38,16 @@ pub enum Command {
     InferenceStatus {
         model_key: String,
     },
+    FailInferenceJob {
+        model_key: String,
+        job_id: String,
+        reason: String,
+    },
+    SkipFailedInference {
+        model_key: String,
+        job_id: String,
+        budget: u64,
+    },
     PauseInference {
         model_key: String,
         reason: Option<String>,
@@ -129,6 +139,16 @@ fn execute(store: &mut Store, command: Command) -> Result<Value> {
             Value::Null
         }
         Command::InferenceStatus { model_key } => json(store.inference_status(&model_key)?)?,
+        Command::FailInferenceJob {
+            model_key,
+            job_id,
+            reason,
+        } => Value::Bool(store.fail_inference_job(&model_key, &job_id, &reason)?),
+        Command::SkipFailedInference {
+            model_key,
+            job_id,
+            budget,
+        } => json(store.skip_failed_inference(&model_key, &job_id, budget)?)?,
         Command::PauseInference { model_key, reason } => {
             store.pause_inference(&model_key, reason.as_deref())?;
             Value::Null
@@ -157,6 +177,17 @@ fn execute(store: &mut Store, command: Command) -> Result<Value> {
         }
         Command::ModelPath => Value::String(store.model_path()?),
         Command::InstallModel { source } => Value::String(store.install_model(Path::new(&source))?),
+        other => return execute_analysis(store, other),
+    };
+    Ok(value)
+}
+
+fn json(value: impl Serialize) -> Result<Value> {
+    serde_json::to_value(value).map_err(error)
+}
+
+fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
+    let value = match command {
         Command::Read => json(store.read()?)?,
         Command::Persist { state } => {
             store.persist(&state)?;
@@ -198,10 +229,7 @@ fn execute(store: &mut Store, command: Command) -> Result<Value> {
             vector,
             limit,
         } => json(crate::worker::runtime()?.block_on(store.search(&model_key, &vector, limit))?)?,
+        _ => return Err("Unsupported analysis command".into()),
     };
     Ok(value)
-}
-
-fn json(value: impl Serialize) -> Result<Value> {
-    serde_json::to_value(value).map_err(error)
 }

@@ -33,12 +33,22 @@ struct SemanticSearchView: View {
                             "索引作成済み \(status.indexed)枚 · 未解析 \(status.awaitingEmbeddings)枚 · 保存待ち \(status.queuedVectors)枚"
                         )
                         .font(.caption)
+                        if status.skipped > 0 {
+                            Text("解析から除外 \(status.skipped)枚").font(.caption)
+                                .accessibilityIdentifier("skippedInferenceCount")
+                        }
                     }
                     Text(search.message).font(.caption).foregroundStyle(.secondary)
                     if search.busy {
                         Button("解析を中断") { Task { await search.pause() } }
                             .accessibilityIdentifier("pauseInference")
                     } else {
+                        if search.inference?.failedJob != nil {
+                            Button("読み込めない写真を解析から除外して続ける") { search.excludeFailed() }
+                                .accessibilityIdentifier("excludeFailedInference")
+                            Text("元の写真は残ります。検索データを作り直すと再試行します。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
                         Button(search.inference == nil ? "モデルを保存して解析を開始" : "解析を開始・再開") { search.start() }
                             .accessibilityIdentifier("resumeInference")
                         if search.status != nil {

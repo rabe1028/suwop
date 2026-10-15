@@ -19,6 +19,7 @@ pub struct InferenceSelection {
 #[serde(rename_all = "camelCase")]
 pub struct InferenceStatus {
     pub model_key: String,
+    pub failed_job: Option<String>,
     pub state: String,
     pub budget_bytes: u64,
     pub error: Option<String>,

@@ -73,7 +73,20 @@ import SwiftUI
         wake()
     }
 
+    private enum StartIntent {
+        case resume, rebuild, exclude(String)
+    }
+
     func start(rebuild: Bool = false) {
+        begin(rebuild ? .rebuild : .resume)
+    }
+
+    func excludeFailed() {
+        guard let job = inference?.failedJob else { return }
+        begin(.exclude(job))
+    }
+
+    private func begin(_ intent: StartIntent) {
         guard task == nil, !pausing else { return }
         selectionRevision += 1
         busy = true
@@ -85,12 +98,22 @@ import SwiftUI
                 selectionTask?.cancel()
                 _ = try? await selectionTask?.value
                 selectionTask = nil
-                let configured = try await store.configureInference(
-                    dimensions: dimensions,
-                    budget: UInt64(budgetMiB) << 20
-                )
+                let configured: InferenceStatus
+                if case let .exclude(job) = intent {
+                    guard let key = inference?.modelKey else { throw SuwopError("解析状態を確認してください。") }
+                    configured = try await store.skipFailedInference(
+                        key: key,
+                        jobID: job,
+                        budget: UInt64(budgetMiB) << 20
+                    )
+                } else {
+                    configured = try await store.configureInference(
+                        dimensions: dimensions,
+                        budget: UInt64(budgetMiB) << 20
+                    )
+                }
                 inference = configured
-                if rebuild {
+                if case .rebuild = intent {
                     guard let selected = try await store.status().first(where: { $0.modelKey == configured.modelKey })
                     else {
                         throw SuwopError("再作成する検索データを取得できません。")
@@ -238,7 +261,10 @@ import SwiftUI
             wake()
         }
     }
+}
 
+/// Native execution and checkpoint scheduling; all job decisions are persisted by Rust.
+extension SemanticSearchModel {
     private func ensureModel() async throws {
         try Task.checkCancellation()
         if let prepareModel {
@@ -284,17 +310,22 @@ import SwiftUI
             guard let job = try await store.pending(modelKey: key, limit: 1).first else { break }
             try await loadIfAdmitted(key: key)
             message = "写真を1枚ずつ解析しています…"
-            let bytes = try await image(job)
-            try Task.checkCancellation()
-            let vector = try await runtime.embedding(bytes, image: true)
-            try Task.checkCancellation()
-            guard try await store.admitInference(key: key, runtime: runtime, loaded: true) else { break }
-            let projected = try await store.projectEmbedding(vector, dimensions: dimensions)
-            try await store.submit(
-                modelKey: key,
-                embeddings: [EmbeddingInput(jobId: job.id, vector: projected.map(Double.init))]
-            )
+            let proceed = try await perform(job: job) {
+                let bytes = try await self.image(job)
+                try Task.checkCancellation()
+                let vector = try await self.runtime.embedding(bytes, image: true)
+                try Task.checkCancellation()
+                guard try await self.store.admitInference(key: key, runtime: self.runtime, loaded: true) else { return }
+                let projected = try await self.store.projectEmbedding(vector, dimensions: self.dimensions)
+                try await self.store.submit(
+                    modelKey: key,
+                    embeddings: [EmbeddingInput(jobId: job.id, vector: projected.map(Double.init))]
+                )
+            }
             await refresh()
+            if !proceed || inference?.state != "running" {
+                break
+            }
         }
         await unload()
         await refresh()
@@ -305,6 +336,25 @@ import SwiftUI
         }, suspended: { self.suspended })
         message = inference?.error ?? status?.error ?? (inference?.state == "paused"
             ? "停止中。未処理の写真から再開できます。" : "解析済みの写真から検索できます。")
+    }
+
+    /// Rust determines whether a failure still belongs to a current job.
+    /// The operation is injected so native I/O failure handling can be tested without model weights.
+    func perform(job: EmbeddingJob, operation: @MainActor () async throws -> Void) async throws -> Bool {
+        do {
+            try await operation()
+            return true
+        } catch {
+            try Task.checkCancellation()
+            if error is CancellationError {
+                throw error
+            }
+            let reason = String(bytes: error.localizedDescription.utf8.prefix(480), encoding: .utf8)
+                ?? "写真を解析できません。"
+            let paused = try await store.failInferenceJob(key: job.modelKey, jobID: job.id, reason: reason)
+            await refresh()
+            return !paused
+        }
     }
 
     /// A committed final shard can have zero queued vectors before the next worker

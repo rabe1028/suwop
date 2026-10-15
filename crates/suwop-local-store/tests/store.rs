@@ -801,3 +801,93 @@ fn selecting_unconfigured_model_does_not_enqueue_or_resume_work() -> Result {
     );
     Ok(())
 }
+
+#[test]
+fn failed_photo_recovery_survives_restart_and_preserves_originals() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    store.persist(&state(2))?;
+    let key = store.configure_inference(256, 1536 << 20)?.model_key;
+    let failed = store.pending(&key, 1)?[0].id.clone();
+    assert!(store.fail_inference_job(&key, &failed, "Cannot decode")?);
+    drop(store);
+    let mut store = Store::open(root.path())?;
+    let paused = store.inference_status(&key)?.ok_or("missing inference")?;
+    assert_eq!(paused.state, "paused");
+    assert_eq!(paused.failed_job.as_deref(), Some(failed.as_str()));
+    let resumed = store.skip_failed_inference(&key, &failed, 1536 << 20)?;
+    assert_eq!(resumed.state, "running");
+    assert!(resumed.failed_job.is_none());
+    let pending = store.pending(&key, 32)?;
+    assert_eq!(pending.len(), 1);
+    assert_ne!(pending[0].id, failed);
+    store.submit(
+        &key,
+        &[EmbeddingInput {
+            job_id: pending[0].id.clone(),
+            vector: vec![1.0; 256],
+        }],
+    )?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    let status = &store.status()?[0];
+    assert_eq!(status.state, "ready");
+    assert_eq!(status.indexed, 1);
+    assert_eq!(status.skipped, 1);
+    assert!(status.active_generation.is_some());
+    assert_eq!(
+        store.read()?.ok_or("missing catalog")?.snapshots[0]
+            .assets
+            .len(),
+        2
+    );
+    store.rebuild(&key, &AnalysisBudget::default())?;
+    assert_eq!(store.pending(&key, 32)?.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn failed_photo_actions_reject_other_models_and_stale_revisions() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    store.persist(&state(1))?;
+    let first = store.configure_inference(256, 1536 << 20)?.model_key;
+    let second = store.configure_inference(512, 1536 << 20)?.model_key;
+    let job = store.pending(&first, 1)?[0].id.clone();
+    assert!(!store.fail_inference_job(&second, &job, "Wrong model")?);
+    assert!(
+        store
+            .skip_failed_inference(&first, &job, 1536 << 20)
+            .is_err()
+    );
+    assert!(store.fail_inference_job(&first, &job, "Cannot decode")?);
+    assert!(store.skip_failed_inference(&first, &job, 1).is_err());
+    let mut revised = state(1);
+    revised.snapshots[0].assets[0].revision = "2".into();
+    store.persist(&revised)?;
+    assert!(
+        store
+            .inference_status(&first)?
+            .ok_or("missing")?
+            .failed_job
+            .is_none()
+    );
+    assert!(
+        store
+            .skip_failed_inference(&first, &job, 1536 << 20)
+            .is_err()
+    );
+    store.configure_inference(256, 1536 << 20)?;
+    assert!(!store.fail_inference_job(&first, &job, "Obsolete failure")?);
+    assert_eq!(
+        store.inference_status(&first)?.ok_or("missing")?.state,
+        "running"
+    );
+    assert_eq!(
+        store.inference_status(&second)?.ok_or("missing")?.state,
+        "running"
+    );
+    assert_eq!(store.pending(&first, 32)?.len(), 1);
+    assert_eq!(store.status()?.iter().map(|s| s.skipped).sum::<u64>(), 0);
+    Ok(())
+}

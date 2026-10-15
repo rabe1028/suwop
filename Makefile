@@ -62,6 +62,9 @@ check-generated:
 
 apple-core:
 	bash scripts/build-rust-apple.sh
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then \
+		cargo clean && rm -rf Generated/RustSlices; \
+	fi
 
 apple-build: apple-core
 	xcodegen generate

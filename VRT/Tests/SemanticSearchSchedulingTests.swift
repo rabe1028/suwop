@@ -156,6 +156,44 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         }
     }
 
+    @MainActor func testUnreadablePhotoCanBeExplicitlyExcludedWithoutDeletingOriginal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        try await store.persist(Wire.decoder().decode(
+            JSONValue.self,
+            from: Data(InteractiveSemanticHost.failedPhoto.utf8)
+        ))
+        let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        let jobs = try await store.pending(modelKey: configured.modelKey)
+        let job = try XCTUnwrap(jobs.first)
+        let search = SemanticSearchModel(
+            store: store,
+            prepareModel: {},
+            image: { _ in throw SuwopError("No image expected") }
+        )
+        await search.selectDimensions()
+        let proceed = try await search.perform(job: job) { throw SuwopError("Cannot decode fixture") }
+        XCTAssertFalse(proceed)
+        XCTAssertEqual(search.inference?.state, "paused")
+        XCTAssertEqual(search.inference?.failedJob, job.id)
+        search.excludeFailed()
+        try await settle { !search.busy }
+        XCTAssertEqual(search.inference?.state, "running")
+        XCTAssertNil(search.inference?.failedJob)
+        XCTAssertEqual(search.status?.skipped, 1)
+        XCTAssertNotNil(search.status?.activeGeneration)
+        let remaining = try await store.pending(modelKey: configured.modelKey)
+        XCTAssertTrue(remaining.isEmpty)
+        let original = try await store.read()
+        guard case let .array(snapshots) = original["snapshots"],
+              case let .array(assets) = snapshots.first?["assets"]
+        else {
+            return XCTFail("Original catalog disappeared")
+        }
+        XCTAssertEqual(assets.count, 1)
+    }
+
     @MainActor private func settle(_ condition: () -> Bool) async throws {
         for _ in 0 ..< 200 {
             if condition() {

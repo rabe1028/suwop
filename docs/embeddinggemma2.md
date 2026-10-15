@@ -204,3 +204,5 @@ dimensions does not register a model or resume a paused journal. On startup Rust
 returns the selected model and its analysis/inference state in one SQLite snapshot.
 Catalog schema v3 preserves existing jobs and indexes; catalogs without a recorded
 selection remain unselected until the user chooses or starts a model.
+
+Unreadable photos pause inference with a durable, revision-bound failed-job ID. The search UI can explicitly exclude that photo from the current analysis generation and continue. Exclusion preserves the original and catalog metadata, reports the skipped count, and is retried on a full rebuild. Stale failures and failures from another model cannot exclude a current photo.

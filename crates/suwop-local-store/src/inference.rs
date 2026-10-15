@@ -117,6 +117,7 @@ impl Store {
             .map_err(error)?;
         tx.execute("INSERT INTO inference_runs VALUES(?1,'running',?2,NULL) ON CONFLICT(model) DO UPDATE SET budget=excluded.budget,state='running',error=NULL",params![key,i64::try_from(budget).map_err(error)?]).map_err(error)?;
         tx.execute("UPDATE generations SET state='building',error=NULL WHERE id=(SELECT latest FROM models WHERE id=?1)", [&key]).map_err(error)?;
+        tx.execute("UPDATE jobs SET reason=NULL WHERE state='awaiting' AND generation=(SELECT latest FROM models WHERE id=?1)", [&key]).map_err(error)?;
         tx.execute("INSERT INTO inference_selection VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET model=excluded.model", [serde_json::to_string(&model).map_err(error)?]).map_err(error)?;
         tx.commit().map_err(error)?;
         self.inference_status(&key)?
@@ -137,13 +138,15 @@ impl Store {
         Ok(())
     }
     pub fn inference_status(&self, key: &str) -> Result<Option<InferenceStatus>> {
-        self.db
+        let mut status = self
+            .db
             .query_row(
                 "SELECT state,budget,error FROM inference_runs WHERE model=?1",
                 [key],
                 |row| {
                     Ok(InferenceStatus {
                         model_key: key.into(),
+                        failed_job: None,
                         state: row.get(0)?,
                         budget_bytes: u64::from(row.get::<_, u32>(1)?),
                         error: row.get(2)?,
@@ -151,7 +154,13 @@ impl Store {
                 },
             )
             .optional()
-            .map_err(error)
+            .map_err(error)?;
+        if let Some(status) = &mut status
+            && status.state == "paused"
+        {
+            status.failed_job = self.db.query_row("SELECT CAST(j.id AS TEXT) FROM jobs j JOIN models m ON m.latest=j.generation JOIN assets a ON a.id=j.asset AND a.revision=j.revision WHERE m.id=?1 AND j.state='awaiting' AND j.reason IS NOT NULL ORDER BY j.id LIMIT 1", [key], |r|r.get(0)).optional().map_err(error)?;
+        }
+        Ok(status)
     }
     pub fn pause_inference(&self, key: &str, reason: Option<&str>) -> Result<()> {
         if reason.is_some_and(|r| r.len() > 512) {

@@ -1,6 +1,20 @@
 import Foundation
 
 public extension LocalStore {
+    func failInferenceJob(key: String, jobID: String, reason: String) async throws -> Bool {
+        try await call(.object([
+            "type": .string("failInferenceJob"), "modelKey": .string(key), "jobId": .string(jobID),
+            "reason": .string(reason),
+        ])).decode(Bool.self)
+    }
+
+    func skipFailedInference(key: String, jobID: String, budget: UInt64) async throws -> InferenceStatus {
+        try await call(.object([
+            "type": .string("skipFailedInference"), "modelKey": .string(key), "jobId": .string(jobID),
+            "budget": .number(Double(budget)),
+        ])).decode(InferenceStatus.self)
+    }
+
     func selectedInference() async throws -> InferenceSelection? {
         try await call(.object(["type": .string("selectedInference")])).decode(InferenceSelection?.self)
     }

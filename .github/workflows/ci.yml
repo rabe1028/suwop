@@ -30,7 +30,10 @@ jobs:
       - name: Enforce Rust, script, workflow and architecture rules
         run: make lint-common
       - run: make test
-      - run: cargo test --locked --workspace --all-features --release
+      - name: Test release without retaining the completed debug build
+        run: |
+          cargo clean
+          cargo test --locked --workspace --all-features --release
 
   immich-integration:
     runs-on: ubuntu-latest
@@ -61,6 +64,8 @@ jobs:
       - name: Build universal Rust libraries, iOS and macOS apps
         run: |
           cargo clean
+          # Swift tests have finished; Xcode uses the shared SourcePackages cache below.
+          rm -rf .build
           SUWOP_CLEAN_CHECK=1 make apple-build
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
@@ -88,7 +93,10 @@ jobs:
       - name: Compare native SwiftUI screenshots on one slim Simulator
         run: make vrt
       - name: Verify real PhotoKit edits, restart, lost-response reconciliation and reversion
-        run: make apple-native-test
+        run: |
+          # Keep VRTArtifacts (screenshots/results); reclaim only completed build products.
+          rm -rf DerivedData/VRT/Build
+          make apple-native-test
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

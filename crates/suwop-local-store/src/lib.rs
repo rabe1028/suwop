@@ -3,6 +3,7 @@ mod api;
 mod catalog;
 mod engine;
 mod inference;
+mod inference_jobs;
 mod jobs;
 mod worker;
 
