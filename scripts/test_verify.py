@@ -4,9 +4,11 @@ import contextlib
 import io
 import json
 import os
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -77,6 +79,86 @@ class VerificationTests(unittest.TestCase):
     def test_missing_command_fails_with_evidence(self):
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(verify.run_check(self.root, "missing", ["/no/such/check"]), 127)
+
+    def assert_cancelled(self, signum, ignore_child=False, ignore_descendant=False):
+        artifacts = self.root / ".tools"
+        artifacts.mkdir()
+        descendant = artifacts / "descendant.py"
+        descendant.write_text(
+            "import os, signal, time\nfrom pathlib import Path\n"
+            + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_descendant else "")
+            + "Path('.tools/descendant.pid').write_text(str(os.getpid()))\n"
+            + "while True: time.sleep(1)\n"
+        )
+        worker = (
+            "import os, signal, subprocess, sys, time\nfrom pathlib import Path\n"
+            + ("signal.signal(signal.SIGTERM, signal.SIG_IGN)\n" if ignore_child else "")
+            + "Path('.tools/child.pid').write_text(str(os.getpid()))\n"
+            + "subprocess.Popen([sys.executable, '.tools/descendant.py'])\n"
+            + "while True: time.sleep(1)\n"
+        )
+        with (artifacts / "wrapper.log").open("wb") as output:
+            wrapper = subprocess.Popen(  # noqa: S603
+                [
+                    sys.executable,
+                    verify.__file__,
+                    "run",
+                    "--label",
+                    "signal",
+                    "--",
+                    sys.executable,
+                    "-c",
+                    worker,
+                ],
+                cwd=self.root,
+                stdout=output,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
+            )
+            try:
+                deadline = time.monotonic() + 10
+                while not (artifacts / "descendant.pid").exists():
+                    self.assertIsNone(wrapper.poll(), "wrapper exited before test setup")
+                    self.assertLess(time.monotonic(), deadline, "child did not become ready")
+                    time.sleep(0.02)
+                wrapper.send_signal(signum)
+                self.assertEqual(wrapper.wait(timeout=10), 128 + signum)
+                report = json.loads(
+                    next((artifacts / "verification").glob("*/result.json")).read_text()
+                )
+                self.assertEqual(report["status"], "cancelled")
+                self.assertEqual(report["exit_code"], 128 + signum)
+                self.assertEqual(report["termination_signal"], signum)
+                for name in ("child", "descendant"):
+                    pid = (artifacts / f"{name}.pid").read_text()
+                    status = subprocess.run(  # noqa: S603
+                        ["ps", "-o", "stat=", "-p", pid],  # noqa: S607
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    ).stdout.strip()
+                    self.assertTrue(not status or status.startswith("Z"), f"{name} still running")
+            finally:
+                # A failing regression must not leak its own fixture processes.
+                child_pid = artifacts / "child.pid"
+                if child_pid.exists():
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(int(child_pid.read_text()), signal.SIGKILL)
+                if wrapper.poll() is None:
+                    wrapper.kill()
+                wrapper.wait(timeout=5)
+
+    def test_sigterm_stops_the_check_group_and_finalizes_report(self):
+        self.assert_cancelled(signal.SIGTERM)
+
+    def test_sigint_stops_the_check_group_and_finalizes_report(self):
+        self.assert_cancelled(signal.SIGINT)
+
+    def test_sigterm_kills_stubborn_child_and_descendant_after_grace(self):
+        self.assert_cancelled(signal.SIGTERM, ignore_child=True, ignore_descendant=True)
+
+    def test_descendant_cannot_outlive_exited_group_leader(self):
+        self.assert_cancelled(signal.SIGTERM, ignore_descendant=True)
 
 
 class RegistryRetryTests(unittest.TestCase):

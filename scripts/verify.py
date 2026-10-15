@@ -2,6 +2,7 @@
 """Run checks with complete disk logs and compact, source-bound JSON evidence."""
 
 import argparse
+import contextlib
 import hashlib
 import json
 import os
@@ -46,7 +47,58 @@ def write_report(path, report):
     temporary.replace(path)
 
 
+@contextlib.contextmanager
+def termination_signals():
+    # Record requests even during Popen, before the child's PID is available.
+    requested = []
+
+    def request(signum, _frame):
+        if not requested:
+            requested.append(signum)
+
+    previous = {sig: signal.signal(sig, request) for sig in (signal.SIGINT, signal.SIGTERM)}
+    try:
+        yield requested
+    finally:
+        for sig, handler in previous.items():
+            signal.signal(sig, handler)
+
+
+def signal_group(process, signum):
+    try:
+        os.killpg(process.pid, signum)
+    except ProcessLookupError:
+        return False
+    return True
+
+
+def wait_check(process, requested):
+    while not requested:
+        try:
+            code = process.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            continue
+        if not requested:
+            return code
+    signal_group(process, requested[0])
+    deadline = time.monotonic() + 5
+    # Reap the leader, but also give its descendants time to finish cleanup.
+    while time.monotonic() < deadline:
+        process.poll()
+        if not signal_group(process, 0):
+            break
+        time.sleep(0.05)
+    signal_group(process, signal.SIGKILL)
+    process.wait()
+    return 128 + requested[0]
+
+
 def run_check(root, label, command):
+    with termination_signals() as requested:
+        return record_check(root, label, command, requested)
+
+
+def record_check(root, label, command, requested):
     directory = root / ".tools" / "verification"
     directory.mkdir(parents=True, exist_ok=True)
     output = Path(tempfile.mkdtemp(prefix=label + "-", dir=directory))
@@ -77,26 +129,24 @@ def run_check(root, label, command):
     print(json.dumps({"status": "running", "report": str(report_path)}), flush=True)
     started = time.monotonic()
     with (output / "output.log").open("wb") as log:
-        try:
-            process = subprocess.Popen(  # noqa: S603
-                command, cwd=root, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
-            )
-        except OSError as error:
-            log.write(str(error).encode())
-            code = 127
+        if requested:
+            code = 128 + requested[0]
         else:
             try:
-                code = process.wait()
-            except KeyboardInterrupt:
-                os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                code = 130
+                process = subprocess.Popen(  # noqa: S603
+                    command, cwd=root, stdout=log, stderr=subprocess.STDOUT, start_new_session=True
+                )
+            except OSError as error:
+                log.write(str(error).encode())
+                code = 127
+            else:
+                code = wait_check(process, requested)
     after = fingerprint(root)
     status = "passed" if code == 0 and before == after else "failed" if code else "source_changed"
+    if requested:
+        status = "cancelled"
+        code = 128 + requested[0]
+        report["termination_signal"] = requested[0]
     report.update(
         status=status,
         exit_code=code,
