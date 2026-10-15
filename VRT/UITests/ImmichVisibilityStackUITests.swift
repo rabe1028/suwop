@@ -4,7 +4,7 @@ final class ImmichVisibilityStackUITests: XCTestCase {
     private let sourceID = "33333333-3333-4333-8333-333333333333"
     private let stackReason = "まとめられた写真の表示先変更には対応していません。"
 
-    @MainActor func testOrdinaryStackedPhotoDisablesLockAndExplainsBeforeAnyPINOrConfirmation() {
+    @MainActor func testOrdinaryStackedPhotoDisablesLockAndExplainsBeforeAnyPINOrConfirmation() async throws {
         let app = launch(locked: false)
         let photo = app.buttons["photo-\(sourceID)"]
         XCTAssertTrue(photo.waitForExistence(timeout: 10))
@@ -14,7 +14,7 @@ final class ImmichVisibilityStackUITests: XCTestCase {
         let lock = app.buttons["lockDisplayedImmichPhoto"]
         XCTAssertTrue(lock.exists)
         XCTAssertFalse(lock.isEnabled)
-        assertReason(in: app)
+        try await assertReason(in: app)
         XCTAssertFalse(app.textFields["immichLockedEmail"].exists)
         XCTAssertFalse(app.secureTextFields["immichLockedPIN"].exists)
         XCTAssertFalse(app.buttons["confirmImmichVisibility"].exists)
@@ -28,7 +28,7 @@ final class ImmichVisibilityStackUITests: XCTestCase {
         app.terminate()
     }
 
-    @MainActor func testLockedStackedPhotoDisablesBothDestinationsWithoutFurtherPINOrConfirmation() {
+    @MainActor func testLockedStackedPhotoDisablesBothDestinationsWithoutFurtherPINOrConfirmation() async throws {
         let app = launch(locked: true)
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
@@ -41,7 +41,7 @@ final class ImmichVisibilityStackUITests: XCTestCase {
         let archive = app.buttons["showImmichArchive-\(sourceID)"]
         XCTAssertTrue(archive.exists)
         XCTAssertFalse(archive.isEnabled)
-        assertReason(in: app)
+        try await assertReason(in: app)
         XCTAssertFalse(app.buttons["confirmImmichVisibility"].exists)
         XCTAssertFalse(app.secureTextFields["immichLockedPIN"].exists)
         app.buttons["closeImmichLocked"].tap()
@@ -79,10 +79,28 @@ final class ImmichVisibilityStackUITests: XCTestCase {
         submit.tap()
     }
 
-    @MainActor private func assertReason(in app: XCUIApplication) {
-        let reason = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", stackReason))
-            .firstMatch
-        XCTAssertTrue(reason.exists, app.debugDescription)
+    @MainActor private func assertReason(in app: XCUIApplication) async throws {
+        let matches = app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", stackReason))
+        let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+        var visible: XCUIElement?
+        repeat {
+            visible = matches.allElementsBoundByIndex.first {
+                $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+            }
+            if visible != nil {
+                break
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        } while ContinuousClock.now < deadline
+        guard let reason = visible else {
+            let attachment = XCTAttachment(screenshot: app.screenshot())
+            attachment.name = "Stack-explanation-no-visible-AX-element"
+            attachment.lifetime = .keepAlways
+            add(attachment)
+            XCTFail("The exact explanation must have a visible nonempty frame: " + app.debugDescription)
+            return
+        }
+        XCTAssertTrue(reason.exists)
         XCTAssertFalse(reason.frame.isEmpty)
         XCTAssertTrue(app.frame.intersects(reason.frame))
     }

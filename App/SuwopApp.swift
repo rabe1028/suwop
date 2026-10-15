@@ -18,9 +18,7 @@ private struct LibrarySceneRoot: View {
     var body: some View {
         GalleryView(model: model, sceneID: sceneID)
             .environment(\.protectionSceneID, sceneID)
-        #if os(iOS)
             .background(NativeScenePresentationAnchor(sceneID: sceneID))
-        #endif
             .task { model.start() }
             .onChange(of: phase, initial: true) { _, phase in
                 let value: ProtectionScenePhase = switch phase {

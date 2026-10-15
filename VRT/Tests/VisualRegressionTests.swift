@@ -145,6 +145,11 @@ final class VisualRegressionTests: XCTestCase {
     @MainActor private func capture(
         _ name: String, view: some View, dark: Bool = false, largeText: Bool = false, scrollToBottom: Bool = false
     ) async throws {
+        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
+        let sceneTraits = SceneCaptureTraits(
+            scene: scene, category: largeText ? .accessibilityExtraLarge : .large
+        )
+        defer { sceneTraits.restore() }
         let raster = RasterMountObservation()
         let root = view
             .environment(\.immichLockedRasterGeometry) { frame in raster.frame = frame }
@@ -156,7 +161,6 @@ final class VisualRegressionTests: XCTestCase {
             .environment(\.dynamicTypeSize, largeText ? .accessibility3 : .large)
         let controller = UIHostingController(rootView: root)
         controller.overrideUserInterfaceStyle = dark ? .dark : .light
-        let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         let window = UIWindow(windowScene: scene)
         window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
         window.overrideUserInterfaceStyle = dark ? .dark : .light
@@ -212,7 +216,8 @@ final class VisualRegressionTests: XCTestCase {
                 throw SuwopError("Mounted Image branch did not report visible geometry")
             }
         }
-        try SnapshotComparison.verify(render(window), named: name)
+        let image = try await SnapshotComparison.stabilizedImage(named: name) { render(window) }
+        try SnapshotComparison.verify(image, named: name)
     }
 
     @MainActor private func assertCaptureTraits(

@@ -32,7 +32,8 @@ final class ImmichVisibilityScreensTests: XCTestCase {
             let host = try VisibilityScreenHost(view: view)
             defer { host.close() }
             try await host.settle()
-            try SnapshotComparison.verify(host.image(), named: name)
+            let image = try await SnapshotComparison.stabilizedImage(named: name) { host.image() }
+            try SnapshotComparison.verify(image, named: name)
         }
     }
 
@@ -58,21 +59,22 @@ final class ImmichVisibilityScreensTests: XCTestCase {
         }
         XCTAssertEqual(fixture.writes, 0)
         XCTAssertEqual(fixture.server.mutationAttempts, 0)
-        try SnapshotComparison.verify(
-            host.image(),
-            named: largeText ? "immich-visibility-lock-confirmation-large-text" : "immich-visibility-lock-confirmation"
-        )
+        let name = largeText ? "immich-visibility-lock-confirmation-large-text" : "immich-visibility-lock-confirmation"
+        let image = try await SnapshotComparison.stabilizedImage(named: name) { host.image() }
+        try SnapshotComparison.verify(image, named: name)
     }
 }
 
 @MainActor private final class VisibilityScreenHost {
     let window: UIWindow
     let controller: UIViewController
+    private let sceneTraits: SceneCaptureTraits
 
     init(view: some View, largeText: Bool = false) throws {
         let scene = try XCTUnwrap(UIApplication.shared.connectedScenes.first as? UIWindowScene)
         XCTAssertEqual(scene.screen.bounds.size, CGSize(width: 402, height: 874))
         XCTAssertEqual(scene.screen.scale, 3)
+        sceneTraits = SceneCaptureTraits(scene: scene, category: largeText ? .accessibilityExtraLarge : .large)
         let root = view
             .background(NativeScenePresentationAnchor(sceneID: ImmichLockedFixtureData.sceneID))
             .environment(\.colorScheme, .light)
@@ -113,5 +115,6 @@ final class ImmichVisibilityScreensTests: XCTestCase {
     func close() {
         window.isHidden = true
         window.rootViewController = nil
+        sceneTraits.restore()
     }
 }

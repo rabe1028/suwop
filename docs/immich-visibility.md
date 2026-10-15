@@ -1,5 +1,55 @@
 # Immich のロック移動・再表示（PP-02C-2）
 
+最新HEAD `ca1cfae` のCI run `38685755541` はcore・Apple・Immich integrationが成功し、VRTは失敗した。
+失敗は既存 `apple-visibility-observed-large-text` の43,691画素差分と、stack理由表示の空frame assertion。
+ローカルstrict VRTの成功とは区別し、CI成果物を使って描画・操作待機を修正した。基準画像と許容差は保持する。
+
+CI録画ではstack理由全文と無効な操作が表示されており、空frameのAX要素を先に取得していた。
+同じ全文を持つ要素のうち、画面内の空でないframeが確定するまで有限時間待つ。
+画像比較では従来の最低待機を残し、基準を参照しない連続描画の全画素が3回安定した後、
+採用した同じ画像を比較する。既存sRGB変換とRGB差2の条件を用い、4秒以内に安定しなければ失敗する。
+修正前のローカル再検証では更新アイコンにも2,233画素の差分が再現した。
+修正後は35画面の比較が2回成功し、stack操作UI2件も成功した
+（`/tmp/suwop-roster-ci-focused3.log`、`/tmp/suwop-roster-ci-focused4.log`）。
+このテスト修正後の全体strict VRTは終了0で成功した。全40画面、host62件、UI33件を通過し、
+record=false、全7stage終了0、基準画像は変更していない
+（`/tmp/suwop-roster-ci-vrt-final1.log`、`DerivedData/VRTArtifacts/20261015T055512Z-90218`）。
+後述のmacOS修正を含む最終ソースの検証と新HEADのhosted CIは別途確認する。
+
+追加レビューで、macOSの確認が認可sceneではなくkey/main windowを選ぶ問題が判明した。
+別windowへのフォーカス移動で異なる文脈に確認が表示されるため、登録されたsceneの
+所有windowへNSAlert sheetを表示する専用アダプタへ変更した。所有window不在・非表示・
+最小化・失効時は中止し、表示後のowner登録差替えや古いcallbackからの確定も拒否する。
+SwiftUI rootにmacOSの弱参照window anchorを登録する。Rustのgrant・scene・generationの
+表示前後の検査は既存AppleShell経由で維持する。
+修正後の `make check` はRust300件・Swift62件、`make sharing-test` は新規7件と既存2件が成功した
+（`/tmp/suwop-c2-mac-check-final1.log`、`/tmp/suwop-c2-mac-sharing-final1.log`）。
+macOSの実NSAlert componentとwindow状態の証拠であり、実アプリの手動複数window受入れではない。
+修正後の `make apple-build` もRust全5ターゲット・XCFramework・iOS/macOSが終了0で成功した
+（`/tmp/suwop-c2-mac-apple-final1.log`）。続く最終VRTでは更新アイコンの2,233画素差分が再発した
+（`/tmp/suwop-c2-mac-vrt-final1.log`、`DerivedData/VRTArtifacts/20261015T061811Z-15278`）。
+同実行はhost62件中画像1件失敗、UI33件はすべて成功し、比較stage65／全体終了2として完了した。
+連続描画の安定だけでは2種類の安定したglyph状態を区別できず、解消済みとは扱わない。
+scene/window/SwiftUIの文字サイズをcapture構築前から揃え、終了時にscene overrideを復元する
+fixture修正を検証する。基準画像は保持する。hosted CI成功前にはマージしない。
+
+共有していた旧worktreeの消失を検出したため、ソースを退避し、現在のworktreeごとに
+独立したtools・target・DerivedDataへ切り替えた。消失の原因は未確認であり、
+旧DerivedDataの成果物への参照は現存を保証しない。以下は独立環境での再検証結果である。
+scene overrideは明示値がある場合だけ旧値を読み、capture終了後にその値または継承状態を復元する。
+出力ディレクトリを作成したfocused検証は5画面・35画面とも成功し、全40画面の再実行も成功した
+（`/tmp/suwop-c2-independent-scene-diagnostic2.log`、
+`/tmp/suwop-c2-independent-scene-generic3.log`、
+`/tmp/suwop-c2-independent-scene-repeat4.log`）。
+基準40枚はHEADとbyte一致し、製品フォント・比較許容値は変更していない。
+診断出力除去後の最終 `make check` は終了0でRust300件・Swift62件とlint・生成確認が成功した
+（`/tmp/suwop-c2-independent-check-final1.log`）。
+最終strict VRTも終了0で、40画面・host62件・UI33件すべて成功した。
+record=false／passed=true、全7stage終了0、基準40枚はHEADとbyte一致する
+（`/tmp/suwop-c2-independent-vrt-final2.log`、`DerivedData/VRTArtifacts/20261015T065530Z-30106`）。
+末尾のsimctl診断収集警告はテスト結果と区別し、wrapper・shutdown・reportの終了0を確認した。
+新HEADのhosted CIとmergeは未完了である。
+
 PR #25でレビュー中。初期HEAD `7db5858` のローカル全gateと実Immich v3.2.4結合は成功した。レビューでstack状態が操作候補へ伝わらないP2指摘を修正し、修正後のローカル必須gateも成功した。以下の検証表は初期HEADの結果であり、修正後の必要な検証とhosted CIは別に確認する。C-1の専用PINセッションはPR #24でmerge済みで、最終HEADとmerge後のCI全4 jobが成功している。
 
 最初の増分は、同じ利用者が所有する、関連動画とstackを持たない静止画のtimeline／archiveからlockedへの変更と、lockedから明示的に選択したtimeline／archiveへの変更を扱う。Live Photo、動画、関連状態が不明な写真は対応済みとしない。通常のtimelineとarchiveの相互変更は、PIN不要の別経路として残す。

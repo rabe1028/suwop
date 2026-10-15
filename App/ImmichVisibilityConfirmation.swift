@@ -16,7 +16,7 @@ import SuwopShell
         private var mounted = false
         private var invalidated = false
     #else
-        private let confirmation = SystemConfirmation()
+        private let confirmation = MacImmichVisibilityConfirmation()
     #endif
 
     #if os(iOS)
@@ -52,7 +52,8 @@ import SuwopShell
                 }
             } onCancel: { Task { @MainActor [weak self] in self?.cancel(id: id) } }
         #else
-            return try await confirmation.changeImmichVisibility(prompt, context: context)
+            // AppleShell rechecks the live Rust grant, scene and generation before and after this native sheet.
+            return try await confirmation.present(prompt, context: context)
         #endif
     }
 
@@ -61,7 +62,7 @@ import SuwopShell
             guard let id = presentationID else { return }
             cancel(id: id)
         #else
-            confirmation.invalidateForContentChange()
+            confirmation.invalidate()
         #endif
     }
 
