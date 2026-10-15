@@ -732,6 +732,16 @@ async fn pair_transitions(
     for id in [&graph.parent, &graph.motion] {
         assert_eq!(detail(ctx, session, id).await?["visibility"], "locked");
     }
+    let other_parent = detail(ctx, session, &graph.other_parent).await?;
+    assert_eq!(
+        other_parent["visibility"], "timeline",
+        "locking the supplied pair must not change the unsupplied parent's visibility"
+    );
+    assert_eq!(
+        other_parent["livePhotoVideoId"].as_str(),
+        Some(graph.motion.as_str()),
+        "the unsupplied parent must retain its forward link to the motion asset"
+    );
     observations.push(
         observe_resources(
             ctx,

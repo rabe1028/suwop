@@ -70,6 +70,13 @@ owner限定のread-only DB照合もP/P2の正確な2参照、Vの逆参照0、�
 専用container・volume・networkの削除と無関係サービスの保持を確認した
 （`/tmp/suwop-live-graph-cleanup-check-20261015-5.log`）。
 
+レビューで、P/Mのbulk lock後のP2状態が観測記録に留まり、契約としてassertされていない
+箇所を補強した。bulk変更の直後に実P2詳細を再取得し、timelineの維持とMへのforward linkを
+明示assertする。補強後もmake check（Rust327件・Swift65件）と実結合5件が成功した
+（`/tmp/suwop-live-graph-p2-check-20261015-1.log`、
+`/tmp/suwop-live-graph-p2-integration-20261015-1.log`、19.43秒）。
+専用container・volume・networkが0で、無関係サービスが同じIDで稼働中であることを確認した。
+
 ## 製品対応へ引き継ぐ条件
 
 通常archiveとPIN保護は異なる操作として設計する。保護操作では付随動画と複数親への影響を
