@@ -195,9 +195,43 @@ fn lance_resume_rebuild_publication_and_pruning() -> Result {
     );
     assert_eq!(rt.block_on(store.prune())?, 0);
     supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
+    // Three new shards, then publication plus exactly one cleanup checkpoint.
+    for _ in 0..4 {
+        assert!(rt.block_on(store.step())?);
+    }
     assert_ne!(store.status()?[0].active_generation, first);
-    assert_eq!(rt.block_on(store.prune())?, 3);
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM shards WHERE generation=?1",
+            [first],
+            |r| r.get::<_, i64>(0)
+        )?,
+        2
+    );
+    drop(store);
+    let mut store = Store::open(root.path())?;
+    while rt.block_on(store.step())? {}
+    // Normal scheduling reclaims old tables/jobs without an explicit Prune command.
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM generations", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM jobs WHERE generation=?1",
+            [first],
+            |r| r.get::<_, i64>(0)
+        )?,
+        0
+    );
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5))?
+            .len(),
+        5
+    );
     store.persist(&state(71))?;
     while rt.block_on(store.step())? {}
     assert_eq!(store.pending(&key, 32)?.len(), 1);
@@ -647,5 +681,59 @@ fn inference_restoration_requires_the_complete_current_provider_identity() -> Re
     assert_eq!(statuses.len(), 2);
     assert!(statuses.iter().any(|s| s.model_key == first.model_key));
     assert!(statuses.iter().any(|s| s.model_key == second.model_key));
+    Ok(())
+}
+
+#[test]
+fn unavailable_immich_snapshot_revokes_analysis_until_freshly_available() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let mut library = state(1);
+    library.snapshots[0].provider = Provider::Immich;
+    library.snapshots[0].assets[0].key.provider = Provider::Immich;
+    store.persist(&library)?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    let job = store.pending(&key, 1)?.remove(0);
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
+            .len(),
+        1
+    );
+    library.snapshots[0].access = ScanAccess::Unavailable;
+    store.persist(&library)?;
+    assert!(store.pending(&key, 1)?.is_empty());
+    assert!(
+        store
+            .submit(
+                &key,
+                &[EmbeddingInput {
+                    job_id: job.id,
+                    vector: vec![1.0; 4]
+                }]
+            )
+            .is_err()
+    );
+    assert!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
+            .is_empty()
+    );
+    assert!(
+        store
+            .validate_embedding_input(&job.asset, &job.asset, None)
+            .is_err()
+    );
+    library.snapshots[0].access = ScanAccess::Full;
+    store.persist(&library)?;
+    assert_eq!(store.pending(&key, 1)?.len(), 1);
+    supply(&mut store, &key)?;
+    while rt.block_on(store.step())? {}
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
+            .len(),
+        1
+    );
     Ok(())
 }

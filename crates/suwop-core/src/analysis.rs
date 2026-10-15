@@ -123,6 +123,7 @@ pub fn visible_assets(
     state
         .snapshots
         .iter()
+        .filter(|snapshot| snapshot.access != crate::domain::ScanAccess::Unavailable)
         .flat_map(|snapshot| &snapshot.assets)
         .filter(move |asset| access.visible(&asset.key))
 }

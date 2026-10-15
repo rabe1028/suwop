@@ -142,6 +142,11 @@ impl Store {
             tx.execute("UPDATE models SET active=latest WHERE EXISTS(SELECT 1 FROM generations g WHERE g.id=models.latest AND g.state='building') AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.generation=models.latest AND j.state IN ('awaiting','queued'))",[]).map_err(error)?;
             tx.execute("UPDATE generations SET state='ready' WHERE state='building' AND id IN (SELECT active FROM models WHERE active=latest) AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.generation=generations.id AND j.state IN ('awaiting','queued'))",[]).map_err(error)?;
             tx.commit().map_err(error)?;
+            // Publication is durable before cleanup. Each checkpoint drops at most
+            // one retired shard so searches and newly queued work can interleave.
+            if self.prune_one().await?.is_some() {
+                return Ok(true);
+            }
             return self.compact();
         };
         if let Err(message) = self.write_chunk(&chunk).await {
@@ -230,46 +235,50 @@ impl Store {
     /// Remove only manifest-owned retired generations, preserving active and latest.
     pub async fn prune(&mut self) -> Result<u64> {
         let _guard = self.analysis_lock()?;
-        let connection = self.connection(&AnalysisBudget::default()).await?;
         let mut removed = 0;
-        loop {
-            let generation: Option<i64> = self.db.query_row("SELECT g.id FROM generations g JOIN models m ON m.id=g.model WHERE g.id!=m.latest AND (m.active IS NULL OR g.id!=m.active) ORDER BY g.id LIMIT 1", [], |r|r.get(0)).optional().map_err(error)?;
-            let Some(generation) = generation else {
-                break;
-            };
-            loop {
-                let shard: Option<i64> = self
-                    .db
-                    .query_row(
-                        "SELECT id FROM shards WHERE generation=?1 ORDER BY id LIMIT 1",
-                        [generation],
-                        |r| r.get(0),
-                    )
-                    .optional()
-                    .map_err(error)?;
-                let Some(shard) = shard else {
-                    break;
-                };
-                match connection.drop_table(&name(generation, shard), &[]).await {
-                    Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
-                    Err(e) => return Err(error(e)),
-                }
-                self.db
-                    .execute("DELETE FROM shards WHERE id=?1", [shard])
-                    .map_err(error)?;
-                removed += 1;
-            }
-            let tx = self
-                .db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            tx.execute("DELETE FROM jobs WHERE generation=?1", [generation])
-                .map_err(error)?;
-            tx.execute("DELETE FROM generations WHERE id=?1", [generation])
-                .map_err(error)?;
-            tx.commit().map_err(error)?;
+        while let Some(count) = self.prune_one().await? {
+            removed += count;
         }
         Ok(removed)
+    }
+    /// Caller holds the analysis lock. Journal entries are removed only after
+    /// their Lance table is gone, so an interrupted cleanup safely replays.
+    async fn prune_one(&mut self) -> Result<Option<u64>> {
+        let retired: Option<(i64, String)> = self.db.query_row("SELECT g.id,g.budget FROM generations g JOIN models m ON m.id=g.model WHERE g.id!=m.latest AND (m.active IS NULL OR g.id!=m.active) ORDER BY g.id LIMIT 1", [], |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?;
+        let Some((generation, budget)) = retired else {
+            return Ok(None);
+        };
+        let shard: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT id FROM shards WHERE generation=?1 ORDER BY id LIMIT 1",
+                [generation],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(error)?;
+        if let Some(shard) = shard {
+            let budget: AnalysisBudget = serde_json::from_str(&budget).map_err(error)?;
+            let connection = self.connection(&budget).await?;
+            match connection.drop_table(&name(generation, shard), &[]).await {
+                Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
+                Err(e) => return Err(error(e)),
+            }
+            self.db
+                .execute("DELETE FROM shards WHERE id=?1", [shard])
+                .map_err(error)?;
+            return Ok(Some(1));
+        }
+        let tx = self
+            .db
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(error)?;
+        tx.execute("DELETE FROM jobs WHERE generation=?1", [generation])
+            .map_err(error)?;
+        tx.execute("DELETE FROM generations WHERE id=?1", [generation])
+            .map_err(error)?;
+        tx.commit().map_err(error)?;
+        Ok(Some(0))
     }
     pub async fn search(
         &self,

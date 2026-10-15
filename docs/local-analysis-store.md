@@ -72,7 +72,10 @@ compaction work before claiming low search latency.
 bounded native operation but is not published while paused. `resume` replays that
 pending shard. A crash before SQLite publication leaves vectors and shard identity
 in the outbox; replay recreates only that unpublished table (including removal of abandoned versions). Completed shards are
-retained. A Lance error pauses the generation and exposes its error in status.
+retained. After replacement publication, the Rust worker reclaims retired
+generations one shard per checkpoint, preserving the active and latest generations.
+Interrupted cleanup resumes from the manifest and uses the retired generation's
+cache budget. A Lance indexing error pauses the generation and exposes its error in status.
 Interrupted deletion/transfer journals remain independent and are never replayed
 by this worker. Index buffers are released after publication; obsolete-generation
 vectors are released by pruning. There is no automatic original-file deletion.
