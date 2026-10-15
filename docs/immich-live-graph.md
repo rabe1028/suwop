@@ -56,6 +56,20 @@ APIとDBの最終visibility一致を確認した。
 （`/tmp/suwop-live-graph-check-20261015-1.log`）。製品コード・DTO・基準画像に変更はなく、
 この増分でAppleビルド・VRTは再実行していない。hosted CIは別途確認する。
 
+先行アーカイブのkey単位画像無効化・busy UI修正（4cd7577）を含むbaseへ取り込み、
+契約検証コミットのstable patch IDが不変であることを確認した。
+そのHEAD `bcca7bece6a058d52a1f124bcb8a9e3e589d0878`でもmake checkは
+Rust/FFI327件・Swift65件が成功した（`/tmp/suwop-live-graph-check-20261015-5.log`）。
+実Immich結合は5件すべて成功、15.27秒
+（`/tmp/suwop-live-graph-integration-20261015-5.log`、
+`/tmp/suwop-live-graph-api-report-20261015-5.json`）。
+owner限定のread-only DB照合もP/P2の正確な2参照、Vの逆参照0、最終visibilityのAPI一致を確認した
+（`/tmp/suwop-live-graph-readonly-control-20261015-5b.json`、同名query/rows）。
+初回のreportパス指定がmacOSのtempfile保存先と異なり空のSQL生成になったため、
+保存先を訂正して5bとして照合した。初回をDB検証成功には含めない。
+専用container・volume・networkの削除と無関係サービスの保持を確認した
+（`/tmp/suwop-live-graph-cleanup-check-20261015-5.log`）。
+
 ## 製品対応へ引き継ぐ条件
 
 通常archiveとPIN保護は異なる操作として設計する。保護操作では付随動画と複数親への影響を
