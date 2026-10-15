@@ -87,6 +87,34 @@ final class VisualRegressionTests: XCTestCase {
         )
     }
 
+    @MainActor func testSemanticSearch() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        let search = SemanticSearchModel(store: store) { _ in
+            throw SuwopError("This fixture must never request image inference")
+        }
+        let library = try SnapshotFixtures.model()
+        try await capture("semantic-search", view: SemanticSearchView(search: search, library: library, open: { _ in }))
+        let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        try await store.pauseInference(key: configured.modelKey)
+        await search.restore()
+        XCTAssertEqual(search.inference?.state, "paused")
+        XCTAssertFalse(search.busy)
+        search.dimensions = 512
+        await search.selectDimensions()
+        XCTAssertNil(search.status)
+        search.dimensions = 256
+        await search.selectDimensions()
+        XCTAssertEqual(search.inference?.state, "paused")
+        try await capture(
+            "semantic-search-paused-large-text",
+            view: SemanticSearchView(search: search, library: library, open: { _ in }),
+            largeText: true,
+            scrollToBottom: true
+        )
+    }
+
     @MainActor private func captureImmichLocked() async throws {
         for name in ["immich-locked-form", "immich-locked-open", "immich-locked-preview", "immich-locked-large-text"] {
             let fixture = try ImmichLockedPhotoFixture(protectedSource: true)

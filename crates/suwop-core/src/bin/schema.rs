@@ -9,6 +9,14 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    inference_status: suwop_core::inference::InferenceStatus,
+    inference_spec: suwop_core::inference::InferenceSpec,
+    analysis_model: suwop_core::analysis::AnalysisModel,
+    analysis_budget: suwop_core::analysis::AnalysisBudget,
+    embedding_input: suwop_core::analysis::EmbeddingInput,
+    embedding_job: suwop_core::analysis::EmbeddingJob,
+    analysis_status: suwop_core::analysis::AnalysisStatus,
+    similarity_hit: suwop_core::analysis::SimilarityHit,
     immich_locked_image_result: suwop_core::immich_locked::ImmichLockedImageResult,
     immich_locked_image_ticket: suwop_core::immich_locked::ImmichLockedImageTicket,
     protected_scene_phase: suwop_core::protection::ProtectionScenePhase,

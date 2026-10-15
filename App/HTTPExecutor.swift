@@ -68,7 +68,7 @@ actor HTTPExecutor {
     }
 
     func thumbnail(_ operation: HttpRequest) async throws -> Data {
-        let (bytes, response) = try await session.data(for: urlRequest(operation))
+        let (bytes, response) = try await BoundedHTTPData.load(urlRequest(operation), session: session, limit: 8 << 20)
         guard try (200 ..< 300).contains(statusCode(response)) else { throw SuwopError("プレビューを取得できません。") }
         return bytes
     }

@@ -1,0 +1,64 @@
+{
+  "256": {
+    "count": 100,
+    "query_language": "English COCO captions",
+    "quality": {
+      "exact_recall_at_1": 0.85,
+      "lance_recall_at_1": 0.85,
+      "exact_recall_at_5": 1.0,
+      "lance_recall_at_5": 1.0,
+      "exact_recall_at_10": 1.0,
+      "lance_recall_at_10": 1.0,
+      "ann_agreement_at_10": 1.0
+    },
+    "components_bytes": {
+      "sqlite": 172032,
+      "sqlite_wal": 0,
+      "lance_data": 103698,
+      "lance_index": 114011,
+      "lance_manifest": 2185
+    },
+    "raw_vectors_bytes": 102400,
+    "inference_seconds": 70.64873898029327,
+    "index_and_search_seconds": 1.5411590337753296,
+    "inference_max_rss_bytes": 999243776,
+    "inference_peak_footprint_bytes": 626116384,
+    "index_max_rss_bytes": 116883456,
+    "index_peak_footprint_bytes": 17220544
+  },
+  "512": {
+    "count": 100,
+    "query_language": "English COCO captions",
+    "quality": {
+      "exact_recall_at_1": 0.85,
+      "lance_recall_at_1": 0.85,
+      "exact_recall_at_5": 1.0,
+      "lance_recall_at_5": 1.0,
+      "exact_recall_at_10": 1.0,
+      "lance_recall_at_10": 1.0,
+      "ann_agreement_at_10": 1.0
+    },
+    "components_bytes": {
+      "sqlite": 172032,
+      "sqlite_wal": 0,
+      "lance_data": 206099,
+      "lance_index": 216860,
+      "lance_manifest": 2185
+    },
+    "raw_vectors_bytes": 204800,
+    "inference_seconds": 70.08042395114899,
+    "index_and_search_seconds": 1.4585429430007935,
+    "inference_max_rss_bytes": 999325696,
+    "inference_peak_footprint_bytes": 625346336,
+    "index_max_rss_bytes": 123977728,
+    "index_peak_footprint_bytes": 24331200
+  },
+  "shared_model_bytes": 387710976,
+  "limitations": [
+    "100 deterministic public COCO images, one known corresponding caption per image; not user-library or Japanese acceptance.",
+    "Exact and ANN ranking are separate; a caption can also fit another photo, but the ground truth has one positive.",
+    "CPU 2 threads, 70 vision tokens, 128 text tokens, 448-pixel previews, same native C adapter as app.",
+    "Independent fresh processes per phase/dimension; other builds active, timings are not isolated benchmarks.",
+    "RSS and physical footprint differ. Memory budgets are admission/checkpoint limits, not hard allocator ceilings."
+  ]
+}

@@ -4,6 +4,8 @@ import SuwopShell
 /// Executes Rust effects. Decisions and operation order belong to the Crux core.
 @MainActor final class AppleShell {
     private let root: URL
+    let localStore: LocalStore
+    var catalogChanged: (@MainActor () -> Void)?
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
     private let sharing = SystemSharing()
@@ -52,6 +54,7 @@ import SuwopShell
             "Suwop",
             isDirectory: true
         )
+        localStore = LocalStore(root: root)
         try FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true,
@@ -335,14 +338,12 @@ import SuwopShell
         }
     }
 
-    private func stateEffect(_ type: String, data: JSONValue) throws -> JSONValue {
+    private func stateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         if type == "readState" {
-            return try readState()
+            return try await localStore.read()
         }
-        let bytes = try Wire.encoder().encode(data)
-        let url = root.appendingPathComponent("library-v1.json")
-        try bytes.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        try await localStore.persist(data)
+        catalogChanged?()
         return .null
     }
 }
@@ -350,7 +351,7 @@ import SuwopShell
 private extension AppleShell {
     func appStateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         if ["readState", "persist"].contains(type) {
-            return try stateEffect(type, data: data)
+            return try await stateEffect(type, data: data)
         }
         if type.contains("ImmichLocked") {
             return try await immichLockedEffect(type, data: data)
@@ -441,12 +442,6 @@ private extension AppleShell {
         }
     }
 
-    private func readState() throws -> JSONValue {
-        let url = root.appendingPathComponent("library-v1.json")
-        guard FileManager.default.fileExists(atPath: url.path) else { return .null }
-        return try Wire.decoder().decode(JSONValue.self, from: Data(contentsOf: url))
-    }
-
     private func requiredString(_ data: JSONValue, _ key: String) throws -> String {
         guard let value = data[key].string else { throw SuwopError("入出力要求に \(key) がありません。") }
         return value
@@ -491,5 +486,57 @@ extension AppleShell {
         let bytes = try await http.thumbnail(request)
         guard let image = PlatformImage(data: bytes) else { throw SuwopError("プレビューを表示できません。") }
         return image
+    }
+}
+
+extension AppleShell {
+    func embeddingImage(_ job: EmbeddingJob, connection: ConnectionSettings?, version: Version?) async throws -> Data {
+        try Task.checkCancellation()
+        let key = job.asset.key
+        guard let dimensions = UInt32(exactly: job.model.dimensions) else { throw SuwopError("モデルの次元数が不正です。") }
+        let spec = try await localStore.inferenceSpec(dimensions: dimensions)
+        let edge = Int(spec.imageEdge)
+        if key.provider == .apple {
+            let store = appleStore(scope: key.scope)
+            let before = try ApplePhotosStore.describe(
+                ApplePhotosStore.fetch(key.assetID),
+                scope: key.scope,
+                fullAccess: false
+            )
+            try await localStore.validateEmbeddingInput(expected: job.asset, fresh: before)
+            let native = try await store.thumbnail(key, edge: CGFloat(edge), preview: true)
+            let after = try ApplePhotosStore.describe(
+                ApplePhotosStore.fetch(key.assetID),
+                scope: key.scope,
+                fullAccess: false
+            )
+            try await localStore.validateEmbeddingInput(expected: job.asset, fresh: after)
+            #if os(iOS)
+                // Keep UIImage orientation metadata until ImageIO applies its thumbnail transform.
+                guard let image = native.cgImage, image.width <= 1024, image.height <= 1024,
+                      let bytes = native.jpegData(compressionQuality: 0.9)
+                else {
+                    throw SuwopError("解析用画像を取得できません。")
+                }
+                return try await EmbeddingImage.prepare(bytes, edge: edge)
+            #else
+                guard let image = native.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
+                    throw SuwopError("解析用画像を取得できません。")
+                }
+                return try await EmbeddingImage.prepare(EmbeddingImage.jpeg(image), edge: edge)
+            #endif
+        }
+        guard key.provider == .immich, let connection, let version else {
+            throw SuwopError("保存先に再接続してください。")
+        }
+        try await localStore.validateEmbeddingInput(expected: job.asset, fresh: job.asset, connection: connection)
+        let credential = try Credentials.read(connection.credentialID)
+        let request = try CoreBridge.utility(7, input: .object([
+            "address": .string(connection.address), "key": .string(credential),
+            "assetID": .string(key.assetID), "preview": .bool(true), "version": .from(version),
+        ])).decode(HttpRequest.self)
+        let bytes = try await http.thumbnail(request)
+        try await localStore.validateEmbeddingInput(expected: job.asset, fresh: job.asset, connection: connection)
+        return try await EmbeddingImage.prepare(bytes, edge: edge)
     }
 }

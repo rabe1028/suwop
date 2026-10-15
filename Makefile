@@ -1,5 +1,9 @@
 export PATH := $(CURDIR)/.tools/bin:$(PATH)
+export CARGO_BUILD_JOBS ?= 2
+APPLE_PACKAGE_CACHE := $(CURDIR)/DerivedData/SourcePackages
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
+export MACOSX_DEPLOYMENT_TARGET ?= 14.0
+export IPHONEOS_DEPLOYMENT_TARGET ?= 17.0
 ifeq ($(shell uname -s),Darwin)
 export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
 endif
@@ -61,8 +65,8 @@ apple-core:
 
 apple-build: apple-core
 	xcodegen generate
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopiOS -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData/iOS CODE_SIGNING_ALLOWED=NO build
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopmacOS -destination 'generic/platform=macOS' -derivedDataPath DerivedData/macOS CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopiOS -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData/iOS CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopmacOS -destination 'generic/platform=macOS' -derivedDataPath DerivedData/macOS CODE_SIGNING_ALLOWED=NO build
 
 integration:
 	bash scripts/immich-integration-test.sh
@@ -86,4 +90,4 @@ apple-native-test:
 .PHONY: sharing-test
 sharing-test:
 	xcodegen generate
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test

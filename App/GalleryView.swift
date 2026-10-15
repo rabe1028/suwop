@@ -11,6 +11,7 @@ struct GalleryView: View {
     @State private var presence: Presence?
     @State private var sort: PhotoSort = .newest
     @State private var query = ""
+    @State private var contentSearch = false
     @State private var selecting = false
     @State private var selectedKeys: Set<AssetKey> = []
     @State private var viewer: AssetKey?
@@ -41,7 +42,7 @@ struct GalleryView: View {
         TabView(selection: $tab) {
             library.tabItem { Label("ライブラリ", systemImage: "photo.on.rectangle") }.tag(0)
             collections.tabItem { Label("コレクション", systemImage: "square.stack") }.tag(1)
-            library.tabItem { Label("検索", systemImage: "magnifyingglass") }.tag(2)
+            searchContent.tabItem { Label("検索", systemImage: "magnifyingglass") }.tag(2)
         }
         .onChange(of: query) { _, _ in updateBrowse() }
         .onChange(of: filter) { _, _ in updateBrowse() }
@@ -86,6 +87,20 @@ struct GalleryView: View {
         .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
             Button("\(selection.count) 件の原本を共有") { model.share(selection) }
         } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
+    }
+
+    private var searchContent: some View {
+        VStack(spacing: 0) {
+            Picker("検索方法", selection: $contentSearch) {
+                Text("名前・日付").tag(false)
+                Text("写真の内容").tag(true)
+            }.pickerStyle(.segmented).padding(.horizontal)
+            if contentSearch, let search = model.semanticSearch {
+                SemanticSearchView(search: search, library: model) { viewer = $0 }
+            } else {
+                library
+            }
+        }
     }
 
     private var library: some View {

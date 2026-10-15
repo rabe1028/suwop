@@ -1,0 +1,166 @@
+W0000 00:00:1792029829.860622 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029829.860885 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_audio_encoder_hw not found. Skipping.
+W0000 00:00:1792029829.860907 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029829.860913 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_audio_frontend not found. Skipping.
+W0000 00:00:1792029829.861387 21800010 litert_lm_loader.cc:391] Section not found: SP_Tokenizer
+INFO: [environment.cc:36] Creating LiteRT environment with options
+WARNING: [npu_registry.cc:34] NPU accelerator could not be loaded and registered: kLiteRtStatusErrorNotFound.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x11d3bd710, name=GPU WebGPU
+INFO: [gpu_registry.cc:113] Statically linked GPU accelerator registered.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x11d3b5cf0, name=CpuAccelerator
+INFO: [cpu_registry.cc:75] XNNPACK CPU accelerator registered.
+W0000 00:00:1792029829.894769 21800010 litert_lm_loader.cc:532] TFLite model type: tf_lite_audio_encoder_hw not found for prefer activation type. Use system's default backend activation type. System's default activation type for Text decoder is fp16. Vision encoder and audio encoder default is fp32.
+W0000 00:00:1792029829.894787 21800010 litert_lm_loader.cc:514] TFLite model type: tf_lite_audio_encoder_hw not found for backend constraints. Skipping.
+INFO: [environment.cc:36] Creating LiteRT environment with options
+WARNING: [npu_registry.cc:34] NPU accelerator could not be loaded and registered: kLiteRtStatusErrorNotFound.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x11d3c2df0, name=GPU WebGPU
+INFO: [gpu_registry.cc:113] Statically linked GPU accelerator registered.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x11d3c2e50, name=CpuAccelerator
+INFO: [cpu_registry.cc:75] XNNPACK CPU accelerator registered.
+W0000 00:00:1792029830.038055 21800010 mel_filterbank.cc:137] Missing 10 bands  starting at 0 in mel-frequency design. Perhaps too many channels or not enough frequency resolution in spectrum. (fft_length: 257 sample_rate: 16000 mel_channel_count: 128 lower_frequency_limit: 0 upper_frequency_limit: 8000
+INFO: [compiled_model.cc:829] Flatbuffer model initialized directly from incoming litert model.
+INFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+INFO: [compiled_model.cc:829] Flatbuffer model initialized directly from incoming litert model.
+W0000 00:00:1792029830.457839 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029830.457861 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_audio_encoder_hw not found. Skipping.
+W0000 00:00:1792029830.458099 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029830.458122 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_end_of_audio not found. Skipping.
+W0000 00:00:1792029830.458130 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029830.458184 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_end_of_audio not found. Skipping.
+INFO: [compiled_model.cc:829] Flatbuffer model initialized directly from incoming litert model.
+INFO: [compiled_model.cc:829] Flatbuffer model initialized directly from incoming litert model.
+INFO: [compiled_model.cc:1856] Tracked constant output tensor eoi_embedding with locked address
+W0000 00:00:1792029830.466277 21800010 litert_lm_loader.cc:391] Section not found: TFLiteModel
+W0000 00:00:1792029830.466288 21800010 litert_lm_loader.cc:479] TFLite model for type: tf_lite_per_layer_embedder not found. Skipping.
+INFO: [compiled_model.cc:829] Flatbuffer model initialized directly from incoming litert model.
+INFO: [environment.cc:36] Creating LiteRT environment with options
+WARNING: [npu_registry.cc:34] NPU accelerator could not be loaded and registered: kLiteRtStatusErrorNotFound.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x777ed65920, name=GPU WebGPU
+INFO: [gpu_registry.cc:113] Statically linked GPU accelerator registered.
+INFO: [accelerator_registry.cc:54] RegisterAccelerator: ptr=0x777ed65980, name=CpuAccelerator
+INFO: [cpu_registry.cc:75] XNNPACK CPU accelerator registered.
+I0000 00:00:1792029830.915989 21800100 stb_image_preprocessor.cc:79] Resize image from 407x448 to 336x384 which will result in 504 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029831.621933 21800095 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029832.254586 21800095 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029832.941417 21800099 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029833.645218 21800099 stb_image_preprocessor.cc:79] Resize image from 448x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029834.248311 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029834.857601 21800095 stb_image_preprocessor.cc:79] Resize image from 448x305 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029835.496644 21800102 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029836.088967 21800010 stb_image_preprocessor.cc:79] Resize image from 299x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029836.700794 21800010 stb_image_preprocessor.cc:79] Resize image from 448x325 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029837.325639 21800099 stb_image_preprocessor.cc:79] Resize image from 298x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029837.903877 21800099 stb_image_preprocessor.cc:79] Resize image from 448x269 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029838.543793 21800097 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029839.173655 21800097 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029839.838121 21800100 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029840.446237 21800009 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029841.036019 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029841.664751 21800009 stb_image_preprocessor.cc:79] Resize image from 448x224 to 528x240 which will result in 495 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029842.301171 21800097 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029844.138494 21800097 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029845.335855 21800097 stb_image_preprocessor.cc:79] Resize image from 240x320 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029847.275145 21800101 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029848.029447 21800096 stb_image_preprocessor.cc:79] Resize image from 448x260 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029848.695224 21800010 stb_image_preprocessor.cc:79] Resize image from 299x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029849.324451 21800098 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029849.918122 21800099 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029850.516249 21800097 stb_image_preprocessor.cc:79] Resize image from 298x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029851.101992 21800101 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029851.703986 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029852.288823 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029852.874323 21800102 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029853.463142 21800009 stb_image_preprocessor.cc:79] Resize image from 448x300 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029854.064287 21800010 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029854.670934 21800102 stb_image_preprocessor.cc:79] Resize image from 448x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029855.258061 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029855.869574 21800009 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029856.452360 21800009 stb_image_preprocessor.cc:79] Resize image from 448x224 to 528x240 which will result in 495 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029857.092680 21800099 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029857.720637 21800099 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029858.403967 21800097 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029859.000949 21800102 stb_image_preprocessor.cc:79] Resize image from 448x325 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029859.644676 21800101 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029860.234561 21800098 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029860.877721 21800101 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029861.493285 21800101 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029862.075370 21800099 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029862.658326 21800098 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029863.241146 21800097 stb_image_preprocessor.cc:79] Resize image from 299x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029863.883519 21800098 stb_image_preprocessor.cc:79] Resize image from 283x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029864.474926 21800096 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029865.049912 21800009 stb_image_preprocessor.cc:79] Resize image from 448x252 to 528x288 which will result in 594 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029865.630619 21800097 stb_image_preprocessor.cc:79] Resize image from 448x272 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029866.206225 21800009 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029866.848438 21800009 stb_image_preprocessor.cc:79] Resize image from 448x357 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029867.456361 21800010 stb_image_preprocessor.cc:79] Resize image from 448x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029868.105334 21800010 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029868.686667 21800101 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029869.277824 21800101 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029869.893435 21800099 stb_image_preprocessor.cc:79] Resize image from 448x253 to 528x288 which will result in 594 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029870.485993 21800096 stb_image_preprocessor.cc:79] Resize image from 298x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029871.070996 21800100 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029871.672616 21800102 stb_image_preprocessor.cc:79] Resize image from 446x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029872.279641 21800096 stb_image_preprocessor.cc:79] Resize image from 422x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029872.860368 21800099 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029873.493774 21800098 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029874.118329 21800098 stb_image_preprocessor.cc:79] Resize image from 448x355 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029874.776824 21800010 stb_image_preprocessor.cc:79] Resize image from 448x321 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029875.384717 21800102 stb_image_preprocessor.cc:79] Resize image from 448x300 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029875.960726 21800102 stb_image_preprocessor.cc:79] Resize image from 448x335 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029876.541954 21800010 stb_image_preprocessor.cc:79] Resize image from 448x377 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029877.156715 21800099 stb_image_preprocessor.cc:79] Resize image from 448x297 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029877.732619 21800010 stb_image_preprocessor.cc:79] Resize image from 448x320 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029878.320613 21800101 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029878.913958 21800095 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029879.504121 21800097 stb_image_preprocessor.cc:79] Resize image from 272x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029880.149274 21800102 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029880.863770 21800102 stb_image_preprocessor.cc:79] Resize image from 298x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029881.619373 21800099 stb_image_preprocessor.cc:79] Resize image from 448x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029882.294285 21800100 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029882.905806 21800009 stb_image_preprocessor.cc:79] Resize image from 448x447 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029883.519137 21800097 stb_image_preprocessor.cc:79] Resize image from 448x321 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029884.150724 21800097 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029884.798287 21800096 stb_image_preprocessor.cc:79] Resize image from 448x304 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029885.424240 21800096 stb_image_preprocessor.cc:79] Resize image from 448x298 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029886.022961 21800099 stb_image_preprocessor.cc:79] Resize image from 448x299 to 480x288 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029886.606903 21800102 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029887.206199 21800101 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029887.864467 21800099 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029888.493672 21800101 stb_image_preprocessor.cc:79] Resize image from 448x448 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029889.293174 21800009 stb_image_preprocessor.cc:79] Resize image from 334x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029889.948943 21800010 stb_image_preprocessor.cc:79] Resize image from 448x447 to 384x384 which will result in 576 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029892.680414 21800097 stb_image_preprocessor.cc:79] Resize image from 298x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029893.395054 21800097 stb_image_preprocessor.cc:79] Resize image from 240x180 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029894.034270 21800097 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029894.674950 21800100 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029895.286961 21800100 stb_image_preprocessor.cc:79] Resize image from 297x448 to 288x480 which will result in 540 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029896.981406 21800097 stb_image_preprocessor.cc:79] Resize image from 358x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029897.992395 21800010 stb_image_preprocessor.cc:79] Resize image from 448x336 to 432x336 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029898.749516 21800097 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+I0000 00:00:1792029899.497326 21800097 stb_image_preprocessor.cc:79] Resize image from 336x448 to 336x432 which will result in 567 patches to fit the max_num_patches: 630 limit.
+WARNING: Cache file is stale. Setting stale flag.
+WARNING: Cache file is stale. Setting stale flag.
+WARNING: Cache file is stale. Setting stale flag.
+INFO: [accelerator_registry.cc:43] DestroyAccelerator: ptr=0x11d3b5cf0, name=CpuAccelerator
+INFO: [accelerator_registry.cc:43] DestroyAccelerator: ptr=0x11d3bd710, name=GPU WebGPU
+INFO: [accelerator_registry.cc:43] DestroyAccelerator: ptr=0x777ed65980, name=CpuAccelerator
+INFO: [accelerator_registry.cc:43] DestroyAccelerator: ptr=0x777ed65920, name=GPU WebGPU
+       74.15 real       175.04 user         8.26 sys
+           999243776  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+               74518  page reclaims
+               20570  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                 124  voluntary context switches
+             1355823  involuntary context switches
+       2085930954160  instructions retired
+        557904138435  cycles elapsed
+           626116384  peak memory footprint

@@ -1,0 +1,15 @@
+{
+  "host": "Apple M1 Max",
+  "ram_bytes": "68719476736",
+  "os": "27.0.1",
+  "model_sha256": "92dcbea108899e5d6e30d919b0744f90d9967e80c67a4ab5503ac16d54f62eb0",
+  "sdk": "LiteRT-LM 0.18.0",
+  "profile": "Debug Swift harness and Rust library, distributed native LiteRT binary",
+  "source_sha256": {
+    "Sources/SuwopShell/EmbeddingRuntime.swift": "1dd1e3d2a16b20ee1573342a4074129cb441194606e76160fb05707f08e1e1c0",
+    "Sources/SuwopShell/EmbeddingImage.swift": "4e395487afa3756f2a59705ccd94ce43eb7a922246048af7f4315d0d420040fb",
+    "crates/suwop-core/src/inference.rs": "b8d737bd085796699c0efdf8f0bd86675b42897515f4329c728d926fcb90a720",
+    "experiments/embedding-evaluation/Sources/EmbeddingProbe/main.swift": "2df8404419962c0ea74f326d26d1c52f7c235552a0edba20074ef048266cfb8d"
+  },
+  "note": "Quality runs used the recorded inference settings. Subsequent changes tightened cache/engine leases, pressure handling, source eligibility, and budget/scene scheduling; they did not change model weights, image sizing, prompts, projection, or index parameters. The source_sha256 field identifies the earlier recorded source checkpoint, not the final application revision. Final validation is recorded separately."
+}

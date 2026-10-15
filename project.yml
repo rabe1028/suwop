@@ -5,6 +5,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: '6.0'
+    # LiteRT-LM 0.18.0 ships its iOS simulator binary for Apple Silicon only.
+    EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
     GCC_TREAT_WARNINGS_AS_ERRORS: YES

@@ -9,6 +9,8 @@ ROOT = Path(__file__).resolve().parent.parent
 CONFIG = json.loads((ROOT / "VRT/environment.json").read_text())
 BASELINES = ROOT / "VRT/Baselines"
 SCREENS = {
+    "semantic-search",
+    "semantic-search-paused-large-text",
     "immich-locked-form",
     "immich-locked-open",
     "immich-locked-preview",
