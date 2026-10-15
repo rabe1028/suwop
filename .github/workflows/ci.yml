@@ -78,8 +78,8 @@ jobs:
 
   vrt:
     runs-on: macos-26
-    # Budget for full VRT and PhotoKit acceptance on a cold CI runner.
-    timeout-minutes: 40
+    # Allow cold builds, the full VRT/UI suite and PhotoKit acceptance to finish in one job.
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       CARGO_BUILD_JOBS: '2'
