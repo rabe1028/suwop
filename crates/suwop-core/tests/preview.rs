@@ -12,6 +12,7 @@ use suwop_core::{
 
 fn asset(provider: Provider, id: &str, fingerprint: char) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,
@@ -53,6 +54,8 @@ fn snapshot(assets: Vec<StoredAsset>, access: ScanAccess) -> LibrarySnapshot {
 }
 fn session() -> Session {
     Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "fixture".into(),
         user_id: "owner".into(),
@@ -66,7 +69,7 @@ fn session() -> Session {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![
             snapshot(

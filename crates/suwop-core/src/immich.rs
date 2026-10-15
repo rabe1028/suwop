@@ -38,7 +38,14 @@ impl Version {
     }
 }
 #[derive(Debug, Clone)]
+pub struct OrdinarySessionGuard {
+    pub generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    pub expected: u64,
+}
+#[derive(Debug, Clone)]
 pub struct Session {
+    pub ordinary_content_guard: Option<OrdinarySessionGuard>,
+    pub ordinary_content_context: Option<OrdinaryContentAuthorization>,
     pub endpoint: String,
     pub key: String,
     pub user_id: String,
@@ -52,9 +59,28 @@ pub struct UploadPart {
     pub path: String,
     pub filename: String,
 }
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum OrdinaryContentPurpose {
+    Read,
+    DestinationReadback,
+    VisibilityReconciliation,
+}
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OrdinaryContentAuthorization {
+    pub source_keys: Vec<AssetKey>,
+    pub expected_revision: String,
+    pub purpose: OrdinaryContentPurpose,
+}
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_visibility_authorization:
+        Option<crate::immich_visibility::ImmichVisibilityAuthorization>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinary_content_authorization: Option<OrdinaryContentAuthorization>,
     pub url: String,
     pub method: String,
     pub headers: BTreeMap<String, String>,
@@ -122,6 +148,32 @@ pub fn valid_id(id: &str) -> Result<(), String> {
     }
 }
 impl Session {
+    pub(crate) fn check_content_guard(&self) -> Result<(), String> {
+        if self
+            .ordinary_content_guard
+            .as_ref()
+            .is_some_and(|g| g.generation.load(std::sync::atomic::Ordering::SeqCst) != g.expected)
+        {
+            return Err("写真へのアクセスが変わりました。処理を中止しました。".into());
+        }
+        Ok(())
+    }
+    fn content_authorization(&self, path: &str) -> Option<OrdinaryContentAuthorization> {
+        let context = self.ordinary_content_context.as_ref()?;
+        let asset_id = path
+            .strip_prefix("assets/")
+            .and_then(|tail| tail.split(['/', '?']).next());
+        let id = asset_id.filter(|id| valid_id(id).is_ok())?;
+        let mut result = context.clone();
+        if result.source_keys.is_empty() {
+            result.source_keys.push(AssetKey {
+                provider: Provider::Immich,
+                scope: self.scope.clone(),
+                asset_id: id.into(),
+            });
+        }
+        Some(result)
+    }
     pub fn preview_request(&self, id: &str, preview: bool) -> Result<HttpRequest, String> {
         valid_id(id)?;
         let size = if preview { "preview" } else { "thumbnail" };
@@ -140,6 +192,10 @@ impl Session {
     #[must_use]
     pub fn request(&self, path: &str, method: &str, body: Option<Value>) -> HttpRequest {
         HttpRequest {
+            immich_visibility_authorization: None,
+            ordinary_content_authorization: (method == "GET")
+                .then(|| self.content_authorization(path))
+                .flatten(),
             url: format!("{}/{path}", self.endpoint),
             method: method.into(),
             headers: BTreeMap::from([
@@ -159,8 +215,12 @@ impl Session {
         method: &str,
         body: Option<Value>,
     ) -> Result<T, String> {
+        self.check_content_guard()?;
         let response: HttpResponse =
             io(ctx, ShellOperation::Http(self.request(path, method, body))).await?;
+        if method == "GET" || method == "POST" && path == "search/metadata" {
+            self.check_content_guard()?;
+        }
         check_status(response.status)?;
         serde_json::from_value(response.body)
             .map_err(|e| format!("Immich の応答形式が不正です: {e}"))
@@ -222,6 +282,33 @@ impl Session {
             fresh.push(asset);
         }
         Ok(fresh)
+    }
+    /// Metadata-only refinement for a freshly enumerated exact owned asset.
+    /// Search omits stack knowledge even when it includes stacked members.
+    pub(crate) async fn hydrate_stack(&self, ctx: &Context, asset: &mut Asset) {
+        if asset.stack != crate::domain::ImmichStackState::Unknown
+            || asset.owner_id != self.user_id
+            || asset.is_trashed
+            || asset.visibility.as_deref() == Some("locked")
+            || valid_id(&asset.id).is_err()
+            || self.check_content_guard().is_err()
+        {
+            return;
+        }
+        let mut request = self.request(&format!("assets/{}", asset.id), "GET", None);
+        // This exact metadata request may precede publication of a new catalog key.
+        // It cannot be reused for original/thumbnail reads or arbitrary paths.
+        request.ordinary_content_authorization = None;
+        let response: Result<HttpResponse, _> = io(ctx, ShellOperation::Http(request)).await;
+        if self.check_content_guard().is_err() {
+            return;
+        }
+        if let Ok(response) = response
+            && check_status(response.status).is_ok()
+            && let Ok(fresh) = serde_json::from_value::<Asset>(response.body)
+        {
+            asset.adopt_stack(&fresh);
+        }
     }
     pub async fn list(&self, ctx: &Context, now: f64) -> Result<Vec<Asset>, String> {
         let mut assets = BTreeMap::new();
@@ -306,9 +393,11 @@ impl Session {
     }
     pub async fn download(&self, ctx: &Context, id: &str, path: &str) -> Result<(), String> {
         valid_id(id)?;
+        self.check_content_guard()?;
         let mut request = self.request(&format!("assets/{id}/original?edited=false"), "GET", None);
         request.download_path = Some(path.into());
         let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
+        self.check_content_guard()?;
         check_status(response.status)
     }
     pub async fn trash(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
@@ -339,6 +428,8 @@ pub async fn connect(
         return Err("API キーが不正です。".into());
     }
     let mut session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: endpoint(address, allow_http)?,
         key: key.into(),
         user_id: String::new(),
@@ -419,6 +510,13 @@ pub fn safe_name(name: &str) -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
+    #[serde(
+        default,
+        deserialize_with = "stack_state",
+        serialize_with = "crate::domain::ImmichStackState::serialize_api",
+        skip_serializing_if = "crate::domain::ImmichStackState::is_unknown"
+    )]
+    pub stack: crate::domain::ImmichStackState,
     pub id: String,
     pub owner_id: String,
     #[serde(rename = "type")]
@@ -456,7 +554,45 @@ pub struct AssetFile {
     pub kind: String,
     pub path: String,
 }
+impl crate::domain::ImmichStackState {
+    fn is_unknown(&self) -> bool {
+        *self == Self::Unknown
+    }
+    fn serialize_api<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Stacked => serde_json::json!({}).serialize(serializer),
+            _ => serializer.serialize_none(),
+        }
+    }
+}
+
+fn stack_state<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<crate::domain::ImmichStackState, D::Error> {
+    use crate::domain::ImmichStackState;
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(if value.is_null() {
+        ImmichStackState::Unstacked
+    } else if value.is_object() {
+        ImmichStackState::Stacked
+    } else {
+        ImmichStackState::Unknown
+    })
+}
+
 impl Asset {
+    pub(crate) fn adopt_stack(&mut self, fresh: &Self) {
+        if self.id == fresh.id
+            && self.owner_id == fresh.owner_id
+            && self.checksum == fresh.checksum
+            && self.updated_at == fresh.updated_at
+            && self.visibility == fresh.visibility
+            && !fresh.is_trashed
+        {
+            self.stack = fresh.stack.clone();
+        }
+    }
+
     #[must_use]
     pub fn record(
         &self,
@@ -530,6 +666,7 @@ impl Asset {
         }
         inventory_sidecars(files, &mut resources, &mut blockers);
         StoredAsset {
+            immich_stack: self.stack.clone(),
             apple_visibility: crate::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Immich,
@@ -620,4 +757,116 @@ fn nullable_library<'de, D: serde::Deserializer<'de>>(
             LibraryStorage::Internal
         }
     })
+}
+
+#[cfg(test)]
+mod stack_inventory_tests {
+    use super::*;
+    use crate::app::{Effect, Event, SavedLibrary, ShellResponse};
+    use std::sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    };
+
+    fn fixture() -> Result<Asset, String> {
+        serde_json::from_value(json!({"id":"33333333-3333-4333-8333-333333333333","ownerId":"owner","type":"IMAGE","originalFileName":"photo.jpg","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision","isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"timeline"})).map_err(|e| e.to_string())
+    }
+    fn session(generation: Arc<AtomicU64>) -> Session {
+        Session {
+            endpoint: "https://fixture.example/api".into(),
+            key: "key".into(),
+            user_id: "owner".into(),
+            scope: "scope".into(),
+            version: Version {
+                major: 3,
+                minor: 2,
+                patch: 4,
+            },
+            ordinary_content_guard: Some(OrdinarySessionGuard {
+                generation,
+                expected: 0,
+            }),
+            ordinary_content_context: Some(OrdinaryContentAuthorization {
+                source_keys: vec![],
+                expected_revision: "revision".into(),
+                purpose: OrdinaryContentPurpose::Read,
+            }),
+        }
+    }
+    #[test]
+    fn metadata_refinement_is_exact_and_cannot_adopt_after_generation_change() -> Result<(), String>
+    {
+        for changed in [false, true] {
+            let generation = Arc::new(AtomicU64::new(0));
+            let session = session(generation.clone());
+            let preview = session.preview_request(&fixture()?.id, false)?;
+            assert!(preview.ordinary_content_authorization.is_some());
+            assert!(
+                session
+                    .request(
+                        "assets/33333333-3333-4333-8333-333333333333/original",
+                        "GET",
+                        None
+                    )
+                    .ordinary_content_authorization
+                    .is_some()
+            );
+            let initial = fixture()?;
+            let mut command = crux_core::Command::<Effect, Event>::new(move |ctx| async move {
+                let mut asset = initial;
+                session.hydrate_stack(&ctx, &mut asset).await;
+                ctx.send_event(Event::Finished {
+                    state: SavedLibrary::default(),
+                    session: None,
+                    status: format!("{:?}", asset.stack),
+                    error: None,
+                    preview_to_select: None,
+                });
+            });
+            let effects = command.effects().collect::<Vec<_>>();
+            assert_eq!(effects.len(), 1);
+            for Effect::Io(mut effect) in effects {
+                let ShellOperation::Http(request) = &effect.operation else {
+                    return Err("HTTP expected".into());
+                };
+                assert_eq!(
+                    request.url,
+                    "https://fixture.example/api/assets/33333333-3333-4333-8333-333333333333"
+                );
+                assert_eq!(request.method, "GET");
+                assert!(request.ordinary_content_authorization.is_none());
+                assert!(request.download_path.is_none());
+                if changed {
+                    generation.fetch_add(1, Ordering::SeqCst);
+                }
+                let mut fresh = serde_json::to_value(fixture()?).map_err(|e| e.to_string())?;
+                fresh["stack"] = Value::Null;
+                effect
+                    .resolve(ShellResponse {
+                        value: Some(json!({"status":200,"body":fresh})),
+                        error: None,
+                    })
+                    .map_err(|_| "resolve")?;
+            }
+            let events = command.events().collect::<Vec<_>>();
+            let Some(Event::Finished { status, .. }) = events.last() else {
+                return Err("completion".into());
+            };
+            assert_eq!(status, if changed { "Unknown" } else { "Unstacked" });
+        }
+        Ok(())
+    }
+    #[test]
+    fn refinement_never_adopts_another_identity_or_revision() -> Result<(), String> {
+        for field in ["id", "ownerId", "checksum", "updatedAt", "visibility"] {
+            let mut original = fixture()?;
+            let mut raw = serde_json::to_value(&original).map_err(|e| e.to_string())?;
+            raw[field] = json!("changed");
+            raw["stack"] = Value::Null;
+            let fresh = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+            original.adopt_stack(&fresh);
+            assert_eq!(original.stack, crate::domain::ImmichStackState::Unknown);
+        }
+        Ok(())
+    }
 }

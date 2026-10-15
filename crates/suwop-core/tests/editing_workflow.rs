@@ -36,6 +36,7 @@ fn changed_draft(
 
 fn asset() -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
@@ -82,7 +83,7 @@ fn fixture_state(access: ScanAccess, scope: &str) -> SavedLibrary {
     remote.key.provider = Provider::Immich;
     remote.key.scope = "remote".into();
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: scope.into(),
         snapshots: vec![
             LibrarySnapshot {

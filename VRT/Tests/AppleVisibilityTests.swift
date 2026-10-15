@@ -85,7 +85,10 @@ final class AppleVisibilityTests: XCTestCase {
             do {
                 _ = try await loading.value
                 XCTFail("A late native image must not be published")
-            } catch { XCTAssertTrue(error.localizedDescription.contains("可視性")) }
+            } catch { XCTAssertTrue(
+                error is CancellationError,
+                "Current exact-source authorization must reject the late image"
+            ) }
             effects.hidden = false
             effects.delayed = false
             model.refresh()

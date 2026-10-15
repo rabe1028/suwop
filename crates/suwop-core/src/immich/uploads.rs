@@ -128,6 +128,7 @@ impl Session {
         ctx: &Context,
         request: super::HttpRequest,
     ) -> Result<(String, bool), String> {
+        self.check_content_guard()?;
         let response: HttpResponse = io(ctx, ShellOperation::Http(request)).await?;
         check_status(response.status)?;
         let status = response.body["status"]

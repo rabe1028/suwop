@@ -31,6 +31,30 @@ import SuwopShell
         cancel(id: id, error: nil)
     }
 
+    func changeImmichVisibility(
+        _ prompt: ImmichVisibilityPrompt,
+        context: ContentPresentationContext
+    ) async throws -> Bool {
+        var message = "\(prompt.from.title) → \(prompt.to.title)"
+        if prompt.removesAllAlbumMembership, prompt.noAutomaticAlbumRestore {
+            message += "\nすべてのアルバムから外れ、再表示しても所属は自動で戻りません。"
+        } else {
+            if prompt.removesAllAlbumMembership {
+                message += "\nすべてのアルバムから外れます。"
+            }
+            if prompt.noAutomaticAlbumRestore {
+                message += "\n再表示してもアルバム所属は自動で戻りません。"
+            }
+        }
+        message += "\nほかの保存先のコピーは変更しません。"
+        return try await confirm(
+            context: context,
+            title: prompt.to.title + "へ変更しますか？",
+            message: message,
+            action: prompt.to.title + "へ変更"
+        )
+    }
+
     func resumeUpload(_ prompt: UploadResumePrompt, context: ContentPresentationContext) async throws -> Bool {
         try await confirm(
             context: context,

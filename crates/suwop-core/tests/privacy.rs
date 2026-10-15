@@ -13,6 +13,7 @@ use suwop_core::{
 
 fn asset(provider: Provider, visibility: AppleVisibility) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: visibility,
         key: AssetKey {
             provider,
@@ -65,7 +66,7 @@ fn state(visibility: AppleVisibility) -> SavedLibrary {
     remote.longitude = None;
     remote.resources[0].name = "public-copy.jpg".into();
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(apple.clone()), snapshot(remote.clone())],
         receipts: vec![TransferReceipt {
@@ -366,7 +367,7 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
             .ok_or("receipt")?
             .remove("appleVisibility");
         let migrated = migrate(old)?;
-        assert_eq!(migrated.schema_version, 5);
+        assert_eq!(migrated.schema_version, 6);
         assert_eq!(
             migrated.snapshots[0].assets[0].apple_visibility,
             AppleVisibility::Unknown
@@ -422,6 +423,8 @@ fn old_upload_intent_evidence_matches_fresh_visible_source_but_not_modified_orig
         .remove("appleVisibility");
     let migrated = migrate(raw)?;
     let session = Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
         endpoint: "https://example/api".into(),
         key: "fixture".into(),
         scope: "remote".into(),

@@ -14,6 +14,7 @@ use suwop_core::{
 const OP: &str = "33333333-3333-4333-8333-333333333333";
 fn photo(id: &str) -> StoredAsset {
     StoredAsset {
+        immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
@@ -54,7 +55,7 @@ fn state() -> SavedLibrary {
     counterpart.key.provider = Provider::Immich;
     counterpart.key.scope = "remote".into();
     SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![
             LibrarySnapshot {

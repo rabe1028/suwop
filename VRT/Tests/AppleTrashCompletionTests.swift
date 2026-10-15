@@ -134,7 +134,7 @@ final class AppleTrashCompletionTests: XCTestCase {
                 )
                 XCTAssertNotNil(model.errorMessage)
                 if outcome == .lost {
-                    XCTAssertEqual(model.errorMessage, "lost native response")
+                    XCTAssertEqual(model.errorMessage, "写真へのアクセスが変わりました。処理結果を確認してください。")
                 } else {
                     XCTAssertTrue(model.errorMessage?.contains("アクセスが変わりました") == true)
                 }

@@ -35,7 +35,7 @@ fn state(trashed: bool) -> Result<SavedLibrary, String> {
     apple.is_offline = false;
     apple.deletion_blockers.clear();
     Ok(SavedLibrary {
-        schema_version: 5,
+        schema_version: 6,
         apple_scope: "apple".into(),
         snapshots: vec![
             LibrarySnapshot {
@@ -79,6 +79,8 @@ fn core(state: SavedLibrary) -> Core<Suwop> {
             state,
             ready: true,
             session: Some(Session {
+                ordinary_content_guard: None,
+                ordinary_content_context: None,
                 endpoint: "https://photos.example/api".into(),
                 key: "fixture".into(),
                 user_id: OWNER.into(),
