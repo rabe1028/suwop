@@ -24,6 +24,7 @@ import SwiftUI
     private let store: LocalStore
     private let runtime = EmbeddingRuntime()
     private let image: @MainActor (EmbeddingJob) async throws -> Data
+    private let prepareModel: (@MainActor () async throws -> Void)?
     private var task: Task<Void, Never>?
     private var loaded = false
     private var suspended = false
@@ -33,8 +34,13 @@ import SwiftUI
     private var selectionRevision = 0
     private var pausing = false
 
-    init(store: LocalStore, image: @escaping @MainActor (EmbeddingJob) async throws -> Data) {
+    init(
+        store: LocalStore,
+        prepareModel: (@MainActor () async throws -> Void)? = nil,
+        image: @escaping @MainActor (EmbeddingJob) async throws -> Data
+    ) {
         self.store = store
+        self.prepareModel = prepareModel
         self.image = image
     }
 
@@ -108,7 +114,10 @@ import SwiftUI
             guard let self else { return }
             busy = true
             defer { finishOperation() }
-            do { try await runPending() } catch { await failed(error) }
+            do {
+                try await ensureModel()
+                try await runPending()
+            } catch { await failed(error) }
             await unload()
         }
     }
@@ -164,9 +173,15 @@ import SwiftUI
             guard let self else { return }
             busy = true
             defer { finishOperation() }
+            let text: String
+            do { text = try await store.queryText(query) } catch {
+                if !Task.isCancelled {
+                    message = error.localizedDescription
+                }
+                return
+            }
             do {
                 try await store.setInferenceBudget(key: key, budget: UInt64(budgetMiB) << 20)
-                let text = try await store.queryText(query)
                 try await loadIfAdmitted(key: key, query: true)
                 let vector = try await runtime.embedding(Data(text.utf8), image: false)
                 try Task.checkCancellation()
@@ -226,6 +241,10 @@ import SwiftUI
 
     private func ensureModel() async throws {
         try Task.checkCancellation()
+        if let prepareModel {
+            try await prepareModel()
+            return
+        }
         if await (try? store.modelPath()) != nil {
             return
         }
@@ -314,7 +333,7 @@ import SwiftUI
     }
 
     private func failed(_ error: Error) async {
-        if error is CancellationError {
+        if Task.isCancelled || error is CancellationError {
             return
         }
         message = error.localizedDescription

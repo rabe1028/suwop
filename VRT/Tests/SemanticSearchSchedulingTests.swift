@@ -109,4 +109,60 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         XCTAssertNil(fresh.inference)
         XCTAssertFalse(fresh.busy)
     }
+
+    @MainActor func testForegroundRetriesInterruptedModelPreparationWithoutPausingJournal() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        var preparations = 0
+        let search = SemanticSearchModel(
+            store: store,
+            prepareModel: {
+                preparations += 1
+                if preparations == 1 {
+                    do { try await Task.sleep(for: .seconds(60)) } catch { throw URLError(.cancelled) }
+                }
+            },
+            image: { _ in throw SuwopError("No image expected") }
+        )
+        search.scene(id: "test", active: true)
+        await search.restore()
+        try await settle { preparations == 1 }
+        search.scene(id: "test", active: false)
+        try await settle { !search.busy }
+        let interrupted = try await store.inferenceStatus(key: configured.modelKey)
+        XCTAssertEqual(interrupted?.state, "running")
+        search.scene(id: "test", active: true)
+        try await settle { preparations == 2 && !search.busy }
+        let resumed = try await store.inferenceStatus(key: configured.modelKey)
+        XCTAssertEqual(resumed?.state, "running")
+    }
+
+    @MainActor func testInvalidSearchTextDoesNotPausePhotoIndexing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = LocalStore(root: root)
+        let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        let search = SemanticSearchModel(store: store) { _ in throw SuwopError("No image expected") }
+        await search.selectDimensions()
+        for invalid in ["   ", String(repeating: "あ", count: 129), "hello\u{0}world"] {
+            search.query = invalid
+            search.search()
+            try await settle { !search.busy }
+            let state = try await store.inferenceStatus(key: configured.modelKey)
+            XCTAssertEqual(state?.state, "running")
+            XCTAssertNil(state?.error)
+        }
+    }
+
+    @MainActor private func settle(_ condition: () -> Bool) async throws {
+        for _ in 0 ..< 200 {
+            if condition() {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        XCTFail("Semantic search scheduling did not settle")
+    }
 }
