@@ -24,10 +24,11 @@ import SuwopShell
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
-    init(visibility: String = "timeline") throws {
+    init(visibility: String = "timeline", video: Bool = false) throws {
         var source = try ImmichVisibilityFixtureData.source(visibility: visibility)
             .decode([String: JSONValue].self)
-        source["originalFileName"] = .string("ORDINARY-ARCHIVE.JPG")
+        source["originalFileName"] = .string(video ? "ORDINARY-ARCHIVE.MP4" : "ORDINARY-ARCHIVE.JPG")
+        source["type"] = .string(video ? "VIDEO" : "IMAGE")
         let initial = JSONValue.object(source)
         record = initial
         originalFacts = try Self.originalData(initial)

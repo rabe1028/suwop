@@ -94,6 +94,7 @@ struct Shell {
     fail_persist: Option<usize>,
     revoke_confirm: bool,
     confirmation_events: Vec<Event>,
+    patch_after_confirm: Option<Value>,
     close_after_write: bool,
     patch: Option<Value>,
     scan_revision: Option<String>,
@@ -149,6 +150,9 @@ impl Shell {
                 }
                 for event in std::mem::take(&mut self.confirmation_events) {
                     assert!(c.process_event(event).is_empty());
+                }
+                if let Some(patch) = self.patch_after_confirm.take() {
+                    self.patch = Some(patch);
                 }
                 Ok(json!(self.confirm))
             }
@@ -394,9 +398,8 @@ fn protected_and_wrong_scope_are_denied_before_io() -> Result<(), String> {
     Ok(())
 }
 #[test]
-fn linked_video_stack_locked_and_unknown_facts_never_confirm() -> Result<(), String> {
+fn link_stack_locked_and_unknown_facts_never_confirm() -> Result<(), String> {
     for patch in [
-        json!({"type":"VIDEO"}),
         json!({"livePhotoVideoId":ASSET}),
         json!({"stack":{}}),
         json!({"visibility":"locked"}),
@@ -937,6 +940,90 @@ fn account_change_revokes_owner_but_retains_actual_active_scene_registration() -
         c.view().immich_archive_view.scene_id.as_deref(),
         Some(SCENE)
     );
+    assert_eq!(s.writes, 0);
+    Ok(())
+}
+
+#[test]
+fn selected_video_uses_pin_free_ordinary_authority_only() -> Result<(), String> {
+    let mut raw = asset();
+    raw["type"] = json!("VIDEO");
+    let a: Asset = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let mut m = model()?;
+    m.state.snapshots[0].assets = vec![a.record("scope", None, None)];
+    let (c, mut s) = started(m)?;
+    s.patch = Some(json!({"type":"VIDEO"}));
+    assert_eq!(
+        c.view().immich_archive_actions[0].to,
+        Some(ImmichArchiveDestination::Archive)
+    );
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.confirms, 1);
+    assert_eq!(s.writes, 1);
+    assert_eq!(s.persists, 2);
+    let state: SavedLibrary =
+        serde_json::from_value(s.disk.ok_or("disk")?).map_err(|e| e.to_string())?;
+    let op = &state.immich_visibility_operations[0];
+    assert_eq!(op.kind, ImmichVisibilityOperationKind::OrdinaryArchive);
+    assert_eq!(
+        op.outcome,
+        suwop_core::apple_visibility::VisibilityOutcome::Applied
+    );
+    assert!(suwop_core::immich_visibility::fences(&state, &key()));
+    Ok(())
+}
+
+#[test]
+fn video_lost_reply_restart_keeps_write_fence_and_pin_hint_disabled() -> Result<(), String> {
+    let mut raw = asset();
+    raw["type"] = json!("VIDEO");
+    let a: Asset = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let stored = a.record("scope", None, None);
+    let mut m = model()?;
+    m.state.snapshots[0].assets = vec![stored];
+    let (c, mut s) = started(m)?;
+    s.patch = Some(json!({"type":"VIDEO"}));
+    let pin = c
+        .view()
+        .immich_visibility_actions
+        .into_iter()
+        .find(|h| h.key == key())
+        .ok_or("PIN hint")?;
+    assert!(!pin.can_show_timeline && !pin.can_show_archive && !pin.can_lock);
+    s.faults.lost = true;
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 1);
+    let state: SavedLibrary =
+        serde_json::from_value(s.disk.ok_or("disk")?).map_err(|e| e.to_string())?;
+    assert_eq!(
+        state.immich_visibility_operations[0].outcome,
+        suwop_core::apple_visibility::VisibilityOutcome::Unknown
+    );
+    assert!(state.immich_visibility_operations[0].observation.is_none());
+    let mut restarted = model()?;
+    assert!(suwop_core::immich_visibility::fences(&state, &key()));
+    restarted.state = state;
+    let (c, mut s) = started(restarted)?;
+    s.patch = Some(json!({"type":"VIDEO"}));
+    s.run(
+        &c,
+        prepare(
+            "44444444-4444-4444-8444-444444444444",
+            ImmichArchiveDestination::Timeline,
+        ),
+    )?;
+    assert_eq!(s.writes, 0);
+    assert_eq!(s.confirms, 0);
+    Ok(())
+}
+
+#[test]
+fn media_type_change_after_confirmation_never_persists_or_writes() -> Result<(), String> {
+    let (c, mut s) = started(model()?)?;
+    s.patch_after_confirm = Some(json!({"type":"VIDEO"}));
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.confirms, 1);
+    assert_eq!(s.persists, 0);
     assert_eq!(s.writes, 0);
     Ok(())
 }

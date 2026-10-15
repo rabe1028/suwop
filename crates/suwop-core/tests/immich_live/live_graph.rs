@@ -11,6 +11,12 @@ use suwop_core::{
     immich::{self, HttpRequest, HttpResponse, Session},
 };
 
+#[path = "live_graph/ordinary_linked.rs"]
+mod ordinary_linked;
+pub(super) use ordinary_linked::{
+    ordinary_linked_controls, ordinary_linked_setup, verify_ordinary_linked,
+};
+
 const PIN: &str = "123456";
 const V: &[u8] = include_bytes!("../fixtures/live_graph/V.mp4");
 const M: &[u8] = include_bytes!("../fixtures/live_graph/M.mp4");
@@ -153,8 +159,16 @@ fn operation_label(request: &HttpRequest) -> &'static str {
 }
 
 async fn setup(ctx: &Context, address: &str, key: &str) -> Result<Elevated, String> {
+    setup_named(ctx, address, key, "graph").await
+}
+async fn setup_named(
+    ctx: &Context,
+    address: &str,
+    key: &str,
+    prefix: &str,
+) -> Result<Elevated, String> {
     let admin = immich::connect(ctx, address, key, true).await?;
-    let email = format!("graph-{}@example.invalid", std::process::id());
+    let email = format!("{prefix}-{}@example.invalid", std::process::id());
     let password = "GraphFixtureOnly123!";
     admin
         .json::<Value>(
@@ -204,6 +218,7 @@ async fn setup(ctx: &Context, address: &str, key: &str) -> Result<Elevated, Stri
     session.unlock(ctx).await?;
     Ok(session)
 }
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Graph {
     video: String,
     motion: String,

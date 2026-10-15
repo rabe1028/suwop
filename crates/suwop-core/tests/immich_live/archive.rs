@@ -19,7 +19,55 @@ const PIXEL: &str = "iVBORw0KGgoAAAANSUhEUgAAAAMAAAACCAYAAACddGYaAAAAEUlEQVR4nGM
 #[test]
 #[ignore = "requires the isolated Docker Immich harness"]
 fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Result<(), String> {
-    let directory = std::env::temp_dir().join(format!("suwop-archive-{}", std::process::id()));
+    ordinary_roundtrip(FixtureMedia::Image)
+}
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_pin_unset_video_archive_roundtrip_preserves_two_albums_and_original() -> Result<(), String>
+{
+    ordinary_roundtrip(FixtureMedia::Video)
+}
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_ordinary_selected_motion_preserves_locked_parent() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::LinkedMotion)
+}
+#[derive(Clone, Copy)]
+enum FixtureMedia {
+    Image,
+    Video,
+    LinkedMotion,
+}
+impl FixtureMedia {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Image => "ordinary.png",
+            Self::Video => "ordinary.mp4",
+            Self::LinkedMotion => "linked-motion.mp4",
+        }
+    }
+    fn role(self) -> ResourceRole {
+        match self {
+            Self::Image => ResourceRole::Image,
+            Self::Video | Self::LinkedMotion => ResourceRole::Video,
+        }
+    }
+    fn bytes(self) -> Result<Vec<u8>, String> {
+        match self {
+            Self::Image => base64::engine::general_purpose::STANDARD
+                .decode(PIXEL)
+                .map_err(|_| "pixel".into()),
+            Self::Video => Ok(include_bytes!("../fixtures/live_graph/V.mp4").to_vec()),
+            Self::LinkedMotion => Ok(include_bytes!("../fixtures/live_graph/M.mp4").to_vec()),
+        }
+    }
+}
+fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
+    let directory = std::env::temp_dir().join(format!(
+        "suwop-archive-{}-{}",
+        std::process::id(),
+        media.name()
+    ));
     std::fs::create_dir_all(&directory).map_err(|e| e.to_string())?;
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .http_status_as_error(false)
@@ -27,7 +75,7 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         .timeout_global(Some(Duration::from_secs(30)))
         .build()
         .into();
-    let (session, id, albums) = setup(&agent, &directory)?;
+    let (session, id, albums) = setup(&agent, &directory, media)?;
     let key = AssetKey {
         provider: Provider::Immich,
         scope: session.scope.clone(),
@@ -91,7 +139,10 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
             operation.outcome,
             suwop_core::apple_visibility::VisibilityOutcome::Applied
         );
-        verify_preserved(&agent, &session, &key, &albums, &directory)?;
+        verify_preserved(&agent, &session, &key, &albums, &directory, media)?;
+        if matches!(media, FixtureMedia::LinkedMotion) {
+            super::live_graph::ordinary_linked_controls(&agent, &session, &directory)?;
+        }
         let refresh_trace_start = shell.diagnostics.trace.len();
         shell.run(
             &core,
@@ -103,12 +154,24 @@ fn real_pin_unset_archive_roundtrip_preserves_two_albums_and_original() -> Resul
         assert!(core.view().ordinary_content_keys.contains(&key));
         recover_scan_revision_race(&mut shell, &core, &session, &key, to, refresh_trace_start)?;
     }
+    finish_roundtrip(&shell, &agent, &session, &directory, media)
+}
+fn finish_roundtrip(
+    shell: &ArchiveShell<'_>,
+    agent: &ureq::Agent,
+    session: &Session,
+    directory: &Path,
+    media: FixtureMedia,
+) -> Result<(), String> {
     assert_eq!(shell.auth_requests, 0);
     assert_eq!(shell.writes, 2);
-    let journal = serde_json::to_string(&read_state(&directory)?).map_err(|_| "journal")?;
+    let journal = serde_json::to_string(&read_state(directory)?).map_err(|_| "journal")?;
     assert!(!journal.contains("password"));
     assert!(!journal.contains("pinCode"));
-    std::fs::remove_dir_all(&directory).map_err(|e| e.to_string())?;
+    if matches!(media, FixtureMedia::LinkedMotion) {
+        super::live_graph::verify_ordinary_linked(agent, session, directory)?;
+    }
+    std::fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
     Ok(())
 }
 fn recover_scan_revision_race(
@@ -392,12 +455,20 @@ impl ArchiveShell<'_> {
         }
     }
 }
-fn setup(agent: &ureq::Agent, directory: &Path) -> Result<(Session, String, Vec<String>), String> {
+fn setup(
+    agent: &ureq::Agent,
+    directory: &Path,
+    media: FixtureMedia,
+) -> Result<(Session, String, Vec<String>), String> {
     let address = std::env::var("SUWOP_IMMICH_URL").map_err(|_| "URL")?;
     let key = std::env::var("SUWOP_IMMICH_API_KEY").map_err(|_| "key")?;
     let directory = directory.to_path_buf();
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
-        let result = fixture(&ctx, &address, &key, &directory).await;
+        let result = if matches!(media, FixtureMedia::LinkedMotion) {
+            super::live_graph::ordinary_linked_setup(&ctx, &address, &key, &directory).await
+        } else {
+            fixture(&ctx, &address, &key, &directory, media).await
+        };
         let (session, status, error) = match result {
             Ok((session, id, albums)) => (
                 Some(session),
@@ -476,8 +547,12 @@ fn setup(agent: &ureq::Agent, directory: &Path) -> Result<(Session, String, Vec<
         serde_json::from_value(value["albums"].clone()).map_err(|_| "setup albums")?,
     ))
 }
-async fn pin_unset_session(ctx: &Context, admin: &Session) -> Result<Session, String> {
-    let email = format!("archive-{}@example.invalid", std::process::id());
+async fn pin_unset_session(
+    ctx: &Context,
+    admin: &Session,
+    suffix: &str,
+) -> Result<Session, String> {
+    let email = format!("archive-{}-{suffix}@example.invalid", std::process::id());
     let password = "ArchiveFixtureOnly123!";
     let _: Value = admin
         .json(
@@ -526,22 +601,21 @@ async fn fixture(
     address: &str,
     key: &str,
     directory: &Path,
+    media: FixtureMedia,
 ) -> Result<(Session, String, Vec<String>), String> {
     let admin = immich::connect(ctx, address, key, true)
         .await
         .map_err(|_| "fixture admin connect")?;
-    let session = pin_unset_session(ctx, &admin)
+    let session = pin_unset_session(ctx, &admin, media.name())
         .await
         .map_err(|_| "fixture new user/session")?;
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(PIXEL)
-        .map_err(|_| "pixel")?;
-    let path = directory.join("ordinary.png");
+    let bytes = media.bytes()?;
+    let path = directory.join(media.name());
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
     let resource = PhotoResource {
         id: "ordinary".into(),
-        name: "ordinary.png".into(),
-        role: ResourceRole::Image,
+        name: media.name().into(),
+        role: media.role(),
         sha1: None,
         bytes: Some(bytes.len() as u64),
     };
@@ -549,7 +623,10 @@ async fn fixture(
         resource: resource.clone(),
         path: path.to_string_lossy().into_owned(),
         signature: FileSignature {
-            sha256: "0".repeat(64),
+            sha256: {
+                use sha2::Digest;
+                suwop_core::domain::hex(&sha2::Sha256::digest(&bytes))
+            },
             bytes: bytes.len() as u64,
         },
     };
@@ -578,6 +655,7 @@ fn verify_preserved(
     key: &AssetKey,
     albums: &[String],
     directory: &Path,
+    media: FixtureMedia,
 ) -> Result<(), String> {
     let response: HttpResponse = serde_json::from_value(execute(
         agent,
@@ -607,9 +685,7 @@ fn verify_preserved(
     immich::check_status(response.status)?;
     assert_eq!(
         std::fs::read(path).map_err(|e| e.to_string())?,
-        base64::engine::general_purpose::STANDARD
-            .decode(PIXEL)
-            .map_err(|_| "pixel")?
+        media.bytes()?
     );
     Ok(())
 }

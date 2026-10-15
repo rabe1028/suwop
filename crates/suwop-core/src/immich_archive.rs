@@ -174,7 +174,7 @@ pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
         .flat_map(|s| &s.assets)
         .filter(|a| allowed(model, &a.key))
         .map(|a| {
-            let mut reason = crate::immich_visibility::hint(a, false).reason;
+            let mut reason = crate::immich_visibility::ordinary_archive_reason(a);
             let to = match a.immich_visibility {
                 Some(ImmichVisibility::Timeline) => Some(ImmichArchiveDestination::Archive),
                 Some(ImmichVisibility::Archive) => Some(ImmichArchiveDestination::Timeline),
@@ -274,6 +274,17 @@ impl From<crate::immich_locked::VisibilitySession> for VisibilityAuthority {
     }
 }
 impl VisibilityAuthority {
+    pub(crate) fn facts(
+        &self,
+        value: &serde_json::Value,
+    ) -> Result<crate::immich_visibility::VisibilityFacts, String> {
+        match self {
+            Self::Locked(_) => crate::immich_visibility::facts(value, self.scope(), self.owner()),
+            Self::Ordinary(_) => {
+                crate::immich_visibility::ordinary_facts(value, self.scope(), self.owner())
+            }
+        }
+    }
     // Ordinary API-key authority may remove stale display state, but can never
     // mint a PIN-session locked entry, even from an authenticated readback.
     pub(crate) fn projection(

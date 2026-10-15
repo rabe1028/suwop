@@ -15,6 +15,8 @@
                         .accessibilityAddTraits(.isHeader)
                         .accessibilityIdentifier("immichArchiveConfirmationTitle")
                     Text("\(prompt.from.title) → \(prompt.to.title)").font(.headline)
+                    Text(prompt.selectedItemDisclosure)
+                        .accessibilityIdentifier("immichArchiveSelectedItemDisclosure")
                     Text("ほかの保存先のコピーは変更しません。")
                 }.fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading).padding(24)

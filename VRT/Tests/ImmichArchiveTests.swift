@@ -3,6 +3,43 @@ import SuwopShell
 import XCTest
 
 final class ImmichArchiveTests: XCTestCase {
+    @MainActor func testVideoOrdinaryRoundtripRetainsOriginalFactsAndNeverAcquiresPINAuthority() async throws {
+        let fixture = try ImmichArchivePhotoFixture(video: true)
+        let model = try await fixture.start()
+        defer {
+            model.immichArchive.close(sceneID: ImmichArchivePhotoFixture.sceneID)
+            fixture.releaseHeld()
+        }
+        let albums = fixture.server.albumMembers
+        for destination in [ImmichArchiveDestination.archive, .timeline] {
+            let view = try await fixture.runtime.view()
+            let asset = try XCTUnwrap(view.state.snapshots.flatMap(\.assets).first {
+                $0.key == ImmichArchiveFixtureServer.key
+            })
+            XCTAssertEqual(asset.resources.map(\.role), [.video])
+            XCTAssertTrue(asset.inventoryComplete)
+            XCTAssertEqual(view.immichArchiveActions.first?.to, destination)
+            XCTAssertFalse(view.immichVisibilityActions.first?.canLock ?? true)
+            XCTAssertEqual(view.immichVisibilityActions.first?.reason, .video)
+            fixture.prepare(destination)
+            try await fixture
+                .settle { !model.immichArchive.busy && !fixture.journal.immichVisibilityOperations.isEmpty }
+            XCTAssertEqual(fixture.server.record["visibility"].string, destination.rawValue)
+            XCTAssertEqual(fixture.server.record["type"].string, "VIDEO")
+            XCTAssertTrue(fixture.server.originalsIntact)
+            XCTAssertEqual(fixture.server.albumMembers, albums)
+            model.refresh()
+            try await fixture.settle { !model.isBusy }
+        }
+        XCTAssertEqual(fixture.server.mutationAttempts, 2)
+        XCTAssertEqual(fixture.server.authenticationRequests, 0)
+        XCTAssertEqual(fixture.deviceAuthCalls, 0)
+        XCTAssertTrue(fixture.confirmations.allSatisfy {
+            $0.selectedItemDisclosure.contains("関連する写真の表示先は変わりません。")
+        })
+        XCTAssertTrue(fixture.confirmations.last?.selectedItemDisclosure.contains("ほかの Immich アプリ") == true)
+    }
+
     @MainActor func testPINFreeBothDirectionsPreserveAlbumsOriginalFactsAndIndependentAppleCopy() async throws {
         let fixture = try ImmichArchivePhotoFixture(appleCopy: true)
         let model = try await fixture.start()
