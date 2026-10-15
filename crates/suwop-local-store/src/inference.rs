@@ -3,13 +3,25 @@ use rusqlite::{OptionalExtension, params};
 use sha2::{Digest, Sha256};
 use std::{fs::File, io::Read, path::Path};
 use suwop_core::{
-    analysis::AnalysisBudget,
+    analysis::{AnalysisBudget, AnalysisStatus},
     app::ConnectionSettings,
     domain::{Provider, StoredAsset},
     inference::{self, InferenceStatus},
 };
 
 impl Store {
+    /// Only this native provider's complete, current model identities are restorable.
+    pub fn compatible_inference_statuses(&self) -> Result<Vec<AnalysisStatus>> {
+        Ok(self
+            .status()?
+            .into_iter()
+            .filter(|status| {
+                inference::specification(status.model.dimensions)
+                    .is_ok_and(|spec| spec.model == status.model)
+            })
+            .collect())
+    }
+
     pub fn validate_embedding_input(
         &self,
         expected: &StoredAsset,

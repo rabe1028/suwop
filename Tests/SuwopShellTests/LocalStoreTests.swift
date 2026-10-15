@@ -63,3 +63,19 @@ import Testing
     #expect(hits.count == 1)
     #expect(hits.first?.asset.assetID == "one")
 }
+
+@Test func nativeProviderRestorationExcludesOtherModelIdentitiesAcrossABI() async throws {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    defer { try? FileManager.default.removeItem(at: root) }
+    let store = LocalStore(root: root)
+    let first = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+    let second = try await store.configureInference(dimensions: 512, budget: 1536 << 20)
+    var incompatible = try await store.inferenceSpec(dimensions: 256).model
+    incompatible.preprocessing += "/old"
+    let budget = AnalysisBudget(cacheBytes: 8 << 20, maxBatchRows: 32, workingBytes: 128 << 20)
+    _ = try await store.register(model: incompatible, budget: budget)
+    let all = try await store.status()
+    #expect(all.count == 3)
+    let compatible = try await store.compatibleInferenceStatuses()
+    #expect(Set(compatible.map(\.modelKey)) == Set([first.modelKey, second.modelKey]))
+}

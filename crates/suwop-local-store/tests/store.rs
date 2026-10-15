@@ -621,3 +621,31 @@ fn inference_input_binds_the_current_server_and_credential_snapshot() -> Result 
     );
     Ok(())
 }
+
+#[test]
+fn inference_restoration_requires_the_complete_current_provider_identity() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let first = store.configure_inference(256, 1536 << 20)?;
+    let second = store.configure_inference(512, 1536 << 20)?;
+    let original = suwop_core::inference::specification(256)?.model;
+    for field in 0..5 {
+        let mut incompatible = original.clone();
+        match field {
+            0 => incompatible.name.push_str("-other"),
+            1 => incompatible.version.push_str("-old"),
+            2 => incompatible.preprocessing.push_str("-other"),
+            3 => incompatible.rendition.push_str("-original"),
+            _ => incompatible.dimensions = 768,
+        }
+        store.register(&incompatible, &AnalysisBudget::default())?;
+    }
+    assert_eq!(store.status()?.len(), 7);
+    drop(store);
+    let reopened = Store::open(root.path())?;
+    let statuses = reopened.compatible_inference_statuses()?;
+    assert_eq!(statuses.len(), 2);
+    assert!(statuses.iter().any(|s| s.model_key == first.model_key));
+    assert!(statuses.iter().any(|s| s.model_key == second.model_key));
+    Ok(())
+}

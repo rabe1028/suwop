@@ -19,6 +19,7 @@ pub struct Request {
     rename_all_fields = "camelCase"
 )]
 pub enum Command {
+    CompatibleInferenceStatuses,
     InferenceSpec {
         dimensions: u32,
     },
@@ -103,6 +104,9 @@ pub enum Command {
 pub fn dispatch(request: Request) -> Result<Value> {
     let mut store = Store::open(Path::new(&request.root))?;
     let value = match request.command {
+        Command::CompatibleInferenceStatuses => {
+            serde_json::to_value(store.compatible_inference_statuses()?).map_err(error)?
+        }
         Command::InferenceSpec { dimensions } => {
             serde_json::to_value(suwop_core::inference::specification(dimensions)?)
                 .map_err(error)?

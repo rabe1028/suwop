@@ -1,6 +1,11 @@
 import Foundation
 
 public extension LocalStore {
+    func compatibleInferenceStatuses() async throws -> [AnalysisStatus] {
+        try await call(.object(["type": .string("compatibleInferenceStatuses")]))
+            .decode([AnalysisStatus].self)
+    }
+
     func inferenceSpec(dimensions: UInt32) async throws -> InferenceSpec {
         try await call(.object(["type": .string("inferenceSpec"), "dimensions": .number(Double(dimensions))]))
             .decode(InferenceSpec.self)

@@ -4,7 +4,16 @@ import SwiftUI
 
 /// Presents the Rust job journal and executes one native inference effect at a time.
 @MainActor final class SemanticSearchModel: ObservableObject {
-    @Published var dimensions: UInt32 = 256
+    @Published var dimensions: UInt32 = 256 {
+        didSet {
+            guard dimensions != oldValue else { return }
+            selectionRevision += 1
+            status = nil
+            inference = nil
+            hits = []
+        }
+    }
+
     @Published var budgetMiB = 1536
     @Published var query = ""
     @Published private(set) var hits: [SimilarityHit] = []
@@ -20,6 +29,8 @@ import SwiftUI
     private var suspended = false
     private var activeScenes: Set<String> = []
     private var needsWork = false
+    private var selectionRevision = 0
+    private var pausing = false
 
     init(store: LocalStore, image: @escaping @MainActor (EmbeddingJob) async throws -> Data) {
         self.store = store
@@ -39,12 +50,15 @@ import SwiftUI
     }
 
     func restore() async {
-        guard let statuses = try? await compatibleStatuses(),
-              let latest = statuses.max(by: { $0.generation < $1.generation }) else { return }
-        guard let value = UInt32(exactly: latest.model.dimensions) else { return }
+        let revision = selectionRevision
+        guard let statuses = try? await store.compatibleInferenceStatuses(),
+              let latest = statuses.max(by: { $0.generation < $1.generation }),
+              let value = UInt32(exactly: latest.model.dimensions) else { return }
+        let restored = try? await store.inferenceStatus(key: latest.modelKey)
+        guard revision == selectionRevision, task == nil, !pausing else { return }
         dimensions = value
         status = latest
-        inference = try? await store.inferenceStatus(key: latest.modelKey)
+        inference = restored
         if let inference {
             budgetMiB = Int(inference.budgetBytes >> 20)
             message = inference.error ?? (inference.state == "paused"
@@ -54,16 +68,27 @@ import SwiftUI
     }
 
     func start(rebuild: Bool = false) {
-        guard task == nil else { return }
+        guard task == nil, !pausing else { return }
+        selectionRevision += 1
+        busy = true
         task = Task { [weak self] in
             guard let self else { return }
             busy = true
             defer { finishOperation() }
             do {
-                if rebuild, let status {
-                    try await store.rebuild(modelKey: status.modelKey, budget: status.budget)
+                let configured = try await store.configureInference(
+                    dimensions: dimensions,
+                    budget: UInt64(budgetMiB) << 20
+                )
+                inference = configured
+                if rebuild {
+                    guard let selected = try await store.status().first(where: { $0.modelKey == configured.modelKey })
+                    else {
+                        throw SuwopError("再作成する検索データを取得できません。")
+                    }
+                    try await store.rebuild(modelKey: configured.modelKey, budget: selected.budget)
                 }
-                inference = try await store.configureInference(dimensions: dimensions, budget: UInt64(budgetMiB) << 20)
+                await refresh()
                 try await ensureModel()
                 try await runPending()
             } catch { await failed(error) }
@@ -73,8 +98,9 @@ import SwiftUI
 
     func wake() {
         needsWork = true
-        guard !suspended, task == nil, inference?.state == "running" else { return }
+        guard !suspended, !pausing, task == nil, inference?.state == "running" else { return }
         needsWork = false
+        busy = true
         task = Task { [weak self] in
             guard let self else { return }
             busy = true
@@ -85,6 +111,15 @@ import SwiftUI
     }
 
     func pause() async {
+        guard !pausing else { return }
+        pausing = true
+        selectionRevision += 1
+        defer { pausing = false }
+        needsWork = false
+        task?.cancel()
+        await task?.value
+        // Configuration may have been awaiting SQLite when Pause was pressed.
+        // Persist the pause after that operation drains so it cannot resume us later.
         needsWork = false
         var persistenceError: String?
         if let key = inference?.modelKey {
@@ -93,8 +128,6 @@ import SwiftUI
                 try await store.setPaused(true, modelKey: key)
             } catch { persistenceError = error.localizedDescription }
         }
-        task?.cancel()
-        await task?.value
         await unload()
         await refresh()
         message = persistenceError.map { "処理は停止しましたが、停止状態を保存できません：\($0)" }
@@ -116,8 +149,10 @@ import SwiftUI
     }
 
     func search() {
-        guard task == nil, status?.model.dimensions == Int64(dimensions), let key = status?.modelKey else { return }
+        guard task == nil, !pausing, status?.model.dimensions == Int64(dimensions),
+              let key = status?.modelKey else { return }
         hits = []
+        busy = true
         task = Task { [weak self] in
             guard let self else { return }
             busy = true
@@ -141,25 +176,23 @@ import SwiftUI
     }
 
     func selectDimensions() async {
-        guard task == nil else { return }
-        hits = []
-        status = try? await compatibleStatuses().first { $0.model.dimensions == Int64(dimensions) }
-        inference = if let key = status?.modelKey {
+        guard task == nil, !pausing else { return }
+        selectionRevision += 1
+        let revision = selectionRevision
+        let selectedDimensions = dimensions
+        let selected = try? await store.compatibleInferenceStatuses()
+            .first { $0.model.dimensions == Int64(selectedDimensions) }
+        let restored = if let key = selected?.modelKey {
             try? await store.inferenceStatus(key: key)
         } else {
-            nil
+            nil as InferenceStatus?
         }
+        guard revision == selectionRevision, task == nil, !pausing else { return }
+        hits = []
+        status = selected
+        inference = restored
         if let inference {
             budgetMiB = Int(inference.budgetBytes >> 20)
-        }
-    }
-
-    private func compatibleStatuses() async throws -> [AnalysisStatus] {
-        let spec = try await store.inferenceSpec(dimensions: dimensions)
-        return try await store.status().filter {
-            [256, 512].contains($0.model.dimensions) && $0.model.name == spec.model.name && $0.model.version == spec
-                .model.version
-                && $0.model.preprocessing == spec.model.preprocessing && $0.model.rendition == spec.model.rendition
         }
     }
 
@@ -172,6 +205,7 @@ import SwiftUI
     }
 
     private func ensureModel() async throws {
+        try Task.checkCancellation()
         if await (try? store.modelPath()) != nil {
             return
         }
@@ -226,12 +260,26 @@ import SwiftUI
         await unload()
         await refresh()
         // Wait for durable vector publication without retaining the model buffers.
-        while status?.queuedVectors ?? 0 > 0, status?.state == "building", !suspended {
-            try await Task.sleep(for: .milliseconds(250))
-            await refresh()
-        }
+        try await Self.waitForPublication(snapshot: {
+            await self.refresh()
+            return self.status
+        }, suspended: { self.suspended })
         message = inference?.error ?? status?.error ?? (inference?.state == "paused"
             ? "停止中。未処理の写真から再開できます。" : "解析済みの写真から検索できます。")
+    }
+
+    /// A committed final shard can have zero queued vectors before the next worker
+    /// transaction publishes it. Follow the durable generation state through that gap.
+    static func waitForPublication(
+        snapshot: @MainActor () async -> AnalysisStatus?,
+        suspended: @MainActor () -> Bool
+    ) async throws {
+        while !suspended() {
+            try Task.checkCancellation()
+            guard let status = await snapshot(), status.state == "building",
+                  status.awaitingEmbeddings == 0 else { return }
+            try await Task.sleep(for: .milliseconds(250))
+        }
     }
 
     private func refresh() async {
