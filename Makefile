@@ -17,7 +17,7 @@ lint-common:
 	env ruff format --check scripts
 	env shellcheck scripts/*.sh .githooks/*
 	env actionlint
-	python3 scripts/check-architecture.py
+	uv run --no-project python scripts/check-architecture.py
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	bash scripts/check-generated.sh
 
@@ -35,6 +35,7 @@ format:
 	@if [ "$$(uname -s)" = Darwin ]; then env swiftformat App Sources Tests VRT NativeAcceptance --config .swiftformat; fi
 
 test:
+	$(MAKE) test-infra
 	bash scripts/test-tools.sh
 	bash scripts/test-hooks.sh
 	env cargo test --locked --workspace --all-features
@@ -51,7 +52,7 @@ check: lint
 
 generate-types:
 	cargo run --locked --quiet -p suwop-core --bin schema > /tmp/suwop-schema.json
-	python3 scripts/generate-swift.py Sources/SuwopShell/Generated/Types.swift < /tmp/suwop-schema.json
+	uv run --no-project python scripts/generate-swift.py Sources/SuwopShell/Generated/Types.swift < /tmp/suwop-schema.json
 
 check-generated:
 	bash scripts/check-generated.sh
@@ -87,3 +88,7 @@ apple-native-test:
 sharing-test:
 	xcodegen generate
 	xcodebuild -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
+
+.PHONY: test-infra
+test-infra:
+	uv run --no-project python -m unittest discover -s scripts -p 'test_*.py' -v
