@@ -37,12 +37,24 @@ fn real_ordinary_selected_motion_preserves_locked_parent() -> Result<(), String>
 fn real_native_selected_motion_preserves_parents_albums_and_originals() -> Result<(), String> {
     ordinary_roundtrip(FixtureMedia::NativeMotion)
 }
+#[test]
+#[ignore = "requires the isolated Docker Immich harness"]
+fn real_pin_unset_selected_live_parent_preserves_motion_and_other_parent() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::LinkedParent)
+}
+#[test]
+#[ignore = "requires the isolated Docker Immich harness and evidence directory"]
+fn real_metadata_pair_parent_archive_preserves_downloaded_native_pair() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::NativeParent)
+}
 #[derive(Clone, Copy)]
 enum FixtureMedia {
     Image,
     Video,
     LinkedMotion,
     NativeMotion,
+    LinkedParent,
+    NativeParent,
 }
 impl FixtureMedia {
     fn name(self) -> &'static str {
@@ -51,16 +63,22 @@ impl FixtureMedia {
             Self::Video => "ordinary.mp4",
             Self::LinkedMotion => "linked-motion.mp4",
             Self::NativeMotion => "synthetic-motion.mov",
+            Self::LinkedParent => "linked-parent.png",
+            Self::NativeParent => "native-parent.jpg",
         }
     }
     fn role(self) -> ResourceRole {
         match self {
-            Self::Image => ResourceRole::Image,
+            Self::Image | Self::LinkedParent | Self::NativeParent => ResourceRole::Image,
             Self::Video | Self::LinkedMotion | Self::NativeMotion => ResourceRole::Video,
         }
     }
     fn bytes(self) -> Result<Vec<u8>, String> {
         match self {
+            Self::NativeParent => Ok(super::live_graph::native_pair_bytes()?.0),
+            Self::LinkedParent => base64::engine::general_purpose::STANDARD
+                .decode(super::PIXELS[0])
+                .map_err(|_| "parent pixel".into()),
             Self::Image => base64::engine::general_purpose::STANDARD
                 .decode(PIXEL)
                 .map_err(|_| "pixel".into()),
@@ -90,18 +108,7 @@ fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
         asset_id: id,
     };
     let core = super::live_locked_core(session.clone());
-    let mut shell = ArchiveShell {
-        agent: &agent,
-        directory: &directory,
-        writes: 0,
-        confirmations: 0,
-        auth_requests: 0,
-        diagnostics: ScanDiagnostics {
-            selected_target: key.asset_id.clone(),
-            ..ScanDiagnostics::default()
-        },
-    };
-    native_controls(&agent, &session, &directory, media, "before")?;
+    let mut shell = ordinary_shell(&agent, &directory, &session, &key, media)?;
     activate_archive(&mut shell, &core)?;
     refresh_initial_hint(&mut shell, &core, &session, &key)?;
     for (index, to) in [
@@ -200,6 +207,45 @@ fn refresh_initial_hint(
         0,
     )
 }
+fn ordinary_shell<'a>(
+    agent: &'a ureq::Agent,
+    directory: &'a Path,
+    session: &Session,
+    key: &AssetKey,
+    media: FixtureMedia,
+) -> Result<ArchiveShell<'a>, String> {
+    native_controls(agent, session, directory, media, "before")?;
+    let forbidden_child = if matches!(
+        media,
+        FixtureMedia::LinkedParent | FixtureMedia::NativeParent
+    ) {
+        if matches!(media, FixtureMedia::NativeParent) {
+            super::live_graph::native_parent_probe(agent, session, directory)?;
+        }
+        let control: Value = serde_json::from_slice(
+            &std::fs::read(directory.join("parent-control.json")).map_err(|_| "parent control")?,
+        )
+        .map_err(|_| "parent control decode")?;
+        Some(control["motion"].as_str().ok_or("motion id")?.to_owned())
+    } else {
+        None
+    };
+    Ok(ArchiveShell {
+        agent,
+        directory,
+        writes: 0,
+        confirmations: 0,
+        auth_requests: 0,
+        diagnostics: ScanDiagnostics {
+            selected_target: key.asset_id.clone(),
+            ..ScanDiagnostics::default()
+        },
+        media,
+        selected_id: key.asset_id.clone(),
+        child_reads: 0,
+        forbidden_child,
+    })
+}
 fn finish_roundtrip(
     shell: &ArchiveShell<'_>,
     agent: &ureq::Agent,
@@ -208,6 +254,7 @@ fn finish_roundtrip(
     media: FixtureMedia,
 ) -> Result<(), String> {
     assert_eq!(shell.auth_requests, 0);
+    assert_eq!(shell.child_reads, 0);
     assert_eq!(shell.writes, 2);
     let journal = serde_json::to_string(&read_state(directory)?).map_err(|_| "journal")?;
     assert!(!journal.contains("password"));
@@ -216,6 +263,49 @@ fn finish_roundtrip(
         super::live_graph::verify_ordinary_linked(agent, session, directory)?;
     }
     std::fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn assert_expected_fixture_shape(
+    asset: &suwop_core::domain::StoredAsset,
+    key: &AssetKey,
+    media: FixtureMedia,
+    child: Option<&str>,
+) -> Result<(), String> {
+    let originals = asset.originals().collect::<Vec<_>>();
+    match media {
+        FixtureMedia::LinkedParent | FixtureMedia::NativeParent => {
+            assert!(!asset.inventory_complete);
+            assert_eq!(asset.resources.len(), 2);
+            assert_eq!(originals.len(), 2);
+            let parent = originals
+                .iter()
+                .find(|r| r.role == ResourceRole::Image)
+                .ok_or("fixture parent original")?;
+            let motion = originals
+                .iter()
+                .find(|r| r.role == ResourceRole::LiveVideo)
+                .ok_or("fixture forward motion")?;
+            assert_eq!(parent.id, key.asset_id);
+            assert_eq!(Some(motion.id.as_str()), child);
+            assert_ne!(parent.id, motion.id);
+        }
+        FixtureMedia::Image
+        | FixtureMedia::Video
+        | FixtureMedia::LinkedMotion
+        | FixtureMedia::NativeMotion => {
+            assert!(asset.inventory_complete);
+            assert_eq!(originals.len(), 1);
+            assert_eq!(originals[0].id, key.asset_id);
+            assert_eq!(
+                originals[0].role,
+                if matches!(media, FixtureMedia::Image) {
+                    ResourceRole::Image
+                } else {
+                    ResourceRole::Video
+                }
+            );
+        }
+    }
     Ok(())
 }
 fn recover_scan_revision_race(
@@ -252,8 +342,7 @@ fn recover_scan_revision_race(
             asset.immich_stack,
             suwop_core::domain::ImmichStackState::Unknown
         );
-        assert!(asset.inventory_complete);
-        assert_eq!(asset.originals().count(), 1);
+        assert_expected_fixture_shape(asset, key, shell.media, shell.forbidden_child.as_deref())?;
         let trace = shell
             .diagnostics
             .selected_hydration_since(refresh_trace_start)
@@ -275,6 +364,13 @@ fn recover_scan_revision_race(
             "freshRevisionParsed",
         ] {
             assert_eq!(trace[field], true, "{field}: {trace}");
+        }
+        if matches!(
+            shell.media,
+            FixtureMedia::LinkedParent | FixtureMedia::NativeParent
+        ) {
+            assert_eq!(trace["typeMatch"], true);
+            assert_eq!(trace["livePhotoVideoIdMatch"], true);
         }
         assert_eq!(trace["updatedAtInstantMatch"], false);
         let writes = shell.writes;
@@ -406,7 +502,15 @@ impl ScanDiagnostics {
             let mut trace = json!({"api":"assetMetadata","status":status,"decode":decode,"stackShape":stack_shape(body),"searchCandidate":source.is_some(),"selectedTarget":selected_target,"purpose":request.ordinary_content_authorization.as_ref().map(|a| format!("{:?}",a.purpose))});
             if let Some(source) = source {
                 trace["searchStackShape"] = json!(stack_shape(source));
-                for field in ["id", "ownerId", "checksum", "updatedAt", "visibility"] {
+                for field in [
+                    "id",
+                    "ownerId",
+                    "checksum",
+                    "updatedAt",
+                    "visibility",
+                    "type",
+                    "livePhotoVideoId",
+                ] {
                     trace[format!("{field}Match")] =
                         json!(source.get(field).is_some() && source.get(field) == body.get(field));
                 }
@@ -544,6 +648,10 @@ struct ArchiveShell<'a> {
     confirmations: usize,
     auth_requests: usize,
     diagnostics: ScanDiagnostics,
+    selected_id: String,
+    child_reads: usize,
+    forbidden_child: Option<String>,
+    media: FixtureMedia,
 }
 impl ArchiveShell<'_> {
     fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
@@ -567,6 +675,21 @@ impl ArchiveShell<'_> {
                 if request.url.contains("/auth/") {
                     self.auth_requests += 1;
                     return Err("ordinary operation attempted authentication".into());
+                }
+                if self
+                    .forbidden_child
+                    .as_ref()
+                    .is_some_and(|id| request.method == "GET" && request.url.contains(id))
+                {
+                    self.child_reads += 1;
+                    return Err("product requested an unselected resource".into());
+                }
+                if request.method == "PUT" {
+                    assert!(request.immich_archive_authorization.is_some());
+                    assert_eq!(
+                        request.url.rsplit('/').next(),
+                        Some(self.selected_id.as_str())
+                    );
                 }
                 if let Some(permit) = &request.immich_archive_authorization {
                     assert_eq!(request.url, permit.url);
@@ -790,6 +913,17 @@ async fn fixture(
         let (id, albums) = super::live_graph::native_motion_setup(ctx, &session, directory).await?;
         return Ok((session, id, albums));
     }
+    if matches!(
+        media,
+        FixtureMedia::LinkedParent | FixtureMedia::NativeParent
+    ) {
+        let (id, albums) = if matches!(media, FixtureMedia::NativeParent) {
+            super::live_graph::ordinary_native_parent_setup(ctx, &session, directory).await?
+        } else {
+            super::live_graph::ordinary_parent_setup(ctx, &session, directory).await?
+        };
+        return Ok((session, id, albums));
+    }
     let bytes = media.bytes()?;
     let path = directory.join(media.name());
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
@@ -899,6 +1033,12 @@ fn native_controls(
     }
     if matches!(media, FixtureMedia::NativeMotion) {
         super::live_graph::native_motion_controls(agent, session, directory, stage)?;
+    }
+    if matches!(
+        media,
+        FixtureMedia::LinkedParent | FixtureMedia::NativeParent
+    ) {
+        super::live_graph::ordinary_parent_controls(agent, session, directory, stage)?;
     }
     Ok(())
 }

@@ -82,7 +82,7 @@ final class ArchiveSceneConfirmationTests: XCTestCase {
         XCTAssertNil(other.attachedSheet)
         XCTAssertFalse(alert.informativeText.contains("アルバム"))
         XCTAssertTrue(alert.informativeText.contains("選択した項目の Immich の表示先だけを変更します。"))
-        XCTAssertTrue(alert.informativeText.contains("関連する写真の表示先は変わりません。"))
+        XCTAssertTrue(alert.informativeText.contains("関連する写真や動画の表示先は変わりません。"))
         owner.endSheet(alert.window, returnCode: .alertSecondButtonReturn)
         try await wait { outcome.finished }
         XCTAssertEqual(outcome.answer, true)

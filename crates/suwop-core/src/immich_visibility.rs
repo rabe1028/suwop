@@ -194,6 +194,21 @@ enum MediaPolicy {
 pub(crate) fn ordinary_archive_reason(
     asset: &crate::domain::StoredAsset,
 ) -> Option<ImmichVisibilityUnsupportedReason> {
+    if asset
+        .resources
+        .iter()
+        .any(|r| r.role == crate::domain::ResourceRole::LiveVideo)
+    {
+        if asset.is_offline {
+            return Some(ImmichVisibilityUnsupportedReason::Unavailable);
+        }
+        if asset.immich_stack == crate::domain::ImmichStackState::Stacked {
+            return Some(ImmichVisibilityUnsupportedReason::Stack);
+        }
+        return linked_parent_parts(asset)
+            .is_none()
+            .then_some(ImmichVisibilityUnsupportedReason::Unknown);
+    }
     unsupported_reason(asset, MediaPolicy::OrdinaryArchive)
 }
 fn unsupported_reason(
@@ -307,9 +322,67 @@ pub fn fences(state: &crate::app::SavedLibrary, key: &AssetKey) -> bool {
     !snapshot.assets.iter().any(|asset| {
         &asset.key == key
             && related.iter().all(|operation| {
-                asset_witness(asset).as_deref() == Some(operation.witness_digest.as_str())
+                operation_witness(asset, operation.kind).as_deref()
+                    == Some(operation.witness_digest.as_str())
             })
     })
+}
+fn linked_parent_parts(
+    asset: &crate::domain::StoredAsset,
+) -> Option<(&crate::domain::PhotoResource, &crate::domain::PhotoResource)> {
+    use crate::domain::{ImmichStackState, Provider, ResourceRole};
+    if asset.key.provider != Provider::Immich
+        || asset.is_offline
+        || asset.immich_stack != ImmichStackState::Unstacked
+    {
+        return None;
+    }
+    let [first, second] = asset.resources.as_slice() else {
+        return None;
+    };
+    let (parent, motion) = match (first.role, second.role) {
+        (ResourceRole::Image | ResourceRole::RawImage, ResourceRole::LiveVideo) => (first, second),
+        (ResourceRole::LiveVideo, ResourceRole::Image | ResourceRole::RawImage) => (second, first),
+        _ => return None,
+    };
+    if parent.id != asset.key.asset_id
+        || motion.id == parent.id
+        || parent.name == motion.name
+        || crate::immich::valid_id(&motion.id).is_err()
+        || crate::domain::normalize_sha1(parent.sha1.as_deref()).is_none()
+    {
+        return None;
+    }
+    Some((parent, motion))
+}
+fn operation_witness(
+    asset: &crate::domain::StoredAsset,
+    kind: ImmichVisibilityOperationKind,
+) -> Option<String> {
+    if kind == ImmichVisibilityOperationKind::OrdinaryArchive
+        && let Some((parent, motion)) = linked_parent_parts(asset)
+    {
+        return Some(linked_identity_digest(
+            &asset.key,
+            &crate::domain::normalize_sha1(parent.sha1.as_deref())?,
+            &motion.id,
+        ));
+    }
+    asset_witness(asset)
+}
+fn linked_identity_digest(key: &AssetKey, checksum: &str, child: &str) -> String {
+    use sha2::Digest;
+    crate::domain::hex(&sha2::Sha256::digest(
+        serde_json::to_vec(&(
+            key,
+            "IMAGE",
+            checksum,
+            "selectedLiveParent/v1",
+            child,
+            "unstacked",
+        ))
+        .unwrap_or_default(),
+    ))
 }
 pub(crate) fn asset_witness(asset: &crate::domain::StoredAsset) -> Option<String> {
     use crate::domain::ResourceRole;
@@ -409,12 +482,23 @@ fn facts_with_policy(
         ("VIDEO", MediaPolicy::OrdinaryArchive) => IdentityMedia::Video,
         _ => return Err("この形式の可視性変更はまだ対応していません。".into()),
     };
-    if !matches!(value.get("livePhotoVideoId"), Some(serde_json::Value::Null)) {
-        return Err(
-            "Live Photo または連結状態を確認できない写真の非表示変更はまだ対応していません。"
-                .into(),
-        );
-    }
+    let linked_child =
+        match (
+            value.get("livePhotoVideoId"),
+            policy,
+            asset.media_type.as_str(),
+        ) {
+            (Some(serde_json::Value::Null), _, _) => None,
+            (Some(serde_json::Value::String(child)), MediaPolicy::OrdinaryArchive, "IMAGE")
+                if child != &asset.id && crate::immich::valid_id(child).is_ok() =>
+            {
+                Some(child.as_str())
+            }
+            _ => return Err(
+                "Live Photo または連結状態を確認できない写真の非表示変更はまだ対応していません。"
+                    .into(),
+            ),
+        };
     if !matches!(value.get("stack"), Some(serde_json::Value::Null)) {
         return Err(
             "スタックまたは構成を確認できない写真の非表示変更はまだ対応していません。".into(),
@@ -436,9 +520,16 @@ fn facts_with_policy(
     if asset.updated_at.is_empty() {
         return Err("写真の更新状態を確認できません。".into());
     }
+    let record = asset.record(scope, None, None);
+    if linked_child.is_some() && linked_parent_parts(&record).is_none() {
+        return Err("選択した写真の構成を確認できません。".into());
+    }
     Ok(VisibilityFacts {
-        asset: asset.record(scope, None, None),
-        witness: identity_digest(&key, &checksum, media),
+        asset: record,
+        witness: linked_child.map_or_else(
+            || identity_digest(&key, &checksum, media),
+            |child| linked_identity_digest(&key, &checksum, child),
+        ),
         key,
         revision: asset.updated_at,
         visibility,
@@ -942,6 +1033,110 @@ mod media_policy_tests {
             identity_digest(&key, &checksum, IdentityMedia::Video),
             expected
         );
+        let old_video = serde_json::to_vec(&(&key, "VIDEO", &checksum, "forwardNull", "unstacked"))
+            .map_err(|e| e.to_string())?;
+        assert_eq!(
+            identity_digest(&key, &checksum, IdentityMedia::Video),
+            crate::domain::hex(&sha2::Sha256::digest(old_video))
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod selected_parent_tests {
+    use super::*;
+    use serde_json::json;
+    fn raw() -> serde_json::Value {
+        json!({"id":"11111111-1111-4111-8111-111111111111","ownerId":"owner","type":"IMAGE","originalFileName":"parent.jpg","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"revision","isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"timeline","livePhotoVideoId":"22222222-2222-4222-8222-222222222222","stack":null})
+    }
+    #[test]
+    fn selected_parent_identity_is_ordinary_only_without_promoting_inventory() -> Result<(), String>
+    {
+        let fresh = ordinary_facts(&raw(), "scope", "owner")?;
+        assert!(!fresh.asset.inventory_complete);
+        assert_eq!(fresh.asset.originals().count(), 2);
+        assert!(ordinary_archive_reason(&fresh.asset).is_none());
+        assert_eq!(
+            hint(&fresh.asset, false).reason,
+            Some(ImmichVisibilityUnsupportedReason::Live)
+        );
+        assert!(facts(&raw(), "scope", "owner").is_err());
+        assert!(asset_witness(&fresh.asset).is_none());
+        assert_eq!(
+            operation_witness(&fresh.asset, ImmichVisibilityOperationKind::OrdinaryArchive),
+            Some(fresh.witness)
+        );
+        assert!(
+            operation_witness(
+                &fresh.asset,
+                ImmichVisibilityOperationKind::LockedTransition
+            )
+            .is_none()
+        );
+        Ok(())
+    }
+    #[test]
+    fn malformed_duplicate_or_mismatched_parent_resources_are_not_eligible() -> Result<(), String> {
+        let fresh = ordinary_facts(&raw(), "scope", "owner")?;
+        for variant in 0..5 {
+            let mut asset = fresh.asset.clone();
+            match variant {
+                0 => asset.resources[0].id = "wrong".into(),
+                1 => asset.resources[1].id = asset.resources[0].id.clone(),
+                2 => asset.resources[1].name = asset.resources[0].name.clone(),
+                3 => asset.resources.push(asset.resources[1].clone()),
+                _ => asset.resources[0].sha1 = None,
+            }
+            assert!(ordinary_archive_reason(&asset).is_some());
+        }
+        for child in [json!(null), json!(""), json!("bad/id"), json!(raw()["id"])] {
+            let mut value = raw();
+            value["livePhotoVideoId"] = child;
+            if value["livePhotoVideoId"].is_null() {
+                continue;
+            }
+            assert!(ordinary_facts(&value, "scope", "owner").is_err());
+        }
+        let mut missing = raw();
+        missing
+            .as_object_mut()
+            .ok_or("object")?
+            .remove("livePhotoVideoId");
+        assert!(ordinary_facts(&missing, "scope", "owner").is_err());
+        Ok(())
+    }
+    #[test]
+    fn linked_parent_fence_requires_ordinary_kind_and_preserves_unresolved_history()
+    -> Result<(), String> {
+        let fresh = ordinary_facts(&raw(), "scope", "owner")?;
+        let operation: ImmichVisibilityOperation = serde_json::from_value(json!({"kind":"ordinaryArchive","id":"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa","scope":"scope","key":fresh.key,"witnessDigest":fresh.witness,"from":"timeline","to":"archive","outcome":"applied","observation":"archive"})).map_err(|e| e.to_string())?;
+        let key = fresh.asset.key.clone();
+        let mut state = crate::app::SavedLibrary {
+            snapshots: vec![crate::domain::LibrarySnapshot {
+                provider: crate::domain::Provider::Immich,
+                scope: "scope".into(),
+                access: crate::domain::ScanAccess::Full,
+                scanned_at: Some(1.0),
+                assets: vec![fresh.asset],
+            }],
+            immich_visibility_operations: vec![operation.clone()],
+            ..crate::app::SavedLibrary::default()
+        };
+        assert!(!fences(&state, &key));
+        state.immich_visibility_operations[0].kind =
+            ImmichVisibilityOperationKind::LockedTransition;
+        assert!(fences(&state, &key));
+        state.immich_visibility_operations[0] = operation.clone();
+        let mut unknown = operation;
+        unknown.observation = None;
+        unknown.outcome = crate::apple_visibility::VisibilityOutcome::Unknown;
+        state.immich_visibility_operations.push(unknown);
+        assert!(fences(&state, &key));
+        state.immich_visibility_operations.pop();
+        state.snapshots[0].assets[0].resources[1].id =
+            "33333333-3333-4333-8333-333333333333".into();
+        assert!(fences(&state, &key));
         Ok(())
     }
 }

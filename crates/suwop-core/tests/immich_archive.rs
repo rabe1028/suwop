@@ -197,6 +197,11 @@ impl Shell {
         if request.url.ends_with("/search/metadata") {
             let mut item = asset();
             item["visibility"] = json!(self.visibility.as_deref().unwrap_or("timeline"));
+            if let Some(Value::Object(patch)) = &self.patch {
+                for (key, value) in patch {
+                    item[key] = value.clone();
+                }
+            }
             item.as_object_mut().ok_or("search asset")?.remove("stack");
             return Ok(json!({"status":200,"body":{"assets":{"items":[item],"nextCursor":null}}}));
         }
@@ -1059,6 +1064,120 @@ fn ordinary_single_resource_response_must_acknowledge_exact_id_and_destination()
                 .iter()
                 .all(|hint| hint.key != key())
         );
+    }
+    Ok(())
+}
+
+const CHILD: &str = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
+fn parent_model() -> Result<Model, String> {
+    let mut raw = asset();
+    raw["livePhotoVideoId"] = json!(CHILD);
+    let parent: Asset = serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let mut m = model()?;
+    m.state.snapshots[0].assets = vec![parent.record("scope", None, None)];
+    Ok(m)
+}
+#[test]
+fn selected_live_parent_changes_only_itself_and_keeps_incomplete_inventory() -> Result<(), String> {
+    let m = parent_model()?;
+    assert!(!m.state.snapshots[0].assets[0].inventory_complete);
+    assert_eq!(m.state.snapshots[0].assets[0].originals().count(), 2);
+    let (c, mut s) = started(m)?;
+    s.patch = Some(json!({"livePhotoVideoId":CHILD}));
+    assert_eq!(
+        c.view().immich_archive_actions[0].to,
+        Some(ImmichArchiveDestination::Archive)
+    );
+    assert!(!c.view().immich_visibility_actions[0].can_lock);
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 1);
+    assert_eq!(s.persists, 2);
+    let durable: SavedLibrary =
+        serde_json::from_value(s.disk.clone().ok_or("disk")?).map_err(|e| e.to_string())?;
+    assert!(suwop_core::immich_visibility::fences(&durable, &key()));
+    s.run(
+        &c,
+        Event::Refresh {
+            permission: false,
+            now: 1_800_000_000.0,
+        },
+    )?;
+    let hint = c
+        .view()
+        .immich_archive_actions
+        .into_iter()
+        .find(|h| h.key == key())
+        .ok_or("fresh parent hint")?;
+    assert_eq!(hint.to, Some(ImmichArchiveDestination::Timeline));
+    assert_eq!(s.writes, 1);
+    Ok(())
+}
+#[test]
+fn parent_relation_race_and_local_parent_denial_prevent_native_write() -> Result<(), String> {
+    for protected in [false, true] {
+        let mut m = parent_model()?;
+        if protected {
+            m.protection.denied.insert(key());
+        }
+        let (c, mut s) = started(m)?;
+        s.patch = Some(json!({"livePhotoVideoId":CHILD}));
+        s.patch_after_confirm =
+            Some(json!({"livePhotoVideoId":"ffffffff-ffff-4fff-8fff-ffffffffffff"}));
+        s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+        assert_eq!(s.confirms, usize::from(!protected));
+        assert_eq!(s.persists, 0);
+        assert_eq!(s.writes, 0);
+    }
+    Ok(())
+}
+#[test]
+fn lost_parent_reply_restart_retains_fence_without_replay_or_child_authority() -> Result<(), String>
+{
+    let (c, mut s) = started(parent_model()?)?;
+    s.patch = Some(json!({"livePhotoVideoId":CHILD}));
+    s.faults.lost = true;
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    assert_eq!(s.writes, 1);
+    let state: SavedLibrary =
+        serde_json::from_value(s.disk.ok_or("disk")?).map_err(|e| e.to_string())?;
+    assert!(state.immich_visibility_operations[0].observation.is_none());
+    let mut m = parent_model()?;
+    m.state = state;
+    let (c, mut s) = started(m)?;
+    s.run(
+        &c,
+        prepare(
+            "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
+            ImmichArchiveDestination::Archive,
+        ),
+    )?;
+    assert_eq!(s.gets, 0);
+    assert_eq!(s.writes, 0);
+    assert_eq!(s.confirms, 0);
+    Ok(())
+}
+
+#[test]
+fn parent_only_authority_never_borrows_child_protection_and_respects_account_and_scene()
+-> Result<(), String> {
+    for scenario in 0..3 {
+        let mut m = parent_model()?;
+        let child = AssetKey {
+            asset_id: CHILD.into(),
+            ..key()
+        };
+        m.protection.denied.insert(child);
+        if scenario == 1 {
+            m.session.as_mut().ok_or("session")?.scope = "other".into();
+        }
+        let (c, mut s) = started(m)?;
+        s.patch = Some(json!({"livePhotoVideoId":CHILD}));
+        s.revoke_confirm = scenario == 2;
+        s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+        assert_eq!(s.writes, usize::from(scenario == 0));
+        if scenario != 0 {
+            assert_eq!(s.persists, 0);
+        }
     }
     Ok(())
 }

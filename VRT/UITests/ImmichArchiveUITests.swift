@@ -8,7 +8,7 @@ final class ImmichArchiveUITests: XCTestCase {
             let disclosure = app.staticTexts["immichArchiveSelectedItemDisclosure"]
             XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
             XCTAssertTrue(disclosure.label.contains("選択した項目の Immich の表示先だけを変更します。"))
-            XCTAssertTrue(disclosure.label.contains("関連する写真の表示先は変わりません。"))
+            XCTAssertTrue(disclosure.label.contains("関連する写真や動画の表示先は変わりません。"))
             if destination == "タイムライン" {
                 XCTAssertTrue(disclosure.label.contains("ほかの Immich アプリにも表示される場合があります。"))
             }
@@ -116,7 +116,7 @@ final class ImmichArchiveUITests: XCTestCase {
     @MainActor private func assertLargeTextDisclosure(in app: XCUIApplication, name: String) {
         let disclosure = app.staticTexts["immichArchiveSelectedItemDisclosure"]
         XCTAssertTrue(disclosure.waitForExistence(timeout: 10))
-        XCTAssertTrue(disclosure.label.contains("関連する写真の表示先は変わりません。"))
+        XCTAssertTrue(disclosure.label.contains("関連する写真や動画の表示先は変わりません。"))
         XCTAssertFalse(disclosure.frame.isEmpty)
         XCTAssertTrue(app.frame.intersects(disclosure.frame))
         let action = app.buttons["confirmImmichArchive"]

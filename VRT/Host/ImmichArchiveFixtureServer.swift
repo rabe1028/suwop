@@ -14,6 +14,13 @@ import SuwopShell
     static let key = AssetKey(provider: .immich, scope: scope, assetID: sourceID)
     private(set) var record: JSONValue
     private let originalFacts: Data
+    let liveParent: Bool
+    static let childID = ImmichLockedFixtureData.latestID
+    static let otherParentID = "77777777-7777-4777-8777-777777777777"
+    private(set) var relatedRecords: [JSONValue]
+    private let relatedFacts: Data
+    private let originalAlbumMembers: [String: Set<String>]
+    @Published private(set) var relatedReads = 0
     private(set) var routes: [String] = []
     private(set) var albumMembers: [String: Set<String>]
     @Published private(set) var mutationAttempts = 0
@@ -24,18 +31,29 @@ import SuwopShell
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
-    init(visibility: String = "timeline", video: Bool = false) throws {
+    init(visibility: String = "timeline", video: Bool = false, liveParent: Bool = false) throws {
+        self.liveParent = liveParent
         var source = try ImmichVisibilityFixtureData.source(visibility: visibility)
             .decode([String: JSONValue].self)
         source["originalFileName"] = .string(video ? "ORDINARY-ARCHIVE.MP4" : "ORDINARY-ARCHIVE.JPG")
         source["type"] = .string(video ? "VIDEO" : "IMAGE")
+        if liveParent {
+            source["livePhotoVideoId"] = .string(Self.childID)
+            source["originalFileName"] = .string("LIVE-PARENT.JPG")
+        }
+        let related = try liveParent ? Self.relatedAssets() : []
+        relatedRecords = related
+        relatedFacts = try Wire.encoder().encode(JSONValue.array(related))
         let initial = JSONValue.object(source)
         record = initial
         originalFacts = try Self.originalData(initial)
-        albumMembers = [
-            ImmichVisibilityFixtureData.albumID: [Self.sourceID],
-            ImmichVisibilityFixtureData.secondAlbumID: [Self.sourceID],
+        let members: Set<String> = liveParent ? [Self.sourceID, Self.childID, Self.otherParentID] : [Self.sourceID]
+        let albums = [
+            ImmichVisibilityFixtureData.albumID: members,
+            ImmichVisibilityFixtureData.secondAlbumID: members,
         ]
+        originalAlbumMembers = albums
+        albumMembers = albums
     }
 
     func execute(_ request: HttpRequest) throws -> HttpResponse {
@@ -44,6 +62,10 @@ import SuwopShell
         }
         let path = String(request.url.dropFirst(Self.endpoint.count + 1))
         routes.append(request.method + " " + path)
+        if [Self.childID, Self.otherParentID].contains(where: { path.contains($0) }) {
+            relatedReads += 1
+            throw SuwopError("Selected parent placement must not read a related asset")
+        }
         if path.hasPrefix("auth/") || path == "server/features" {
             authenticationRequests += 1
             throw SuwopError("Ordinary archive must not initiate password or PIN authentication")
@@ -141,7 +163,25 @@ import SuwopShell
     }
 
     var intactAlbumCount: Int {
-        albumMembers.values.filter { $0 == Set([Self.sourceID]) }.count
+        albumMembers.filter { originalAlbumMembers[$0.key] == $0.value }.count
+    }
+
+    var relatedAssetsIntact: Bool {
+        (try? Wire.encoder().encode(JSONValue.array(relatedRecords))) == relatedFacts
+    }
+
+    private static func relatedAssets() throws -> [JSONValue] {
+        var child = try ImmichLockedFixtureData.asset(childID, name: "LIVE-MOTION.MOV", visibility: "locked")
+            .decode([String: JSONValue].self)
+        child["type"] = .string("VIDEO")
+        child["checksum"] = .string(String(repeating: "b", count: 40))
+        child["stack"] = .null
+        var other = try ImmichLockedFixtureData.asset(otherParentID, name: "OTHER-PARENT.JPG", visibility: "archive")
+            .decode([String: JSONValue].self)
+        other["livePhotoVideoId"] = .string(childID)
+        other["checksum"] = .string(String(repeating: "c", count: 40))
+        other["stack"] = .null
+        return [.object(child), .object(other)]
     }
 
     private static func originalData(_ record: JSONValue) throws -> Data {
