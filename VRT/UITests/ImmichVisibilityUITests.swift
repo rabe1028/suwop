@@ -273,12 +273,16 @@ final class ImmichVisibilityUITests: XCTestCase {
         lost: Bool = false,
         live: Bool = false,
         largeText: Bool = false,
-        selectedLinked: Bool = false
+        selectedLinked: Bool = false,
+        unsupportedServer: Bool = false,
+        initiallyLocked: Bool = false
     ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--immich-visibility-fixture"]
             + (lost ? ["--lost-visibility-response"] : []) + (live ? ["--unsupported-live"] : [])
             + (selectedLinked ? ["--selected-linked-after-mutation"] : [])
+            + (unsupportedServer ? ["--unsupported-write-server"] : [])
+            + (initiallyLocked ? ["--initially-locked"] : [])
             + (largeText ? ["--large-text"] : [])
         app.launch()
         return app
@@ -290,7 +294,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         photo.tap()
         XCTAssertTrue(app.buttons["写真を編集"].waitForExistence(timeout: 10))
         app.buttons["写真を編集"].tap()
-        app.buttons["lockDisplayedImmichPhoto"].tap()
+        revealVerificationEntry(in: app).tap()
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
     }
 
@@ -298,7 +302,9 @@ final class ImmichVisibilityUITests: XCTestCase {
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
-        app.buttons["immichLockedPhotosHistory"].tap()
+        let history = app.buttons["immichLockedPhotosHistory"]
+        revealWriteMenuItem(history, in: app, needsHitTarget: true)
+        history.tap()
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
     }
 
@@ -405,5 +411,166 @@ extension ImmichVisibilityUITests {
         }
         expect("attempts=1", element: app.staticTexts["visibilityFixtureAttempts"])
         app.terminate()
+    }
+
+    @MainActor func testUnsupportedWriteServerDisablesOrdinaryLockBeforeAnyPIN() {
+        let app = launch(unsupportedServer: true)
+        let photo = app.buttons["photo-\(sourceID)"]
+        XCTAssertTrue(photo.waitForExistence(timeout: 10))
+        photo.tap()
+        XCTAssertTrue(app.buttons["写真を編集"].waitForExistence(timeout: 10))
+        app.buttons["写真を編集"].tap()
+        let lock = app.buttons["lockDisplayedImmichPhoto"]
+        XCTAssertTrue(lock.waitForExistence(timeout: 5))
+        XCTAssertFalse(lock.isEnabled)
+        let guidance = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "このサーバーではロック写真の表示先を変更できません。閲覧や現在の状態の確認は引き続き利用できます。"
+        ))
+        let visible = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guidance.allElementsBoundByIndex.contains {
+                $0.exists && !$0.frame.isEmpty && app.frame.intersects($0.frame)
+            }
+        }, object: nil)
+        XCTAssertEqual(XCTWaiter.wait(for: [visible], timeout: 5), .completed)
+        XCTAssertFalse(app.textFields["immichLockedEmail"].exists)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.1, dy: 0.2)).tap()
+        app.buttons["写真を閉じる"].tap()
+        expect("logins=0", element: app.staticTexts["visibilityFixtureLogins"])
+        expect("attempts=0", element: app.staticTexts["visibilityFixtureAttempts"])
+        app.terminate()
+    }
+
+    @MainActor func testUnsupportedWriteServerKeepsPINReadingAndLockedPreviewAvailable() {
+        exerciseUnsupportedServerReading(largeText: false)
+    }
+
+    @MainActor func testAX3UnsupportedWriteServerKeepsPreviewAndCloseReachableAfterScrolling() {
+        exerciseUnsupportedServerReading(largeText: true)
+    }
+
+    @MainActor private func exerciseUnsupportedServerReading(largeText: Bool) {
+        let app = launch(largeText: largeText, unsupportedServer: true, initiallyLocked: true)
+        openHistory(app)
+        authenticate(app)
+        let archive = app.buttons["showImmichArchive-\(sourceID)"]
+        XCTAssertTrue(archive.waitForExistence(timeout: 10))
+        XCTAssertFalse(archive.isEnabled)
+        XCTAssertFalse(app.buttons["showImmichTimeline-\(sourceID)"].isEnabled)
+        XCTAssertTrue(app.staticTexts["immichVisibilityWriteAvailability-\(sourceID)"].exists)
+        if largeText {
+            attachWriteMenu(app, name: "unsupported-write-AX3-before-scroll")
+        }
+        let preview = app.buttons["immichLockedPreview-\(sourceID)"]
+        for _ in 0 ..< 5 {
+            if preview.exists, preview.isHittable, app.frame.contains(preview.frame) {
+                break
+            }
+            app.collectionViews.firstMatch.swipeUp()
+        }
+        assertReachable(preview, in: app)
+        assertReachable(app.buttons["closeImmichLocked"], in: app)
+        if largeText {
+            attachWriteMenu(app, name: "unsupported-write-AX3-preview-action")
+        }
+        preview.tap()
+        let raster = app.images["immichLockedRaster"]
+        for _ in 0 ..< 5 {
+            if raster.exists, !raster.frame.isEmpty, app.frame.contains(raster.frame) {
+                break
+            }
+            app.collectionViews.firstMatch.swipeDown()
+        }
+        XCTAssertTrue(raster.waitForExistence(timeout: 10))
+        XCTAssertFalse(raster.frame.isEmpty)
+        XCTAssertTrue(app.frame.contains(raster.frame))
+        assertReachable(app.buttons["closeImmichLocked"], in: app)
+        if largeText {
+            attachWriteMenu(app, name: "unsupported-write-AX3-visible-raster")
+        }
+        app.buttons["closeImmichLocked"].tap()
+        expect("attempts=0", element: app.staticTexts["visibilityFixtureAttempts"])
+        expect("pins=1", element: app.staticTexts["visibilityFixturePINs"])
+        app.terminate()
+    }
+
+    @MainActor private func revealVerificationEntry(in app: XCUIApplication) -> XCUIElement {
+        let verification = app.buttons["lockDisplayedImmichPhoto"]
+        revealWriteMenuItem(verification, in: app, needsHitTarget: true)
+        XCTAssertEqual(verification.label, "Immich の PIN で変更可否を確認")
+        XCTAssertTrue(verification.isEnabled)
+        let guidance = app.descendants(matching: .any).matching(NSPredicate(
+            format: "label == %@", "Immich の PIN で認証して、表示先を変更できるか確認してください。"
+        )).firstMatch
+        revealWriteMenuItem(guidance, in: app, needsHitTarget: false)
+        XCTAssertFalse(guidance.frame.isEmpty)
+        XCTAssertTrue(app.frame.contains(guidance.frame))
+        if app.launchArguments.contains("--large-text") {
+            attachWriteMenu(app, name: "write-contract-AX3-verification-guidance")
+        }
+        revealWriteMenuItem(verification, in: app, needsHitTarget: true)
+        XCTAssertTrue(verification.isHittable)
+        XCTAssertFalse(app.textFields["immichLockedEmail"].exists)
+        XCTAssertFalse(app.buttons["confirmImmichVisibility"].exists)
+        XCTAssertFalse(app.buttons["confirmImmichArchive"].exists)
+        if app.launchArguments.contains("--large-text") {
+            attachWriteMenu(app, name: "write-contract-AX3-verification-action")
+        }
+        return verification
+    }
+
+    @MainActor private func revealWriteMenuItem(
+        _ element: XCUIElement, in app: XCUIApplication, needsHitTarget: Bool
+    ) {
+        guard let menu = app.collectionViews.allElementsBoundByIndex.last else {
+            XCTFail("The native menu must expose a scrolling collection: " + app.debugDescription)
+            return
+        }
+        let collectionFrame = menu.frame
+        let clippingFrames = app.otherElements.containing(.collectionView, identifier: nil)
+            .allElementsBoundByIndex.map(\.frame).filter {
+                !$0.isEmpty && abs($0.minX - collectionFrame.minX) < 1 &&
+                    abs($0.minY - collectionFrame.minY) < 1 && abs($0.width - collectionFrame.width) < 1
+            }
+        guard !clippingFrames.isEmpty else {
+            XCTFail("The native menu's clipping container must be identified through public ancestry")
+            return
+        }
+        let frame = clippingFrames.reduce(collectionFrame.intersection(app.frame)) { $0.intersection($1) }
+        guard !frame.isEmpty, frame.height > 160 else {
+            XCTFail("The native menu must have a usable onscreen clipping viewport")
+            return
+        }
+        let viewport = frame.insetBy(dx: 0, dy: 12)
+        let reached = WriteMenuScrollGesture.reveal(
+            element, in: app, menu: menu, viewport: viewport, needsHitTarget: needsHitTarget
+        )
+        attachWriteMenuGeometry(
+            app,
+            collection: collectionFrame,
+            viewport: viewport,
+            target: element.exists ? element.frame : .zero,
+            action: needsHitTarget
+        )
+        if !reached {
+            attachWriteMenu(app, name: "write-contract-menu-target-not-reached")
+        }
+        XCTAssertTrue(reached, "The exact native menu item must be visible before label inspection or tapping")
+    }
+
+    @MainActor private func attachWriteMenuGeometry(
+        _ app: XCUIApplication, collection: CGRect, viewport: CGRect, target: CGRect, action: Bool
+    ) {
+        guard app.launchArguments.contains("--large-text") else { return }
+        let attachment = XCTAttachment(string: "collection=\(collection)\nviewport=\(viewport)\ntarget=\(target)")
+        attachment.name = action ? "write-contract-AX3-action-rects" : "write-contract-AX3-guidance-rects"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    @MainActor private func attachWriteMenu(_ app: XCUIApplication, name: String) {
+        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachment.name = name
+        attachment.lifetime = .keepAlways
+        add(attachment)
     }
 }

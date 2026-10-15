@@ -14,6 +14,9 @@ use suwop_core::{
     immich_locked::Secret,
     immich_visibility::{AlbumMembershipObservation, ImmichVisibility},
 };
+#[path = "visibility/write_contract.rs"]
+mod write_contract;
+
 const FILE_CAPTURE_TIME: f64 = 1_780_000_000.0;
 const SCENE: &str = "11111111-1111-4111-8111-111111111111";
 const GRANT: &str = "22222222-2222-4222-8222-222222222222";
@@ -44,34 +47,13 @@ fn real_immich_single_image_visibility_removes_two_owned_albums_and_never_restor
         agent: &agent,
         directory: &directory,
         writes: 0,
+        confirmations: 0,
+        persists: 0,
         elevated_memberships: vec![],
         fresh_observations: vec![],
         fact_requests: BTreeMap::new(),
     };
-    shell.run(
-        &core,
-        Event::Refresh {
-            permission: false,
-            now: scan_now()?,
-        },
-    )?;
-    assert!(core.view().ordinary_content_keys.contains(&key));
-    assert!(
-        core.view()
-            .immich_visibility_actions
-            .iter()
-            .any(|a| a.key == key && a.can_lock)
-    );
-    shell.run(&core, Event::RefreshAlbums)?;
-    for album in &albums {
-        assert!(album_contains(&agent, &session, album, &key.asset_id)?);
-    }
-    wait_for_stable_asset(
-        &agent,
-        &session.request(&format!("assets/{}", key.asset_id), "GET", None),
-        &key,
-    )?;
-    shell.run(&core, open(GRANT))?;
+    authorize_image_lock(&mut shell, &core, &agent, &session, &key, &albums)?;
     shell.run(
         &core,
         prepare(
@@ -120,6 +102,49 @@ fn real_immich_single_image_visibility_removes_two_owned_albums_and_never_restor
             .contains("visibility-fixture.png")
     );
     std::fs::remove_dir_all(directory).map_err(|e| e.to_string())?;
+    Ok(())
+}
+fn authorize_image_lock(
+    shell: &mut LiveVisibilityShell<'_>,
+    core: &Core<Suwop>,
+    agent: &ureq::Agent,
+    session: &Session,
+    key: &AssetKey,
+    albums: &[String],
+) -> Result<(), String> {
+    shell.run(
+        core,
+        Event::Refresh {
+            permission: false,
+            now: scan_now()?,
+        },
+    )?;
+    assert!(core.view().ordinary_content_keys.contains(key));
+    assert!(
+        core.view()
+            .immich_visibility_actions
+            .iter()
+            .any(|a| a.key == *key && !a.can_lock && a.write_availability == suwop_core::immich_visibility::ImmichVisibilityWriteAvailability::VerificationRequired)
+    );
+    shell.run(core, Event::RefreshAlbums)?;
+    for album in albums {
+        assert!(album_contains(agent, session, album, &key.asset_id)?);
+    }
+    wait_for_stable_asset(
+        agent,
+        &session.request(&format!("assets/{}", key.asset_id), "GET", None),
+        key,
+    )?;
+    shell.run(core, open(GRANT))?;
+    assert!(
+        core.view()
+            .immich_visibility_actions
+            .iter()
+            .any(|a| a.key == *key
+                && a.can_lock
+                && a.write_availability
+                    == suwop_core::immich_visibility::ImmichVisibilityWriteAvailability::Supported)
+    );
     Ok(())
 }
 fn open(grant: &str) -> Event {
@@ -192,6 +217,8 @@ struct LiveVisibilityShell<'a> {
     agent: &'a ureq::Agent,
     directory: &'a Path,
     writes: usize,
+    confirmations: usize,
+    persists: usize,
     elevated_memberships: Vec<Vec<String>>,
     fresh_observations: Vec<(String, String)>,
     fact_requests: BTreeMap<String, HttpRequest>,
@@ -254,6 +281,12 @@ impl LiveVisibilityShell<'_> {
     fn respond(&mut self, core: &Core<Suwop>, operation: &ShellOperation) -> Result<Value, String> {
         match operation {
             ShellOperation::Http(request) => {
+                if matches!(request.method.as_str(), "PUT" | "PATCH" | "DELETE") {
+                    assert!(
+                        request.immich_visibility_authorization.is_some(),
+                        "provider mutation lacks exact C2 authorization"
+                    );
+                }
                 if let Some(permit) = &request.immich_visibility_authorization {
                     let grant = core.view().immich_locked_view;
                     assert_eq!(grant.grant_id.as_deref(), Some(permit.grant_id.as_str()));
@@ -303,8 +336,12 @@ impl LiveVisibilityShell<'_> {
                 }
                 Ok(value)
             }
-            ShellOperation::ConfirmImmichVisibility { .. } => Ok(json!(true)),
+            ShellOperation::ConfirmImmichVisibility { .. } => {
+                self.confirmations += 1;
+                Ok(json!(true))
+            }
             ShellOperation::Persist(state) => {
+                self.persists += 1;
                 let path = self.directory.join("journal.tmp");
                 std::fs::write(
                     &path,

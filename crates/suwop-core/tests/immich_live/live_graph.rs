@@ -34,6 +34,13 @@ pub(super) use ordinary_parent::{
 #[path = "live_graph/selected_recovery.rs"]
 mod selected_recovery;
 
+#[path = "live_graph/write_contract.rs"]
+mod write_contract;
+pub(super) use write_contract::{
+    native_cid_after_unlock, native_cid_before_product, native_cid_denied, native_cid_observe,
+    native_cid_setup,
+};
+
 const PIN: &str = "123456";
 const V: &[u8] = include_bytes!("../fixtures/live_graph/V.mp4");
 const M: &[u8] = include_bytes!("../fixtures/live_graph/M.mp4");

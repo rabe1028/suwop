@@ -915,12 +915,14 @@ public struct ImmichVisibilityActionHint: Codable, Sendable {
     public var canShowTimeline: Bool
     public var key: AssetKey
     public var reason: ImmichVisibilityUnsupportedReason?
-    public init(canLock: Bool, canShowArchive: Bool, canShowTimeline: Bool, key: AssetKey, reason: ImmichVisibilityUnsupportedReason? = nil) {
+    public var writeAvailability: ImmichVisibilityWriteAvailability
+    public init(canLock: Bool, canShowArchive: Bool, canShowTimeline: Bool, key: AssetKey, reason: ImmichVisibilityUnsupportedReason? = nil, writeAvailability: ImmichVisibilityWriteAvailability) {
         self.canLock = canLock
         self.canShowArchive = canShowArchive
         self.canShowTimeline = canShowTimeline
         self.key = key
         self.reason = reason
+        self.writeAvailability = writeAvailability
     }
 }
 
@@ -1032,6 +1034,12 @@ public struct ImmichVisibilityView: Codable, Sendable {
         self.sceneID = sceneID
         self.status = status
     }
+}
+
+public enum ImmichVisibilityWriteAvailability: String, Codable, CaseIterable, Sendable {
+    case `verificationRequired`
+    case `supported`
+    case `unsupported`
 }
 
 public struct LibrarySnapshot: Codable, Sendable {

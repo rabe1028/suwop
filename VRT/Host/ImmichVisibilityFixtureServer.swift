@@ -16,6 +16,9 @@ import SuwopShell
     @Published private(set) var logins = 0
     @Published private(set) var pinSubmissions = 0
     private var externalChanges = 0
+    var serverVersion: JSONValue = .object([
+        "major": .number(3), "minor": .number(3), "patch": .number(3), "prerelease": .null,
+    ])
     var configurationAfterMutation: SourceKind?
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
@@ -43,7 +46,7 @@ import SuwopShell
         routes.append(request.method + " " + path)
         switch path {
         case "server/features": return response(.object(["passwordLogin": .bool(true)]))
-        case "server/version": return try response(.from(Version(major: 3, minor: 2, patch: 4)))
+        case "server/version": return response(serverVersion)
         case "auth/login": return login(request)
         default: break
         }

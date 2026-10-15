@@ -24,6 +24,16 @@ extension ImmichVisibilityUnsupportedReason {
     }
 }
 
+extension ImmichVisibilityWriteAvailability {
+    var guidance: String? {
+        switch self {
+        case .verificationRequired: "Immich の PIN で認証して、表示先を変更できるか確認してください。"
+        case .supported: nil
+        case .unsupported: "このサーバーではロック写真の表示先を変更できません。閲覧や現在の状態の確認は引き続き利用できます。"
+        }
+    }
+}
+
 extension ImmichVisibilityPrompt {
     var continuingAccessDisclosure: String? {
         guard to == .locked else { return nil }

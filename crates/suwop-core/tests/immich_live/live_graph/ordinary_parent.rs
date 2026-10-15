@@ -22,6 +22,13 @@ pub(super) async fn recovery_native_parent_setup(
 ) -> Result<(String, Vec<String>), String> {
     setup_pair(ctx, session, directory, true, "selected-recovery").await
 }
+pub(super) async fn write_contract_native_setup(
+    ctx: &Context,
+    session: &Session,
+    directory: &Path,
+) -> Result<(String, Vec<String>), String> {
+    setup_pair(ctx, session, directory, true, "write-contract").await
+}
 async fn setup_pair(
     ctx: &Context,
     session: &Session,
