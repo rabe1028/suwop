@@ -11,7 +11,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import verify
 
@@ -122,7 +122,9 @@ class VerificationTests(unittest.TestCase):
                     self.assertLess(time.monotonic(), deadline, "child did not become ready")
                     time.sleep(0.02)
                 wrapper.send_signal(signum)
-                self.assertEqual(wrapper.wait(timeout=10), 128 + signum)
+                self.assertEqual(
+                    wrapper.wait(timeout=10), 128 + signum, (artifacts / "wrapper.log").read_text()
+                )
                 report = json.loads(
                     next((artifacts / "verification").glob("*/result.json")).read_text()
                 )
@@ -147,6 +149,30 @@ class VerificationTests(unittest.TestCase):
                 if wrapper.poll() is None:
                     wrapper.kill()
                 wrapper.wait(timeout=5)
+
+    def test_permission_error_is_ignored_only_for_an_exited_zombie_group(self):
+        process = Mock(pid=123)
+        process.poll.return_value = 0
+        with (
+            patch("verify.os.killpg", side_effect=PermissionError),
+            patch("verify.subprocess.check_output", return_value="123 Z+\n456 S\n"),
+        ):
+            self.assertFalse(verify.signal_group(process, 0))
+            self.assertFalse(verify.signal_group(process, signal.SIGKILL))
+        with (
+            patch("verify.os.killpg", side_effect=PermissionError),
+            patch("verify.subprocess.check_output", return_value="123 S\n"),
+            self.assertRaises(PermissionError),
+        ):
+            verify.signal_group(process, signal.SIGKILL)
+        process.poll.return_value = None
+        with patch("verify.os.killpg", side_effect=PermissionError):
+            self.assertTrue(verify.signal_group(process, 0))
+        with (
+            patch("verify.os.killpg", side_effect=PermissionError),
+            self.assertRaises(PermissionError),
+        ):
+            verify.signal_group(process, signal.SIGTERM)
 
     def test_sigterm_stops_the_check_group_and_finalizes_report(self):
         self.assert_cancelled(signal.SIGTERM)

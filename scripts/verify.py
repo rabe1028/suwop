@@ -69,6 +69,23 @@ def signal_group(process, signum):
         os.killpg(process.pid, signum)
     except ProcessLookupError:
         return False
+    except PermissionError as error:
+        # Darwin can report EPERM for an exited group containing only zombies.
+        # Never treat a live or uninspectable group as successfully terminated.
+        if process.poll() is None:
+            if signum == 0:
+                return True  # EPERM proves existence; wait for the leader to exit.
+            error.add_note("Process group leader has not exited")
+            raise
+        states = subprocess.check_output(
+            ["ps", "-axo", "pgid=,stat="],  # noqa: S607
+            text=True,
+        ).splitlines()
+        group = [row.split()[1] for row in states if row.split()[0] == str(process.pid)]
+        if any(not state.startswith("Z") for state in group):
+            error.add_note(f"Process group states: {group}")
+            raise
+        return False
     return True
 
 
