@@ -32,11 +32,17 @@ fn real_pin_unset_video_archive_roundtrip_preserves_two_albums_and_original() ->
 fn real_ordinary_selected_motion_preserves_locked_parent() -> Result<(), String> {
     ordinary_roundtrip(FixtureMedia::LinkedMotion)
 }
+#[test]
+#[ignore = "isolated Docker and native metadata evidence required"]
+fn real_native_selected_motion_preserves_parents_albums_and_originals() -> Result<(), String> {
+    ordinary_roundtrip(FixtureMedia::NativeMotion)
+}
 #[derive(Clone, Copy)]
 enum FixtureMedia {
     Image,
     Video,
     LinkedMotion,
+    NativeMotion,
 }
 impl FixtureMedia {
     fn name(self) -> &'static str {
@@ -44,12 +50,13 @@ impl FixtureMedia {
             Self::Image => "ordinary.png",
             Self::Video => "ordinary.mp4",
             Self::LinkedMotion => "linked-motion.mp4",
+            Self::NativeMotion => "synthetic-motion.mov",
         }
     }
     fn role(self) -> ResourceRole {
         match self {
             Self::Image => ResourceRole::Image,
-            Self::Video | Self::LinkedMotion => ResourceRole::Video,
+            Self::Video | Self::LinkedMotion | Self::NativeMotion => ResourceRole::Video,
         }
     }
     fn bytes(self) -> Result<Vec<u8>, String> {
@@ -59,6 +66,7 @@ impl FixtureMedia {
                 .map_err(|_| "pixel".into()),
             Self::Video => Ok(include_bytes!("../fixtures/live_graph/V.mp4").to_vec()),
             Self::LinkedMotion => Ok(include_bytes!("../fixtures/live_graph/M.mp4").to_vec()),
+            Self::NativeMotion => Ok(super::live_graph::native_pair_bytes()?.1),
         }
     }
 }
@@ -93,6 +101,7 @@ fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
             ..ScanDiagnostics::default()
         },
     };
+    native_controls(&agent, &session, &directory, media, "before")?;
     activate_archive(&mut shell, &core)?;
     refresh_initial_hint(&mut shell, &core, &session, &key)?;
     for (index, to) in [
@@ -138,9 +147,17 @@ fn ordinary_roundtrip(media: FixtureMedia) -> Result<(), String> {
             suwop_core::apple_visibility::VisibilityOutcome::Applied
         );
         verify_preserved(&agent, &session, &key, &albums, &directory, media)?;
-        if matches!(media, FixtureMedia::LinkedMotion) {
-            super::live_graph::ordinary_linked_controls(&agent, &session, &directory)?;
-        }
+        native_controls(
+            &agent,
+            &session,
+            &directory,
+            media,
+            if index == 0 {
+                "after-archive"
+            } else {
+                "after-timeline"
+            },
+        )?;
         let refresh_trace_start = shell.diagnostics.trace.len();
         shell.run(
             &core,
@@ -554,6 +571,12 @@ impl ArchiveShell<'_> {
                 if let Some(permit) = &request.immich_archive_authorization {
                     assert_eq!(request.url, permit.url);
                     assert_eq!(request.method, "PUT");
+                    assert!(
+                        request
+                            .url
+                            .ends_with(&format!("/assets/{}", permit.key.asset_id))
+                    );
+                    assert_eq!(request.body, Some(json!({"visibility":permit.to})));
                     assert_eq!(
                         core.view().immich_archive_view.active_operation.as_ref(),
                         Some(permit)
@@ -763,6 +786,10 @@ async fn fixture(
     let session = pin_unset_session(ctx, &admin, media.name())
         .await
         .map_err(|_| "fixture new user/session")?;
+    if matches!(media, FixtureMedia::NativeMotion) {
+        let (id, albums) = super::live_graph::native_motion_setup(ctx, &session, directory).await?;
+        return Ok((session, id, albums));
+    }
     let bytes = media.bytes()?;
     let path = directory.join(media.name());
     std::fs::write(&path, &bytes).map_err(|e| e.to_string())?;
@@ -858,4 +885,20 @@ fn activate_archive(shell: &mut ArchiveShell<'_>, core: &Core<Suwop>) -> Result<
             scene_id: SCENE.into(),
         },
     )
+}
+
+fn native_controls(
+    agent: &ureq::Agent,
+    session: &Session,
+    directory: &Path,
+    media: FixtureMedia,
+    stage: &str,
+) -> Result<(), String> {
+    if matches!(media, FixtureMedia::LinkedMotion) {
+        super::live_graph::ordinary_linked_controls(agent, session, directory)?;
+    }
+    if matches!(media, FixtureMedia::NativeMotion) {
+        super::live_graph::native_motion_controls(agent, session, directory, stage)?;
+    }
+    Ok(())
 }

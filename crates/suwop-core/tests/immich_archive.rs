@@ -98,6 +98,7 @@ struct Shell {
     close_after_write: bool,
     patch: Option<Value>,
     scan_revision: Option<String>,
+    write_response: Option<Value>,
 }
 impl Shell {
     fn run(&mut self, c: &Core<Suwop>, event: Event) -> Result<(), String> {
@@ -204,6 +205,11 @@ impl Shell {
         }
         if request.method == "PUT" {
             self.writes += 1;
+            assert_eq!(
+                request.url,
+                format!("https://fixture.example/api/assets/{ASSET}")
+            );
+            assert_eq!(request.body, Some(json!({"visibility":"archive"})));
             let permit = request
                 .immich_archive_authorization
                 .as_ref()
@@ -231,7 +237,9 @@ impl Shell {
             if self.faults.lost {
                 return Err("lost response".into());
             }
-            return Ok(json!({"status":200,"body":null}));
+            return Ok(self.write_response.clone().unwrap_or_else(
+                || json!({"status":200,"body":{"id":ASSET,"visibility":"archive"}}),
+            ));
         }
         self.gets += 1;
         assert_eq!(
@@ -1025,5 +1033,32 @@ fn media_type_change_after_confirmation_never_persists_or_writes() -> Result<(),
     assert_eq!(s.confirms, 1);
     assert_eq!(s.persists, 0);
     assert_eq!(s.writes, 0);
+    Ok(())
+}
+
+#[test]
+fn ordinary_single_resource_response_must_acknowledge_exact_id_and_destination()
+-> Result<(), String> {
+    for response in [
+        json!({"status":204,"body":null}),
+        json!({"status":200,"body":null}),
+        json!({"status":200,"body":{"id":"another","visibility":"archive"}}),
+        json!({"status":200,"body":{"id":ASSET,"visibility":"timeline"}}),
+    ] {
+        let (c, mut s) = started(model()?)?;
+        s.write_response = Some(response);
+        s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+        assert_eq!(s.writes, 1);
+        assert_eq!(
+            s.disk.as_ref().ok_or("disk")?["immichVisibilityOperations"][0]["outcome"],
+            "unknown"
+        );
+        assert!(
+            c.view()
+                .immich_archive_actions
+                .iter()
+                .all(|hint| hint.key != key())
+        );
+    }
     Ok(())
 }

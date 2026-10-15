@@ -52,10 +52,9 @@ import SuwopShell
         _ authorization: ImmichArchiveAuthorization,
         request: HttpRequest
     ) async throws -> NativeSubmissionPermit {
-        guard case let .object(body) = request.body, Set(body.keys) == Set(["ids", "visibility"]),
+        guard case let .object(body) = request.body, Set(body.keys) == Set(["visibility"]),
               request.ordinaryContentAuthorization == nil, request.immichVisibilityAuthorization == nil,
               request.url == authorization.url, request.method == "PUT",
-              try request.body["ids"].decode([String].self) == [authorization.key.assetID],
               request.body["visibility"].string == authorization.to.rawValue else { throw CancellationError() }
         let (view, permit) = try await fresh(sceneID: authorization.sceneID)
         guard let active = view.activeOperation,

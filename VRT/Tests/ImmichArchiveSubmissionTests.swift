@@ -16,6 +16,16 @@ final class ImmichArchiveSubmissionTests: XCTestCase {
         let issued = try XCTUnwrap(fixture.issuedPUTs.first)
         let authority = try XCTUnwrap(issued.immichArchiveAuthorization)
         XCTAssertEqual(authority.operationID, fixture.journal.immichVisibilityOperations.first?.id)
+        XCTAssertEqual(issued.url, ImmichArchiveFixtureServer.endpoint + "/assets/" + authority.key.assetID)
+        XCTAssertEqual(try Set(issued.body.decode([String: JSONValue].self).keys), Set(["visibility"]))
+        var bulk = issued
+        bulk.url = ImmichArchiveFixtureServer.endpoint + "/assets"
+        var wrongTarget = issued
+        wrongTarget.url = ImmichArchiveFixtureServer.endpoint + "/assets/77777777-7777-4777-8777-777777777777"
+        var withIDs = issued
+        withIDs.body = .object([
+            "ids": .array([.string(authority.key.assetID)]), "visibility": .string(authority.to.rawValue),
+        ])
         var extraField = issued
         var body = try issued.body.decode([String: JSONValue].self)
         body["isFavorite"] = .bool(true)
@@ -33,7 +43,7 @@ final class ImmichArchiveSubmissionTests: XCTestCase {
             operationID: authority.operationID,
             sceneID: authority.sceneID
         )
-        for malformed in [extraField, ordinary, locked] {
+        for malformed in [extraField, ordinary, locked, bulk, wrongTarget, withIDs] {
             let operation = try JSONValue.object([
                 "type": .string("http"), "data": .from(malformed),
             ]).decode(ShellOperation.self)

@@ -251,15 +251,21 @@ impl OrdinaryArchiveAuthority {
         }
         crate::immich_visibility::validate_operation(operation)?;
         let mut request = self.session.request(
-            "assets",
+            &format!("assets/{}", operation.key.asset_id),
             "PUT",
-            Some(serde_json::json!({"ids":[operation.key.asset_id],"visibility":operation.to})),
+            Some(serde_json::json!({"visibility":operation.to})),
         );
         request.immich_archive_authorization = Some(self.permit.clone());
         let response: crate::immich::HttpResponse =
             crate::app::io(ctx, ShellOperation::Http(request)).await?;
         self.valid()?;
-        crate::immich::check_status(response.status)?;
+        if response.status != 200
+            || response.body["id"].as_str() != Some(operation.key.asset_id.as_str())
+            || response.body["visibility"]
+                != serde_json::to_value(operation.to).map_err(|_| ERROR)?
+        {
+            return Err(ERROR.into());
+        }
         Ok(response.body)
     }
 }
@@ -467,6 +473,7 @@ fn authority(
         return None;
     }
     let session = model.session.clone()?;
+    let url = format!("{}/assets/{}", session.endpoint, key.asset_id);
     let permit = ImmichArchiveAuthorization {
         operation_id: id,
         scene_id: scene.into(),
@@ -474,7 +481,7 @@ fn authority(
         scope: session.scope.clone(),
         key,
         to,
-        url: format!("{}/assets", session.endpoint),
+        url,
     };
     Some(VisibilityAuthority::Ordinary(OrdinaryArchiveAuthority {
         session,

@@ -177,3 +177,80 @@ Logs are `/tmp/suwop-video-initial-scan-unit1.log`,
 removed and the pre-existing service retained. Updated hosted CI remains pending.
 This test-only change does not alter product files, DTOs or the 46 reviewed
 visual baselines; prior Apple and visual evidence remains separately recorded.
+
+
+## Native metadata side effects and route correction
+
+The earlier seven passing integration cases used API-linked assets. They do not
+establish preservation for a JPEG/MOV pair carrying matching native Live Photo
+metadata. A separate disposable v3.2.4 probe exposed a bulk-update defect:
+`PUT /assets` queues SidecarWrite even for visibility-only changes, which queues
+metadata extraction. Native Live Photo matching then hides the motion asset and
+removes its album memberships.
+
+Evidence is retained at `/tmp/suwop-native-effects-evidence-20261015-1` with the
+run log `/tmp/suwop-native-effects-integration-20261015-1.log`. After the selected
+parent's bulk archive and its metadata completion, the motion asset lost both
+album memberships. After bulk motion archive, the motion was hidden rather than
+archived. After bulk motion lock and its own metadata completion, it was hidden
+and its original remained accessible through ordinary credentials (HTTP 200).
+A stable locked-motion precondition was therefore not established; the proposed
+subsequent parent mutation was explicitly skipped. This does not attribute a
+locked-motion downgrade to a later parent operation that never occurred.
+
+The separate single-asset visibility-only controls returned HTTP 200, preserved
+both memberships for all three assets and preserved every original byte. Their
+metadata timestamps stayed unchanged during bounded observations; this alone is
+not a guarantee against future independent server jobs. Pinned service code
+shows that `PUT /assets/{id}` does not enqueue SidecarWrite when only visibility
+is supplied, and does not relink unless livePhotoVideoId is supplied.
+
+Ordinary Timeline/Archive operations are being changed to this exact selected
+asset route, with only visibility in the body, validated response identity and
+destination, and the existing fresh readback and durable Unknown fences. New
+product validation is pending; the successful observation probe is not product
+acceptance. PIN remains separately gated: the single route omits bulk album
+removal, so this correction must not silently change the PIN contract or enable
+VIDEO/Live PIN operations. No reviewed visual baseline is changed by this work.
+
+
+The route correction passed focused Rust22 and full `make check` (Rust/FFI336,
+Swift65; eight real-server cases ignored in that unit invocation). Logs:
+`/tmp/suwop-video-single-route-target-20261015-1.log` and
+`/tmp/suwop-video-single-route-check-20261015-2.log`. The first full check stopped
+on a test-helper length lint; the helper was split without removing assertions.
+
+Real v3.2.4 integration then passed all eight cases in 19.09 seconds
+(`/tmp/suwop-video-single-route-integration-20261015-1.log`). The added case uses
+the canonical fixed JPEG/MOV package in `Tests/fixtures/native_live_pair`, with
+matching embedded Live identifiers. A disposable harness-only read-only database
+checkpoint establishes initial metadata extraction completion before final setup;
+production authorization does not read the database. Setup changes visibility
+through the single route and adds the three assets to two albums.
+
+The actual Rust operation changes only M Timeline -> Archive -> Timeline with
+two single-asset PUTs and no PIN authentication. Before and after each operation,
+P remains Timeline, P2 remains Archive, both still links remain M, and all three
+assets have exactly the two fixture memberships and unchanged original bytes.
+Evidence is `/tmp/suwop-video-native-motion-evidence-20261015-1`, including the
+read-only checkpoint and three observation/download stages. Parent review
+independently matched the stage states and JPEG/MOV SHA256 to the canonical
+fixture. Dedicated Docker containers, volumes and network were removed; the
+unrelated existing service remained running. This is synthetic native-metadata
+Immich evidence, not physical-device PhotoKit acceptance.
+
+Apple rebuild and strict VRT for this product change are pending. Earlier Apple,
+visual and hosted results predate this route correction and do not stand in for
+those checks. The 46 visual baselines remain held.
+
+
+Corrected-source Apple build and strict VRT both completed successfully. All five
+Rust Apple targets, XCFramework, iOS and macOS builds passed in
+`/tmp/suwop-video-single-route-apple1-20261016.log`. Strict VRT passed host77 and
+UI41 with 46 actual images and zero differences in
+`/tmp/suwop-video-single-route-strict1-20261016.log` and
+`DerivedData/VRTArtifacts/20261015T145054Z-54263/report.json`.
+All seven stages exited zero, record=false, and all 46 baseline hashes remained
+unchanged. The exact-route/body rejection tests and preservation of the submitted
+200 response after Close passed. Parent review compared a 406-file source manifest
+and found no changes during verification. Updated-head hosted CI remains pending.

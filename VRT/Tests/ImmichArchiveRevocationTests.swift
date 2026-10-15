@@ -156,7 +156,7 @@ final class ImmichArchiveRevocationTests: XCTestCase {
         model.immichArchive.close(sceneID: ImmichArchivePhotoFixture.sceneID)
         fixture.releaseHeld()
         try await fixture.settle { !model.immichArchive.busy }
-        XCTAssertEqual(fixture.returnedStatuses, [204])
+        XCTAssertEqual(fixture.returnedStatuses, [200])
         XCTAssertEqual(fixture.journal.immichVisibilityOperations.first?.id, id)
         XCTAssertEqual(fixture.journal.immichVisibilityOperations.first?.outcome, .unknown)
         model.immichArchive.sceneChanged(sceneID: ImmichArchivePhotoFixture.sceneID, phase: .active)
