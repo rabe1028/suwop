@@ -194,3 +194,25 @@ Live Photo未対応の文言全体と無効な操作ボタンが表示されて�
 テスト修正後の対象UI全8件が成功した（`/tmp/suwop-archive-live-reason-ui2-20261015.log`
 とxcresult）。説明表示の検査も成功した。先行ui実行は古いXcode生成物参照によるbuild失敗で、
 動作検証には使用しない。別DerivedDataでビルド・実行した。最新HEADのhosted CIは別途確認する。
+
+## 保存結果が不明な間の操作表示
+
+最初の操作意図の保存と読戻しが両方失敗した場合、対象Aは一時的に表示から除外される。
+一方、別の写真Bは一覧に残り、修正前はアーカイブ操作が有効に表示されていた。
+Rustの実行入口は共通の保存不確定フラグで拒否するため、Bの操作が無反応になっていた。
+同じフラグをRustの操作候補にも適用し、保存結果が不明な間は利用不可として表示する。
+保存記録、対象Aの制限、再送禁止、復旧手順は変更しない。
+
+2写真の回帰テストで、旧コードのBの候補がSome(Archive)になることを再現した
+（`/tmp/suwop-archive-hint-p2-red-20261015-3.log`）。修正後の対象12件は成功した
+（`/tmp/suwop-archive-hint-p2-green-20261015-2.log`）。Bへの新しい操作IDによる要求も
+追加GET・保存・PUTを行わず、正しい保存状態の復旧後も再走査までは操作を再開しない。
+再走査後に操作候補が戻ることと、復旧によるPUTが0であることを確認した。
+先行red1/green1は対象Aの表示除外を考慮していないfixture、red2は修正済みコードの
+確認手順に問題があり、旧動作の再現証拠には使用しない。
+
+修正後のmake checkはRust/FFI317件・Swift65件が成功し、lintと生成確認も通過した
+（`/tmp/suwop-archive-hint-p2-check-20261015-1.log`）。全5 Rustターゲット、
+XCFramework、iOS/macOSビルドも成功した
+（`/tmp/suwop-archive-hint-p2-apple-20261015-1.log`）。Swiftソースと基準画像は変更していない。
+先行HEADのローカルstrict VRTと、新しいHEADのhosted CIは別の検証記録として扱う。

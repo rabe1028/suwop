@@ -171,6 +171,10 @@ pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
                 Some(ImmichVisibility::Archive) => Some(ImmichArchiveDestination::Timeline),
                 _ => None,
             };
+            if model.immich_visibility.persistence_uncertain {
+                reason =
+                    Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unavailable);
+            }
             if to.is_none() && reason.is_none() {
                 reason = Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unknown);
             }

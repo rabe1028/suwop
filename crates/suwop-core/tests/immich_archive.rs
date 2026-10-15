@@ -578,3 +578,71 @@ fn revision_race_disables_archive_until_explicit_fresh_scan_without_replay() -> 
     assert_eq!(s.confirms, 1);
     Ok(())
 }
+
+#[test]
+fn indeterminate_intent_disables_hint_until_exact_state_recovery() -> Result<(), String> {
+    let mut m = model()?;
+    let mut other = m.state.snapshots[0].assets[0].clone();
+    other.key.asset_id = "66666666-6666-4666-8666-666666666666".into();
+    let retained = other.key.clone();
+    m.state.snapshots[0].assets.push(other);
+    let before = serde_json::to_value(&m.state).map_err(|e| e.to_string())?;
+    let (c, mut s) = started(m)?;
+    s.disk = Some(before);
+    s.fail_persist = Some(1);
+    s.faults.read_fail = true;
+    s.run(&c, prepare(ID, ImmichArchiveDestination::Archive))?;
+    let view = c.view();
+    assert!(view.immich_archive_view.persistence_uncertain);
+    assert!(view.immich_archive_view.can_recover);
+    let hint = view
+        .immich_archive_actions
+        .into_iter()
+        .find(|h| h.key == retained)
+        .ok_or("retained snapshot hint")?;
+    assert_eq!(hint.to, None);
+    assert_eq!(
+        hint.reason,
+        Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Unavailable)
+    );
+    let gets = s.gets;
+    s.run(
+        &c,
+        Event::PrepareImmichArchive {
+            key: retained,
+            to: ImmichArchiveDestination::Archive,
+            operation_id: "44444444-4444-4444-8444-444444444444".into(),
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert_eq!(s.gets, gets);
+    assert_eq!(s.persists, 1);
+    assert_eq!(s.writes, 0);
+    s.faults.read_fail = false;
+    s.run(
+        &c,
+        Event::RecoverImmichArchiveState {
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert!(!c.view().immich_archive_view.persistence_uncertain);
+    assert_eq!(s.persists, 1);
+    assert!(c.view().immich_archive_actions.is_empty());
+    s.run(
+        &c,
+        Event::Refresh {
+            permission: false,
+            now: 1_800_000_000.0,
+        },
+    )?;
+    let hint = c
+        .view()
+        .immich_archive_actions
+        .into_iter()
+        .find(|h| h.key == key())
+        .ok_or("recovered hint")?;
+    assert_eq!(hint.to, Some(ImmichArchiveDestination::Archive));
+    assert_eq!(s.persists, 2);
+    assert_eq!(s.writes, 0);
+    Ok(())
+}
