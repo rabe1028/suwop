@@ -125,3 +125,11 @@ was recovered from source-writing tool history onto current main, then tested ag
 Earlier measurement links from that worktree were unavailable and are not evidence
 for this patch. Current reproducible results and limitations are recorded in
 [the 256/512 comparison](embeddinggemma2.md).
+
+The idle worker also reclaims a manifest-owned shard in an active/latest generation
+once no jobs reference it. This handles same-revision photos returning after a
+startup availability refresh without accumulating another index on every launch.
+Cleanup shares the analysis lock with publication and search, drops at most one
+shard per checkpoint, and removes its SQLite manifest only after the Lance table
+is gone. Interrupted cleanup can safely resume; a shard with any job reference is
+retained.

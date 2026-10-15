@@ -931,3 +931,109 @@ fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
     );
     Ok(())
 }
+
+#[test]
+fn returning_assets_reclaim_detached_active_shards_one_at_a_time() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let library = state(65);
+    store.persist(&library)?;
+    let budget = AnalysisBudget {
+        max_batch_rows: 32,
+        ..AnalysisBudget::default()
+    };
+    let key = store.register(&model(), &budget)?;
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    let count = || db.query_row("SELECT count(*) FROM shards", [], |r| r.get::<_, i64>(0));
+    let generation = store.status()?[0].active_generation;
+    assert_eq!(count()?, 3);
+    for _ in 0..3 {
+        let mut absent = library.clone();
+        absent.snapshots[0].access = ScanAccess::Unavailable;
+        store.persist(&absent)?;
+        store.persist(&library)?;
+        let old = db
+            .prepare("SELECT id,generation FROM shards ORDER BY id")?
+            .query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, i64>(1)?)))?
+            .collect::<std::result::Result<Vec<_>, _>>()?;
+        assert_eq!(store.status()?[0].awaiting_embeddings, 65);
+        // No new vectors are required for reclamation. Each idle checkpoint drops one table.
+        for remaining in (0..3).rev() {
+            assert!(rt.block_on(store.step())?);
+            assert_eq!(count()?, remaining);
+        }
+        for (id, generation) in old {
+            assert!(
+                !root
+                    .path()
+                    .join("analysis")
+                    .join(format!("g{generation}_s{id}.lance"))
+                    .exists()
+            );
+        }
+        drop(store);
+        store = Store::open(root.path())?;
+        supply(&mut store, &key)?;
+        while rt.block_on(store.step())? {}
+        assert_eq!(store.status()?[0].active_generation, generation);
+        assert_eq!(count()?, 3);
+        assert_eq!(
+            rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 100))?
+                .len(),
+            65
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn detached_cleanup_preserves_shared_shards_and_resumes_after_table_drop() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let library = state(2);
+    store.persist(&library)?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    let (id, generation): (i64, i64) =
+        db.query_row("SELECT id,generation FROM shards", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })?;
+    let mut partial = library.clone();
+    partial.snapshots[0].assets.remove(0);
+    store.persist(&partial)?;
+    store.persist(&library)?;
+    while rt.block_on(store.step())? {}
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .len(),
+        1
+    );
+    let mut absent = library.clone();
+    absent.snapshots[0].access = ScanAccess::Unavailable;
+    store.persist(&absent)?;
+    store.persist(&library)?;
+    // Simulate interruption after deleting the Lance table but before journal cleanup.
+    let connection = rt.block_on(
+        lancedb::connect(root.path().join("analysis").to_str().ok_or("path")?).execute(),
+    )?;
+    rt.block_on(connection.drop_table(&format!("g{generation}_s{id}"), &[]))?;
+    drop(store);
+    let mut store = Store::open(root.path())?;
+    assert_eq!(rt.block_on(store.prune())?, 1);
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    supply(&mut store, &key)?;
+    while rt.block_on(store.step())? {}
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .len(),
+        2
+    );
+    Ok(())
+}

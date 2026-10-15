@@ -232,7 +232,7 @@ impl Store {
         }
         Ok(())
     }
-    /// Remove only manifest-owned retired generations, preserving active and latest.
+    /// Remove retired generations and unreferenced shards, preserving live jobs.
     pub async fn prune(&mut self) -> Result<u64> {
         let _guard = self.analysis_lock()?;
         let mut removed = 0;
@@ -246,7 +246,7 @@ impl Store {
     async fn prune_one(&mut self) -> Result<Option<u64>> {
         let retired: Option<(i64, String)> = self.db.query_row("SELECT g.id,g.budget FROM generations g JOIN models m ON m.id=g.model WHERE g.id!=m.latest AND (m.active IS NULL OR g.id!=m.active) ORDER BY g.id LIMIT 1", [], |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?;
         let Some((generation, budget)) = retired else {
-            return Ok(None);
+            return self.prune_detached_shard().await;
         };
         let shard: Option<i64> = self
             .db
@@ -279,6 +279,28 @@ impl Store {
             .map_err(error)?;
         tx.commit().map_err(error)?;
         Ok(Some(0))
+    }
+    /// The analysis lock prevents a writer from claiming a shard during cleanup.
+    /// Metadata may detach references, but never attaches jobs to an existing shard.
+    async fn prune_detached_shard(&self) -> Result<Option<u64>> {
+        let shard: Option<(i64, i64, String)> = self.db.query_row(
+            "SELECT s.id,s.generation,g.budget FROM shards s JOIN generations g ON g.id=s.generation WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.shard=s.id) ORDER BY s.id LIMIT 1",
+            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
+        ).optional().map_err(error)?;
+        let Some((shard, generation, budget)) = shard else {
+            return Ok(None);
+        };
+        let budget: AnalysisBudget = serde_json::from_str(&budget).map_err(error)?;
+        let connection = self.connection(&budget).await?;
+        match connection.drop_table(&name(generation, shard), &[]).await {
+            Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
+            Err(e) => return Err(error(e)),
+        }
+        // Keep the manifest until the table is gone, including across interruption.
+        self.db
+            .execute("DELETE FROM shards WHERE id=?1", [shard])
+            .map_err(error)?;
+        Ok(Some(1))
     }
     pub async fn search(
         &self,

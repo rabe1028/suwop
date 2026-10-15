@@ -8,6 +8,7 @@ pub(crate) fn enqueue_latest(tx: &Transaction<'_>) -> Result<()> {
     tx.execute("INSERT OR IGNORE INTO jobs(generation,asset,revision,state) SELECT m.latest,a.id,a.revision,'awaiting' FROM models m CROSS JOIN assets a", []).map_err(error)?;
     // A source may return after becoming temporarily absent. Its result must be
     // supplied again; do not resurrect a stale/unpublished vector implicitly.
+    // Detached shards stay in the manifest until the worker safely reclaims them.
     tx.execute("UPDATE jobs SET state='awaiting',shard=NULL,reason=NULL WHERE state='obsolete' AND EXISTS (SELECT 1 FROM models m JOIN assets a ON a.id=jobs.asset AND a.revision=jobs.revision WHERE m.latest=jobs.generation)", []).map_err(error)?;
     tx.execute("UPDATE generations SET state='building' WHERE state='ready' AND EXISTS (SELECT 1 FROM jobs j WHERE j.generation=generations.id AND j.state IN ('awaiting','queued'))", []).map_err(error)?;
     Ok(())
