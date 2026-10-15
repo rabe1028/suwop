@@ -408,6 +408,12 @@ impl VisibilityAuthority {
             }
         }
     }
+    pub(crate) async fn verify_write_contract(&self, ctx: &Context) -> Result<(), String> {
+        match self {
+            Self::Locked(c) => c.verify_write_contract(ctx).await,
+            Self::Ordinary(c) => c.valid(),
+        }
+    }
     pub(crate) async fn mutate_visibility(
         &self,
         ctx: &Context,

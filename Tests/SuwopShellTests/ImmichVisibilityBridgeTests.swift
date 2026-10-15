@@ -19,6 +19,9 @@ private final class VisibilityABI {
 
     init(saved: SavedLibrary? = nil, visibility: String = "timeline") throws {
         driver = try LockedSessionABI()
+        driver.serverVersion = .object([
+            "major": .number(3), "minor": .number(3), "patch": .number(3), "prerelease": .null,
+        ])
         if let saved {
             driver.saved = saved
         }

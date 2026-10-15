@@ -100,6 +100,10 @@ enum WriteFault {
 }
 #[derive(Default)]
 struct Shell {
+    versions: std::collections::VecDeque<Value>,
+    version_reads: usize,
+    fail_version: Option<usize>,
+    confirmations: usize,
     pages: Option<std::collections::VecDeque<Value>>,
     paths: Vec<String>,
     status_reads: usize,
@@ -155,7 +159,8 @@ impl Shell {
             }
             ShellOperation::Http(request) => self.http(request),
             ShellOperation::ConfirmImmichVisibility { prompt } => {
-                assert_eq!(prompt.grant_id, GRANT);
+                self.confirmations += 1;
+                assert!([GRANT, NEXT].contains(&prompt.grant_id.as_str()));
                 assert_eq!(prompt.scene_id, SCENE);
                 Ok(json!(self.confirmed))
             }
@@ -208,6 +213,16 @@ impl Shell {
         self.asset_failure
             .map(|status| Ok(json!({"status":status,"body":null})))
     }
+    fn version_response(&mut self) -> Result<Value, String> {
+        self.version_reads += 1;
+        if self.fail_version == Some(self.version_reads) {
+            return Err("fixture version transport unavailable".into());
+        }
+        Ok(self
+            .versions
+            .pop_front()
+            .unwrap_or_else(|| json!({"major":3,"minor":3,"patch":3,"prerelease":null})))
+    }
     fn http(&mut self, request: &suwop_core::immich::HttpRequest) -> Result<Value, String> {
         let path = request
             .url
@@ -238,6 +253,7 @@ impl Shell {
         );
         assert!(!request.headers.contains_key("x-api-key"));
         let body = match path {
+            "server/version" => self.version_response()?,
             "users/me" => json!({"id":OWNER}),
             "auth/status" => {
                 self.status_reads += 1;
@@ -259,7 +275,7 @@ impl Shell {
                     .immich_visibility_authorization
                     .as_ref()
                     .ok_or("visibility permit")?;
-                assert_eq!(permit.grant_id, GRANT);
+                assert!([GRANT, NEXT].contains(&permit.grant_id.as_str()));
                 assert_eq!(permit.scene_id, SCENE);
                 assert!([OP, NEXT].contains(&permit.operation_id.as_str()));
                 self.writes += 1;
@@ -1745,3 +1761,6 @@ fn pin_direct_video_lock_and_unlock_never_persist_or_write() -> Result<(), Strin
 
 #[path = "immich_visibility/selected_observation.rs"]
 mod selected_observation;
+
+#[path = "immich_visibility/write_contract.rs"]
+mod write_contract;

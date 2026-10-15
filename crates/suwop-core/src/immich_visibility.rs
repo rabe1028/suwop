@@ -25,9 +25,32 @@ pub enum ImmichVisibilityUnsupportedReason {
     Unknown,
     Unavailable,
 }
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ImmichVisibilityWriteAvailability {
+    VerificationRequired,
+    Supported,
+    Unsupported,
+}
+pub(crate) fn gate_write_hint(
+    hint: &mut ImmichVisibilityActionHint,
+    availability: ImmichVisibilityWriteAvailability,
+) {
+    hint.write_availability = if hint.reason.is_some() {
+        ImmichVisibilityWriteAvailability::Unsupported
+    } else {
+        availability
+    };
+    if availability != ImmichVisibilityWriteAvailability::Supported {
+        hint.can_lock = false;
+        hint.can_show_timeline = false;
+        hint.can_show_archive = false;
+    }
+}
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichVisibilityActionHint {
+    pub write_availability: ImmichVisibilityWriteAvailability,
     pub key: AssetKey,
     pub can_lock: bool,
     pub can_show_timeline: bool,
@@ -186,12 +209,31 @@ pub fn actions(model: &Model) -> Vec<ImmichVisibilityActionHint> {
         .filter(|snapshot| snapshot.access != crate::domain::ScanAccess::Unavailable)
         .flat_map(|snapshot| &snapshot.assets)
         .filter(|asset| asset.key.provider == crate::domain::Provider::Immich)
-        .map(|asset| hint(asset, false))
+        .map(|asset| {
+            let mut action = hint(asset, false);
+            let supported = crate::immich_locked::write_supported(model);
+            let verification = model
+                .session
+                .as_ref()
+                .is_some_and(|s| (s.version.major, s.version.minor, s.version.patch) == (3, 3, 3));
+            gate_write_hint(
+                &mut action,
+                if supported {
+                    ImmichVisibilityWriteAvailability::Supported
+                } else if verification && !crate::immich_locked::write_checked(model) {
+                    ImmichVisibilityWriteAvailability::VerificationRequired
+                } else {
+                    ImmichVisibilityWriteAvailability::Unsupported
+                },
+            );
+            action
+        })
         .collect()
 }
 #[must_use]
 pub fn locked_action(key: AssetKey) -> ImmichVisibilityActionHint {
     ImmichVisibilityActionHint {
+        write_availability: ImmichVisibilityWriteAvailability::Unsupported,
         key,
         can_lock: false,
         can_show_timeline: false,
@@ -265,6 +307,11 @@ pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVi
     let reason = unsupported_reason(asset, MediaPolicy::LockedImage);
 
     ImmichVisibilityActionHint {
+        write_availability: if reason.is_none() {
+            ImmichVisibilityWriteAvailability::Supported
+        } else {
+            ImmichVisibilityWriteAvailability::Unsupported
+        },
         key: asset.key.clone(),
         can_lock: reason.is_none() && !locked,
         can_show_timeline: reason.is_none() && locked,
@@ -709,7 +756,8 @@ fn begin(
     else {
         return Command::done();
     };
-    if key.scope != capability.scope()
+    if !crate::immich_locked::write_supported(model)
+        || key.scope != capability.scope()
         || key.provider != crate::domain::Provider::Immich
         || model.state.protected_entries.iter().any(|e| e.key == key)
         || model.protection.denied.contains(&key)

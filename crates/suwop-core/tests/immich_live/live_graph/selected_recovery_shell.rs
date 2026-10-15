@@ -154,15 +154,17 @@ impl<'a> RecoveryShell<'a> {
         } else {
             let allowed = matches!(
                 (request.method.as_str(), path),
-                ("GET", "server/features" | "users/me" | "auth/status")
-                    | (
-                        "POST",
-                        "auth/login"
-                            | "auth/session/unlock"
-                            | "auth/session/lock"
-                            | "auth/logout"
-                            | "search/metadata"
-                    )
+                (
+                    "GET",
+                    "server/features" | "server/version" | "users/me" | "auth/status"
+                ) | (
+                    "POST",
+                    "auth/login"
+                        | "auth/session/unlock"
+                        | "auth/session/lock"
+                        | "auth/logout"
+                        | "search/metadata"
+                )
             ) || (request.method == "GET"
                 && path.starts_with("assets/")
                 && !path.contains('?')
