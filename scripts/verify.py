@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --script
 """Run checks with complete disk logs and compact, source-bound JSON evidence."""
 
 import argparse

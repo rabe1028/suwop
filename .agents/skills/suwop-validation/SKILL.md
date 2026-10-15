@@ -8,10 +8,13 @@ does not waive them or replace native/device acceptance.
 
 ## Local iteration
 
+Run all Python through `uv run --no-project python`; use `uv venv` and `uv pip`
+for environment/package operations.
+
 - Find the affected test once with `rg`; run that Rust test target/filter or
   Swift test filter while editing. Run the complete required gates after the
   final relevant edit. Avoid rerunning a whole suite just to read its outcome.
-- Wrap long commands: `python3 scripts/verify.py run --label check -- make check`.
+- Wrap long commands: `uv run --no-project python scripts/verify.py run --label check -- make check`.
   The first line names a result JSON. Keep the tool's process/session ID, wait on
   that process, and read the completed JSON once. Full output stays in its log.
   A failed command returns its exit code and at most 30 lines / 6 KB of output.
@@ -32,7 +35,7 @@ does not waive them or replace native/device acceptance.
 ## CI follow-up
 
 - Resolve the exact run and head once. Use
-  `python3 scripts/verify.py ci RUN_ID --expected-head FULL_SHA` for one compact
+  `uv run --no-project python scripts/verify.py ci RUN_ID --expected-head FULL_SHA` for one compact
   snapshot. Exit 0 = completed success, 1 = completed failure, 2 = pending,
   3 = wrong head. It never retries jobs, mutates PRs, or treats pending as green.
 - Preserve run ID, expected SHA, failed job ID and log path in the task's small

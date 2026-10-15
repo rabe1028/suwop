@@ -17,7 +17,7 @@ lint-common:
 	env ruff format --check scripts
 	env shellcheck scripts/*.sh .githooks/*
 	env actionlint
-	python3 scripts/check-architecture.py
+	uv run --no-project python scripts/check-architecture.py
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	bash scripts/check-generated.sh
 
@@ -52,7 +52,7 @@ check: lint
 
 generate-types:
 	cargo run --locked --quiet -p suwop-core --bin schema > /tmp/suwop-schema.json
-	python3 scripts/generate-swift.py Sources/SuwopShell/Generated/Types.swift < /tmp/suwop-schema.json
+	uv run --no-project python scripts/generate-swift.py Sources/SuwopShell/Generated/Types.swift < /tmp/suwop-schema.json
 
 check-generated:
 	bash scripts/check-generated.sh
@@ -91,4 +91,4 @@ sharing-test:
 
 .PHONY: test-infra
 test-infra:
-	python3 -m unittest discover -s scripts -p 'test_*.py' -v
+	uv run --no-project python -m unittest discover -s scripts -p 'test_*.py' -v
