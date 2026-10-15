@@ -6,7 +6,7 @@ LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
 for attempt in 1 2 3; do
     status=0
-    "$@" pull > "$LOG" 2>&1 || status=$?
+    "$@" pull --policy missing > "$LOG" 2>&1 || status=$?
     cat "$LOG"
     if [[ "$status" == 0 ]]; then exit 0; fi
     if [[ "$attempt" == 3 ]] || ! grep -Eiq 'toomanyrequests|too many requests|(^|[^0-9a-f])429([^0-9a-f]|$)' "$LOG"; then
