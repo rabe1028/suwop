@@ -67,6 +67,12 @@ def termination_signals():
 def signal_group(process, signum):
     try:
         os.killpg(process.pid, signum)
+    except PermissionError:
+        # Darwin can transiently deny an existence probe as the group exits.
+        # Keep the bounded grace period; actual signal failures must propagate.
+        if signum != 0:
+            raise
+        return True
     except ProcessLookupError:
         return False
     return True
