@@ -1764,3 +1764,6 @@ mod selected_observation;
 
 #[path = "immich_visibility/write_contract.rs"]
 mod write_contract;
+
+#[path = "immich_visibility/ordinary_selected.rs"]
+mod ordinary_selected;

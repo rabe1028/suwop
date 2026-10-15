@@ -62,6 +62,21 @@ pub enum ShellOperation {
     ConfirmImmichVisibility {
         prompt: crate::immich_visibility::ImmichVisibilityPrompt,
     },
+    ReadOrdinarySelectedImage {
+        ticket: crate::ordinary_selected::OrdinarySelectedImageTicket,
+    },
+    PublishOrdinarySelectedImage {
+        ticket: crate::ordinary_selected::OrdinarySelectedImageTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseOrdinarySelectedImage {
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseOrdinarySelectedImages {
+        generation: u64,
+    },
     ReadImmichLockedImage {
         ticket: crate::immich_locked::ImmichLockedImageTicket,
     },
@@ -367,6 +382,43 @@ pub enum Event {
         scene_id: String,
         phase: crate::protection::ProtectionScenePhase,
     },
+    RequestOrdinarySelectedImage {
+        key: crate::domain::AssetKey,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        kind: crate::ordinary_selected::OrdinarySelectedImageKind,
+    },
+    CancelOrdinarySelectedImage {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    CloseOrdinarySelectedScene {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    #[serde(skip)]
+    OrdinarySelectedRefreshFinished {
+        result: Box<crate::workflow::Outcome>,
+        expected_generation: u64,
+        refresh_id: u64,
+        origin: crate::ordinary_selected::RefreshOrigin,
+    },
+    #[serde(skip)]
+    OrdinarySelectedImageRead {
+        ticket: crate::ordinary_selected::OrdinarySelectedImageTicket,
+        result: Option<crate::ordinary_selected::OrdinarySelectedImageResult>,
+    },
+    #[serde(skip)]
+    OrdinarySelectedImagePublished {
+        ticket: crate::ordinary_selected::OrdinarySelectedImageTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+        approved: bool,
+    },
     RequestImmichLockedImage {
         #[serde(rename = "entryID")]
         entry_id: String,
@@ -637,6 +689,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub ordinary_selected: crate::ordinary_selected::OrdinarySelectedModel,
     pub immich_archive: crate::immich_archive::ImmichArchiveModel,
     pub immich_visibility: crate::immich_visibility::ImmichVisibilityModel,
     pub ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -657,6 +710,10 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub ordinary_selected_presentation: Vec<crate::ordinary_selected::OrdinarySelectedPresentation>,
+    pub ordinary_selected_pending: Vec<crate::ordinary_selected::OrdinarySelectedImageRequest>,
+    pub ordinary_selected_images: Vec<crate::ordinary_selected::OrdinarySelectedImageAccess>,
+    pub ordinary_selected_generation: u64,
     pub immich_archive_view: crate::immich_archive::ImmichArchiveView,
     pub immich_archive_actions: Vec<crate::immich_archive::ImmichArchiveActionHint>,
     pub ordinary_content_keys: Vec<crate::domain::AssetKey>,
@@ -692,14 +749,16 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
-        if matches!(
-            event,
-            Event::Disconnect
-                | Event::Configure { .. }
-                | Event::ProtectedPersisted { .. }
-                | Event::ProtectedReconciled { .. }
-                | Event::Finished { .. }
-        ) {
+        if crate::ordinary_selected::security_progress_changed(&event, model)
+            || matches!(
+                event,
+                Event::Disconnect
+                    | Event::Configure { .. }
+                    | Event::ProtectedPersisted { .. }
+                    | Event::ProtectedReconciled { .. }
+                    | Event::Finished { .. }
+            )
+        {
             model
                 .ordinary_generation
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -711,21 +770,52 @@ impl crux_core::App for Suwop {
             }
             crate::immich_archive::invalidate(model);
         }
+        let selected_cleanup = crate::ordinary_selected::reconcile(&event, model);
+        if let Some(command) = crate::ordinary_selected::update(&event, model) {
+            return selected_cleanup
+                .and(command)
+                .and(crate::ordinary_selected::reconcile_current(model));
+        }
+        if let Event::OrdinarySelectedRefreshFinished {
+            result,
+            expected_generation,
+            refresh_id,
+            origin,
+        } = event.clone()
+        {
+            return selected_cleanup.and(crate::ordinary_selected::finish_refresh(
+                model,
+                result,
+                expected_generation,
+                refresh_id,
+                &origin,
+            ));
+        }
         if let Some(command) = crate::immich_archive::update(event.clone(), model) {
-            return command;
+            return selected_cleanup
+                .and(command)
+                .and(crate::ordinary_selected::reconcile_current(model));
         }
         if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
-            return command;
+            return selected_cleanup
+                .and(command)
+                .and(crate::ordinary_selected::reconcile_current(model));
         }
         if let Some(command) = crate::immich_locked::update(event.clone(), model) {
-            return command;
+            return selected_cleanup
+                .and(command)
+                .and(crate::ordinary_selected::reconcile_current(model));
         }
         let cleanup = if crate::immich_locked::invalidates(&event) {
             crate::immich_locked::close(model)
         } else {
             Command::done()
         };
-        cleanup.and(Self::update_library(event, model))
+        let library = Self::update_library(event, model);
+        selected_cleanup
+            .and(cleanup)
+            .and(library)
+            .and(crate::ordinary_selected::reconcile_current(model))
     }
     fn view(&self, model: &Model) -> ViewModel {
         Self::library_view(model)
@@ -794,49 +884,73 @@ impl Suwop {
                 crate::protection::reconcile(model)
             }
             _ if model.busy => Command::done(),
-            event => {
-                model.busy = true;
-                model.error = None;
-                model.changed_during_work = false;
-                model.status = "処理中…".into();
-                let state = model.state.clone();
-                let session = model.session.clone();
-                let apple_generation = model.apple_generation.clone();
-                let denied_content = model
-                    .protection
-                    .denied
-                    .union(&model.immich_visibility.denied)
-                    .cloned()
-                    .collect();
-                let ordinary_generation = model.ordinary_generation.clone();
-                Command::new(move |ctx| async move {
-                    let result = crate::workflow::run_guarded(
-                        &ctx,
-                        event,
-                        state,
-                        session,
-                        apple_generation,
-                        denied_content,
-                        ordinary_generation,
-                    )
-                    .await;
-                    ctx.send_event(Event::Finished {
-                        state: result.state,
-                        session: result.session,
-                        status: result.status,
-                        error: result.error,
-                        preview_to_select: result.preview_to_select,
-                    });
-                })
-            }
+            event => Self::start_workflow(event, model),
         }
+    }
+    fn start_workflow(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        model.busy = true;
+        model.error = None;
+        model.changed_during_work = false;
+        model.status = "処理中…".into();
+        let origin = crate::ordinary_selected::RefreshOrigin::capture(model);
+        let state = model.state.clone();
+        let session = model.session.clone();
+        let apple_generation = model.apple_generation.clone();
+        let denied_content = model
+            .protection
+            .denied
+            .union(&model.immich_visibility.denied)
+            .cloned()
+            .collect();
+        let ordinary_generation = model.ordinary_generation.clone();
+        let expected_generation = ordinary_generation.load(std::sync::atomic::Ordering::SeqCst);
+        let is_refresh = matches!(event, Event::Refresh { .. });
+        let refresh_id = if is_refresh {
+            model.ordinary_selected.refresh_sequence =
+                model.ordinary_selected.refresh_sequence.wrapping_add(1);
+            let id = model.ordinary_selected.refresh_sequence;
+            model.ordinary_selected.active_refresh = Some(id);
+            id
+        } else {
+            model.ordinary_selected.active_refresh = None;
+            0
+        };
+        Command::new(move |ctx| async move {
+            let result = crate::workflow::run_guarded(
+                &ctx,
+                event,
+                state,
+                session,
+                apple_generation,
+                denied_content,
+                ordinary_generation,
+            )
+            .await;
+            if is_refresh {
+                ctx.send_event(Event::OrdinarySelectedRefreshFinished {
+                    result: Box::new(result),
+                    expected_generation,
+                    refresh_id,
+                    origin,
+                });
+                return;
+            }
+            ctx.send_event(Event::Finished {
+                state: result.state,
+                session: result.session,
+                status: result.status,
+                error: result.error,
+                preview_to_select: result.preview_to_select,
+            });
+        })
     }
     fn library_view(model: &Model) -> ViewModel {
         let can_transfer = can_transfer(model);
         let move_blockers = public_move_blockers(model, can_transfer);
-        let public = crate::privacy::PublishedLibrary::from_canonical(
+        let operation_public = crate::privacy::PublishedLibrary::from_canonical(
             &crate::protection::ordinary_state(model),
         );
+        let public = crate::ordinary_selected::public_library(model);
         let photos = catalog(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
             &public.snapshots,
@@ -853,16 +967,17 @@ impl Suwop {
             })
             .collect();
         let displayed_dates = displayed_dates(&preview_choices);
-        let editing_access =
-            crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
-        let ordinary_content_keys = ordinary_keys(&public);
-        let private_content_revision = ordinary_revision(
-            model.session.as_ref().map(|s| s.scope.as_str()),
-            model
-                .ordinary_generation
-                .load(std::sync::atomic::Ordering::SeqCst),
+        let editing_access = crate::editing::EditingAccess::new(
+            &operation_public.snapshots,
+            &model.state.apple_scope,
         );
+        let (ordinary_content_keys, private_content_revision) =
+            ordinary_projection(model, &operation_public);
         ViewModel {
+            ordinary_selected_presentation: crate::ordinary_selected::presentations(model),
+            ordinary_selected_images: crate::ordinary_selected::images(model),
+            ordinary_selected_pending: crate::ordinary_selected::pending(model),
+            ordinary_selected_generation: crate::ordinary_selected::generation(model),
             ordinary_content_keys,
             private_content_revision,
             immich_archive_view: crate::immich_archive::view(model),
@@ -889,7 +1004,7 @@ impl Suwop {
                 .map(|p| {
                     (
                         crate::browser::photo_id(p),
-                        crate::metadata::targets(p, &public.snapshots),
+                        crate::metadata::targets(p, &operation_public.snapshots),
                     )
                 })
                 .collect(),
@@ -1004,16 +1119,25 @@ fn choose_preview(
     if model.protection.denied.contains(anchor) || model.protection.denied.contains(&key) {
         return Err("保護した写真を通常の一覧から表示できません。".into());
     }
-    if !model.state.apple_content_visible(anchor) || !model.state.apple_content_visible(&key) {
+    let public = crate::ordinary_selected::public_library(model);
+    let present = |key: &crate::domain::AssetKey| {
+        public
+            .snapshots
+            .iter()
+            .filter(|s| s.access != crate::domain::ScanAccess::Unavailable)
+            .flat_map(|s| &s.assets)
+            .any(|a| a.key == *key)
+    };
+    if !present(anchor) || !present(&key) {
         return Err("写真の可視性を確認してください。".into());
     }
-    let photos = catalog(&model.state.presentation_snapshots(), &model.state.receipts);
+    let photos = catalog(&public.snapshots, &public.receipts);
     let photo = photos
         .iter()
         .find(|p| p.assets.iter().any(|a| a.key == *anchor))
         .ok_or("表示する写真を確認できません。一覧を更新してください。")?;
     let choices = crate::media::PreviewAccess::new(
-        &model.state.snapshots,
+        &public.snapshots,
         &model.state.apple_scope,
         model.session.as_ref(),
     )
@@ -1085,6 +1209,20 @@ pub(crate) fn ordinary_revision(scope: Option<&str>, generation: u64) -> String 
     ))
 }
 
+fn ordinary_projection(
+    model: &Model,
+    public: &crate::privacy::PublishedLibrary,
+) -> (Vec<crate::domain::AssetKey>, String) {
+    (
+        ordinary_keys(public),
+        ordinary_revision(
+            model.session.as_ref().map(|s| s.scope.as_str()),
+            model
+                .ordinary_generation
+                .load(std::sync::atomic::Ordering::SeqCst),
+        ),
+    )
+}
 fn ordinary_keys(public: &crate::privacy::PublishedLibrary) -> Vec<crate::domain::AssetKey> {
     let keys: Vec<_> = public
         .snapshots

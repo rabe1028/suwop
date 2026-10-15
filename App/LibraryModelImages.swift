@@ -2,6 +2,11 @@ import Foundation
 import SuwopShell
 
 extension LibraryModel {
+    func selectedPresentation(_ photo: UnifiedPhoto) -> OrdinarySelectedPresentation? {
+        guard let key = view?.previewSources[photo.id] else { return nil }
+        return ordinarySelected.descriptor(for: key)
+    }
+
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         try await ordinaryImage(photo, preview: true)
     }

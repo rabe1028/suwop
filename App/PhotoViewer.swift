@@ -58,9 +58,15 @@ struct PhotoViewer: View {
                 header
             }
             if let photo {
-                ZoomablePhoto(photo: photo, model: model, move: move) { withAnimation { chrome.toggle() } }
-                    .id(photo.id)
+                ZoomablePhoto(photo: photo, model: model, sceneID: protectionOwner, move: move) {
+                    withAnimation { chrome.toggle() }
+                }
+                .id(photo.id)
                 if chrome {
+                    if model.selectedPresentation(photo) != nil {
+                        Text("表示のみ — この表示元の共有・編集・再生・転送はできません。")
+                            .font(.caption).padding(.horizontal).accessibilityIdentifier("ordinarySelectedReadOnly")
+                    }
                     actions(photo)
                 }
             } else {
@@ -185,7 +191,7 @@ struct PhotoViewer: View {
                     Button("停止") { model.stop() }
                 }
             }
-            if photo.providers.count > 1 {
+            if model.selectedPresentation(photo) == nil, Set(model.operationKeys(photo).map(\.provider)).count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }
             Group {
@@ -237,11 +243,11 @@ struct PhotoViewer: View {
             Button { model.play(photo) } label: {
                 Image(systemName: kind == .live ? "livephoto.play" : "play.circle")
             }
-            .disabled(model.isBusy)
+            .disabled(model.isBusy || model.selectedPresentation(photo) != nil)
             .accessibilityLabel(kind == .live ? "Live Photo の原本を再生" : "動画の原本を再生")
         }
         Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
-            .disabled(model.isBusy).accessibilityLabel("原本ファイルを共有")
+            .disabled(model.isBusy || model.selectedPresentation(photo) != nil).accessibilityLabel("原本ファイルを共有")
         Menu {
             Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
             Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
@@ -276,11 +282,12 @@ struct PhotoViewer: View {
             }.disabled(model.displayedSource(photo) == nil)
                 .accessibilityIdentifier("protectDisplayedSource")
         } label: { Image(systemName: "slider.horizontal.3") }
-            .disabled(model.isBusy).accessibilityLabel("写真を編集")
+            .disabled(model.isBusy || model.selectedPresentation(photo) != nil).accessibilityLabel("写真を編集")
         Button { model.favorite([photo], value: !photo.isFavorite) } label: {
             Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
         }
-        .foregroundStyle(photo.isFavorite ? Color.red : .white).disabled(model.isBusy)
+        .foregroundStyle(photo.isFavorite ? Color.red : .white)
+        .disabled(model.isBusy || model.selectedPresentation(photo) != nil)
         .accessibilityLabel(photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加")
         Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
     }
@@ -325,6 +332,7 @@ struct PhotoViewer: View {
 private struct ZoomablePhoto: View {
     let photo: UnifiedPhoto
     @ObservedObject var model: LibraryModel
+    let sceneID: String
     let move: (Int) -> Void
     let toggleChrome: () -> Void
     @State private var image: PlatformImage?
@@ -338,51 +346,18 @@ private struct ZoomablePhoto: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if let image, imageIdentifier == model.previewIdentifier(photo) {
-                    platformImage(image).resizable().scaledToFit().frame(
-                        width: geometry.size.width,
-                        height: geometry.size.height
-                    )
-                    .scaleEffect(scale).offset(offset)
-                    .gesture(MagnificationGesture().onChanged { scale = min(6, max(1, settledScale * $0))
-                        offset = bounded(offset, size: geometry.size)
+                if let proof = model.selectedPresentation(photo) {
+                    OrdinarySelectedRasterView(
+                        session: model.ordinarySelected,
+                        key: proof.key,
+                        sceneID: sceneID,
+                        kind: .preview
+                    ) { image in
+                        renderedImage(image, size: geometry.size)
+                            .accessibilityIdentifier("ordinarySelectedPreview")
                     }
-                    .onEnded { _ in settledScale = scale
-                        offset = bounded(offset, size: geometry.size)
-                        settledOffset = offset
-                    })
-                    .simultaneousGesture(DragGesture().onChanged { value in
-                        if scale > 1 {
-                            offset = bounded(
-                                CGSize(
-                                    width: settledOffset.width + value.translation.width,
-                                    height: settledOffset.height + value.translation.height
-                                ),
-                                size: geometry.size
-                            )
-                        }
-                    }.onEnded { value in
-                        let horizontal = abs(value.translation.width) > abs(value.translation.height) * 1.3
-                        if scale > 1 {
-                            settledOffset = offset
-                        } else if abs(value.translation.width) > 45, horizontal {
-                            move(value.translation.width < 0 ? 1 : -1)
-                        }
-                    })
-                    .onTapGesture(count: 2) {
-                        withAnimation { scale = scale > 1 ? 1 : 2.5
-                            settledScale = scale
-                            offset = .zero
-                            settledOffset = .zero
-                        }
-                    }.onTapGesture { toggleChrome() }
-                    .accessibilityLabel(model.displayedSource(photo)?.name ?? photo.name)
-                    .accessibilityIdentifier("photoPreview")
-                    .accessibilityAction(named: "拡大・縮小") { scale = scale > 1 ? 1 : 2.5
-                        settledScale = scale
-                        offset = .zero
-                        settledOffset = .zero
-                    }
+                } else if let image, imageIdentifier == model.previewIdentifier(photo) {
+                    renderedImage(image, size: geometry.size)
                 } else if let error {
                     ContentUnavailableView {
                         Label("写真を読み込めません", systemImage: "exclamationmark.triangle")
@@ -393,6 +368,7 @@ private struct ZoomablePhoto: View {
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
         }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
+            guard model.selectedPresentation(photo) == nil else { return }
             let identifier = model.previewIdentifier(photo)
             error = nil
             scale = 1
@@ -412,8 +388,56 @@ private struct ZoomablePhoto: View {
         }
     }
 
-    private func bounded(_ value: CGSize, size: CGSize) -> CGSize {
-        guard let image, image.size.width > 0, image.size.height > 0 else { return .zero }
+    private func renderedImage(_ image: PlatformImage, size: CGSize) -> some View {
+        platformImage(image).resizable().scaledToFit().frame(
+            width: size.width,
+            height: size.height
+        )
+        .scaleEffect(scale).offset(offset)
+        .gesture(MagnificationGesture().onChanged { scale = min(6, max(1, settledScale * $0))
+            offset = bounded(offset, size: size, image: image)
+        }
+        .onEnded { _ in settledScale = scale
+            offset = bounded(offset, size: size, image: image)
+            settledOffset = offset
+        })
+        .simultaneousGesture(DragGesture().onChanged { value in
+            if scale > 1 {
+                offset = bounded(
+                    CGSize(
+                        width: settledOffset.width + value.translation.width,
+                        height: settledOffset.height + value.translation.height
+                    ),
+                    size: size,
+                    image: image
+                )
+            }
+        }.onEnded { value in
+            let horizontal = abs(value.translation.width) > abs(value.translation.height) * 1.3
+            if scale > 1 {
+                settledOffset = offset
+            } else if abs(value.translation.width) > 45, horizontal {
+                move(value.translation.width < 0 ? 1 : -1)
+            }
+        })
+        .onTapGesture(count: 2) {
+            withAnimation { scale = scale > 1 ? 1 : 2.5
+                settledScale = scale
+                offset = .zero
+                settledOffset = .zero
+            }
+        }.onTapGesture { toggleChrome() }
+        .accessibilityLabel(model.displayedSource(photo)?.name ?? photo.name)
+        .accessibilityIdentifier("photoPreview")
+        .accessibilityAction(named: "拡大・縮小") { scale = scale > 1 ? 1 : 2.5
+            settledScale = scale
+            offset = .zero
+            settledOffset = .zero
+        }
+    }
+
+    private func bounded(_ value: CGSize, size: CGSize, image: PlatformImage) -> CGSize {
+        guard image.size.width > 0, image.size.height > 0 else { return .zero }
         let fit = min(size.width / image.size.width, size.height / image.size.height)
         let width = max(0, (image.size.width * fit * scale - size.width) / 2)
         let height = max(0, (image.size.height * fit * scale - size.height) / 2)

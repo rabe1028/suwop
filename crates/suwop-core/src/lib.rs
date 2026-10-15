@@ -18,3 +18,5 @@ pub mod immich_locked;
 pub mod immich_visibility;
 
 pub mod immich_archive;
+
+pub mod ordinary_selected;

@@ -165,14 +165,16 @@ fn durable_state_available(model: &Model) -> bool {
 }
 #[must_use]
 pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
-    let state =
-        crate::privacy::PublishedLibrary::from_canonical(&crate::protection::ordinary_state(model));
+    let ordinary = crate::protection::ordinary_state(model);
+    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let state = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
     state
         .snapshots
         .iter()
         .filter(|s| s.access != crate::domain::ScanAccess::Unavailable)
         .flat_map(|s| &s.assets)
         .filter(|a| allowed(model, &a.key))
+        .filter(|a| access.can_operate(&a.key))
         .map(|a| {
             let mut reason = crate::immich_visibility::ordinary_archive_reason(a);
             let to = match a.immich_visibility {

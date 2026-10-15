@@ -80,6 +80,7 @@ pub(crate) struct ContentAccess {
     visible: BTreeSet<AssetKey>,
     hidden: BTreeSet<AssetKey>,
     protected: BTreeSet<AssetKey>,
+    app_protected: BTreeSet<AssetKey>,
 }
 impl ContentAccess {
     pub(crate) fn new(state: &SavedLibrary) -> Self {
@@ -119,6 +120,11 @@ impl ContentAccess {
         });
         hidden.retain(|k| !duplicates.contains(k));
         Self {
+            app_protected: state
+                .protected_entries
+                .iter()
+                .map(|e| e.key.clone())
+                .collect(),
             visible,
             hidden,
             protected: state
@@ -136,10 +142,16 @@ impl ContentAccess {
         }
     }
     pub(crate) fn visible(&self, key: &AssetKey) -> bool {
+        self.can_operate(key)
+    }
+    pub(crate) fn can_operate(&self, key: &AssetKey) -> bool {
         !self.protected.contains(key)
             && (key.provider != Provider::Apple || self.visible.contains(key))
     }
 
+    pub(crate) fn can_present(&self, key: &AssetKey, presentation: &BTreeSet<AssetKey>) -> bool {
+        !self.app_protected.contains(key) && (self.can_operate(key) || presentation.contains(key))
+    }
     pub(crate) fn protected(&self, key: &AssetKey) -> bool {
         self.protected.contains(key)
     }

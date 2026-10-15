@@ -18,7 +18,7 @@ import SuwopShell
         guard let runtime else { throw CancellationError() }
         let requiresPublishedKey = switch purpose {
         case .read: true
-        case .destinationReadback, .visibilityReconciliation: false
+        case .destinationReadback, .visibilityReconciliation, .selectedPresentationMetadata: false
         }
         guard requiresPublishedKey || expectedRevision?.isEmpty == false else { throw CancellationError() }
         let view = try await runtime.snapshot().view

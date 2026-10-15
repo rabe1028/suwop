@@ -113,7 +113,7 @@ struct PhotoGrid: View {
     private func tile(_ photo: UnifiedPhoto) -> some View {
         Button {
             if selecting {
-                let keys = Set(photo.assets.map(\.key))
+                let keys = Set(model.operationKeys(photo))
                 if !selectedKeys.isDisjoint(with: keys) {
                     selectedKeys.subtract(keys)
                 } else {
@@ -134,21 +134,26 @@ struct PhotoGrid: View {
             .accessibilityLabel("\(photo.name)、\(photo.presence.title)\(photo.isFavorite ? "、お気に入り" : "")")
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
             .accessibilityAddTraits(!selectedKeys.isDisjoint(with: photo.assets.map(\.key)) ? .isSelected : [])
-            .accessibilityAction(named: "写真を選択") {
-                selecting = true
-                selectedKeys.formUnion(photo.assets.map(\.key))
+            .disabled(selecting && model.operationKeys(photo).isEmpty)
+            .accessibilityActions {
+                if !model.operationKeys(photo).isEmpty {
+                    Button("写真を選択") {
+                        selecting = true
+                        selectedKeys.formUnion(model.operationKeys(photo))
+                    }
+                }
             }
             .contextMenu {
                 Button("写真を選択", systemImage: "checkmark.circle") {
                     selecting = true
-                    selectedKeys.formUnion(photo.assets.map(\.key))
-                }
+                    selectedKeys.formUnion(model.operationKeys(photo))
+                }.disabled(model.operationKeys(photo).isEmpty)
                 Button(
                     photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加",
                     systemImage: photo.isFavorite ? "heart.slash" : "heart"
                 ) {
                     model.favorite([photo], value: !photo.isFavorite)
-                }.disabled(model.isBusy)
+                }.disabled(model.isBusy || model.operationKeys(photo).isEmpty)
                 Button("写真を表示", systemImage: "arrow.up.left.and.arrow.down.right") {
                     if let key = photo.assets.first?.key {
                         open(key)
@@ -163,13 +168,25 @@ struct PhotoTile: View {
     @ObservedObject var model: LibraryModel
     let selected: Bool
     let selecting: Bool
+    @Environment(\.protectionSceneID) private var sceneID
     @State private var image: PlatformImage?
     @State private var imageIdentifier = ""
     var body: some View {
         GeometryReader { geometry in
             ZStack(alignment: .bottomLeading) {
                 Rectangle().fill(.secondary.opacity(0.15))
-                if let image, imageIdentifier == model.previewIdentifier(photo) {
+                if let proof = model.selectedPresentation(photo), let sceneID {
+                    OrdinarySelectedRasterView(
+                        session: model.ordinarySelected,
+                        key: proof.key,
+                        sceneID: sceneID,
+                        kind: .thumbnail
+                    ) { image in
+                        platformImage(image).resizable().scaledToFill().frame(
+                            width: geometry.size.width, height: geometry.size.height
+                        ).clipped()
+                    }
+                } else if let image, imageIdentifier == model.previewIdentifier(photo) {
                     platformImage(image).resizable().scaledToFill().frame(
                         width: geometry.size.width,
                         height: geometry.size.height
@@ -190,6 +207,9 @@ struct PhotoTile: View {
                     if photo.resources.contains(where: { $0.role == .rawImage }) {
                         Text("RAW").bold()
                     }
+                    if model.selectedPresentation(photo) != nil {
+                        Text("表示のみ")
+                    }
                     Spacer()
                     if photo.presence == .both {
                         Image(systemName: "checkmark.icloud.fill")
@@ -207,6 +227,7 @@ struct PhotoTile: View {
             .contentShape(Rectangle())
             .task(id: model.previewIdentifier(photo)) {
                 image = nil
+                guard model.selectedPresentation(photo) == nil else { return }
                 let identifier = model.previewIdentifier(photo)
                 let loaded = try? await model.thumbnail(photo)
                 if !Task.isCancelled, identifier == model.previewIdentifier(photo) {

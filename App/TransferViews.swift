@@ -80,6 +80,7 @@ struct PhotoInfo: View {
             }
             ForEach(Provider.allCases, id: \.self) { provider in
                 let assets = photo.assets.filter { $0.key.provider == provider }
+                let canOperate = assets.allSatisfy { model.operationKeys(photo).contains($0.key) }
                 Section(provider.title) {
                     if assets.isEmpty {
                         Text("未検出（未照合の原本がある場合は未確定）").foregroundStyle(.secondary)
@@ -121,27 +122,27 @@ struct PhotoInfo: View {
                     if !assets.isEmpty {
                         ForEach(model.metadataTargets(photo).filter { $0.provider == provider }) { target in
                             Button("日時・位置情報を変更") { pendingMetadata = target }
-                                .disabled(model.isBusy)
+                                .disabled(model.isBusy || !canOperate)
                         }
                         let destination = provider == .apple ? Provider.immich : .apple
                         Button("\(destination.title) にコピー") { wantsMove = false
                             pendingSource = provider
                         }
-                        .disabled(!model.canTransfer)
+                        .disabled(!model.canTransfer || !canOperate)
                         Button("\(destination.title) へ移動") { wantsMove = true
                             pendingSource = provider
                         }
-                        .disabled(!model.canTransfer || assets.contains { !$0.deletionBlockers.isEmpty })
+                        .disabled(!model.canTransfer || !canOperate || assets.contains { !$0.deletionBlockers.isEmpty })
                         if provider == .apple {
                             Button(
                                 assets.count > 1 ? "Apple 側のすべての \(assets.count) 件を削除" : "Apple Photos から削除",
                                 role: .destructive
                             ) { model.trashOnApple([photo]) }
-                                .disabled(model.isBusy)
+                                .disabled(model.isBusy || !canOperate)
                         }
                         if provider == .immich {
                             Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich([photo]) }
-                                .disabled(model.isBusy)
+                                .disabled(model.isBusy || !canOperate)
                         }
                     }
                 }

@@ -1,22 +1,32 @@
 //! External setup and independent observer; never part of the product Inspect effect trace.
 use super::*;
 pub(super) const STILL_SHA1: &str = "2ad1f4d64d8e8d78751e2af0145e4f79382875f4";
-pub(super) struct Fixture {
+pub(in super::super) struct Fixture {
     pub elevated: Elevated,
     pub email: String,
     pub parent: String,
     pub motion: String,
-    other: String,
+    pub other: String,
     albums: Vec<String>,
 }
 impl Fixture {
     pub fn setup(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
+        Self::setup_with_prefix(agent, directory, "selected-recovery")
+    }
+    pub fn setup_ordinary(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
+        Self::setup_with_prefix(agent, directory, "ordinary-selected-read")
+    }
+    fn setup_with_prefix(
+        agent: &ureq::Agent,
+        directory: &Path,
+        prefix: &'static str,
+    ) -> Result<Self, String> {
         let address = std::env::var("SUWOP_IMMICH_URL").map_err(|_| "fixture URL")?;
         let key = std::env::var("SUWOP_IMMICH_API_KEY").map_err(|_| "fixture key")?;
         let work = directory.to_path_buf();
         let (sender, receiver) = std::sync::mpsc::channel();
         let mut command = Command::<Effect, Event>::new(move |ctx| async move {
-            let result = Box::pin(Self::prepare(&ctx, &address, &key, &work)).await;
+            let result = Box::pin(Self::prepare(&ctx, &address, &key, &work, prefix)).await;
             let _ = sender.send(result);
         });
         loop {
@@ -45,12 +55,14 @@ impl Fixture {
         address: &str,
         key: &str,
         directory: &Path,
+        prefix: &str,
     ) -> Result<Self, String> {
-        let elevated = setup_named(ctx, address, key, "selected-recovery").await?;
+        let elevated = setup_named(ctx, address, key, prefix).await?;
         let ordinary = &elevated.ordinary;
-        let (parent, albums) =
-            super::super::ordinary_parent::recovery_native_parent_setup(ctx, ordinary, directory)
-                .await?;
+        let (parent, albums) = super::super::ordinary_parent::native_checkpoint_setup(
+            ctx, ordinary, directory, prefix,
+        )
+        .await?;
         let control: Value = serde_json::from_slice(
             &std::fs::read(directory.join("parent-control.json")).map_err(|_| "control read")?,
         )
@@ -118,7 +130,7 @@ impl Fixture {
             .await?;
         Ok(Self {
             elevated,
-            email: format!("selected-recovery-{}@example.invalid", std::process::id()),
+            email: format!("{prefix}-{}@example.invalid", std::process::id()),
             parent,
             motion,
             other,
@@ -146,6 +158,14 @@ impl Fixture {
         Ok(response.body)
     }
     pub fn observe(&self, agent: &ureq::Agent, directory: &Path) -> Result<Value, String> {
+        self.observe_visibility(agent, directory, "locked")
+    }
+    pub fn observe_visibility(
+        &self,
+        agent: &ureq::Agent,
+        directory: &Path,
+        visibility: &str,
+    ) -> Result<Value, String> {
         let pair = native_pair_bytes()?;
         let expected = [pair.0, pair.1, png(1)?];
         let mut observations = Vec::new();
@@ -158,7 +178,7 @@ impl Fixture {
             assert_eq!(detail["ownerId"], self.elevated.ordinary.user_id);
             assert_eq!(detail["type"], if index == 1 { "VIDEO" } else { "IMAGE" });
             if index == 0 {
-                assert_eq!(detail["visibility"], "locked");
+                assert_eq!(detail["visibility"], visibility);
                 assert_eq!(detail["livePhotoVideoId"], self.motion);
                 assert!(detail["stack"].is_null());
                 assert_eq!(
@@ -208,6 +228,56 @@ impl Fixture {
             observations.push(json!({"identity":identity,"albumIDs":memberships,"originalSHA256":format!("{:x}",sha2::Sha256::digest(bytes))}));
         }
         Ok(json!(observations))
+    }
+    pub fn set_visibility(&self, agent: &ureq::Agent, visibility: &str) -> Result<(), String> {
+        if !["locked", "timeline", "archive"].contains(&visibility) {
+            return Err("external fixture visibility".into());
+        }
+        let response: HttpResponse = serde_json::from_value(execute(
+            agent,
+            &self.elevated.request(
+                &format!("assets/{}", self.parent),
+                "PUT",
+                Some(json!({"visibility":visibility})),
+            ),
+        )?)
+        .map_err(|_| "external visibility response")?;
+        immich::check_status(response.status)?;
+        assert_eq!(response.body["id"], self.parent);
+        assert_eq!(response.body["visibility"], visibility);
+        Ok(())
+    }
+    pub fn ready_stills(&self, agent: &ureq::Agent, directory: &Path) -> Result<(), String> {
+        for preview in [false, true] {
+            let mut request = self
+                .elevated
+                .ordinary
+                .preview_request(&self.parent, preview)?;
+            let path = directory.join(if preview {
+                "ready-preview.image"
+            } else {
+                "ready-thumbnail.image"
+            });
+            request.download_path = Some(path.to_string_lossy().into_owned());
+            let mut ready = false;
+            // Existing live C1 derivative-readiness bound, fixture-only before measured reads.
+            for _ in 0..80 {
+                let response: HttpResponse = serde_json::from_value(execute(agent, &request)?)
+                    .map_err(|_| "derivative readiness response")?;
+                if response.status == 200 {
+                    let bytes = std::fs::read(&path).map_err(|_| "derivative readiness bytes")?;
+                    if super::super::derivative_headers::dimensions(&bytes).is_some() {
+                        ready = true;
+                        break;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            if !ready {
+                return Err("fixture derivatives not ready".into());
+            }
+        }
+        Ok(())
     }
     pub fn close(&self, agent: &ureq::Agent) -> Result<(), String> {
         for path in ["auth/session/lock", "auth/logout"] {
