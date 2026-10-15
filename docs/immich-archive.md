@@ -109,3 +109,24 @@ inactive/backgroundの両方で確認1回を検出して失敗した。保存と
 （`/tmp/suwop-archive-record1-pixels.json`）。record=trueの実行であり、最終比較の成功ではない。
 main基点への変更前にソース372ファイルを退避し、変更後も全hash一致を確認した
 （`/tmp/suwop-archive-pre-mainbase-20261015-171827`）。
+
+## PR #27 の通常確認とPIN一覧の分離
+
+過去の通常アーカイブ履歴を持つ写真が後でロックされた場合、通常履歴のInspectが
+PIN認証済み一覧と選択中画像を先に消していた。通常metadata取得はlocked写真の取得を拒否され、
+通常認可からPIN一覧を再生成できないため、再認証まで項目が戻らなかった。
+通常Inspectから一覧削除の呼出しを除き、読み取り側がPIN一覧へ干渉しないようにした。
+確認済みのvisibility変更開始時とPIN認可付きInspectの処理は維持する。
+
+回帰はRustのPIN認証・一覧取得・画像選択を実行してから、通常Inspectの403応答を処理する。
+旧コードは一覧と画像の消失で失敗し、修正後は一覧・画像・grant全体が一致した。
+追加認証0、保存0、PUT0、画像解放0も確認した
+（`/tmp/suwop-archive-pr27-p2-red-20261015.log`、
+`/tmp/suwop-archive-pr27-p2-green-20261015.log`）。
+修正後の `make check` はRust315件・Swift65件とlint・生成確認が成功した
+（`/tmp/suwop-archive-pr27-p2-check2-20261015.log`）。
+App・Swift DTO・基準画像に変更はない。上記45画面／host75／UI36のローカルVRTは
+修正前HEAD `f02f405` の結果であり、修正後HEADの全体VRT・PhotoKit・実Immich結合は
+hosted CIで再確認する。
+修正後のAppleビルドも全5 Rustターゲット・XCFramework・iOS/macOSが成功した
+（`/tmp/suwop-archive-pr27-p2-apple-20261015.log`）。基準45枚はHEADと全hash一致。

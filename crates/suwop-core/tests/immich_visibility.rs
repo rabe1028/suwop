@@ -110,6 +110,7 @@ struct Shell {
     confirmed: bool,
     writes: usize,
     ordinary_writes: usize,
+    ordinary_reads: usize,
     write_fault: WriteFault,
     persist_calls: usize,
     fail_persist: Option<usize>,
@@ -123,6 +124,16 @@ struct Shell {
 impl Shell {
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
+            ShellOperation::Http(request)
+                if request.headers.contains_key("x-api-key")
+                    && request.method == "GET"
+                    && request.url == format!("https://fixture.example/api/assets/{ASSET}") =>
+            {
+                assert!(!request.headers.contains_key("Authorization"));
+                self.paths.push(format!("assets/{ASSET}"));
+                self.ordinary_reads += 1;
+                Ok(json!({"status":403,"body":null}))
+            }
             ShellOperation::Http(request) => self.http(request),
             ShellOperation::ConfirmImmichVisibility { prompt } => {
                 assert_eq!(prompt.grant_id, GRANT);
@@ -175,6 +186,7 @@ impl Shell {
             self.ordinary_writes += 1;
         }
         assert!(!request.headers.contains_key("Cookie"));
+
         if path == "server/features" {
             return Ok(json!({"status":200,"body":{"passwordLogin":true}}));
         }
@@ -1368,5 +1380,79 @@ fn old_refresh_completion_never_releases_new_session_work_busy() -> Result<(), S
     assert_eq!(c.view().immich_locked_view.grant_id.as_deref(), Some(NEXT));
     shell.drain(&c, new_work)?;
     assert!(!c.view().busy);
+    Ok(())
+}
+
+#[test]
+fn ordinary_inspect_preserves_authenticated_locked_roster_and_selected_image() -> Result<(), String>
+{
+    use suwop_core::immich_visibility::{
+        AlbumMembershipObservation, ImmichVisibility, ImmichVisibilityOperation,
+        ImmichVisibilityOperationKind,
+    };
+    let old = ImmichVisibilityOperation {
+        kind: ImmichVisibilityOperationKind::OrdinaryArchive,
+        id: OP.into(),
+        scope: key().scope,
+        key: key(),
+        witness_digest: "a".repeat(64),
+        from: ImmichVisibility::Timeline,
+        to: ImmichVisibility::Archive,
+        outcome: suwop_core::apple_visibility::VisibilityOutcome::Applied,
+        observation: Some(ImmichVisibility::Archive),
+        album_membership_observation: AlbumMembershipObservation::NotChecked,
+    };
+    let c = core_operations(false, vec![old]);
+    let mut locked = asset();
+    locked["visibility"] = json!("locked");
+    let mut shell = Shell {
+        visibility: Some("locked".into()),
+        pages: Some(std::collections::VecDeque::from([
+            json!({"assets":{"items":[locked],"nextCursor":null}}),
+        ])),
+        ..Shell::default()
+    };
+    shell.run(&c, open(GRANT))?;
+    shell.run(
+        &c,
+        Event::RequestImmichLockedImage {
+            entry_id: ASSET.into(),
+            grant_id: GRANT.into(),
+            request_id: NEXT.into(),
+        },
+    )?;
+    let before = c.view().immich_locked_view;
+    assert_eq!(before.entries.as_ref().ok_or("entries")?.len(), 1);
+    assert!(before.image.is_some());
+    let before_json = serde_json::to_value(&before).map_err(|e| e.to_string())?;
+    shell.run(
+        &c,
+        Event::ImmichArchiveSceneChanged {
+            scene_id: SCENE.into(),
+            phase: suwop_core::protection::ProtectionScenePhase::Active,
+        },
+    )?;
+    let status_reads = shell.status_reads;
+    let paths = shell.paths.len();
+    shell.run(
+        &c,
+        Event::InspectImmichArchive {
+            record_id: OP.into(),
+            scene_id: SCENE.into(),
+        },
+    )?;
+    assert_eq!(
+        serde_json::to_value(c.view().immich_locked_view).map_err(|e| e.to_string())?,
+        before_json
+    );
+    assert_eq!(shell.ordinary_reads, 1);
+    assert_eq!(shell.status_reads, status_reads);
+    assert_eq!(&shell.paths[paths..], &[format!("assets/{ASSET}")]);
+    assert_eq!(shell.persist_calls, 0);
+    assert_eq!(shell.writes, 0);
+    assert_eq!(shell.ordinary_writes, 0);
+    assert_eq!(shell.stages, 1);
+    assert!(shell.releases.is_empty());
+    assert!(shell.disk.is_none());
     Ok(())
 }

@@ -561,7 +561,6 @@ fn inspect(model: &mut Model, id: &str, scene: &str) -> Command<crate::app::Effe
     ) else {
         return Command::done();
     };
-    crate::immich_locked::remove_visibility_entry(model, &operation.key);
     model.immich_archive.working = true;
     model.busy = true;
     let before = model.state.clone();

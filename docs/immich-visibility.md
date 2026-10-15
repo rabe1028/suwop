@@ -162,3 +162,8 @@ expected-headを指定してsquash mergeし、mainは `23fa2f8ef25e26ef06306a8b0
 PhotoKitは全11stage終了0・19phase完了・passed=true。PhotoKitの範囲は生成JPEGを使う
 Simulator検証で、直接unhide・hidden原本再検証・実機/iCloudは未検証のまま。
 取得先は `/tmp/suwop-c2-ci-c8304ad-artifacts`。
+
+マージ済みC-2 worktreeは作業差分なし・merged PR HEAD一致を確認後に管理アーカイブへ移した。
+ignored検証ファイル4,686件を全hash照合して
+`/Users/rabe1028/disk-cleanup-20261015/preserved/immich-visibility-actions-174356` に退避し、
+ソースarchive・path/branch/HEAD manifest・削除前後のworktree一覧を保持した。
