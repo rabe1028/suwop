@@ -29,7 +29,7 @@ import SwiftUI
             guard library == nil else { return }
             do {
                 let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-                let store = LocalStore(root: root)
+                let store = try LocalStore(root: root)
                 let failedPhoto = CommandLine.arguments.contains("--semantic-failure")
                 if failedPhoto {
                     try await store.persist(Wire.decoder().decode(JSONValue.self, from: Data(Self.failedPhoto.utf8)))

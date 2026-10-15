@@ -6,7 +6,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testPublicationWaitsAcrossEmptyQueueAndStopsForNewInference() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         _ = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
         let statuses = try await store.status()
         var status = try XCTUnwrap(statuses.first)
@@ -46,7 +46,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testDimensionChangeImmediatelyInvalidatesPreviousModel() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
         try await store.pauseInference(key: configured.modelKey)
         let search = SemanticSearchModel(store: store) { _ in throw SuwopError("No image expected") }
@@ -66,7 +66,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testPauseDrainsConfigurationBeforePersistingPause() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         let search = SemanticSearchModel(store: store) { _ in throw SuwopError("No image expected") }
         search.start()
         await search.pause()
@@ -81,7 +81,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testRestoreUsesPersistedSelectionInsteadOfNewestGeneration() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         for dimensions in [UInt32(256), 512] {
             let configured = try await store.configureInference(dimensions: dimensions, budget: 1536 << 20)
             try await store.pauseInference(key: configured.modelKey)
@@ -95,12 +95,14 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         await search.selectDimensions()
         search.dimensions = 256
         await search.selectDimensions()
-        let reopened = SemanticSearchModel(store: LocalStore(root: root)) { _ in throw SuwopError("No image expected") }
+        let reopened = try SemanticSearchModel(store: LocalStore(root: root)) { _ in
+            throw SuwopError("No image expected")
+        }
         await reopened.restore()
         XCTAssertEqual(reopened.dimensions, 256)
         XCTAssertEqual(reopened.inference?.state, "paused")
 
-        let unconfigured = LocalStore(root: root.appendingPathComponent("unconfigured"))
+        let unconfigured = try LocalStore(root: root.appendingPathComponent("unconfigured"))
         _ = try await unconfigured.selectInference(dimensions: 512)
         let fresh = SemanticSearchModel(store: unconfigured) { _ in throw SuwopError("No image expected") }
         await fresh.restore()
@@ -113,7 +115,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testForegroundRetriesInterruptedModelPreparationWithoutPausingJournal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
         try await store.persist(Wire.decoder().decode(
             JSONValue.self,
@@ -147,7 +149,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testInvalidSearchTextDoesNotPausePhotoIndexing() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
         let search = SemanticSearchModel(store: store) { _ in throw SuwopError("No image expected") }
         await search.selectDimensions()
@@ -164,7 +166,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testUnreadablePhotoCanBeExplicitlyExcludedWithoutDeletingOriginal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         try await store.persist(Wire.decoder().decode(
             JSONValue.self,
             from: Data(InteractiveSemanticHost.failedPhoto.utf8)
@@ -202,7 +204,7 @@ final class SemanticSearchSchedulingTests: XCTestCase {
     @MainActor func testEmptyJournalWakeDoesNotReadOrPrepareTheModel() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         _ = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
         var preparations = 0
         let search = SemanticSearchModel(

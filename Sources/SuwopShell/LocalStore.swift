@@ -7,8 +7,29 @@ public final class LocalStore: Sendable {
     private let metadata = DispatchQueue(label: "suwop.catalog", qos: .utility)
     private let analysis = DispatchQueue(label: "suwop.analysis-query", qos: .utility)
 
-    public init(root: URL) {
+    public init(root: URL) throws {
+        try Self.prepareDerivedDirectories(root: root)
         self.root = root.path
+    }
+
+    /// Native backup attributes apply only to reproducible files, never the catalog root.
+    private static func prepareDerivedDirectories(root: URL) throws {
+        let manager = FileManager.default
+        try manager.createDirectory(at: root, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+        for name in ["models", "analysis"] {
+            var directory = root.appendingPathComponent(name, isDirectory: true)
+            try manager.createDirectory(
+                at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]
+            )
+            let kind = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            guard kind.isDirectory == true, kind.isSymbolicLink != true else {
+                throw SuwopError("解析用ディレクトリが不正です。")
+            }
+            directory.removeAllCachedResourceValues()
+            var values = URLResourceValues()
+            values.isExcludedFromBackup = true
+            try directory.setResourceValues(values)
+        }
     }
 
     public func read() async throws -> JSONValue {

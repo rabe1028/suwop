@@ -90,7 +90,7 @@ final class VisualRegressionTests: XCTestCase {
     @MainActor func testSemanticSearch() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
-        let store = LocalStore(root: root)
+        let store = try LocalStore(root: root)
         let search = SemanticSearchModel(store: store) { _ in
             throw SuwopError("This fixture must never request image inference")
         }

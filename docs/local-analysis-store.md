@@ -10,6 +10,13 @@ migration the SQLite database is canonical; editing the old JSON has no effect.
 Back up SQLite using its online backup mechanism (or close the app and copy the
 DB together with any WAL); copying just a live database file is not sufficient.
 
+The native adapter excludes only the `models/` and `analysis/` directories from
+Apple device/iCloud backups, including existing installations. The catalog and
+its WAL remain eligible. Directory attributes are installed before Rust can write
+derived data; failures are surfaced rather than silently including large files.
+After restoring a backup without derived files, download the model again and use
+**Rebuild** to recreate the index from the preserved catalog and original sources.
+
 ## Data separation
 
 - `library_state` preserves the existing Rust application journal, including Move

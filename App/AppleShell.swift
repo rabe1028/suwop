@@ -72,7 +72,7 @@ import SuwopShell
             "Suwop",
             isDirectory: true
         )
-        localStore = LocalStore(root: root)
+        localStore = try LocalStore(root: root)
         try FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true,
