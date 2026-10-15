@@ -127,3 +127,55 @@ pub fn visible_assets(
         .flat_map(|snapshot| &snapshot.assets)
         .filter(move |asset| access.visible(&asset.key))
 }
+
+/// Complete, fresh inventories can retire derived revisions. Missing/limited
+/// sources cannot. This policy never authorizes deletion of original media.
+#[derive(Debug)]
+pub struct AnalysisPresence<'a> {
+    scopes: std::collections::BTreeSet<(crate::domain::Provider, &'a str)>,
+    revisions: std::collections::BTreeMap<&'a crate::domain::AssetKey, &'a str>,
+}
+impl<'a> AnalysisPresence<'a> {
+    #[must_use]
+    pub fn new(state: &'a crate::app::SavedLibrary) -> Self {
+        use std::collections::{BTreeMap, BTreeSet};
+        let mut snapshots = BTreeMap::new();
+        for snapshot in &state.snapshots {
+            snapshots
+                .entry((snapshot.provider, snapshot.scope.as_str()))
+                .and_modify(|value| *value = None)
+                .or_insert(Some(snapshot));
+        }
+        let mut result = Self {
+            scopes: BTreeSet::new(),
+            revisions: BTreeMap::new(),
+        };
+        for (scope, snapshot) in snapshots {
+            let Some(snapshot) = snapshot else { continue };
+            let mut keys = BTreeSet::new();
+            if snapshot.access != crate::domain::ScanAccess::Full
+                || snapshot.scanned_at.is_none()
+                || snapshot.assets.iter().any(|asset| {
+                    (asset.key.provider, asset.key.scope.as_str()) != scope
+                        || !keys.insert(&asset.key)
+                })
+            {
+                continue;
+            }
+            result.scopes.insert(scope);
+            result.revisions.extend(
+                snapshot
+                    .assets
+                    .iter()
+                    .map(|asset| (&asset.key, asset.revision.as_str())),
+            );
+        }
+        result
+    }
+
+    #[must_use]
+    pub fn confirms_removed_revision(&self, key: &crate::domain::AssetKey, revision: &str) -> bool {
+        self.scopes.contains(&(key.provider, key.scope.as_str()))
+            && self.revisions.get(key).copied() != Some(revision)
+    }
+}

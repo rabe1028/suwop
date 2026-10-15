@@ -133,3 +133,14 @@ Cleanup shares the analysis lock with publication and search, drops at most one
 shard per checkpoint, and removes its SQLite manifest only after the Lance table
 is gone. Interrupted cleanup can safely resume; a shard with any job reference is
 retained.
+
+Schema 4 retains a compact `analysis_asset_keys` identity map independently of the
+current visible asset projection. It is backfilled from available schema-3 asset
+rows during migration. A full, timestamped, unambiguous inventory for the same
+provider/scope can detach obsolete jobs for removed or superseded revisions;
+limited, unavailable, unstamped or missing sources cannot. Identity survives those
+uncertain scans and process restarts, so a later confirmed removal can release the
+shard. Keys with neither a current asset nor a referenced shard are removed during
+the next catalog commit. This is derived-data retention policy, never original-deletion authority.
+Older already-obsolete jobs whose identity was lost before schema 4 remain
+conservative and are reclaimed with their generation on an explicit rebuild.

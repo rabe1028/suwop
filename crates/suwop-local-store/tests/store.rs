@@ -478,7 +478,7 @@ fn v1_migration_preserves_queued_vectors_and_library() -> Result {
     )?;
     let mut store = Store::open(root.path())?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    assert_eq!(version, 3);
+    assert_eq!(version, 4);
     assert_eq!(
         store.read()?.ok_or("missing library")?.snapshots[0]
             .assets
@@ -1035,5 +1035,107 @@ fn detached_cleanup_preserves_shared_shards_and_resumes_after_table_drop() -> Re
             .len(),
         2
     );
+    Ok(())
+}
+
+#[test]
+fn confirmed_removal_detaches_shards_after_unavailable_and_limited_scans() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let library = state(2);
+    store.persist(&library)?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    for access in [ScanAccess::Unavailable, ScanAccess::Limited] {
+        let mut uncertain = library.clone();
+        uncertain.snapshots[0].access = access;
+        uncertain.snapshots[0].assets.clear();
+        store.persist(&uncertain)?;
+        assert_eq!(rt.block_on(store.prune())?, 0);
+        drop(store);
+        store = Store::open(root.path())?;
+    }
+    let mut missing = library.clone();
+    missing.snapshots[0].assets.clear();
+    let mut unstamped = missing.clone();
+    unstamped.snapshots[0].scanned_at = None;
+    store.persist(&unstamped)?;
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    let mut other = missing.clone();
+    other.snapshots[0].scope = "different-source".into();
+    store.persist(&other)?;
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    let mut ambiguous = missing.clone();
+    ambiguous.snapshots.push(missing.snapshots[0].clone());
+    store.persist(&ambiguous)?;
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    store.persist(&missing)?;
+    assert!(rt.block_on(store.step())?);
+    assert_eq!(rt.block_on(store.prune())?, 0);
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM shards", [], |r| r.get::<_, i64>(0))?,
+        0
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM analysis_asset_keys", [], |r| r
+            .get::<_, i64>(0))?,
+        0
+    );
+    assert_eq!(
+        db.query_row(
+            "SELECT count(*) FROM jobs WHERE shard IS NOT NULL",
+            [],
+            |r| r.get::<_, i64>(0)
+        )?,
+        0
+    );
+    assert!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn v3_migration_retains_identity_for_later_confirmed_revision_removal() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    let mut library = state(1);
+    store.persist(&library)?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    supply(&mut store, &key)?;
+    let rt = runtime()?;
+    while rt.block_on(store.step())? {}
+    drop(store);
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    db.execute_batch(
+        "DROP TABLE analysis_asset_keys; DROP INDEX jobs_asset_revision; PRAGMA user_version=3;",
+    )?;
+    let mut store = Store::open(root.path())?;
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+        4
+    );
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM analysis_asset_keys", [], |r| r
+            .get::<_, i64>(0))?,
+        1
+    );
+    assert_eq!(
+        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
+            .len(),
+        1
+    );
+    library.snapshots[0].assets[0].revision = "new".into();
+    store.persist(&library)?;
+    assert_eq!(rt.block_on(store.prune())?, 1);
+    supply(&mut store, &key)?;
+    while rt.block_on(store.step())? {}
+    let hits = rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?;
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].revision, "new");
     Ok(())
 }

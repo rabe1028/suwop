@@ -48,7 +48,7 @@ impl Store {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 3 {
+        if version > 4 {
             return Err("Unsupported local catalog version".into());
         }
         if version == 0 {
@@ -86,6 +86,19 @@ impl Store {
                 .map_err(error)?;
             if current == 2 {
                 tx.execute_batch(include_str!("migration-v3.sql"))
+                    .map_err(error)?;
+            }
+            tx.commit().map_err(error)?;
+        }
+        if version <= 3 {
+            let tx = db
+                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+                .map_err(error)?;
+            let current: i64 = tx
+                .query_row("PRAGMA user_version", [], |r| r.get(0))
+                .map_err(error)?;
+            if current == 3 {
+                tx.execute_batch(include_str!("migration-v4.sql"))
                     .map_err(error)?;
             }
             tx.commit().map_err(error)?;
@@ -182,10 +195,13 @@ impl Store {
                     .map_err(error)?;
             }
         }
+        tx.execute("INSERT OR IGNORE INTO analysis_asset_keys SELECT id,json_extract(json,'$.key') FROM assets", []).map_err(error)?;
         // A changed/disappeared source cannot accept an old model result.
         tx.execute("UPDATE jobs SET state='obsolete' WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=jobs.asset AND a.revision=jobs.revision)", []).map_err(error)?;
         tx.execute("DELETE FROM embedding_vectors WHERE job IN (SELECT id FROM jobs WHERE state='obsolete')",[]).map_err(error)?;
+        super::presence::detach_confirmed_removed(&tx, state)?;
         super::jobs::enqueue_latest(&tx)?;
+        tx.execute("DELETE FROM analysis_asset_keys WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=analysis_asset_keys.id) AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset=analysis_asset_keys.id AND j.shard IS NOT NULL)", []).map_err(error)?;
         tx.commit().map_err(error)
     }
 }

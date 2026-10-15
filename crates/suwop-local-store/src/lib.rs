@@ -5,6 +5,7 @@ mod engine;
 mod inference;
 mod inference_jobs;
 mod jobs;
+mod presence;
 mod worker;
 
 pub use api::{Command, Request, dispatch};

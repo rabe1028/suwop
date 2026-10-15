@@ -21,4 +21,7 @@ CREATE TABLE IF NOT EXISTS embedding_vectors (
 CREATE INDEX IF NOT EXISTS jobs_shard ON jobs(shard,state);
 CREATE TABLE IF NOT EXISTS inference_runs (model TEXT PRIMARY KEY REFERENCES models(id), state TEXT NOT NULL, budget INTEGER NOT NULL, error TEXT);
 CREATE TABLE IF NOT EXISTS inference_selection (id INTEGER PRIMARY KEY CHECK(id=1), model TEXT NOT NULL);
-PRAGMA user_version=3;
+CREATE TABLE IF NOT EXISTS analysis_asset_keys (id TEXT PRIMARY KEY, json TEXT NOT NULL);
+INSERT OR IGNORE INTO analysis_asset_keys SELECT id,json_extract(json,'$.key') FROM assets;
+CREATE INDEX IF NOT EXISTS jobs_asset_revision ON jobs(asset,revision);
+PRAGMA user_version=4;
