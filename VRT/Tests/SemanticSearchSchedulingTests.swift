@@ -163,6 +163,32 @@ final class SemanticSearchSchedulingTests: XCTestCase {
         }
     }
 
+    @MainActor func testSearchPreparationFailureDoesNotPausePhotoIndexing() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store = try LocalStore(root: root)
+        let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)
+        let search = SemanticSearchModel(
+            store: store,
+            prepareModel: { throw SuwopError("Query preparation failed") },
+            image: { _ in throw SuwopError("No image expected") }
+        )
+        await search.selectDimensions()
+        search.query = "a mountain"
+        search.search()
+        try await settle { !search.busy }
+        XCTAssertEqual(search.message, "Query preparation failed")
+        let persisted = try await store.inferenceStatus(key: configured.modelKey)
+        XCTAssertEqual(persisted?.state, "running")
+        XCTAssertNil(persisted?.error)
+        try await store.persist(Wire.decoder().decode(
+            JSONValue.self,
+            from: Data(InteractiveSemanticHost.failedPhoto.utf8)
+        ))
+        let pending = try await store.pending(modelKey: configured.modelKey)
+        XCTAssertEqual(pending.count, 1)
+    }
+
     @MainActor func testUnreadablePhotoCanBeExplicitlyExcludedWithoutDeletingOriginal() async throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }

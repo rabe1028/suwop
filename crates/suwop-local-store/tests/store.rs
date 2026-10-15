@@ -1139,3 +1139,36 @@ fn v3_migration_retains_identity_for_later_confirmed_revision_removal() -> Resul
     assert_eq!(hits[0].revision, "new");
     Ok(())
 }
+
+#[test]
+fn explicit_exclusions_survive_visibility_refresh_until_revision_or_rebuild() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    store.persist(&state(1))?;
+    let key = store.register(&model(), &AnalysisBudget::default())?;
+    let job = store.pending(&key, 1)?.remove(0);
+    store.skip(&key, &job.id, "unsupported media")?;
+    for access in [ScanAccess::Unavailable, ScanAccess::Limited] {
+        let mut hidden = state(0);
+        hidden.snapshots[0].access = access;
+        store.persist(&hidden)?;
+        drop(store);
+        store = Store::open(root.path())?;
+        store.persist(&state(1))?;
+        assert!(store.pending(&key, 1)?.is_empty());
+        assert_eq!(store.status()?[0].skipped, 1);
+    }
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    let reason: String = db.query_row("SELECT reason FROM jobs WHERE id=?1", [&job.id], |r| {
+        r.get(0)
+    })?;
+    assert_eq!(reason, "unsupported media");
+    let mut changed = state(1);
+    changed.snapshots[0].assets[0].revision = "2".into();
+    store.persist(&changed)?;
+    assert_eq!(store.pending(&key, 1)?[0].asset.revision, "2");
+    store.rebuild(&key, &AnalysisBudget::default())?;
+    assert_eq!(store.pending(&key, 1)?.len(), 1);
+    assert_eq!(store.status()?[0].skipped, 0);
+    Ok(())
+}

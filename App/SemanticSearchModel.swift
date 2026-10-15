@@ -212,7 +212,13 @@ import SwiftUI
                 let projected = try await store.projectEmbedding(vector, dimensions: dimensions)
                 hits = try await store.search(modelKey: key, vector: projected)
                 message = hits.isEmpty ? "該当する写真がありません。索引の進捗を確認してください。" : "\(hits.count) 件の候補"
-            } catch { await failed(error) }
+            } catch {
+                // Query failures do not change the photo journal. Rust admission
+                // already persists a pause if the shared memory budget is exceeded.
+                if !Task.isCancelled, !(error is CancellationError) {
+                    message = error.localizedDescription
+                }
+            }
             await unload()
             await refresh()
         }

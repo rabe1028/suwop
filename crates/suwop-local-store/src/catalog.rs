@@ -197,7 +197,9 @@ impl Store {
         }
         tx.execute("INSERT OR IGNORE INTO analysis_asset_keys SELECT id,json_extract(json,'$.key') FROM assets", []).map_err(error)?;
         // A changed/disappeared source cannot accept an old model result.
-        tx.execute("UPDATE jobs SET state='obsolete' WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=jobs.asset AND a.revision=jobs.revision)", []).map_err(error)?;
+        // Explicit exclusions belong to this generation and revision, even while
+        // visibility is unavailable. Only a new revision or rebuild retries them.
+        tx.execute("UPDATE jobs SET state='obsolete' WHERE state!='skipped' AND NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=jobs.asset AND a.revision=jobs.revision)", []).map_err(error)?;
         tx.execute("DELETE FROM embedding_vectors WHERE job IN (SELECT id FROM jobs WHERE state='obsolete')",[]).map_err(error)?;
         super::presence::detach_confirmed_removed(&tx, state)?;
         super::jobs::enqueue_latest(&tx)?;
