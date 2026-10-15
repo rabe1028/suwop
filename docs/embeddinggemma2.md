@@ -206,3 +206,5 @@ Catalog schema v3 preserves existing jobs and indexes; catalogs without a record
 selection remain unselected until the user chooses or starts a model.
 
 Unreadable photos pause inference with a durable, revision-bound failed-job ID. The search UI can explicitly exclude that photo from the current analysis generation and continue. Exclusion preserves the original and catalog metadata, reports the skipped count, and is retried on a full rebuild. Stale failures and failures from another model cannot exclude a current photo.
+
+Apple CI builds the five Rust release targets in separate matrix jobs. The app job depends on all five, verifies each library's source revision, target and SHA-256 against the current clean checkout, then runs the same universal XCFramework, iOS/macOS app builds and native sharing tests. Intermediate libraries expire after one day; screenshots and acceptance results retain their existing retention. Local `make apple-build` still builds every target from source.

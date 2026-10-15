@@ -30,7 +30,8 @@ if [[ "${1:-}" == "--host" ]]; then
     exit 0
 fi
 TARGETS=(aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
-for triple in "${TARGETS[@]}"; do
+build_slice() {
+    local triple="$1" SDK
     rustup target add "$triple"
     case "$triple" in
         *-apple-darwin) SDK=macosx ;;
@@ -47,7 +48,28 @@ for triple in "${TARGETS[@]}"; do
         # Only this completed, retained slice's generated objects; keep host/test caches.
         rm -rf -- "target/$triple/release"
     fi
-done
+}
+case "${1:-}" in
+    --slice)
+        [[ "$#" == 2 ]] || { echo "Expected one Apple target" >&2; exit 1; }
+        case "$2" in
+            aarch64-apple-darwin|x86_64-apple-darwin|aarch64-apple-ios|aarch64-apple-ios-sim|x86_64-apple-ios) ;;
+            *) echo "Unsupported Apple target: $2" >&2; exit 1 ;;
+        esac
+        build_slice "$2"
+        python3 scripts/apple_slices.py stamp "$2"
+        exit 0
+        ;;
+    --package)
+        [[ "$#" == 1 ]] || exit 1
+        # Require all five slices from this exact clean checkout before replacing output.
+        python3 scripts/apple_slices.py verify
+        ;;
+    "")
+        for triple in "${TARGETS[@]}"; do build_slice "$triple"; done
+        ;;
+    *) echo "Unknown build mode: $1" >&2; exit 1 ;;
+esac
 mkdir -p target/apple/macos target/apple/simulator
 lipo -create Generated/RustSlices/{aarch64,x86_64}-apple-darwin/libsuwop_ffi.a -output target/apple/macos/libsuwop_ffi.a
 lipo -create Generated/RustSlices/aarch64-apple-ios-sim/libsuwop_ffi.a Generated/RustSlices/x86_64-apple-ios/libsuwop_ffi.a \

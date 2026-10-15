@@ -45,9 +45,44 @@ jobs:
           IMMICH_VERSION: v3.2.4
         run: make integration
 
-  apple:
+  apple-rust:
+    name: apple-rust (${{ matrix.target }})
     runs-on: macos-15
-    timeout-minutes: 120
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-apple-darwin
+          - x86_64-apple-darwin
+          - aarch64-apple-ios
+          - aarch64-apple-ios-sim
+          - x86_64-apple-ios
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Isolate the pinned Rust toolchain
+        run: |
+          suwop_rustup_dir="$(mktemp -d "$RUNNER_TEMP/suwop-slice-rustup.XXXXXX")"
+          echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
+          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Install protobuf compiler
+        run: brew install protobuf
+      - name: Build one release slice
+        env:
+          APPLE_TARGET: ${{ matrix.target }}
+        run: bash scripts/build-rust-apple.sh --slice "$APPLE_TARGET"
+      - name: Retain the revision-bound release slice
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: rust-slice-${{ matrix.target }}
+          path: Generated/RustSlices/
+          if-no-files-found: error
+          retention-days: 1
+
+  apple:
+    needs: apple-rust
+    runs-on: macos-15
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Isolate Rust toolchains from the runner image
@@ -61,12 +96,18 @@ jobs:
         run: make lint-swift
       - name: Test the real Rust-to-Swift bridge
         run: make test
+      - name: Download this run's five release slices
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: rust-slice-*
+          path: Generated/RustSlices
+          merge-multiple: true
       - name: Build universal Rust libraries, iOS and macOS apps
         run: |
           cargo clean
           # Swift tests have finished; Xcode uses the shared SourcePackages cache below.
           rm -rf .build
-          SUWOP_CLEAN_CHECK=1 make apple-build
+          SUWOP_CLEAN_CHECK=1 make apple-build APPLE_RUST_BUILD_ARGS=--package
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
 
@@ -99,7 +140,7 @@ jobs:
           make apple-native-test
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: vrt-${{ github.sha }}
           path: |

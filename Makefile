@@ -1,5 +1,6 @@
 export PATH := $(CURDIR)/.tools/bin:$(PATH)
 export CARGO_BUILD_JOBS ?= 2
+APPLE_RUST_BUILD_ARGS ?=
 APPLE_PACKAGE_CACHE := $(CURDIR)/DerivedData/SourcePackages
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
 export MACOSX_DEPLOYMENT_TARGET ?= 14.0
@@ -41,6 +42,7 @@ format:
 test:
 	bash scripts/test-tools.sh
 	bash scripts/test-hooks.sh
+	python3 -B -m unittest discover -s scripts -p 'test_*.py'
 	env cargo test --locked --workspace --all-features
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	@if [ "$$(uname -s)" = Darwin ]; then \
@@ -61,7 +63,7 @@ check-generated:
 	bash scripts/check-generated.sh
 
 apple-core:
-	bash scripts/build-rust-apple.sh
+	bash scripts/build-rust-apple.sh $(APPLE_RUST_BUILD_ARGS)
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then \
 		cargo clean && rm -rf Generated/RustSlices; \
 	fi
