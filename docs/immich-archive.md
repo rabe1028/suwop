@@ -216,3 +216,20 @@ Rustの実行入口は共通の保存不確定フラグで拒否するため、B
 XCFramework、iOS/macOSビルドも成功した
 （`/tmp/suwop-archive-hint-p2-apple-20261015-1.log`）。Swiftソースと基準画像は変更していない。
 先行HEADのローカルstrict VRTと、新しいHEADのhosted CIは別の検証記録として扱う。
+
+追加レビューで、保護設定の保存結果が不明な場合にも、別の写真の候補と実行条件が
+食い違うことが分かった。準備状態・schema・可視性の保存不確定・保護設定の保存不確定を
+共通のRust判定にまとめ、候補表示と実行入口の両方で使用する。
+操作中かどうか、scene所有権、写真ごとの制限、操作IDの検査は従来の場所に保持する。
+回帰では実際の保護操作の保存・読戻し失敗を通し、別の写真の表示、追加効果の不発生、
+正しい保存状態からの復旧を検査する。archive sceneを先に有効化し、scene不一致による
+拒否が保存状態の検査を隠さないようにする。この追加修正の実行検証は別途記録する。
+
+修正前の保護操作経路と準備未完了の両方で、有効候補が残る失敗を再現した
+（`/tmp/suwop-archive-membership-hint-red-20261015-1.log`、
+`/tmp/suwop-archive-readiness-hint-red-20261015-1.log`）。共通判定への変更後は
+保護15件・アーカイブ13件が成功した（`/tmp/suwop-archive-durable-hints-green-20261015-1.log`）。
+make checkもRust/FFI319件・Swift65件、lint・生成確認が成功した
+（`/tmp/suwop-archive-durable-hints-check-20261015-1.log`）。
+全5 Rustターゲット・XCFramework・iOS/macOSビルドも成功した
+（`/tmp/suwop-archive-durable-hints-apple-20261015-1.log`）。

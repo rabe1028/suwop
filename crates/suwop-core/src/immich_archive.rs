@@ -154,6 +154,14 @@ pub fn view(model: &Model) -> ImmichArchiveView {
             .flatten(),
     }
 }
+// Shared durable prerequisites for the advisory destination and mutation entry.
+// Busy/scene ownership and operation IDs remain request-specific.
+fn durable_state_available(model: &Model) -> bool {
+    model.ready
+        && model.state.schema_version == 7
+        && !model.immich_visibility.persistence_uncertain
+        && !model.protection.membership_uncertain
+}
 #[must_use]
 pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
     let state =
@@ -171,7 +179,7 @@ pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
                 Some(ImmichVisibility::Archive) => Some(ImmichArchiveDestination::Timeline),
                 _ => None,
             };
-            if model.immich_visibility.persistence_uncertain {
+            if !durable_state_available(model) {
                 reason =
                     Some(crate::immich_visibility::ImmichVisibilityUnsupportedReason::Unavailable);
             }
@@ -499,12 +507,7 @@ fn begin(
     id: String,
     scene: &str,
 ) -> Command<crate::app::Effect, Event> {
-    if model.busy
-        || !model.ready
-        || model.state.schema_version != 7
-        || model.immich_visibility.persistence_uncertain
-        || model.protection.membership_uncertain
-    {
+    if model.busy || !durable_state_available(model) {
         return Command::done();
     }
     if crate::immich_visibility::fences(&model.state, &key)

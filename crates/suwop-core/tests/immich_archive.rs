@@ -646,3 +646,43 @@ fn indeterminate_intent_disables_hint_until_exact_state_recovery() -> Result<(),
     assert_eq!(s.writes, 0);
     Ok(())
 }
+
+#[test]
+fn retained_snapshots_do_not_advertise_archive_before_readiness_or_schema_validation()
+-> Result<(), String> {
+    for ready in [false, true] {
+        let mut m = model()?;
+        m.ready = ready;
+        if ready {
+            m.state.schema_version = 6;
+        }
+        let c = Core::new_with(Suwop, m);
+        assert!(
+            c.process_event(Event::ImmichArchiveSceneChanged {
+                scene_id: SCENE.into(),
+                phase: ProtectionScenePhase::Active,
+            })
+            .is_empty()
+        );
+        assert_eq!(
+            c.view().immich_archive_view.scene_id.as_deref(),
+            Some(SCENE)
+        );
+        let hint = c
+            .view()
+            .immich_archive_actions
+            .into_iter()
+            .find(|h| h.key == key())
+            .ok_or("retained snapshot")?;
+        assert_eq!(hint.to, None);
+        assert_eq!(
+            hint.reason,
+            Some(suwop_core::immich_visibility::ImmichVisibilityUnsupportedReason::Unavailable)
+        );
+        assert!(
+            c.process_event(prepare(ID, ImmichArchiveDestination::Archive))
+                .is_empty()
+        );
+    }
+    Ok(())
+}
