@@ -13,11 +13,11 @@ echo 'cargo 1.95.0'
 printf '%0128d\n' {1..2048}
 touch "$SUWOP_TOOL_PROBE"
 STUB
-for spec in 'ruff 0.17.0' 'actionlint 1.7.12' 'shellcheck version: 0.11.0' 'swiftlint 0.65.1' 'swiftformat 0.63.1'; do
+for spec in 'uv 0.11.24' 'ruff 0.17.0' 'actionlint 1.7.12' 'shellcheck version: 0.11.0' 'swiftlint 0.65.1' 'swiftformat 0.63.1'; do
   name="${spec%% *}"
   version="${spec#* }"
   printf '#!/usr/bin/env bash\necho %s\n' "$version" > "$TEMP/$name"
 done
-chmod +x "$TEMP"/{cargo,ruff,actionlint,shellcheck,swiftlint,swiftformat}
+chmod +x "$TEMP"/{cargo,uv,ruff,actionlint,shellcheck,swiftlint,swiftformat}
 PATH="$TEMP:$PATH" bash "$ROOT/scripts/check-tools.sh"
 test -f "$SUWOP_TOOL_PROBE"

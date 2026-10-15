@@ -11,6 +11,7 @@ check() {
     exit 1
   fi
 }
+check uv --version 0.11.24
 check cargo --version 1.95.0
 check ruff --version 0.17.0
 check actionlint -version 1.7.12

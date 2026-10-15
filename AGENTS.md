@@ -17,3 +17,9 @@
 - Report local checks, hosted CI and actual PhotoKit/device acceptance separately.
 - SwiftUI changes also require `make vrt` using the environment in `VRT/environment.json`.
   Review visual differences before explicit `make vrt-record`; CI must never update baselines.
+
+- For long checks and CI follow-up, use `.agents/skills/suwop-validation/SKILL.md`.
+  `scripts/verify.py` keeps complete logs and returns compact, source-bound results.
+
+- Run Python through `uv run --no-project python`; manage Python environments
+  and packages with `uv venv` / `uv pip`, including scripts and CI.

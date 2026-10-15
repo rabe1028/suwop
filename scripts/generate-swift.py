@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env -S uv run --no-project --script
 """Generate value-only Swift DTOs from Rust's JSON schema; fail on unknown schema kinds."""
 
 import json
