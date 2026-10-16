@@ -1,0 +1,32 @@
+Input #0, mov,mp4,m4a,3gp,3g2,mj2, from 'Tests/fixtures/private_video/synthetic-private-video.mp4':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf62.12.102
+  Duration: 00:00:30.00, start: 0.000000, bitrate: 89 kb/s
+  Stream #0:0[0x1](und): Video: h264 (Constrained Baseline) (avc1 / 0x31637661), yuv420p(progressive), 96x96 [SAR 1:1 DAR 1:1], 53 kb/s, 12 fps, 12 tbr, 12288 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      encoder         : Lavc62.28.102 libx264
+  Stream #0:1[0x2](und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 32 kb/s (default)
+    Metadata:
+      handler_name    : SoundHandler
+Stream mapping:
+  Stream #0:0 -> #0:0 (copy)
+  Stream #0:1 -> #0:1 (copy)
+Output #0, mov, to 'Tests/fixtures/private_video/synthetic-private-video.mov':
+  Metadata:
+    major_brand     : isom
+    minor_version   : 512
+    compatible_brands: isomiso2avc1mp41
+    encoder         : Lavf62.12.102
+  Stream #0:0(und): Video: h264 (Constrained Baseline) (avc1 / 0x31637661), yuv420p(progressive), 96x96 [SAR 1:1 DAR 1:1], q=2-31, 53 kb/s, 12 fps, 12 tbr, 12288 tbn (default)
+    Metadata:
+      handler_name    : VideoHandler
+      encoder         : Lavc62.28.102 libx264
+  Stream #0:1(und): Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 32 kb/s (default)
+    Metadata:
+      handler_name    : SoundHandler
+[out#0/mov @ 0x7a9907c300] video:194KiB audio:119KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 4.554353%
+frame=  360 fps=0.0 q=-1.0 Lsize=     328KiB time=00:00:30.00 bitrate=  89.6kbits/s speed=5.05e+03x elapsed=0:00:00.00

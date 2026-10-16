@@ -84,7 +84,7 @@ def generate(schema):
             default = " = nil" if kind.endswith("?") else ""
             if field in {"appleVisibility", "immichStack"}:
                 default = " = .unknown"
-            if field in {"isFavorite", "isOffline"}:
+            if field in {"isFavorite", "isOffline", "canPlayVideo"}:
                 default = " = false"
             if field == "inventoryComplete":
                 default = " = true"

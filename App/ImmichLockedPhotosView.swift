@@ -128,14 +128,25 @@ struct ImmichLockedPhotosView: View {
                     Text(error).foregroundStyle(.red)
                 }
             }
-        }
+        }.accessibilityIdentifier("immichLockedAuthenticationForm")
     }
 
     private func opened(_ view: ImmichLockedView) -> some View {
         List {
             Section {
-                Text("このアプリで保護した表示元は含めません。共有・編集・再生・転送はできません。")
+                Text("このアプリで保護した表示元は含めません。写真を表示し、動画をこの画面で再生できます。共有・編集・転送はできません。")
                     .font(.caption).foregroundStyle(.secondary)
+                if let video = view.video, let manager = session.videoAccess {
+                    ImmichLockedVideoSurface(access: video, manager: manager, playback: session.videoPlayer)
+                        .id(video.stagedID)
+                    Button("再生を終了") { session.stopVideo(sceneID: sceneID) }
+                        .accessibilityIdentifier("stopImmichLockedVideo")
+                } else if view.videoPending != nil {
+                    ProgressView("動画の原本を確認しています")
+                        .accessibilityIdentifier("immichLockedVideoLoading")
+                    Button("取得を取り消す") { session.stopVideo(sceneID: sceneID) }
+                        .accessibilityIdentifier("cancelImmichLockedVideo")
+                }
                 if let image = view.image {
                     ImmichLockedRasterView(session: session, sceneID: sceneID, access: image)
                         .id("\(image.grantID)-\(image.generation)-\(image.requestID)")
@@ -153,9 +164,16 @@ struct ImmichLockedPhotosView: View {
                             hint: entry.visibilityAction,
                             sceneID: sceneID
                         )
-                        Button("写真を表示") { session.requestImage(entryID: entry.id, sceneID: sceneID) }
-                            .buttonStyle(.borderless)
-                            .accessibilityIdentifier("immichLockedPreview-\(entry.id)")
+                        if entry.canPlayVideo {
+                            Button("動画を再生") { session.requestVideo(entryID: entry.id, sceneID: sceneID) }
+                                .buttonStyle(.borderless)
+                                .disabled(session.busy)
+                                .accessibilityIdentifier("immichLockedPlay-\(entry.id)")
+                        } else {
+                            Button("写真を表示") { session.requestImage(entryID: entry.id, sceneID: sceneID) }
+                                .buttonStyle(.borderless)
+                                .accessibilityIdentifier("immichLockedPreview-\(entry.id)")
+                        }
                     }.padding(.vertical, 4)
                 }
             }
@@ -163,7 +181,7 @@ struct ImmichLockedPhotosView: View {
             if let error = session.error {
                 Text(error).foregroundStyle(.red)
             }
-        }
+        }.accessibilityIdentifier("immichLockedContentList")
     }
 
     private func submit() {

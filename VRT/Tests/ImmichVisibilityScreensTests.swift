@@ -148,9 +148,13 @@ final class ImmichVisibilityScreensTests: XCTestCase {
         let last = IndexPath(item: list.numberOfItems(inSection: section) - 1, section: section)
         XCTAssertGreaterThanOrEqual(last.item, 0)
         let record = IndexPath(item: max(0, last.item - 1), section: section)
+        // Realize the lazy self-sizing record before deriving an offset from contentSize estimates.
+        list.scrollToItem(at: record, at: .top, animated: false)
+        controller.view.layoutIfNeeded()
         let framing = largeText ? list.bounds.height * 0.2 : 0
         var settled = 0
-        for _ in 0 ..< 40 {
+        var observations: [String] = []
+        for step in 0 ..< 40 {
             controller.view.layoutIfNeeded()
             let bottom = max(
                 -list.adjustedContentInset.top,
@@ -165,11 +169,21 @@ final class ImmichVisibilityScreensTests: XCTestCase {
             )
             let ready = abs(finalBottom - bottom) < 1 && abs(list.contentOffset.y - bottom) < 1 &&
                 list.indexPathsForVisibleItems.contains(record)
+            observations.append(
+                "step=\(step), id=\(list.accessibilityIdentifier ?? "nil"), size=\(list.contentSize), bounds=\(list.bounds.size)"
+                    + ", requested=\(bottom), actual=\(list.contentOffset.y), final=\(finalBottom), record=\(record)"
+                    + ", counts=\((0 ..< list.numberOfSections).map { list.numberOfItems(inSection: $0) })"
+                    + ", visible=\(list.indexPathsForVisibleItems.sorted()), ready=\(ready)"
+            )
             settled = ready ? settled + 1 : 0
             if settled == 3 {
                 return
             }
         }
+        let attachment = XCTAttachment(string: observations.joined(separator: "\n"))
+        attachment.lifetime = .keepAlways
+        XCTContext.runActivity(named: "History capture readiness geometry") { $0.add(attachment) }
+        try SnapshotComparison.diagnostic(image(), named: "selected-history-readiness-failed")
         XCTFail("History's record did not become visible at a settled content offset")
         throw CaptureReadinessError.historyNotVisible
     }

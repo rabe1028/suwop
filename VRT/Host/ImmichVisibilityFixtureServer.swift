@@ -24,13 +24,16 @@ import SuwopShell
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
-    init(visibility: String = "timeline", kind: SourceKind = .image) throws {
+    init(visibility: String = "timeline", kind: SourceKind = .image, customRecord: JSONValue? = nil) throws {
         record = switch kind {
         case .image: try ImmichVisibilityFixtureData.source(visibility: visibility)
         case .live: try ImmichVisibilityFixtureData.unsupportedSource(video: false, visibility: visibility)
         case .video: try ImmichVisibilityFixtureData.unsupportedSource(video: true, visibility: visibility)
         case .stacked: try ImmichVisibilityFixtureData.stackedSource(visibility: visibility)
         case .unknownStack: try ImmichVisibilityFixtureData.stackedSource(visibility: visibility, missing: true)
+        }
+        if let customRecord {
+            record = customRecord
         }
         let members: Set<String> = visibility == "locked" ? [] : [ImmichVisibilityFixtureData.sourceID]
         albumMembers = [

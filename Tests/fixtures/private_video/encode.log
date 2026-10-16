@@ -1,0 +1,39 @@
+Input #0, lavfi, from 'testsrc2=size=96x96:rate=12:duration=30':
+  Duration: N/A, start: 0.000000, bitrate: N/A
+  Stream #0:0: Video: wrapped_avframe, yuv420p, 96x96 [SAR 1:1 DAR 1:1], 12 fps, 12 tbr, 12 tbn
+Input #1, lavfi, from 'sine=frequency=440:sample_rate=44100:duration=30':
+  Duration: N/A, start: 0.000000, bitrate: 705 kb/s
+  Stream #1:0: Audio: pcm_s16le, 44100 Hz, mono, s16, 705 kb/s
+Stream mapping:
+  Stream #0:0 -> #0:0 (wrapped_avframe (native) -> h264 (libx264))
+  Stream #1:0 -> #0:1 (pcm_s16le (native) -> aac (native))
+[libx264 @ 0x7c5904c000] using SAR=1/1
+[libx264 @ 0x7c5904c000] using cpu capabilities: ARMv8 NEON
+[libx264 @ 0x7c5904c000] profile Constrained Baseline, level 1.1, 4:2:0, 8-bit
+[libx264 @ 0x7c5904c000] 264 - core 164 - H.264/MPEG-4 AVC codec - Copyleft 2003-2025 - http://www.videolan.org/x264.html - options: cabac=0 ref=16 deblock=1:0:0 analyse=0x1:0x131 me=umh subme=10 psy=1 psy_rd=1.00:0.00 mixed_ref=1 me_range=24 chroma_me=1 trellis=2 8x8dct=0 cqm=0 deadzone=21,11 fast_pskip=1 chroma_qp_offset=-2 threads=3 lookahead_threads=1 sliced_threads=0 nr=0 decimate=1 interlaced=0 bluray_compat=0 constrained_intra=0 bframes=0 weightp=0 keyint=12 keyint_min=1 scenecut=40 intra_refresh=0 rc_lookahead=12 rc=crf mbtree=1 crf=28.0 qcomp=0.60 qpmin=0 qpmax=69 qpstep=4 ip_ratio=1.40 aq=1:1.00
+Output #0, mp4, to 'Tests/fixtures/private_video/synthetic-private-video.mp4':
+  Metadata:
+    encoder         : Lavf62.12.102
+  Stream #0:0: Video: h264 (avc1 / 0x31637661), yuv420p(tv, progressive), 96x96 [SAR 1:1 DAR 1:1], q=2-31, 12 fps, 12288 tbn
+    Metadata:
+      encoder         : Lavc62.28.102 libx264
+    Side data:
+      CPB properties: bitrate max/min/avg: 0/0/0 buffer size: 0 vbv_delay: N/A
+  Stream #0:1: Audio: aac (LC) (mp4a / 0x6134706D), 44100 Hz, mono, fltp, 32 kb/s
+    Metadata:
+      encoder         : Lavc62.28.102 aac
+frame=  277 fps=0.0 q=31.0 size=       0KiB time=00:00:24.68 bitrate=   0.0kbits/s speed=48.9x elapsed=0:00:00.50
+[mp4 @ 0x7c58c78500] Starting second pass: moving the moov atom to the beginning of the file
+[out#0/mp4 @ 0x7c58c7c900] video:194KiB audio:119KiB subtitle:0KiB other streams:0KiB global headers:0KiB muxing overhead: 4.538806%
+frame=  360 fps=0.0 q=-1.0 Lsize=     328KiB time=00:00:30.00 bitrate=  89.6kbits/s speed=  46x elapsed=0:00:00.65
+[libx264 @ 0x7c5904c000] frame I:31    Avg QP:26.77  size:  2071
+[libx264 @ 0x7c5904c000] frame P:329   Avg QP:31.99  size:   408
+[libx264 @ 0x7c5904c000] mb I  I16..4: 27.7%  0.0% 72.3%
+[libx264 @ 0x7c5904c000] mb P  I16..4:  2.6%  0.0%  0.2%  P16..4: 25.5% 17.4% 18.6%  4.0%  1.6%    skip:30.2%
+[libx264 @ 0x7c5904c000] coded y,uvDC,uvAC intra: 42.1% 80.3% 67.1% inter: 16.2% 43.0% 34.8%
+[libx264 @ 0x7c5904c000] i16 v,h,dc,p: 64% 16% 19%  0%
+[libx264 @ 0x7c5904c000] i4 v,h,dc,ddl,ddr,vr,hd,vl,hu: 51% 25% 14%  1%  1%  2%  3%  1%  2%
+[libx264 @ 0x7c5904c000] i8c dc,h,v,p: 50% 12% 35%  2%
+[libx264 @ 0x7c5904c000] ref P L0: 57.4% 16.4%  9.3%  4.8%  2.9%  4.1%  2.1%  1.1%  0.8%  0.9%  0.3%
+[libx264 @ 0x7c5904c000] kb/s:52.94
+[aac @ 0x7c5904ce00] Qavg: 150.485

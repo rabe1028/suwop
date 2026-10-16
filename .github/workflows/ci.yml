@@ -178,6 +178,8 @@ jobs:
           SUWOP_CLEAN_CHECK=1 make apple-build APPLE_RUST_BUILD_ARGS=--package
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
+      - name: Verify private VIDEO playback and exact owner cleanup on macOS
+        run: make private-video-mac-test
 
   simulator:
     runs-on: macos-26

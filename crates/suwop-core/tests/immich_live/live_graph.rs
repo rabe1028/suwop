@@ -44,6 +44,9 @@ pub(super) use write_contract::{
 #[path = "live_graph/derivative_headers.rs"]
 mod derivative_headers;
 
+#[path = "live_graph/private_video.rs"]
+mod private_video;
+
 #[path = "live_graph/ordinary_selected_read.rs"]
 mod ordinary_selected_read;
 

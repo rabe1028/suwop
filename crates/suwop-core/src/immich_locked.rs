@@ -1,4 +1,5 @@
 //! Dedicated ephemeral password session. Never installed in the ordinary API-key session.
+pub mod video;
 mod write_contract;
 use crate::{
     app::{Context, Event, Model, ShellOperation, io},
@@ -38,6 +39,8 @@ pub enum ImmichLockedState {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedEntry {
+    #[serde(default)]
+    pub can_play_video: bool,
     pub visibility_action: crate::immich_visibility::ImmichVisibilityActionHint,
     pub id: String,
     pub asset: StoredAsset,
@@ -105,6 +108,10 @@ pub struct ImmichLockedView {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_lock_confirmed: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video_pending: Option<video::ImmichLockedVideoPending>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub video: Option<video::ImmichLockedVideoAccess>,
 }
 #[derive(Clone)]
 pub struct DedicatedSession {
@@ -137,6 +144,7 @@ pub struct OpenedSession {
 }
 #[derive(Default)]
 pub struct ImmichLockedModel {
+    video: video::VideoModel,
     refresh_id: u64,
     refresh_busy: bool,
     pub generation: Arc<AtomicU64>,
@@ -335,6 +343,7 @@ pub(crate) fn write_supported(model: &Model) -> bool {
 }
 fn entry_for_view(model: &Model, entry: &ImmichLockedEntry) -> ImmichLockedEntry {
     let mut entry = entry.clone();
+    entry.can_play_video = video::eligible(&entry.asset);
     if model
         .state
         .immich_visibility_operations
@@ -409,6 +418,8 @@ pub fn view(model: &Model) -> ImmichLockedView {
             }),
         error: locked.error.clone(),
         remote_lock_confirmed: locked.remote_lock_confirmed,
+        video_pending: video::projection(model).0,
+        video: video::projection(model).1,
     }
 }
 fn release(staged_id: String) -> Command<crate::app::Effect, Event> {
@@ -419,6 +430,8 @@ fn release(staged_id: String) -> Command<crate::app::Effect, Event> {
 }
 /// Local revocation is synchronous; cleanup never restores capabilities.
 pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
+    let had_video = model.immich_locked.video.has_work();
+    let video_cleanup = video::stop(model);
     if model.immich_locked.refresh_busy {
         model.busy = false;
         model.immich_locked.refresh_busy = false;
@@ -427,7 +440,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
     if model.immich_locked.state == ImmichLockedState::Locked
         && model.immich_locked.session.is_none()
     {
-        return Command::done();
+        return video_cleanup;
     }
     let locked = &mut model.immich_locked;
     locked.generation.fetch_add(1, Ordering::SeqCst);
@@ -444,7 +457,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
     locked.remote_lock_confirmed = None;
     locked.hard_deadline = None;
     locked.lease_deadline = None;
-    Command::new(move |ctx| async move {
+    video_cleanup.and(Command::new(move |ctx| async move {
         let _: Result<Value, _> = io(
             &ctx,
             ShellOperation::ReleaseImmichLockedImages {
@@ -452,6 +465,15 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
             },
         )
         .await;
+        if had_video {
+            let _: Result<Value, _> = io(
+                &ctx,
+                ShellOperation::ReleaseImmichLockedVideos {
+                    generation: revoked_generation.saturating_sub(1),
+                },
+            )
+            .await;
+        }
         if let Some(session) = session {
             let confirmed = cleanup(&ctx, &session).await;
             ctx.send_event(Event::ImmichLockedClosed {
@@ -459,7 +481,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
                 confirmed,
             });
         }
-    })
+    }))
 }
 
 async fn open_session(
@@ -640,6 +662,7 @@ async fn locked_inventory(
             hydrate_locked_stack(ctx, generation, expected, session, &mut asset).await?;
             let record = asset.record(&session.ordinary.scope, None, None);
             entries.push(ImmichLockedEntry {
+                can_play_video: false,
                 visibility_action: crate::immich_visibility::hint(&record, true),
                 id: asset.id.clone(),
                 asset: record,
@@ -884,6 +907,9 @@ fn refreshed_inventory(
     }
 }
 pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Effect, Event>> {
+    if let Some(command) = video::update(event.clone(), model) {
+        return Some(command);
+    }
     Some(match event {
         Event::RefreshImmichLocked { grant_id, scene_id } => {
             refresh_inventory(model, &grant_id, &scene_id)
@@ -953,7 +979,10 @@ pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Eff
             entry_id,
             grant_id,
             request_id,
-        } => request_image(model, entry_id, grant_id, request_id),
+        } => {
+            let cleanup = video::stop(model);
+            cleanup.and(request_image(model, entry_id, grant_id, request_id))
+        }
         Event::ImmichLockedImageRead { ticket, result } => image_read(model, ticket, result),
         Event::ImmichLockedImagePublished {
             ticket,
@@ -1132,6 +1161,7 @@ fn check_session(
         return close(model);
     };
     let shared = model.immich_locked.generation.clone();
+    let video_binding = video::heartbeat(model);
     let pending = model.immich_locked.pending.clone();
     let selected_proof = pending
         .as_ref()
@@ -1139,6 +1169,9 @@ fn check_session(
         .cloned();
     Command::new(move |ctx| async move {
         let result = async {
+            if let Some(binding) = &video_binding {
+                video::check_heartbeat(&ctx, binding).await?;
+            }
             if let Some(ticket) = &pending {
                 fresh(&ctx, &shared, ticket, &session, selected_proof.as_ref()).await?;
             }
@@ -1693,6 +1726,7 @@ pub(crate) fn publish_visibility_entry(
     remove_visibility_entry(model, key);
     if facts.visibility == crate::immich_visibility::ImmichVisibility::Locked {
         model.immich_locked.entries.push(ImmichLockedEntry {
+            can_play_video: false,
             id: key.asset_id.clone(),
             visibility_action: crate::immich_visibility::hint(&facts.asset, true),
             asset: facts.asset,
@@ -1756,6 +1790,7 @@ pub(crate) fn publish_selected_observation(
             );
         }
         model.immich_locked.entries.push(ImmichLockedEntry {
+            can_play_video: false,
             id: key.asset_id.clone(),
             asset: projection.facts.asset,
             visibility_action: hint,
@@ -1856,6 +1891,7 @@ mod keyed_visibility_invalidation_tests {
         };
         let mut model = Model::default();
         model.immich_locked.entries.push(ImmichLockedEntry {
+            can_play_video: false,
             id: key.asset_id.clone(),
             visibility_action: crate::immich_visibility::locked_action(key.clone()),
             asset,
