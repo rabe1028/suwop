@@ -4,7 +4,7 @@ use suwop_core::immich_locked::video::ImmichLockedVideoTicket;
 fn ticket(expected: Option<u64>, maximum: u64) -> Result<ImmichLockedVideoTicket, String> {
     serde_json::from_value(json!({
         "pending":{"requestID":id(90),"entryID":"video","grantID":id(91),"sceneID":SCENE,"generation":1,"key":{"provider":"immich","scope":"http://fixture.invalid/api#owner","assetID":id(92)},"phase":"acquiring"},
-        "displayLeaseID":1,"deadlineUnixMilliseconds":transport::now_ms()?.checked_add(30_000).ok_or("test deadline")?,"expectedRevision":"revision","expectedSha1":format!("{:x}",sha1::Sha1::digest(V)),"expectedBytes":expected,
+        "initialAcquisitionLease":{"leaseID":1,"deadlineUnixMilliseconds":u64::MAX,"remainingMilliseconds":30_000,"extensionMilliseconds":0},"acquisitionLease":{"leaseID":1,"deadlineUnixMilliseconds":u64::MAX,"remainingMilliseconds":30_000,"extensionMilliseconds":0},"displayLeaseID":1,"deadlineUnixMilliseconds":transport::now_ms()?.checked_add(30_000).ok_or("test deadline")?,"expectedRevision":"revision","expectedSha1":format!("{:x}",sha1::Sha1::digest(V)),"expectedBytes":expected,
         "storage":{"leaseID":id(90),"measurementNonce":id(93),"deadlineUnixMilliseconds":transport::now_ms()?.checked_add(30_000).ok_or("test storage deadline")?,"availableBytes":2_147_483_648_u64,"otherUnallocatedBytes":0,"allocationUnitBytes":4096,"capacityClass":"importantUsage"},
         "maxReceivedBytes":maximum,"minimumRemainingBytes":268_435_456,"request":{"url":"http://fixture.invalid/api/original","method":"GET","headers":{},"body":null,"fields":{},"files":[],"downloadPath":null}
     })).map_err(|error| format!("test video ticket: {error}"))

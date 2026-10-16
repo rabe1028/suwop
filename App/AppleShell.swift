@@ -140,7 +140,9 @@ import SuwopShell
         }
         return try await dispatch(operation, data: data, context: context)
     }
+}
 
+extension AppleShell {
     private func dispatch(
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
@@ -157,6 +159,7 @@ import SuwopShell
              "releaseImmichLockedImages", "releaseImmichLockedImage", "scheduleImmichLockedExpiry",
              "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
              "prepareImmichLockedVideo", "releaseImmichLockedVideo", "releaseImmichLockedVideos",
+             "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
              "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
              "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
             return try await appStateEffect(operation.type, data: data, context: context)

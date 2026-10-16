@@ -14,6 +14,21 @@ import SuwopShell
     private var saved: SavedLibrary
     private(set) var issuedOriginals = 0
     private(set) var videoReadFailure: String?
+    var inspectionCompletionBarrier: (@MainActor () async -> Void)?
+    var preparationCompletionBarrier: (@MainActor () async -> Void)?
+    var readStartBarrier: (@MainActor () async -> Void)?
+    var readCompletionBarrier: (@MainActor () async -> Void)?
+    var renewalStartBarrier: (@MainActor () async -> Void)?
+    private(set) var rejectedRenewals = 0
+    var renewalAcknowledgementBarrier: (@MainActor (JSONValue) async throws -> JSONValue)?
+    var preparationStarted: (@MainActor () -> Void)?
+    private(set) var storageQuoteDeadline: Int64?
+    private(set) var completedReadResults = 0
+    private(set) var completedReadLeaseID: Int64?
+    private(set) var preparationRequests = 0
+    private(set) var appliedRenewals = 0
+    var omitAcquisitionSchedules = false
+    private(set) var acquisitionScheduleRequests = 0
 
     init(expectedBytesKnown: Bool = true, container: String = "mp4", filenameOverride: String? = nil) throws {
         runtime = try RustRuntime()
@@ -51,20 +66,7 @@ import SuwopShell
         }
         let library = LibraryModel(runtime: runtime, shell: shell, executeEffect: { [weak self] operation, context in
             guard let self else { throw CancellationError() }
-            switch operation.type {
-            case "readState": return try .from(saved)
-            case "persist":
-                saved = try (operation.data ?? .null).decode(SavedLibrary.self)
-                return .null
-            case "readCredential": return .string(ImmichLockedFixtureData.ordinaryAPIKey)
-            case "appleScan": return try .from(LibrarySnapshot(
-                    provider: .apple, scope: saved.appleScope, assets: [], access: .full
-                ))
-            case "readImmichLockedVideo":
-                issuedOriginals += 1
-                return try await readVideo(operation, context: context)
-            default: return try await shell.execute(operation, context: context)
-            }
+            return try await fixtureEffect(operation, context: context)
         })
         library.immichLocked.timerEffect = { [timerBarrier] in await timerBarrier.wait($0) }
         model = library
@@ -76,9 +78,80 @@ import SuwopShell
         return library
     }
 
+    private func fixtureEffect(
+        _ operation: ShellOperation, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        if ImmichLockedVideoEffects.types.contains(operation.type) {
+            return try await videoEffect(operation, context: context)
+        }
+        switch operation.type {
+        case "readState": return try .from(saved)
+        case "persist":
+            saved = try (operation.data ?? .null).decode(SavedLibrary.self)
+            return .null
+        case "readCredential": return .string(ImmichLockedFixtureData.ordinaryAPIKey)
+        case "appleScan": return try .from(LibrarySnapshot(
+                provider: .apple, scope: saved.appleScope, assets: [], access: .full
+            ))
+        default: return try await shell.execute(operation, context: context)
+        }
+    }
+
+    private func videoEffect(
+        _ operation: ShellOperation, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        switch operation.type {
+        case "inspectImmichLockedVideoStorage":
+            let result = try await shell.execute(operation, context: context)
+            storageQuoteDeadline = try result.decode(ImmichLockedVideoStorageFacts.self).deadlineUnixMilliseconds
+            await inspectionCompletionBarrier?()
+            return result
+        case "scheduleImmichLockedVideoAcquisitionExpiry":
+            acquisitionScheduleRequests += 1
+            if omitAcquisitionSchedules {
+                return .null
+            }
+            return try await shell.execute(operation, context: context)
+        case "renewImmichLockedVideoAcquisition":
+            return try await renewVideo(operation, context: context)
+        case "prepareImmichLockedVideo":
+            preparationRequests += 1
+            preparationStarted?()
+            let result = try await shell.execute(operation, context: context)
+            await preparationCompletionBarrier?()
+            return result
+        case "readImmichLockedVideo":
+            issuedOriginals += 1
+            return try await readVideo(operation, context: context)
+        default: return try await shell.execute(operation, context: context)
+        }
+    }
+
+    private func renewVideo(
+        _ operation: ShellOperation, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        await renewalStartBarrier?()
+        do {
+            let result = try await shell.execute(operation, context: context)
+            appliedRenewals += 1
+            if let renewalAcknowledgementBarrier {
+                return try await renewalAcknowledgementBarrier(result)
+            }
+            return result
+        } catch {
+            rejectedRenewals += 1
+            throw error
+        }
+    }
+
     private func readVideo(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
         do {
-            return try await shell.execute(operation, context: context)
+            await readStartBarrier?()
+            let result = try await shell.execute(operation, context: context)
+            completedReadLeaseID = try result.decode(ImmichLockedVideoResult.self).acquisitionLeaseID
+            completedReadResults += 1
+            await readCompletionBarrier?()
+            return result
         } catch {
             let failure = error as NSError
             videoReadFailure = "\(failure.domain):\(failure.code)"
@@ -98,6 +171,17 @@ import SuwopShell
             session.view(for: ImmichLockedFixtureData.sceneID)?.entries?.contains(where: \.canPlayVideo) == true
                 && !session.busy
         }
+    }
+
+    func checkCurrentVideoAcquisition() throws {
+        guard let model, let view = model.immichLocked.projection,
+              let grantID = view.grantID else { throw CancellationError() }
+        let leaseID = view.leaseID
+        // Identical existing Check event to the production C1 timer; all status/metadata/renewal effects remain real.
+        model.send([
+            "type": .string("checkImmichLockedSession"), "grantID": .string(grantID),
+            "generation": .number(Double(view.generation)), "leaseID": .number(Double(leaseID)),
+        ])
     }
 
     func play() throws {

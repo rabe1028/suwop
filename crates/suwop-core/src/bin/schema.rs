@@ -9,6 +9,8 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    immich_locked_video_acquisition_renewed:
+        suwop_core::immich_locked::video::ImmichLockedVideoAcquisitionRenewed,
     immich_locked_video_ticket: suwop_core::immich_locked::video::ImmichLockedVideoTicket,
     immich_locked_video_result: suwop_core::immich_locked::video::ImmichLockedVideoResult,
     immich_locked_video_prepared: suwop_core::immich_locked::video::ImmichLockedVideoPrepared,

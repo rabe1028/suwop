@@ -152,3 +152,41 @@ infra24、全Apple build、macOS native9、strict VRT host129／UI57の全186件
 詳細と診断収集警告の扱いは[保護動画の検証記録](immich-private-video.md)に保持する。
 最終HEADのhosted CI・レビュー・マージは未完了。取得期限更新、VIDEO書込み、
 Live複数資源処理とPP-03以降の範囲は変更しない。
+
+### C-1 VIDEO取得期限更新の進捗
+
+以下は検索基盤を取り込む前の取得期限更新ブランチの検証履歴である。PR #35の最新状態は上の統合後記録を参照する。
+
+初回再生のPR #35はHEAD `4653774`で提出済み。最初のCIのXcode 16.4でAVAssetTrackの
+Swift 6 isolationエラーが発生し、同じassetのcallback内でtrackを判定してBoolだけを返す
+修正を加えた。修正後のlocal check、全Apple build、Mac 9件、iOS host28／UI2件が成功。
+更新後CI 38835197338はcore／Apple／PhotoKit／実Immich成功、UI 55件中1件失敗で終了。
+失敗記録を調査中であり、マージは未完了。
+
+後続の[取得期限更新](immich-private-video-renewal.md)ではRust対象22件とClippyが成功。
+native初回44件は43成功・1件失敗で、古い容量測定を使った成功期待を拒否／成功の2件に
+分けて再検証し、その2件が成功した。実低速streamの2回更新、30秒を超えるhash／準備、
+公開後の再生継続を確認した。新規nativeケースは15件、基準48枚は不変。全体check、
+全Apple build、Mac 9件、実Immich 3.2.4の13件／3.3.3の14件は成功した。
+strict VRTはhost 132件・48画面差分0まで進んだが、公開時の期限切れ競合をレビューで
+発見し、UI実行中に停止した。公開と期限切れを同じlockで競合させる修正後、
+controller 7件、実際の遅い公開と旧callbackのケース1件、実低速stream 1件の対象9件は成功。
+修正後の全体受入れ、最終HEADのCIとマージは未完了。
+PP-02全体とPP-03以降の残作業は完了扱いにしない。
+
+
+### 最新の統合検証とPR #35マージ（2026-10-16）
+
+PR #35は最終HEAD `9382a93`のCI全11 job成功・未解決レビュー0を確認し、main `14e1bcc`へ
+マージ済み。両treeは同一で、merge後CI 38864174445も全11 job成功。
+上の未完了表記は当時の履歴として保持する。
+
+取得期限更新は同じmain内容を統合したsource `be0f4293`でDTO生成、check
+（Rust/FFI451／Swift70／infra24）、実Immich3.2.4の13件／3.3.3の14件、
+全Apple build、Mac9、strict VRT host147／UI57の全204件が成功した。
+全50画面差分0、record=false、ソース・基準画像は前後不変。
+通常・AX3の実動画再生も確認済み。完全な記録と診断収集警告は
+[取得期限更新の検証](immich-private-video-renewal.md)に分ける。
+検証済み内容を保持してブランチの基点をmainへ整合した。
+取得期限更新の最終HEADのhosted CI・レビュー・マージは未完了。
+C-2 VIDEO書込み、Live複数資源処理、PP-03〜16の範囲・到達条件は引き続き残る。

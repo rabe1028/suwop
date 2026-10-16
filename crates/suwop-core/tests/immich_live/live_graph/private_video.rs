@@ -13,6 +13,8 @@ mod controls;
 mod drift;
 #[path = "private_video_fixture.rs"]
 mod fixture;
+#[path = "private_video_renewal.rs"]
+mod renewal;
 #[path = "private_video_shell.rs"]
 mod shell;
 #[path = "private_video_transport.rs"]
@@ -61,6 +63,7 @@ fn real_private_video_originals_are_pin_bound_read_only_and_cleanup_drift() -> R
     let after = fixture.observe(&agent, &root, "observer-after-positive")?;
     assert_eq!(baseline, after);
     synthetic_absence(&agent, &fixture, &root)?;
+    renewal::exercise(&agent, &fixture, &root)?;
     drift::exercise(&agent, &fixture, &root)?;
     let after = fixture.observe(&agent, &root, "observer-after-all")?;
     // Drift changes only V visibility/revision, and restores V locked before this observation.

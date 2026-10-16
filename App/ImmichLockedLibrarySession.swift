@@ -69,6 +69,13 @@ struct ImmichLockedTimer: Sendable {
             videoPlayer?.shield(binding: binding, leaseID: leaseID)
         }
         shell.immichLockedTimerEffect = { [weak self] in self?.schedule($0) }
+        shell.immichLockedVideoAccess.acquisitionExpired = { [weak self] pending, leaseID in
+            self?.send([
+                "type": .string("expireImmichLockedVideoAcquisition"),
+                "sceneID": .string(pending.sceneID), "requestID": .string(pending.requestID),
+                "generation": .number(Double(pending.generation)), "leaseID": .number(Double(leaseID)),
+            ])
+        }
     }
 
     func view(for sceneID: String) -> ImmichLockedView? {

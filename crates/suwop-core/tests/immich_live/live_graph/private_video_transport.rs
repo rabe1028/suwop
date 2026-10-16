@@ -97,6 +97,7 @@ pub(super) fn stream_to_file(
     let digest = format!("{:x}", sha1.finalize());
     assert_eq!(digest, ticket.expected_sha1);
     Ok(ImmichLockedVideoResult {
+        acquisition_lease_id: ticket.acquisition_lease.lease_id,
         request_id: ticket.pending.request_id.clone(),
         staged_id: ticket.storage.lease_id.clone(),
         sha1: digest,

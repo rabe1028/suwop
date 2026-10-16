@@ -4,6 +4,7 @@ import SuwopShell
     static let types = [
         "inspectImmichLockedVideoStorage", "readImmichLockedVideo", "prepareImmichLockedVideo",
         "releaseImmichLockedVideo", "releaseImmichLockedVideos",
+        "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
     ]
 
     static func execute(
@@ -19,6 +20,17 @@ import SuwopShell
         case "prepareImmichLockedVideo": return try await .from(access.prepare(
                 data["ticket"].decode(ImmichLockedVideoTicket.self), stagedID: data["stagedID"].decode(String.self)
             ))
+        case "renewImmichLockedVideoAcquisition": return try await .from(access.renew(
+                data["ticket"].decode(ImmichLockedVideoTicket.self),
+                previousLeaseID: data["previousLeaseID"].decode(Int64.self),
+                lease: data["lease"].decode(ImmichLockedVideoAcquisitionLease.self)
+            ))
+        case "scheduleImmichLockedVideoAcquisitionExpiry":
+            try await access.scheduleAcquisitionExpiry(
+                data["pending"].decode(ImmichLockedVideoPending.self),
+                lease: data["lease"].decode(ImmichLockedVideoAcquisitionLease.self)
+            )
+            return .null
         case "releaseImmichLockedVideo":
             try await access.release(
                 data["pending"].decode(ImmichLockedVideoPending.self), leaseID: data["leaseID"].decode(String.self)
