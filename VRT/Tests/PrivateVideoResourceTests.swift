@@ -74,6 +74,25 @@ final class PrivateVideoResourceTests: XCTestCase {
         XCTAssertThrowsError(try PrivateVideoAllocation.rounded(1, unit: 0))
     }
 
+    func testFullUpfrontCeilingRejectsCapacityLossWhileIncrementalClaimCanFit() throws {
+        // This is a Rust-supplied finite ceiling, not a promise of reserved physical storage.
+        let headroom: Int64 = 256 * 1024 * 1024
+        let budget = PrivateVideoAllocation.Budget(maximum: 8192, minimumRemaining: headroom, unit: 4096)
+        XCTAssertNoThrow(try PrivateVideoAllocation.verify(
+            available: headroom + 8192, otherUnallocated: 0, allocated: 0, nextWritten: 8192, budget: budget
+        ))
+        XCTAssertThrowsError(try PrivateVideoAllocation.verify(
+            available: headroom + 4096, otherUnallocated: 0, allocated: 0, nextWritten: 8192, budget: budget
+        ))
+        XCTAssertThrowsError(try PrivateVideoAllocation.verify(
+            available: headroom + 8192, otherUnallocated: 4096, allocated: 0, nextWritten: 8192, budget: budget
+        ))
+        // Incremental mode checks a small claim rather than treating its finite ceiling as a reservation.
+        XCTAssertNoThrow(try PrivateVideoAllocation.verify(
+            available: headroom + 4096, otherUnallocated: 0, allocated: 0, nextWritten: 1, budget: budget
+        ))
+    }
+
     func testMIMEHintsAreSanitizedAndGenericHeadersUseFilenameFallback() {
         XCTAssertEqual(PrivateVideoMediaHint.response("Video/MP4; codecs=avc1"), "video/mp4")
         XCTAssertNil(PrivateVideoMediaHint.response("application/octet-stream"))

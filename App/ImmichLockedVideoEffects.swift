@@ -5,6 +5,7 @@ import SuwopShell
         "inspectImmichLockedVideoStorage", "readImmichLockedVideo", "prepareImmichLockedVideo",
         "releaseImmichLockedVideo", "releaseImmichLockedVideos",
         "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
+        "quiesceImmichLockedVideo",
     ]
 
     static func execute(
@@ -30,6 +31,10 @@ import SuwopShell
                 data["pending"].decode(ImmichLockedVideoPending.self),
                 lease: data["lease"].decode(ImmichLockedVideoAcquisitionLease.self)
             )
+            return .null
+        case "quiesceImmichLockedVideo":
+            let pending = try data["pending"].decode(ImmichLockedVideoPending?.self)
+            try await access.quiesce(key: data["key"].decode(AssetKey.self), pending: pending)
             return .null
         case "releaseImmichLockedVideo":
             try await access.release(

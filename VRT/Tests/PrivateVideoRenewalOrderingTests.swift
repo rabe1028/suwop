@@ -136,6 +136,43 @@ final class PrivateVideoRenewalOrderingTests: XCTestCase {
         }
     }
 
+    @MainActor func testRenewalRejectsChangedCommitmentModeWithoutChangingTheLiveController() async throws {
+        try await withFixture { fixture, model in
+            let manager = fixture.shell.immichLockedVideoAccess
+            var hash: CheckedContinuation<Void, Never>?
+            var renewal: CheckedContinuation<Void, Never>?
+            defer {
+                hash?.resume()
+                renewal?.resume()
+                manager.hashBarrier = nil
+                fixture.renewalStartBarrier = nil
+            }
+            manager.hashBarrier = { _ in await withCheckedContinuation { hash = $0 } }
+            fixture.renewalStartBarrier = { await withCheckedContinuation { renewal = $0 } }
+            try fixture.play()
+            try await fixture.settle { hash != nil }
+            try await ContinuousClock().sleep(until: ContinuousClock.now.advanced(by: .milliseconds(100)))
+            try fixture.checkCurrentVideoAcquisition()
+            try await fixture.settle { renewal != nil }
+            let candidate = try XCTUnwrap(model.immichLocked.projection?.videoAcquisition?.lease)
+            var exact = try XCTUnwrap(fixture.lastReadTicket)
+            exact.acquisitionLease = candidate
+            var changed = exact
+            changed.commitmentMode = exact.commitmentMode == .fullUpfront ? .incremental : .fullUpfront
+            XCTAssertNotEqual(PrivateVideoAcquisitionContract(exact), PrivateVideoAcquisitionContract(changed))
+            do {
+                _ = try await manager.renew(changed, previousLeaseID: 1, lease: candidate)
+                XCTFail("A renewal must not change the immutable commitment mode")
+            } catch is CancellationError {} catch { throw error }
+            XCTAssertEqual(manager.currentAcquisitionLeaseID, 1)
+            let ack = try await manager.renew(exact, previousLeaseID: 1, lease: candidate)
+            XCTAssertEqual(ack.leaseID, candidate.leaseID)
+            XCTAssertEqual(manager.currentAcquisitionLeaseID, candidate.leaseID)
+            XCTAssertNil(model.immichLocked.projection?.video)
+            XCTAssertEqual(fixture.server.mutationAttempts, 0)
+        }
+    }
+
     @MainActor private func heldAcknowledgement(fail: Bool) async throws {
         try await withFixture { fixture, model in
             let manager = fixture.shell.immichLockedVideoAccess

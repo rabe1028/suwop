@@ -12,10 +12,14 @@ import SuwopShell
     let timerBarrier = ImmichLockedTimerBarrier()
     private(set) var model: LibraryModel?
     private var saved: SavedLibrary
+    private(set) var safeEffectTrace: [String] = []
     private(set) var issuedOriginals = 0
     private(set) var videoReadFailure: String?
+    var videoInspectionBarrier: (@MainActor (ImmichLockedVideoPending) async -> Void)?
+    private(set) var persistedWrites = 0
     var inspectionCompletionBarrier: (@MainActor () async -> Void)?
     var preparationCompletionBarrier: (@MainActor () async -> Void)?
+    private(set) var lastReadTicket: ImmichLockedVideoTicket?
     var readStartBarrier: (@MainActor () async -> Void)?
     var readCompletionBarrier: (@MainActor () async -> Void)?
     var renewalStartBarrier: (@MainActor () async -> Void)?
@@ -30,9 +34,17 @@ import SuwopShell
     var omitAcquisitionSchedules = false
     private(set) var acquisitionScheduleRequests = 0
 
-    init(expectedBytesKnown: Bool = true, container: String = "mp4", filenameOverride: String? = nil) throws {
+    init(
+        expectedBytesKnown: Bool = true,
+        container: String = "mp4",
+        filenameOverride: String? = nil,
+        files: PrivateVideoFiles? = nil
+    ) throws {
         runtime = try RustRuntime()
         shell = try AppleShell()
+        if let files {
+            shell.immichLockedVideoAccess.installFilesForTesting(files)
+        }
         let mediaURL = try Self.mediaURL(container: container)
         let media = try Data(contentsOf: mediaURL)
         transport = try PrivateVideoHTTPServer(bytes: media)
@@ -81,12 +93,21 @@ import SuwopShell
     private func fixtureEffect(
         _ operation: ShellOperation, context: ContentPresentationContext
     ) async throws -> JSONValue {
+        let kind = switch operation.data?["generation"] ?? .null {
+        case .number: "number"
+        case .bool: "bool"
+        case .null: "absent-or-null"
+        default: "other"
+        }
+        safeEffectTrace.append("\(operation.type):generation=\(kind)")
+        safeEffectTrace = Array(safeEffectTrace.suffix(8))
         if ImmichLockedVideoEffects.types.contains(operation.type) {
             return try await videoEffect(operation, context: context)
         }
         switch operation.type {
         case "readState": return try .from(saved)
         case "persist":
+            persistedWrites += 1
             saved = try (operation.data ?? .null).decode(SavedLibrary.self)
             return .null
         case "readCredential": return .string(ImmichLockedFixtureData.ordinaryAPIKey)
@@ -102,6 +123,8 @@ import SuwopShell
     ) async throws -> JSONValue {
         switch operation.type {
         case "inspectImmichLockedVideoStorage":
+            let pending = try (operation.data ?? .null)["pending"].decode(ImmichLockedVideoPending.self)
+            await videoInspectionBarrier?(pending)
             let result = try await shell.execute(operation, context: context)
             storageQuoteDeadline = try result.decode(ImmichLockedVideoStorageFacts.self).deadlineUnixMilliseconds
             await inspectionCompletionBarrier?()
@@ -146,6 +169,7 @@ import SuwopShell
 
     private func readVideo(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
         do {
+            lastReadTicket = try (operation.data ?? .null)["ticket"].decode(ImmichLockedVideoTicket.self)
             await readStartBarrier?()
             let result = try await shell.execute(operation, context: context)
             completedReadLeaseID = try result.decode(ImmichLockedVideoResult.self).acquisitionLeaseID
@@ -154,7 +178,17 @@ import SuwopShell
             return result
         } catch {
             let failure = error as NSError
-            videoReadFailure = "\(failure.domain):\(failure.code)"
+            // Preserve only known static local messages, never arbitrary transport descriptions.
+            let safeMessages = [
+                "動画を取得する空き容量が不足しています。",
+                "動画を取得する空き容量を確認できません。",
+                "動画の保存先を確認できません。",
+                "ハッシュ計算を初期化できません。",
+                "動画の原本を確認できません。",
+            ]
+            let message = (error as? SuwopError)?.message
+            let classified = message.flatMap { safeMessages.contains($0) ? $0 : nil } ?? "unclassified"
+            videoReadFailure = "\(failure.domain):\(failure.code):\(classified)"
             throw error
         }
     }

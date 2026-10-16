@@ -15,8 +15,36 @@ enum PrivateVideoAllocation {
 
     struct Budget: Sendable {
         let maximum: Int64
+        let mode: ImmichLockedVideoCommitmentMode
         let minimumRemaining: Int64
         let unit: Int64
+
+        init(
+            maximum: Int64,
+            minimumRemaining: Int64,
+            unit: Int64,
+            mode: ImmichLockedVideoCommitmentMode = .fullUpfront
+        ) {
+            self.maximum = maximum
+            self.minimumRemaining = minimumRemaining
+            self.unit = unit
+            self.mode = mode
+        }
+    }
+
+    static func initialClaim(_ budget: Budget) throws -> Int64 {
+        guard budget.maximum > 0, budget.unit > 0 else { throw unavailable() }
+        switch budget.mode {
+        case .fullUpfront: return budget.maximum
+        case .incremental: return min(budget.maximum, budget.unit)
+        }
+    }
+
+    static func extendedClaim(current: Int64, nextWritten: Int64, budget: Budget) throws -> Int64 {
+        guard current > 0, current <= budget.maximum, nextWritten >= 0, nextWritten <= budget.maximum else {
+            throw unavailable()
+        }
+        return max(current, nextWritten)
     }
 
     static func unallocated(maximum: Int64, allocated: Int64, unit: Int64) throws -> Int64 {

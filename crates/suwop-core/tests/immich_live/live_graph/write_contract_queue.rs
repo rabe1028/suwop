@@ -18,7 +18,7 @@ pub(super) fn metadata_stamp(root: &Path, session: &Session, id: &str) -> Result
         .map(str::to_owned)
         .ok_or_else(|| "probe metadata timestamp".into())
 }
-fn queue_snapshot() -> Result<Value, String> {
+pub(super) fn queue_snapshot() -> Result<Value, String> {
     let project = std::env::var("IMMICH_TEST_PROJECT").map_err(|_| "queue isolated project")?;
     if !project.starts_with("suwop-")
         || !project

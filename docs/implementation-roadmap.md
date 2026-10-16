@@ -190,3 +190,15 @@ PR #35は最終HEAD `9382a93`のCI全11 job成功・未解決レビュー0を確
 検証済み内容を保持してブランチの基点をmainへ整合した。
 取得期限更新の最終HEADのhosted CI・レビュー・マージは未完了。
 C-2 VIDEO書込み、Live複数資源処理、PP-03〜16の範囲・到達条件は引き続き残る。
+
+### PR #36のマージとC-2 VIDEOのローカル検証（2026-10-17）
+
+取得期限更新の[PR #36](https://github.com/rabe1028/suwop/pull/36)は最終HEAD `f34a85a12bd8c74f8d494aed1bd6fb2d4ca52da1`からmain `3c23ca5a3d84c5a54e6b328df42580fe2bed938f`へマージ済み。提出HEADのCI全11 job成功と、同一treeのmerge後CI失敗は区別する。[merge後run 38887593424](https://github.com/rabe1028/suwop/actions/runs/38887593424)はVRTと集約jobが失敗。他9 jobは成功した。absent-sizeのネイティブテスト失敗を記録し、その実行の原因は未確定のまま保持する。
+
+C-2では選択した物理VIDEOのlocked／timeline／archive変更をImmich 3.3.3で追加した。書込み前に読取り・更新権限を失効し、native処理の終了を待ち、未解決intentを永続化する。応答消失は自動再送しない。3.2.4ではこの書込みを開始しない。未知サイズの取得には有限上限と最低空き容量を保持した段階的容量計上を追加した。
+
+現時点のローカル検証はcheck（Rust467／Swift70／infra24）、focused native40、全5 Rust target／XCFramework／iOS／macOS、Mac native9、実Immich3.2.4の14件／3.3.3の15件が成功。確認画面の通常文字サイズ1枚のみレビュー後に更新し、他49基準はバイト不変。全体strict VRTはhost168／UI61の全229件成功・失敗0・skip0、50画面差分0、record=false、sourceと基準画像前後不変で成功。提出HEADのhosted CI・レビュー・マージは未実施。
+
+関連写真や動画から原本へ引き続きアクセスできる場合があることは実サーバーで確認し、確認画面に明記した。今回の変更は関連資源の配置を変更せず、全経路での秘匿を保証しない。Live複数資源処理、PP-03〜16、実機・iCloud受入れは引き続き残る。
+
+詳細は[選択動画の表示先変更](immich-selected-video-visibility.md)を参照。これらはPR #37のARM64ビルド変更を統合する前の証拠であり、統合後の確認は別記する。

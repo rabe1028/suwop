@@ -1,13 +1,27 @@
 use super::{Deserialize, ERROR, Serialize, Value};
 /// App headroom, not an OS requirement or a maximum movie size.
 pub const PRIVATE_VIDEO_HEADROOM_BYTES: u64 = 256 * 1024 * 1024;
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ImmichLockedVideoCapacityClass {
     ImportantUsage,
     Available,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+/// Capacity commitment is distinct from the immutable total received-byte ceiling.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ImmichLockedVideoCommitmentMode {
+    FullUpfront,
+    Incremental,
+}
+pub(super) fn commitment_mode(expected: Option<u64>) -> ImmichLockedVideoCommitmentMode {
+    if expected.is_some() {
+        ImmichLockedVideoCommitmentMode::FullUpfront
+    } else {
+        ImmichLockedVideoCommitmentMode::Incremental
+    }
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedVideoStorageFacts {
     #[serde(rename = "leaseID")]

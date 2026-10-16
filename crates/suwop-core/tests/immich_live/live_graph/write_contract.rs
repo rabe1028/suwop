@@ -450,3 +450,7 @@ fn verify_native_cid(session: &Session, root: &Path, control: &Value) -> Result<
     }
     write_evidence(root, "native-cid-established.json", &rows)
 }
+
+pub(super) fn selected_video_queue_snapshot() -> Result<Value, String> {
+    queue::queue_snapshot()
+}

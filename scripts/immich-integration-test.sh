@@ -67,7 +67,7 @@ import os
 from pathlib import Path
 
 names = [line.removesuffix(": test") for line in Path(os.environ["SUWOP_NATIVE_LIVE_EVIDENCE_DIR"], "applicable-tests.txt").read_text().splitlines() if line.endswith(": test")]
-expected = 13 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 14
+expected = 14 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 15
 required = {"real_exact_release_native_image_write_gate_preserves_related_resources", "real_private_video_originals_are_pin_bound_read_only_and_cleanup_drift"}
 if len(names) != expected or not all(any(name.endswith(case) for name in names) for case in required):
     raise SystemExit("Applicable integration case list does not match the explicit release matrix")

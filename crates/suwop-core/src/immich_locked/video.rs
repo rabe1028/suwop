@@ -8,7 +8,9 @@ use super::{
     visibility_session,
 };
 use crate::domain::FileSignature;
-pub use policy::{ImmichLockedVideoCapacityClass, ImmichLockedVideoStorageFacts};
+pub use policy::{
+    ImmichLockedVideoCapacityClass, ImmichLockedVideoCommitmentMode, ImmichLockedVideoStorageFacts,
+};
 pub use renewal::{
     ImmichLockedVideoAcquisitionLease, ImmichLockedVideoAcquisitionRenewed,
     ImmichLockedVideoAcquisitionState,
@@ -48,6 +50,7 @@ pub struct ImmichLockedVideoTicket {
     pub expected_revision: String,
     pub expected_sha1: String,
     pub expected_bytes: Option<u64>,
+    pub commitment_mode: ImmichLockedVideoCommitmentMode,
     pub storage: ImmichLockedVideoStorageFacts,
     pub max_received_bytes: u64,
     pub minimum_remaining_bytes: u64,
@@ -206,6 +209,38 @@ pub(crate) fn stop(model: &mut Model) -> Command<crate::app::Effect, Event> {
         .lease
         .take()
         .map_or_else(Command::done, |(p, id)| release(p, id))
+}
+/// Retire only the selected request synchronously. Native quiescence owns its JOIN/cleanup.
+pub(crate) fn stop_for_key(
+    model: &mut Model,
+    key: &AssetKey,
+) -> Command<crate::app::Effect, Event> {
+    if model
+        .immich_locked
+        .video
+        .pending
+        .as_ref()
+        .is_some_and(|p| &p.key == key)
+    {
+        stop(model)
+    } else {
+        Command::done()
+    }
+}
+pub(crate) fn quiesce_visibility(
+    model: &mut Model,
+    key: &AssetKey,
+) -> Option<ImmichLockedVideoPending> {
+    let pending = model
+        .immich_locked
+        .video
+        .pending
+        .clone()
+        .filter(|p| &p.key == key);
+    if pending.is_some() {
+        let _ = stop(model);
+    }
+    pending
 }
 pub(crate) fn reconcile(model: &mut Model) -> Command<crate::app::Effect, Event> {
     if model

@@ -215,27 +215,6 @@ impl Fixture {
         Ok(())
     }
 }
-fn drive_setup(agent: &ureq::Agent, command: &mut Command<Effect, Event>) -> Result<(), String> {
-    loop {
-        let effects = command.effects().collect::<Vec<_>>();
-        if effects.is_empty() {
-            return Ok(());
-        }
-        for Effect::Io(mut request) in effects {
-            let result = match &request.operation {
-                ShellOperation::Http(http) => execute(agent, http),
-                ShellOperation::Wait { milliseconds } => {
-                    std::thread::sleep(Duration::from_millis(u64::from(*milliseconds)));
-                    Ok(Value::Null)
-                }
-                _ => Err("unexpected external video setup effect".into()),
-            };
-            request
-                .resolve(live_response(result))
-                .map_err(|_| "video setup resolve")?;
-        }
-    }
-}
 pub(super) fn write_json(path: &Path, value: &Value) -> Result<(), String> {
     use std::io::Write;
     let encoded = serde_json::to_vec_pretty(value).map_err(|_| "private video evidence encode")?;

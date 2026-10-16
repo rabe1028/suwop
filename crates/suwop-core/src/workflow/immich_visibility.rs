@@ -254,6 +254,35 @@ async fn inspect_selected(
         status,
     }
 }
+pub(crate) async fn apply_quiesced(
+    ctx: &crate::app::Context,
+    before: crate::app::SavedLibrary,
+    prepared: PreparedVisibility,
+    pending: Option<crate::immich_locked::video::ImmichLockedVideoPending>,
+) -> VisibilityCompletion {
+    if prepared.operation.kind == super::ImmichVisibilityOperationKind::LockedTransition {
+        let quiet: Result<(), _> = crate::app::io(
+            ctx,
+            crate::app::ShellOperation::QuiesceImmichLockedVideo {
+                key: prepared.operation.key.clone(),
+                pending,
+            },
+        )
+        .await;
+        if quiet.is_err() || prepared.capability.valid().is_err() {
+            return VisibilityCompletion {
+                selected_projection: None,
+                projection: None,
+                recovery_proof: None,
+                state: before,
+                uncertain: false,
+                status: "選択した項目の停止を確認できませんでした。変更は開始されませんでした。"
+                    .into(),
+            };
+        }
+    }
+    apply(ctx, before, prepared).await
+}
 pub(crate) async fn apply(
     ctx: &crate::app::Context,
     before: crate::app::SavedLibrary,

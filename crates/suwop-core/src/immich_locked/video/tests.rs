@@ -238,6 +238,16 @@ fn complete_known_and_absent_size_video_requires_hidden_prepare_and_final_rust_a
                 .can_play_video
         );
         shell.run(&c, request())?;
+        let ticket = shell.last_ticket.as_ref().ok_or("read ticket")?;
+        assert_eq!(
+            ticket.commitment_mode,
+            if absent {
+                ImmichLockedVideoCommitmentMode::Incremental
+            } else {
+                ImmichLockedVideoCommitmentMode::FullUpfront
+            }
+        );
+        assert_eq!(ticket.expected_bytes.is_none(), absent);
         let view = c.view();
         let approved = view.immich_locked_view.video.ok_or("approval")?;
         assert_eq!(approved.staged_id, LEASE);
@@ -437,3 +447,47 @@ fn rejected_issued_refresh_reconciles_private_video_lease_on_early_return() -> R
 
 #[path = "tests/renewal.rs"]
 mod renewal_cases;
+#[test]
+fn visibility_quiescence_is_exact_key_and_captures_request_without_a_quote() -> Result<(), String> {
+    let mut model = approved_model()?;
+    let key = model
+        .immich_locked
+        .video
+        .pending
+        .as_ref()
+        .ok_or("pending")?
+        .key
+        .clone();
+    let mut other = key.clone();
+    other.scope.push_str("/another-account");
+    assert!(quiesce_visibility(&mut model, &other).is_none());
+    assert!(model.immich_locked.video.access.is_some());
+    assert!(model.immich_locked.video.lease.is_some());
+    model.immich_locked.video.access = None;
+    model.immich_locked.video.lease = None;
+    let captured = quiesce_visibility(&mut model, &key).ok_or("captured request")?;
+    assert_eq!(captured.request_id, REQUEST);
+    assert!(model.immich_locked.video.pending.is_none());
+    assert!(model.immich_locked.video.binding.is_none());
+    Ok(())
+}
+#[test]
+fn inspect_stop_for_key_revokes_only_selected_video_projection() -> Result<(), String> {
+    let mut model = approved_model()?;
+    let key = model
+        .immich_locked
+        .video
+        .pending
+        .as_ref()
+        .ok_or("pending")?
+        .key
+        .clone();
+    let mut other = key.clone();
+    other.asset_id = "77777777-7777-4777-8777-777777777777".into();
+    let _ = stop_for_key(&mut model, &other);
+    assert!(model.immich_locked.video.access.is_some());
+    let _ = stop_for_key(&mut model, &key);
+    assert!(model.immich_locked.video.access.is_none());
+    assert!(model.immich_locked.video.pending.is_none());
+    Ok(())
+}

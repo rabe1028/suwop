@@ -98,6 +98,10 @@ pub enum ShellOperation {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
         lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
     },
+    QuiesceImmichLockedVideo {
+        key: crate::domain::AssetKey,
+        pending: Option<crate::immich_locked::video::ImmichLockedVideoPending>,
+    },
     ReleaseImmichLockedVideo {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
         #[serde(rename = "leaseID")]

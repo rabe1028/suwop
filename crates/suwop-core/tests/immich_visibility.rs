@@ -128,11 +128,32 @@ struct Shell {
     asset_failure: Option<u16>,
     asset_transport_failure: Option<()>,
     patch_after_stage: Option<Value>,
+    quiescence_failure: Option<String>,
+    quiescence_ack: Option<Value>,
+    quiescences: Vec<AssetKey>,
+    quiescence_pending: Vec<Option<suwop_core::immich_locked::video::ImmichLockedVideoPending>>,
 }
 impl Shell {
+    fn quiesce_response(
+        &mut self,
+        key: &AssetKey,
+        pending: Option<&suwop_core::immich_locked::video::ImmichLockedVideoPending>,
+    ) -> Result<Value, String> {
+        self.quiescences.push(key.clone());
+        self.quiescence_pending.push(pending.cloned());
+        if let Some(message) = &self.quiescence_failure {
+            Err(message.clone())
+        } else {
+            Ok(self.quiescence_ack.clone().unwrap_or(Value::Null))
+        }
+    }
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
             ShellOperation::ConfirmImmichArchive { .. } => Ok(json!(true)),
+            ShellOperation::QuiesceImmichLockedVideo { key, pending } => {
+                self.quiesce_response(key, pending.as_ref())
+            }
+
             ShellOperation::Http(request)
                 if request.headers.contains_key("x-api-key")
                     && self
@@ -183,6 +204,27 @@ impl Shell {
                     self.disk.clone().ok_or_else(|| "missing".into())
                 }
             }
+            ShellOperation::InspectImmichLockedVideoStorage { pending } => Ok(
+                json!({"leaseID":pending.request_id,"measurementNonce":OP,"deadlineUnixMilliseconds":u64::MAX,"availableBytes":1_073_741_824_u64,"otherUnallocatedBytes":0,"allocationUnitBytes":4096,"capacityClass":"available"}),
+            ),
+            ShellOperation::ReadImmichLockedVideo { ticket } => Ok(
+                json!({"requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"sha1":"a".repeat(40),"signature":{"sha256":"c".repeat(64),"bytes":123}}),
+            ),
+            ShellOperation::PrepareImmichLockedVideo { ticket, staged_id } => Ok(
+                json!({"requestID":ticket.pending.request_id,"stagedID":staged_id,"acquisitionLeaseID":ticket.acquisition_lease.lease_id}),
+            ),
+            ShellOperation::RenewImmichLockedVideoAcquisition {
+                ticket,
+                previous_lease_id,
+                lease,
+            } => Ok(json!({
+                "requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,
+                "previousLeaseID":previous_lease_id,"leaseID":lease.lease_id
+            })),
+            ShellOperation::ReleaseImmichLockedVideo { pending, .. } => {
+                self.releases.push(pending.request_id.clone());
+                Ok(Value::Null)
+            }
             ShellOperation::ReadImmichLockedImage { ticket } => {
                 self.stages += 1;
                 if let Some(patch) = self.patch_after_stage.take() {
@@ -197,7 +239,8 @@ impl Shell {
                 self.releases.push(staged_id.clone());
                 Ok(Value::Null)
             }
-            ShellOperation::ReleaseImmichLockedImages { .. }
+            ShellOperation::ScheduleImmichLockedVideoAcquisitionExpiry { .. }
+            | ShellOperation::ReleaseImmichLockedImages { .. }
             | ShellOperation::ScheduleImmichLockedExpiry { .. }
             | ShellOperation::ScheduleImmichLockedCheck { .. } => Ok(Value::Null),
             _ => Err("unexpected ordinary/native mutation".into()),
@@ -997,10 +1040,9 @@ fn closing_during_confirmation_cannot_create_intent_or_write() -> Result<(), Str
     Ok(())
 }
 #[test]
-fn unknown_relationship_video_stack_and_identity_facts_fail_before_intent() -> Result<(), String> {
+fn unknown_relationship_stack_and_identity_facts_fail_before_intent() -> Result<(), String> {
     use suwop_core::immich_visibility::ImmichVisibility;
     for patch in [
-        json!({"type":"VIDEO"}),
         json!({"stack":{"id":NEXT}}),
         json!({"checksum":"invalid"}),
         json!({"ownerId":NEXT}),
@@ -1740,19 +1782,27 @@ fn ordinary_prepared_preserves_other_key_pending_read() -> Result<(), String> {
 }
 
 #[test]
-fn pin_direct_video_lock_and_unlock_never_persist_or_write() -> Result<(), String> {
+fn old_release_pin_direct_video_lock_and_unlock_never_confirm_persist_or_write()
+-> Result<(), String> {
     use suwop_core::immich_visibility::ImmichVisibility;
     for to in [
         ImmichVisibility::Locked,
         ImmichVisibility::Timeline,
         ImmichVisibility::Archive,
     ] {
-        let (c, mut shell) = opened(false)?;
+        let c = core(false);
+        let mut shell = Shell {
+            confirmed: true,
+            versions: [json!({"major":3,"minor":2,"patch":4,"prerelease":null})].into(),
+            ..Shell::default()
+        };
         shell.facts_patch = Some(json!({"type":"VIDEO"}));
+        shell.run(&c, open(GRANT))?;
         if to != ImmichVisibility::Locked {
             shell.visibility = Some("locked".into());
         }
         shell.run(&c, prepare(OP, to))?;
+        assert_eq!(shell.confirmations, 0);
         assert_eq!(shell.writes, 0);
         assert_eq!(shell.persist_calls, 0);
     }
@@ -1767,3 +1817,6 @@ mod write_contract;
 
 #[path = "immich_visibility/ordinary_selected.rs"]
 mod ordinary_selected;
+
+#[path = "immich_visibility/selected_video.rs"]
+mod selected_video;

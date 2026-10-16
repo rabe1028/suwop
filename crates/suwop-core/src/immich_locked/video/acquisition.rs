@@ -143,6 +143,26 @@ pub(super) fn request(
         });
     }))
 }
+fn initial_lease(
+    acquisition: &VideoAcquisition,
+    deadline: u64,
+) -> super::ImmichLockedVideoAcquisitionLease {
+    super::ImmichLockedVideoAcquisitionLease {
+        lease_id: 1,
+        deadline_unix_milliseconds: deadline,
+        remaining_milliseconds: u64::try_from(
+            acquisition
+                .capability
+                .lease_deadline
+                .min(acquisition.capability.hard_deadline)
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis(),
+        )
+        .unwrap_or(0),
+        extension_milliseconds: 0,
+    }
+}
+
 pub(super) fn planned(
     model: &mut Model,
     mut acquisition: VideoAcquisition,
@@ -172,20 +192,7 @@ pub(super) fn planned(
     acquisition.pending.phase = ImmichLockedVideoPhase::Acquiring;
     model.immich_locked.video.pending = Some(acquisition.pending.clone());
     model.immich_locked.video.lease = Some((acquisition.pending.clone(), storage.lease_id.clone()));
-    let initial_lease = super::ImmichLockedVideoAcquisitionLease {
-        lease_id: 1,
-        deadline_unix_milliseconds: deadline,
-        remaining_milliseconds: u64::try_from(
-            acquisition
-                .capability
-                .lease_deadline
-                .min(acquisition.capability.hard_deadline)
-                .saturating_duration_since(std::time::Instant::now())
-                .as_millis(),
-        )
-        .unwrap_or(0),
-        extension_milliseconds: 0,
-    };
+    let initial_lease = initial_lease(&acquisition, deadline);
     let mut ticket = ImmichLockedVideoTicket {
         pending: acquisition.pending.clone(),
         acquisition_lease: initial_lease.clone(),
@@ -195,6 +202,7 @@ pub(super) fn planned(
         expected_revision: acquisition.revision.clone(),
         expected_sha1: acquisition.sha1.clone(),
         expected_bytes: bytes,
+        commitment_mode: policy::commitment_mode(bytes),
         storage,
         max_received_bytes: maximum,
         minimum_remaining_bytes: policy::PRIVATE_VIDEO_HEADROOM_BYTES,

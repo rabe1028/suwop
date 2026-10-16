@@ -278,30 +278,64 @@ impl LiveVisibilityShell<'_> {
         }
         Ok(())
     }
+    fn validate_provider_request(
+        &mut self,
+        core: &Core<Suwop>,
+        request: &HttpRequest,
+    ) -> Result<(), String> {
+        if matches!(request.method.as_str(), "PUT" | "PATCH" | "DELETE") {
+            assert!(
+                request.immich_visibility_authorization.is_some(),
+                "provider mutation lacks exact C2 authorization"
+            );
+        }
+        if let Some(permit) = &request.immich_visibility_authorization {
+            let grant = core.view().immich_locked_view;
+            assert_eq!(grant.grant_id.as_deref(), Some(permit.grant_id.as_str()));
+            assert_eq!(grant.scene_id.as_deref(), Some(permit.scene_id.as_str()));
+            assert_eq!(grant.generation, permit.generation);
+            assert!(
+                journal(self.directory)?
+                    .immich_visibility_operations
+                    .iter()
+                    .any(|o| o.id == permit.operation_id
+                        && o.outcome == suwop_core::apple_visibility::VisibilityOutcome::Unknown)
+            );
+            let canonical = journal(self.directory)?;
+            let operation = canonical
+                .immich_visibility_operations
+                .iter()
+                .find(|o| o.id == permit.operation_id)
+                .ok_or("exact C2 operation")?;
+            assert_eq!(request.method, "PUT");
+            assert_eq!(
+                request.url,
+                format!(
+                    "{}/assets",
+                    operation
+                        .key
+                        .scope
+                        .rsplit_once('#')
+                        .ok_or("C2 scope endpoint")?
+                        .0
+                )
+            );
+            assert_eq!(
+                request.body,
+                Some(json!({"ids":[operation.key.asset_id],"visibility":operation.to}))
+            );
+            self.writes += 1;
+        }
+        assert!(
+            !request.url.contains("/original"),
+            "C2 visibility must not acquire selected or related originals"
+        );
+        Ok(())
+    }
     fn respond(&mut self, core: &Core<Suwop>, operation: &ShellOperation) -> Result<Value, String> {
         match operation {
             ShellOperation::Http(request) => {
-                if matches!(request.method.as_str(), "PUT" | "PATCH" | "DELETE") {
-                    assert!(
-                        request.immich_visibility_authorization.is_some(),
-                        "provider mutation lacks exact C2 authorization"
-                    );
-                }
-                if let Some(permit) = &request.immich_visibility_authorization {
-                    let grant = core.view().immich_locked_view;
-                    assert_eq!(grant.grant_id.as_deref(), Some(permit.grant_id.as_str()));
-                    assert_eq!(grant.scene_id.as_deref(), Some(permit.scene_id.as_str()));
-                    assert_eq!(grant.generation, permit.generation);
-                    assert!(
-                        journal(self.directory)?
-                            .immich_visibility_operations
-                            .iter()
-                            .any(|o| o.id == permit.operation_id
-                                && o.outcome
-                                    == suwop_core::apple_visibility::VisibilityOutcome::Unknown)
-                    );
-                    self.writes += 1;
-                }
+                self.validate_provider_request(core, request)?;
                 let value = execute(self.agent, request)?;
                 if request.method == "GET"
                     && let Some(visibility) = value["body"]["visibility"].as_str()
@@ -366,7 +400,8 @@ impl LiveVisibilityShell<'_> {
             ShellOperation::AppleAlbums { scope } => {
                 Ok(json!({"provider":"apple","scope":scope,"albums":[],"access":"full"}))
             }
-            ShellOperation::ReleaseImmichLockedImage { .. }
+            ShellOperation::QuiesceImmichLockedVideo { .. }
+            | ShellOperation::ReleaseImmichLockedImage { .. }
             | ShellOperation::ReleaseImmichLockedImages { .. }
             | ShellOperation::ScheduleImmichLockedCheck { .. }
             | ShellOperation::ScheduleImmichLockedExpiry { .. } => Ok(Value::Null),
@@ -789,3 +824,6 @@ fn assert_roster(
     }
     Ok(())
 }
+
+#[path = "visibility/selected_video.rs"]
+mod selected_video;

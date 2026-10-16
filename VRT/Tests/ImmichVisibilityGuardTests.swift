@@ -166,8 +166,8 @@ final class ImmichVisibilityGuardTests: XCTestCase {
         XCTAssertEqual(fixture.journal.immichVisibilityOperations.first?.outcome, .unknown)
     }
 
-    @MainActor func testAppProtectionAndLiveOrVideoSourcesRejectChangesBeforeConfirmation() async throws {
-        for kind in [ImmichVisibilityFixtureServer.SourceKind.image, .live, .video] {
+    @MainActor func testAppProtectionAndLiveSourcesRejectChangesBeforeConfirmation() async throws {
+        for kind in [ImmichVisibilityFixtureServer.SourceKind.image, .live] {
             let fixture = try ImmichVisibilityPhotoFixture(protectedSource: kind == .image, kind: kind)
             let model = try await fixture.start()
             defer { model.immichLocked.close()

@@ -59,7 +59,7 @@ final class PrivateVideoFileTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
-    private func binding() -> PrivateVideoBinding {
+    func binding() -> PrivateVideoBinding {
         PrivateVideoBinding(ImmichLockedVideoPending(
             entryID: UUID().uuidString,
             generation: 1,

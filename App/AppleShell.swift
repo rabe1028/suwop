@@ -160,6 +160,7 @@ extension AppleShell {
              "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
              "prepareImmichLockedVideo", "releaseImmichLockedVideo", "releaseImmichLockedVideos",
              "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
+             "quiesceImmichLockedVideo",
              "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
              "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
             return try await appStateEffect(operation.type, data: data, context: context)

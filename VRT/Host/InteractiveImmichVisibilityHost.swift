@@ -57,6 +57,9 @@ import SwiftUI
     }
 
     private func sourceKind() -> ImmichVisibilityFixtureServer.SourceKind {
+        if CommandLine.arguments.contains("--selected-video-source") {
+            return .video
+        }
         if CommandLine.arguments.contains("--stacked-source") {
             return .stacked
         }
@@ -77,6 +80,8 @@ import SwiftUI
             GalleryView(model: model, sceneID: ImmichLockedFixtureData.sceneID)
                 .environment(\.protectionSceneID, ImmichLockedFixtureData.sceneID)
             HStack {
+                Text("kind=\(server.record["type"].string ?? "unknown")")
+                    .accessibilityIdentifier("visibilityFixtureKind")
                 Text("writes=\(fixture.writes)").accessibilityIdentifier("visibilityFixtureWrites")
                 Text("attempts=\(server.mutationAttempts)").accessibilityIdentifier("visibilityFixtureAttempts")
                 Text("mutations=\(server.mutations)").accessibilityIdentifier("visibilityFixtureMutations")

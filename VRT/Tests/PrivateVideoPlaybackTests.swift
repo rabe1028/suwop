@@ -244,15 +244,19 @@ final class PrivateVideoPlaybackTests: XCTestCase {
     @MainActor func testAbsentMetadataAndContentLengthStillUseFiniteRustBudgetAndActualPlayer() async throws {
         try await withFixture(expectedBytesKnown: false) { fixture, model, host in
             fixture.transport.fault = .noLength
-            try fixture.play()
+            try privateVideoStage("play") { try fixture.play() }
             let access: ImmichLockedVideoAccess
             do {
                 access = try await approved(fixture, model: model)
             } catch {
-                throw SuwopError(
+                throw PrivateVideoStageError(
+                    stage: "approval",
+                    underlying: error,
+                    detail:
                     "Absent-length approval failed: requests=\(fixture.transport.requests), read=\(fixture.videoReadFailure ?? "none")"
                         + ", quoted=\(fixture.shell.immichLockedVideoAccess.quotedVideoCount)"
                         + ", staged=\(fixture.shell.immichLockedVideoAccess.stagedVideoCount)"
+                        + ", effects=\(fixture.safeEffectTrace.joined(separator: ","))"
                 )
             }
             _ = mount(access, fixture: fixture, model: model, host: host)
@@ -261,7 +265,10 @@ final class PrivateVideoPlaybackTests: XCTestCase {
                 try await fixture
                     .settle { player.currentItem?.status == .readyToPlay && player.currentTime().seconds > 0.1 }
             } catch {
-                throw SuwopError(
+                throw PrivateVideoStageError(
+                    stage: "playback",
+                    underlying: error,
+                    detail:
                     "Absent-length playback failed: item=\(player.currentItem != nil), status=\(player.currentItem?.status.rawValue ?? -1)"
                         + ", rate=\(player.rate), failed=\(model.immichLocked.videoPlayer.failed)"
                 )
@@ -271,41 +278,51 @@ final class PrivateVideoPlaybackTests: XCTestCase {
         }
     }
 
-    @MainActor private func withFixture(
+    @MainActor func withFixture(
         expectedBytesKnown: Bool = true,
         container: String = "mp4",
         filenameOverride: String? = nil,
+        files: PrivateVideoFiles? = nil,
         _ body: @MainActor (PrivateVideoFixture, LibraryModel, NativeVisibilityHost) async throws -> Void
     ) async throws {
-        let fixture = try PrivateVideoFixture(
-            expectedBytesKnown: expectedBytesKnown, container: container, filenameOverride: filenameOverride
-        )
-        let host = try NativeVisibilityHost()
+        let fixture = try privateVideoStage("fixture-init") {
+            try PrivateVideoFixture(
+                expectedBytesKnown: expectedBytesKnown,
+                container: container,
+                filenameOverride: filenameOverride,
+                files: files
+            )
+        }
+        let host = try privateVideoStage("host-init") { try NativeVisibilityHost() }
         let sceneID = ImmichLockedFixtureData.sceneID
         NativeScenePresentationAnchors.shared.register(sceneID: sceneID, window: host.window)
+        var stage = "start"
         do {
             let model = try await fixture.start()
+            stage = "open"
             try await fixture.open()
+            stage = "body"
             try await body(fixture, model, host)
             await fixture.close()
         } catch {
+            let failureTrace = fixture.safeEffectTrace.joined(separator: ",")
             await fixture.close()
             NativeScenePresentationAnchors.shared.unregister(sceneID: sceneID, window: host.window)
             host.close()
-            throw error
+            throw privateVideoFailure(error, stage: stage, trace: failureTrace)
         }
         NativeScenePresentationAnchors.shared.unregister(sceneID: sceneID, window: host.window)
         host.close()
     }
 
-    @MainActor private func approved(
+    @MainActor func approved(
         _ fixture: PrivateVideoFixture, model: LibraryModel
     ) async throws -> ImmichLockedVideoAccess {
         try await fixture.settle { model.immichLocked.view(for: ImmichLockedFixtureData.sceneID)?.video != nil }
         return try XCTUnwrap(model.immichLocked.view(for: ImmichLockedFixtureData.sceneID)?.video)
     }
 
-    @MainActor private func mount(
+    @MainActor func mount(
         _ access: ImmichLockedVideoAccess,
         fixture: PrivateVideoFixture,
         model: LibraryModel,
@@ -444,4 +461,31 @@ extension PrivateVideoPlaybackTests {
             XCTAssertGreaterThan(player.rate, 0)
         }
     }
+}
+
+/// Test diagnostics retain the original Error; no credentials or wire body are recorded.
+private struct PrivateVideoStageError: Error, CustomStringConvertible {
+    let stage: String
+    let underlying: any Error
+    var detail = ""
+    var description: String {
+        "PrivateVideo stage=\(stage) \(detail); underlying=\(String(reflecting: underlying))"
+    }
+}
+
+@MainActor private func privateVideoStage<T>(_ stage: String, _ operation: () throws -> T) throws -> T {
+    do { return try operation() } catch {
+        throw PrivateVideoStageError(stage: stage, underlying: error)
+    }
+}
+
+private func privateVideoFailure(_ error: any Error, stage: String, trace: String) -> PrivateVideoStageError {
+    if let prior = error as? PrivateVideoStageError {
+        return PrivateVideoStageError(
+            stage: prior.stage,
+            underlying: prior.underlying,
+            detail: prior.detail + ", effectsAtCatch=\(trace)"
+        )
+    }
+    return PrivateVideoStageError(stage: stage, underlying: error, detail: "effectsAtCatch=\(trace)")
 }

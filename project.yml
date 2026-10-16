@@ -178,6 +178,7 @@ targets:
     deploymentTarget: '14.0'
     sources:
       - path: App/ImmichLockedVideoNativeAccess.swift
+      - path: App/ImmichLockedVideoQuiescence.swift
       - path: App/ImmichLockedVideoEffects.swift
       - path: App/ImmichLockedVideoPlayer.swift
       - path: App/ImmichLockedVideoSurface.swift

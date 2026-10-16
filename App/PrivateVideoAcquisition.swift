@@ -127,6 +127,7 @@ struct PrivateVideoAcquisitionContract: Equatable {
     let revision: String
     let sha1: String
     let expectedBytes: Int64?
+    let commitmentMode: ImmichLockedVideoCommitmentMode
     let maximum: Int64
     let minimumRemaining: Int64
     let storageNonce: String
@@ -141,6 +142,7 @@ struct PrivateVideoAcquisitionContract: Equatable {
         revision = ticket.expectedRevision
         sha1 = ticket.expectedSha1
         expectedBytes = ticket.expectedBytes
+        commitmentMode = ticket.commitmentMode
         maximum = ticket.maxReceivedBytes
         minimumRemaining = ticket.minimumRemainingBytes
         storageNonce = ticket.storage.measurementNonce
