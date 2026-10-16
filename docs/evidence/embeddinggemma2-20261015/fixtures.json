@@ -1,0 +1,702 @@
+[
+  {
+    "id": "197658",
+    "file": "000000197658.jpg",
+    "query": "Cather preparing to catch ball in an empty field ",
+    "source": "http://images.cocodataset.org/val2017/000000197658.jpg",
+    "sha256": "f64bd0a68f5e3ad7b20d905c2cdbdbe3ac5829ba959687b99026d65b883d78be"
+  },
+  {
+    "id": "186422",
+    "file": "000000186422.jpg",
+    "query": "a brown bear is walking away from a river",
+    "source": "http://images.cocodataset.org/val2017/000000186422.jpg",
+    "sha256": "32645938210dfce86c4059be71a60c9baea67135d6f737178ed4e133ab234695"
+  },
+  {
+    "id": "417249",
+    "file": "000000417249.jpg",
+    "query": "A woman is carrying many packages in an office building",
+    "source": "http://images.cocodataset.org/val2017/000000417249.jpg",
+    "sha256": "a0788f6d609cf3a4e194b317b810b1e806fe95436588355cc76073d783a4f7d2"
+  },
+  {
+    "id": "457078",
+    "file": "000000457078.jpg",
+    "query": "A room with a desktop computer and a picture of a mummy. ",
+    "source": "http://images.cocodataset.org/val2017/000000457078.jpg",
+    "sha256": "499deb8ae25e2796c2eedc2485dfa76c42485772240bd54a6ef6f65a82a6bcf5"
+  },
+  {
+    "id": "8277",
+    "file": "000000008277.jpg",
+    "query": "The meal consists of chopped chicken with cheese and brocolli.",
+    "source": "http://images.cocodataset.org/val2017/000000008277.jpg",
+    "sha256": "692fc5469af5fffdc0dac05e709a0ac1380dca32d4c57436903b122f3c3558dc"
+  },
+  {
+    "id": "35326",
+    "file": "000000035326.jpg",
+    "query": "A stove back splash with a granite design.",
+    "source": "http://images.cocodataset.org/val2017/000000035326.jpg",
+    "sha256": "585b9ab944861e297b49d352117de3ab59a5c3bd55f3a298bdf91b7a3a544678"
+  },
+  {
+    "id": "25228",
+    "file": "000000025228.jpg",
+    "query": "A woman sitting on a surfboard in the ocean.",
+    "source": "http://images.cocodataset.org/val2017/000000025228.jpg",
+    "sha256": "2b6b45ffe7197a9006a98ed31b8f55495bb876e0c224f1695810f04e61f626cd"
+  },
+  {
+    "id": "581482",
+    "file": "000000581482.jpg",
+    "query": "A fancy metal cloth is seen against huge barred windows at a stone train station.",
+    "source": "http://images.cocodataset.org/val2017/000000581482.jpg",
+    "sha256": "746f096af1cde539f2eba4e4c16dc46e84f424dc0ba1159d9455c4ba913ef098"
+  },
+  {
+    "id": "183049",
+    "file": "000000183049.jpg",
+    "query": "A book shelf filled with lots of colorful books.",
+    "source": "http://images.cocodataset.org/val2017/000000183049.jpg",
+    "sha256": "fd2ee31aceafdd19a676f309d5ab6c9ff302bf28e494e5793b4481d02c594e52"
+  },
+  {
+    "id": "498032",
+    "file": "000000498032.jpg",
+    "query": "A person standing in a room with a remote.",
+    "source": "http://images.cocodataset.org/val2017/000000498032.jpg",
+    "sha256": "278fe7fbd0cbd99cf92132484659c115390436a2955695f0842933e5d954dc98"
+  },
+  {
+    "id": "401244",
+    "file": "000000401244.jpg",
+    "query": "a person playing frisbee on a field in sport wear",
+    "source": "http://images.cocodataset.org/val2017/000000401244.jpg",
+    "sha256": "e2d84f0a45e20683e2bf5c01693f33966209c91a938a2386316543f33911bfa6"
+  },
+  {
+    "id": "374551",
+    "file": "000000374551.jpg",
+    "query": "There is a tiny bird on the branch.",
+    "source": "http://images.cocodataset.org/val2017/000000374551.jpg",
+    "sha256": "74d7c8949cc1578c8b67ea703dad718b053a38901f7d56001c894dfb858a472a"
+  },
+  {
+    "id": "546325",
+    "file": "000000546325.jpg",
+    "query": "A couch with pillows sitting in a living room.",
+    "source": "http://images.cocodataset.org/val2017/000000546325.jpg",
+    "sha256": "31b3fd982f89b8a2550c66be16f1e15f81dcb1401a30823933f76b01361f48c3"
+  },
+  {
+    "id": "370999",
+    "file": "000000370999.jpg",
+    "query": "some little stones sitting around a dime ",
+    "source": "http://images.cocodataset.org/val2017/000000370999.jpg",
+    "sha256": "174fc27563ff6cb874ccea6f13014c75ae71fd98966c2c407d9ae36114bee32d"
+  },
+  {
+    "id": "219578",
+    "file": "000000219578.jpg",
+    "query": "A dog and cat lying  together on an orange couch. ",
+    "source": "http://images.cocodataset.org/val2017/000000219578.jpg",
+    "sha256": "c812b11f47fec3b967f3e3e00ad42b1005ff9acede996b5d10c32fbe4bd3cbf1"
+  },
+  {
+    "id": "471567",
+    "file": "000000471567.jpg",
+    "query": "A giraffe stands alone outdoors at the zoo.",
+    "source": "http://images.cocodataset.org/val2017/000000471567.jpg",
+    "sha256": "419a8b31511158d4e0f537e94a8a9a5b3d69bbe05978f362d2c391d2639ef288"
+  },
+  {
+    "id": "53626",
+    "file": "000000053626.jpg",
+    "query": "A group of people standing on ski's in the snow.",
+    "source": "http://images.cocodataset.org/val2017/000000053626.jpg",
+    "sha256": "b609e8bb0a6363d08b129b858886c083b6729d35fba713562334dfe0a1a409ec"
+  },
+  {
+    "id": "221502",
+    "file": "000000221502.jpg",
+    "query": "A park bench surrounded by floral arrangements on either side.",
+    "source": "http://images.cocodataset.org/val2017/000000221502.jpg",
+    "sha256": "8f684f768d51ee5058fb6cead30953e22a1cf0bb657ad6c53e5facc522e1b3c8"
+  },
+  {
+    "id": "523807",
+    "file": "000000523807.jpg",
+    "query": "A foot long hot dog sitting on top of a bun.",
+    "source": "http://images.cocodataset.org/val2017/000000523807.jpg",
+    "sha256": "a6dbfae1cf8653a35f5942c134dc98df06d9fcff2333454ef0b1ec786368aaf9"
+  },
+  {
+    "id": "171190",
+    "file": "000000171190.jpg",
+    "query": "a large group of people are gathered around the table",
+    "source": "http://images.cocodataset.org/val2017/000000171190.jpg",
+    "sha256": "f91f91529cda49927ba1f546fb9d986f8e063ee2f2c61f1f7245e462f154b3eb"
+  },
+  {
+    "id": "57150",
+    "file": "000000057150.jpg",
+    "query": "Little girl holding up a big stuffed animal with other children in background.",
+    "source": "http://images.cocodataset.org/val2017/000000057150.jpg",
+    "sha256": "ae7e6f712229d1ab128aab94e4b358c2dd58b63af4e45438bf9aa0d089eb963f"
+  },
+  {
+    "id": "256518",
+    "file": "000000256518.jpg",
+    "query": "A breakfast plate with toast, vegetables, eggs and meat.",
+    "source": "http://images.cocodataset.org/val2017/000000256518.jpg",
+    "sha256": "2e0f61f66dcd728f9d3ca0e5898f1d8c0684f32951efe2b84607bd3b3e665764"
+  },
+  {
+    "id": "61960",
+    "file": "000000061960.jpg",
+    "query": "A PERSON LAYING ON A BED WITH THIGH HIGHS AND HEELS",
+    "source": "http://images.cocodataset.org/val2017/000000061960.jpg",
+    "sha256": "768a390a453b8bccf0a5ebca858eff9622ba1d420f6418b858c7248dcd827be7"
+  },
+  {
+    "id": "333745",
+    "file": "000000333745.jpg",
+    "query": "A woman with an umbrella is walking past a bus.",
+    "source": "http://images.cocodataset.org/val2017/000000333745.jpg",
+    "sha256": "db3e2af085b3eafd7b00ebf44f43eebf839838a68493dcaaa3529fff953835c9"
+  },
+  {
+    "id": "224222",
+    "file": "000000224222.jpg",
+    "query": "a group of people that is surfing on some water",
+    "source": "http://images.cocodataset.org/val2017/000000224222.jpg",
+    "sha256": "c006a25d579fd4fc5394c06f2b7b44775aa7df92faeb10aa10a2818874298c28"
+  },
+  {
+    "id": "255747",
+    "file": "000000255747.jpg",
+    "query": "Two  beige plates with thick sandwich and mustard.",
+    "source": "http://images.cocodataset.org/val2017/000000255747.jpg",
+    "sha256": "eb2d33e008d9816010b3bec817b1738494222971e1548c058a539dbca97790ed"
+  },
+  {
+    "id": "369751",
+    "file": "000000369751.jpg",
+    "query": "Parking meters and signage are on the side of the street",
+    "source": "http://images.cocodataset.org/val2017/000000369751.jpg",
+    "sha256": "57d5d8701f72bcd01989b9252ed1f2d92a54bda330be182e838071c70f7f06ba"
+  },
+  {
+    "id": "167240",
+    "file": "000000167240.jpg",
+    "query": "A vase siting on top of a wooden shelf near a map.",
+    "source": "http://images.cocodataset.org/val2017/000000167240.jpg",
+    "sha256": "91454081895eea6698362d6494abe9dd6edc433b208a7d53d18eeedf73ac3d80"
+  },
+  {
+    "id": "19402",
+    "file": "000000019402.jpg",
+    "query": "A COUPLE WEARING HEAVY COATS LAUGHING WHILE EATING PIZZA.",
+    "source": "http://images.cocodataset.org/val2017/000000019402.jpg",
+    "sha256": "b08173e02dc865e7f13fecbcbed574b70271c07fef6023236d0dea8d6bf77619"
+  },
+  {
+    "id": "41635",
+    "file": "000000041635.jpg",
+    "query": "Three cows standing on a grass field under a cloudy sky.",
+    "source": "http://images.cocodataset.org/val2017/000000041635.jpg",
+    "sha256": "a894f9b6c0edc1dd58214d1fcc3b469e6c98b2c9c4c2e04930408d790841ab40"
+  },
+  {
+    "id": "1353",
+    "file": "000000001353.jpg",
+    "query": "some children are riding on a mini orange train",
+    "source": "http://images.cocodataset.org/val2017/000000001353.jpg",
+    "sha256": "1cccef217a1e5eec2acc74d7c08a105da3ef6fdb8514e221cdea9b0b373b60ea"
+  },
+  {
+    "id": "509735",
+    "file": "000000509735.jpg",
+    "query": "A family of giraffes by a few zebras and a gazelle.",
+    "source": "http://images.cocodataset.org/val2017/000000509735.jpg",
+    "sha256": "3e8c623c60a3b130a2535e201eefa0c751c75b5a97514f250760e8b1231d77c2"
+  },
+  {
+    "id": "416837",
+    "file": "000000416837.jpg",
+    "query": "A cow grazing on the side of a hill.",
+    "source": "http://images.cocodataset.org/val2017/000000416837.jpg",
+    "sha256": "3f86b8f0da89b3cbd163eaae02cdd1523c95f6c427901d58c9308ef9f97dbd7b"
+  },
+  {
+    "id": "403584",
+    "file": "000000403584.jpg",
+    "query": "Two people standing on a beach next to the ocean.",
+    "source": "http://images.cocodataset.org/val2017/000000403584.jpg",
+    "sha256": "2393ceaf53e25a0142c9ae3ede9e2d6369c6fab030987bb984e0e00cd3c80e81"
+  },
+  {
+    "id": "160666",
+    "file": "000000160666.jpg",
+    "query": "A toothbrush with toothpaste next to a tube on a counter.",
+    "source": "http://images.cocodataset.org/val2017/000000160666.jpg",
+    "sha256": "a7bfafb7a35760c7ab6fc4c8afef40f8d79f4ecb6d3659f67bb00f17e2335d88"
+  },
+  {
+    "id": "10707",
+    "file": "000000010707.jpg",
+    "query": "A man standing in a living room holding a Nintendo Wii game controller.",
+    "source": "http://images.cocodataset.org/val2017/000000010707.jpg",
+    "sha256": "a361abb7579193709ef3debbec6298bf0c540bece429c4aadb19be82e04ab6a0"
+  },
+  {
+    "id": "423798",
+    "file": "000000423798.jpg",
+    "query": "A street at night is lit up by streetlights.",
+    "source": "http://images.cocodataset.org/val2017/000000423798.jpg",
+    "sha256": "b56d20c765424ac5d6a21f9896b796d30c97e747fee50ed4b01bcd105732f911"
+  },
+  {
+    "id": "469828",
+    "file": "000000469828.jpg",
+    "query": "The skier is quickly racing past the yellow flag. ",
+    "source": "http://images.cocodataset.org/val2017/000000469828.jpg",
+    "sha256": "da467fd7658b6a83bce7c087ca84ea7b2698fffdd15c8025c46c73f5c1e8442e"
+  },
+  {
+    "id": "52891",
+    "file": "000000052891.jpg",
+    "query": "There is a dog holding a Frisbee in its mouth.",
+    "source": "http://images.cocodataset.org/val2017/000000052891.jpg",
+    "sha256": "e55b86a1cda874117ba1bd855e38dbc9b5427b840c362d72330019676ec47a44"
+  },
+  {
+    "id": "110638",
+    "file": "000000110638.jpg",
+    "query": "A couple of large elephants standing next to a baby elephant.",
+    "source": "http://images.cocodataset.org/val2017/000000110638.jpg",
+    "sha256": "e002401e4038fe47dbd68ccad90c1b5ef0365527d12fae72b4fbd3cfd7473dc9"
+  },
+  {
+    "id": "64718",
+    "file": "000000064718.jpg",
+    "query": "there is a male tennis player about to hit the ball",
+    "source": "http://images.cocodataset.org/val2017/000000064718.jpg",
+    "sha256": "23311e201fadb5ba2bd9a0d6cac209b1f91ce946362ef7100ba47993b2822ff4"
+  },
+  {
+    "id": "180101",
+    "file": "000000180101.jpg",
+    "query": "A boy getting ready to blow out candles on a birthday cake.",
+    "source": "http://images.cocodataset.org/val2017/000000180101.jpg",
+    "sha256": "079670676d766b9e53cc1e35c1d90ad1ae6f80849498912153c9fa7001a0c934"
+  },
+  {
+    "id": "506656",
+    "file": "000000506656.jpg",
+    "query": "a guy standing in front of a few horses.",
+    "source": "http://images.cocodataset.org/val2017/000000506656.jpg",
+    "sha256": "ccf96e71979f281cdf03b44d3895246a4e64b8f344b4c3c1b4f71d8bdcdd455f"
+  },
+  {
+    "id": "32817",
+    "file": "000000032817.jpg",
+    "query": "A man climbing on a toilet bowl in a closet",
+    "source": "http://images.cocodataset.org/val2017/000000032817.jpg",
+    "sha256": "b0028b5505cb3969c3bca9e63a6e0691b5ba85f8db31dcf68eb46881f3c98b78"
+  },
+  {
+    "id": "417876",
+    "file": "000000417876.jpg",
+    "query": "Two giraffes are standing together outside near a wall.",
+    "source": "http://images.cocodataset.org/val2017/000000417876.jpg",
+    "sha256": "15ecdedb0111dd48fc3d613356ed88b99e7900d73a50ae2c0493b461d61d307c"
+  },
+  {
+    "id": "530466",
+    "file": "000000530466.jpg",
+    "query": "A passenger train that has some graffiti on it.",
+    "source": "http://images.cocodataset.org/val2017/000000530466.jpg",
+    "sha256": "9d1b80aefa9950e11bb2fa73e2e8dc590b3267e453f47c466b30cf78a222d7a1"
+  },
+  {
+    "id": "190648",
+    "file": "000000190648.jpg",
+    "query": "A messy and unmade bed and a red chair",
+    "source": "http://images.cocodataset.org/val2017/000000190648.jpg",
+    "sha256": "82b5e21ac76674c80db31c0c06e1655144ad4198dfd2d813912de6141b53ddfa"
+  },
+  {
+    "id": "450559",
+    "file": "000000450559.jpg",
+    "query": "A teenager doing skateboard tricks at a skate park",
+    "source": "http://images.cocodataset.org/val2017/000000450559.jpg",
+    "sha256": "6b499bed18af66b182859133ab3208762c3c40c3048c5c21c91b7f6b144a7f36"
+  },
+  {
+    "id": "15440",
+    "file": "000000015440.jpg",
+    "query": "A stop sigh on a post with two buses in the background.",
+    "source": "http://images.cocodataset.org/val2017/000000015440.jpg",
+    "sha256": "477f0dd9751336fc5e5ef0f7c406506998049de4edae936311a4400c934c8419"
+  },
+  {
+    "id": "446651",
+    "file": "000000446651.jpg",
+    "query": "Young girl with helmet on hold on tight to her father driving the motorcycle.",
+    "source": "http://images.cocodataset.org/val2017/000000446651.jpg",
+    "sha256": "68c8ba3c72603ed69835bf0f7be7f943daeadb12778a5fb0ab3606a3b0b79124"
+  },
+  {
+    "id": "533493",
+    "file": "000000533493.jpg",
+    "query": "Three men celebrating some kind of personal victory.",
+    "source": "http://images.cocodataset.org/val2017/000000533493.jpg",
+    "sha256": "70ce085b852201411730b097046ca4196457395b7d612b5f3282ca0768ac2c2b"
+  },
+  {
+    "id": "174482",
+    "file": "000000174482.jpg",
+    "query": "a blue bike parked on a side walk ",
+    "source": "http://images.cocodataset.org/val2017/000000174482.jpg",
+    "sha256": "41fab00aad97dad3eb7d035420b8cc61ed0ca8f4f0b66a4fbc1bd0bba6f8a5b3"
+  },
+  {
+    "id": "555009",
+    "file": "000000555009.jpg",
+    "query": "A laptop computer sitting on top of a desk.",
+    "source": "http://images.cocodataset.org/val2017/000000555009.jpg",
+    "sha256": "01d975300362169fe1d5bbdf664f28873201678c9e6679080e69aba4deb1ca27"
+  },
+  {
+    "id": "257478",
+    "file": "000000257478.jpg",
+    "query": "a close up of a baseball player holding a glove on the field",
+    "source": "http://images.cocodataset.org/val2017/000000257478.jpg",
+    "sha256": "7cd8ad2ab327eb205ec2f0c2972f22f23aba50bf9e60fcbb90e23037e215f82d"
+  },
+  {
+    "id": "232489",
+    "file": "000000232489.jpg",
+    "query": "A paper plate that has two pieces of pizza on it.",
+    "source": "http://images.cocodataset.org/val2017/000000232489.jpg",
+    "sha256": "2aa8b4f0f7498c5cda3170ed3de9cd1421e7cd2f6e33bb2e7c9da9a519151283"
+  },
+  {
+    "id": "360097",
+    "file": "000000360097.jpg",
+    "query": "A gate is near lots and lots of luggage that is all grouped together in different clusters.",
+    "source": "http://images.cocodataset.org/val2017/000000360097.jpg",
+    "sha256": "57cf8aeaa73b52951118851955fb8f2a8a7f3eaef4725648122f76e54d22e245"
+  },
+  {
+    "id": "129322",
+    "file": "000000129322.jpg",
+    "query": "a bath room with a toilet and toilet paper ",
+    "source": "http://images.cocodataset.org/val2017/000000129322.jpg",
+    "sha256": "1d416547f359c5353d7747b6fee3c08ba40ff1fa23c99d2c2352b31e579aa0ea"
+  },
+  {
+    "id": "129062",
+    "file": "000000129062.jpg",
+    "query": "A hotdog stand with outside seating and bright lights.",
+    "source": "http://images.cocodataset.org/val2017/000000129062.jpg",
+    "sha256": "a5aa8bf64678f4da55e3f55c4a4802b48ee8ca9c4be69bb985702f746e88bf7c"
+  },
+  {
+    "id": "93437",
+    "file": "000000093437.jpg",
+    "query": "A shot of an elderly man inside a kitchen.",
+    "source": "http://images.cocodataset.org/val2017/000000093437.jpg",
+    "sha256": "7c9c2698d8cb9f2d424196cd29bed724d7f9aa9fb0e46dc152b598c94861a4ea"
+  },
+  {
+    "id": "289586",
+    "file": "000000289586.jpg",
+    "query": "A giraffe points its head towards the sky",
+    "source": "http://images.cocodataset.org/val2017/000000289586.jpg",
+    "sha256": "915f8d37726e95c51d35ee998c841a4d8e1dcd648990e2acec76ea4e9bd736b6"
+  },
+  {
+    "id": "27972",
+    "file": "000000027972.jpg",
+    "query": "A man in a red shirt rides a yellow surfboard on light blue water.",
+    "source": "http://images.cocodataset.org/val2017/000000027972.jpg",
+    "sha256": "aeb3671152fdb0f319a96bdcf659751a925e52d5ab867e7c412273f7bfe73845"
+  },
+  {
+    "id": "28809",
+    "file": "000000028809.jpg",
+    "query": "A picture of a bunch of bananas sitting on a table. ",
+    "source": "http://images.cocodataset.org/val2017/000000028809.jpg",
+    "sha256": "ae2c7be44df33d27135b6aa2f5d82d4c8bb9784e99469a04be708ee68943a45d"
+  },
+  {
+    "id": "365208",
+    "file": "000000365208.jpg",
+    "query": "A black and white photo shows someone standing on a beach behind a curtain",
+    "source": "http://images.cocodataset.org/val2017/000000365208.jpg",
+    "sha256": "a1a58588a52869234419bdf068722001a86e3cc4dbcd1f2da1665921ce46370b"
+  },
+  {
+    "id": "486046",
+    "file": "000000486046.jpg",
+    "query": "a giraffe staring right into the camera ",
+    "source": "http://images.cocodataset.org/val2017/000000486046.jpg",
+    "sha256": "cbf5920ff795f319cfe0934c62724aa79727a00cacffd8574327e53fe51ba83c"
+  },
+  {
+    "id": "334521",
+    "file": "000000334521.jpg",
+    "query": "Giraffes and a bird behind a chain link fence at a zoo",
+    "source": "http://images.cocodataset.org/val2017/000000334521.jpg",
+    "sha256": "936eddbb14e81c4b670d1cd7b7b9a5ed72db520d6c4e86355148302a4358700e"
+  },
+  {
+    "id": "226154",
+    "file": "000000226154.jpg",
+    "query": "A green and white bus on street next to dirt area.",
+    "source": "http://images.cocodataset.org/val2017/000000226154.jpg",
+    "sha256": "c1c4315fd2043e9a2ae44d5e9176a1b844b3dd5d50c2b0b74fdd3084dc0d216e"
+  },
+  {
+    "id": "391375",
+    "file": "000000391375.jpg",
+    "query": "A girl sitting on a bench in front of a stone wall.",
+    "source": "http://images.cocodataset.org/val2017/000000391375.jpg",
+    "sha256": "668cc307e1066ceb163f2ef4aa44383c78bdaa5ddcceba3907a8dee0ce531a10"
+  },
+  {
+    "id": "431896",
+    "file": "000000431896.jpg",
+    "query": "A yellow and red train traveling down train tracks.",
+    "source": "http://images.cocodataset.org/val2017/000000431896.jpg",
+    "sha256": "3a535d011fd955e02c9031140dd099261ac35da6bad4974325fafb959111897f"
+  },
+  {
+    "id": "443498",
+    "file": "000000443498.jpg",
+    "query": "A large city bus driving down a street.",
+    "source": "http://images.cocodataset.org/val2017/000000443498.jpg",
+    "sha256": "11b784ab178c8d7daa33e74c9713f1c7fc9ce8896ae9e224ee8716bb2063e47a"
+  },
+  {
+    "id": "8899",
+    "file": "000000008899.jpg",
+    "query": "A red brick building with a graffiti covered front.",
+    "source": "http://images.cocodataset.org/val2017/000000008899.jpg",
+    "sha256": "5643dd54684df9750a16660fcb033e3acda2eff9c809cb69acb428b1184cadd1"
+  },
+  {
+    "id": "280930",
+    "file": "000000280930.jpg",
+    "query": "there is a young girl putting food in to a oven",
+    "source": "http://images.cocodataset.org/val2017/000000280930.jpg",
+    "sha256": "57a58decd3d841b44ab611fda39b45f69815586899d28e0db8a58b8472213639"
+  },
+  {
+    "id": "192699",
+    "file": "000000192699.jpg",
+    "query": "Two people stand near a bike wearing helmets.",
+    "source": "http://images.cocodataset.org/val2017/000000192699.jpg",
+    "sha256": "cb45c60d48a145e58d1bc071c3a89a0778d0e7150e51f470cd4c7b34eee185be"
+  },
+  {
+    "id": "34205",
+    "file": "000000034205.jpg",
+    "query": "Closeup of a plate of food that includes chicken, mushrooms and broccoli.",
+    "source": "http://images.cocodataset.org/val2017/000000034205.jpg",
+    "sha256": "48fbf607e09ff475a83d2f67ae74e59da68e7992ecb43245c4ba65a8ae3c2509"
+  },
+  {
+    "id": "286907",
+    "file": "000000286907.jpg",
+    "query": "A bathroom scene with focus on the toilet.",
+    "source": "http://images.cocodataset.org/val2017/000000286907.jpg",
+    "sha256": "14650c5b58412fb29f21eaeaedabd489e1137b7af48476a83e395df52038e879"
+  },
+  {
+    "id": "130579",
+    "file": "000000130579.jpg",
+    "query": "A pitcher about to pitch in a baseball game.",
+    "source": "http://images.cocodataset.org/val2017/000000130579.jpg",
+    "sha256": "76251fa331d2ae25f3f9d7efdde7754a444d8638627a13bb095f491dd41f2b4e"
+  },
+  {
+    "id": "229753",
+    "file": "000000229753.jpg",
+    "query": "Two tall giraffes are next to bare trees.",
+    "source": "http://images.cocodataset.org/val2017/000000229753.jpg",
+    "sha256": "b7d09aae69159a63043f445b77863a6a1949f01c9560cfdf7e0a150556ee1ec7"
+  },
+  {
+    "id": "451084",
+    "file": "000000451084.jpg",
+    "query": "A child is doing a trick on a skateboard.",
+    "source": "http://images.cocodataset.org/val2017/000000451084.jpg",
+    "sha256": "5529744604da165247e60fa2d2cbeb8fe0ef52c2b5493a882bd747421dcef483"
+  },
+  {
+    "id": "419882",
+    "file": "000000419882.jpg",
+    "query": "a lot of trains that are parked next to each other",
+    "source": "http://images.cocodataset.org/val2017/000000419882.jpg",
+    "sha256": "06e8cf748cf9c82c66b22e47aa9fb1ed4d93ebefc76f03d4ae823140babe7fa1"
+  },
+  {
+    "id": "481413",
+    "file": "000000481413.jpg",
+    "query": "A small child is holding a frisbee while looking at the beach. ",
+    "source": "http://images.cocodataset.org/val2017/000000481413.jpg",
+    "sha256": "2ce2ac7144577c0a6349c272e034295852aa5e1d0e81dcf5451f148e72e98d3d"
+  },
+  {
+    "id": "372718",
+    "file": "000000372718.jpg",
+    "query": "A clear vase that has some flowers in it.",
+    "source": "http://images.cocodataset.org/val2017/000000372718.jpg",
+    "sha256": "a8cbd5017edc8a6e8fc733f1478a11012e92665a9bd0265b75f51d54f8618108"
+  },
+  {
+    "id": "252216",
+    "file": "000000252216.jpg",
+    "query": "Some animals that are standing in the grass together.",
+    "source": "http://images.cocodataset.org/val2017/000000252216.jpg",
+    "sha256": "4d1e6e1342d3ec42bd4aa18e64e0a3c3fd928c093730c8cc62212d89724dec90"
+  },
+  {
+    "id": "229997",
+    "file": "000000229997.jpg",
+    "query": "A bear sitting in the grass surrounded by five vultures.",
+    "source": "http://images.cocodataset.org/val2017/000000229997.jpg",
+    "sha256": "9c62105390761ac4adf9cb96e80652b55f64866c897cb5d6b3de405fe92db5f8"
+  },
+  {
+    "id": "549136",
+    "file": "000000549136.jpg",
+    "query": "A barbed wire fence has a teddy bear in it.",
+    "source": "http://images.cocodataset.org/val2017/000000549136.jpg",
+    "sha256": "cba2f02d88e1108a8939fad1583bb3221255b067f5686cfacad7f6c8ba5c3f3d"
+  },
+  {
+    "id": "176799",
+    "file": "000000176799.jpg",
+    "query": "A couple of people skateboarding in a graffiti filled area.",
+    "source": "http://images.cocodataset.org/val2017/000000176799.jpg",
+    "sha256": "63e94d002954531e2ea11b89733a6a871fd0118060000b5445efe2e7636c447a"
+  },
+  {
+    "id": "397279",
+    "file": "000000397279.jpg",
+    "query": "The tennis player does not know what to expect with the next serve.",
+    "source": "http://images.cocodataset.org/val2017/000000397279.jpg",
+    "sha256": "69c92ac515b372adeecba63f4cd49b12c9bc6f1a1c357f776c7d2985ea179445"
+  },
+  {
+    "id": "10995",
+    "file": "000000010995.jpg",
+    "query": "A small room with a bed and window letting in light.",
+    "source": "http://images.cocodataset.org/val2017/000000010995.jpg",
+    "sha256": "19ee23abae8a3da6b5914987e991ea9ee8a9743309ae17db732426c8fa860fe2"
+  },
+  {
+    "id": "400573",
+    "file": "000000400573.jpg",
+    "query": "A man biting into a doughnut with a sly look.",
+    "source": "http://images.cocodataset.org/val2017/000000400573.jpg",
+    "sha256": "e69c9284d1daa751972b08af8edf17cefe5e610f83c046d9c824b7a38ada9cb0"
+  },
+  {
+    "id": "574823",
+    "file": "000000574823.jpg",
+    "query": "A baseball player standing on the field in uniform.",
+    "source": "http://images.cocodataset.org/val2017/000000574823.jpg",
+    "sha256": "969b78e958e7602472d7904720988199bfd95779746793aba6937e6d7274677b"
+  },
+  {
+    "id": "121506",
+    "file": "000000121506.jpg",
+    "query": "A wooden table with an inverted umbrella on it.",
+    "source": "http://images.cocodataset.org/val2017/000000121506.jpg",
+    "sha256": "c343589eeba3701c2e6bc2b7f7f6c65eaaf9b2d998fd0402b90d82bdc69a0325"
+  },
+  {
+    "id": "373315",
+    "file": "000000373315.jpg",
+    "query": "A man riding a skateboard up the side of a cement ramp.",
+    "source": "http://images.cocodataset.org/val2017/000000373315.jpg",
+    "sha256": "f4cca49cbd47c286906d3893035be665a551a4cd19ddaef61d20cc17cdd17a26"
+  },
+  {
+    "id": "452084",
+    "file": "000000452084.jpg",
+    "query": "A lunch bowl with bread, sausage, tomato, and egg. ",
+    "source": "http://images.cocodataset.org/val2017/000000452084.jpg",
+    "sha256": "cde28c002bf0c170efe8b949d53d36cca3673cc49242171d44de9c7e88494b87"
+  },
+  {
+    "id": "528980",
+    "file": "000000528980.jpg",
+    "query": "A windblown inverted umbrella mounted on a pole with city buildings behind.",
+    "source": "http://images.cocodataset.org/val2017/000000528980.jpg",
+    "sha256": "980e7576d00d09f07ead713cc8e8ad8791025e5779fbde9f4c663733a9f9f5a2"
+  },
+  {
+    "id": "107339",
+    "file": "000000107339.jpg",
+    "query": "A pretty young lady standing in front of a couch behind a wooden table.",
+    "source": "http://images.cocodataset.org/val2017/000000107339.jpg",
+    "sha256": "2f87cea6ff7cc56d497b7e1f7a37dbc753f1faa99713c7b2d579db2f75c50a22"
+  },
+  {
+    "id": "180792",
+    "file": "000000180792.jpg",
+    "query": "A bathroom with a toilet, toilet roll and safety rail.",
+    "source": "http://images.cocodataset.org/val2017/000000180792.jpg",
+    "sha256": "a601ae551debf872d9dcfe675f1219698d7336b86eb77d727cf201279f9e3ebc"
+  },
+  {
+    "id": "109313",
+    "file": "000000109313.jpg",
+    "query": "A man holding a tv remote and wii controller.",
+    "source": "http://images.cocodataset.org/val2017/000000109313.jpg",
+    "sha256": "d0ab7148b6dd5ab937c2f2cd1425ce18414bc4a74e4a70d5b7b8f42d45ab7865"
+  },
+  {
+    "id": "378515",
+    "file": "000000378515.jpg",
+    "query": "A man kneeling down over piles of bananas.",
+    "source": "http://images.cocodataset.org/val2017/000000378515.jpg",
+    "sha256": "edf5f635541bcc6558db28535ed8acfed4439cfca1fdef1dae8ce09a237ec25f"
+  },
+  {
+    "id": "335328",
+    "file": "000000335328.jpg",
+    "query": "A couple of people riding waves on top of boards.",
+    "source": "http://images.cocodataset.org/val2017/000000335328.jpg",
+    "sha256": "73544f620a071e28b175a2a514082fd59ea166632681bab743bdb836633b4a0d"
+  },
+  {
+    "id": "326970",
+    "file": "000000326970.jpg",
+    "query": "A man and two women sitting on a tan ledge.",
+    "source": "http://images.cocodataset.org/val2017/000000326970.jpg",
+    "sha256": "30b9cac3319a6458aa7d209b863f8860a7e7d7f028d39559dd8b20b96c112aa3"
+  },
+  {
+    "id": "43737",
+    "file": "000000043737.jpg",
+    "query": "A photograph of a sidewalk covered in snow.",
+    "source": "http://images.cocodataset.org/val2017/000000043737.jpg",
+    "sha256": "87e63848d72793260c580c8653f3ad0529682e49782dceb54385c0aa5417a10d"
+  },
+  {
+    "id": "30504",
+    "file": "000000030504.jpg",
+    "query": "A person riding skis down a snow covered slope.",
+    "source": "http://images.cocodataset.org/val2017/000000030504.jpg",
+    "sha256": "6a07fb2882010ba47140c43ffd7cd4a51331f197666ea9837b43bc077e88f552"
+  }
+]

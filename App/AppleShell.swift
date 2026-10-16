@@ -3,6 +3,8 @@ import SuwopShell
 
 @MainActor final class AppleShell {
     private let root: URL
+    let localStore: LocalStore
+    var catalogChanged: (@MainActor () -> Void)?
     private var apple: ApplePhotosStore?
     private let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
@@ -75,6 +77,7 @@ import SuwopShell
             "Suwop",
             isDirectory: true
         )
+        localStore = try LocalStore(root: root)
         try FileManager.default.createDirectory(
             at: root,
             withIntermediateDirectories: true,
@@ -303,18 +306,6 @@ import SuwopShell
         }
     }
 
-    private func credentialEffect(_ type: String, data: JSONValue) throws -> JSONValue {
-        switch type {
-        case "readCredential": return try .string(Credentials.read(requiredString(data, "account")))
-        case "saveCredential":
-            try Credentials.save(requiredString(data, "key"), account: requiredString(data, "account"))
-            return .null
-        case "removeCredential": try Credentials.remove(requiredString(data, "account"))
-            return .null
-        default: throw SuwopError("未知の Keychain 入出力です。")
-        }
-    }
-
     private func albumEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         switch type {
         case "appleAlbums":
@@ -369,14 +360,24 @@ import SuwopShell
 }
 
 private extension AppleShell {
-    func stateEffect(_ type: String, data: JSONValue) throws -> JSONValue {
-        if type == "readState" {
-            return try readState()
+    func credentialEffect(_ type: String, data: JSONValue) throws -> JSONValue {
+        switch type {
+        case "readCredential": return try .string(Credentials.read(requiredString(data, "account")))
+        case "saveCredential":
+            try Credentials.save(requiredString(data, "key"), account: requiredString(data, "account"))
+            return .null
+        case "removeCredential": try Credentials.remove(requiredString(data, "account"))
+            return .null
+        default: throw SuwopError("未知の Keychain 入出力です。")
         }
-        let bytes = try Wire.encoder().encode(data)
-        let url = root.appendingPathComponent("library-v1.json")
-        try bytes.write(to: url, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+    }
+
+    func stateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
+        if type == "readState" {
+            return try await localStore.read()
+        }
+        try await localStore.persist(data)
+        catalogChanged?()
         return .null
     }
 
@@ -391,7 +392,7 @@ private extension AppleShell {
             )
         }
         if ["readState", "persist"].contains(type) {
-            return try stateEffect(type, data: data)
+            return try await stateEffect(type, data: data)
         }
         if type.contains("ImmichLocked") {
             return try await immichLockedEffect(type, data: data, http: http)
@@ -471,12 +472,6 @@ private extension AppleShell {
         }
     }
 
-    private func readState() throws -> JSONValue {
-        let url = root.appendingPathComponent("library-v1.json")
-        guard FileManager.default.fileExists(atPath: url.path) else { return .null }
-        return try Wire.decoder().decode(JSONValue.self, from: Data(contentsOf: url))
-    }
-
     private func requiredString(_ data: JSONValue, _ key: String) throws -> String {
         guard let value = data[key].string else { throw SuwopError("入出力要求に \(key) がありません。") }
         return value
@@ -493,6 +488,14 @@ private extension AppleShell {
 }
 
 extension AppleShell {
+    func embeddingAppleStore(scope: String) -> ApplePhotosStore {
+        appleStore(scope: scope)
+    }
+
+    func embeddingThumbnail(_ request: HttpRequest) async throws -> Data {
+        try await http.thumbnail(request)
+    }
+
     func thumbnail(
         _ key: AssetKey,
         connection: ConnectionSettings?,

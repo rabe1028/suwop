@@ -1,5 +1,10 @@
 export PATH := $(CURDIR)/.tools/bin:$(PATH)
+export CARGO_BUILD_JOBS ?= 2
+APPLE_RUST_BUILD_ARGS ?=
+APPLE_PACKAGE_CACHE := $(CURDIR)/DerivedData/SourcePackages
 export DEVELOPER_DIR ?= /Applications/Xcode.app/Contents/Developer
+export MACOSX_DEPLOYMENT_TARGET ?= 14.0
+export IPHONEOS_DEPLOYMENT_TARGET ?= 17.0
 ifeq ($(shell uname -s),Darwin)
 export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
 endif
@@ -58,12 +63,15 @@ check-generated:
 	bash scripts/check-generated.sh
 
 apple-core:
-	bash scripts/build-rust-apple.sh
+	bash scripts/build-rust-apple.sh $(APPLE_RUST_BUILD_ARGS)
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then \
+		cargo clean && rm -rf Generated/RustSlices; \
+	fi
 
 apple-build: apple-core
 	xcodegen generate
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopiOS -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData/iOS CODE_SIGNING_ALLOWED=NO build
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopmacOS -destination 'generic/platform=macOS' -derivedDataPath DerivedData/macOS CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopiOS -destination 'generic/platform=iOS Simulator' -derivedDataPath DerivedData/iOS CODE_SIGNING_ALLOWED=NO build
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopmacOS -destination 'generic/platform=macOS' -derivedDataPath DerivedData/macOS CODE_SIGNING_ALLOWED=NO build
 
 integration:
 	bash scripts/immich-integration-test.sh
@@ -87,11 +95,11 @@ apple-native-test:
 .PHONY: sharing-test
 sharing-test:
 	xcodegen generate
-	xcodebuild -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
+	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
 
 .PHONY: test-infra
 test-infra:
-	uv run --no-project python -m unittest discover -s scripts -p 'test_*.py' -v
+	uv run --no-project python -B -m unittest discover -s scripts -p 'test_*.py' -v
 
 .PHONY: private-video-mac-test
 private-video-mac-test:

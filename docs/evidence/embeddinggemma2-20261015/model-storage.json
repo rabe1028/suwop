@@ -1,0 +1,10 @@
+{
+  "model_bytes": 387710976,
+  "native_cache_files": {
+    "embeddinggemma-2-text-vision-440m.litertlm_1792028995_387710976.text_encoder.xnnpack_cache": 70930728,
+    "embeddinggemma-2-text-vision-440m.litertlm_1792028995_387710976.vision_encoder.xnnpack_cache": 217562184,
+    "embeddinggemma-2-text-vision-440m.litertlm_1792028995_387710976.vision_adapter.xnnpack_cache": 1575160
+  },
+  "note": "Shared by both dimensions; observed after inference, outside the Lance catalog.",
+  "total_model_and_native_caches_bytes": 677779048
+}

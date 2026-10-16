@@ -8,6 +8,7 @@ rust-version.workspace = true
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [dependencies]
+suwop-local-store = { path = "../suwop-local-store" }
 suwop-core = { path = "../suwop-core" }
 crux_core.workspace = true
 serde_json.workspace = true

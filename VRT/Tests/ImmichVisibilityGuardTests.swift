@@ -3,6 +3,41 @@ import SuwopShell
 import XCTest
 
 final class ImmichVisibilityGuardTests: XCTestCase {
+    @MainActor func testLockIntentRejectsQueuedEmbeddingImageBeforeNativeIO() async throws {
+        let fixture = try ImmichVisibilityPhotoFixture()
+        let model = try await fixture.start()
+        defer { model.immichLocked.close()
+            fixture.releaseHeld()
+        }
+        let photo = try XCTUnwrap(model.photos.first)
+        let asset = try XCTUnwrap(photo.assets.first { $0.key.provider == .immich })
+        let job = EmbeddingJob(
+            asset: asset,
+            generation: 1,
+            id: "queued-before-lock",
+            model: AnalysisModel(
+                dimensions: 256,
+                name: "fixture",
+                preprocessing: "fixture",
+                rendition: "preview",
+                version: "1"
+            ),
+            modelKey: "fixture"
+        )
+        try await fixture.open()
+        fixture.server.fault = .lostMutationReply
+        fixture.prepare(.locked)
+        try await fixture.settle {
+            !model.immichLocked.visibility.busy && fixture.journal.immichVisibilityOperations.count == 1
+        }
+        do {
+            _ = try await fixture.shell.embeddingImage(job, connection: nil, version: nil)
+            XCTFail("A queued analysis read must respect the current Rust visibility fence")
+        } catch is CancellationError {
+            // Rejected by the current content projection before local model or photo I/O.
+        }
+    }
+
     @MainActor func testPrivateExactSourceRejectsQueuedAndLateOrdinaryHTTPWhileAppleCopyRemainsReadable() async throws {
         let fixture = try ImmichVisibilityPhotoFixture(appleCopy: true)
         let model = try await fixture.start()

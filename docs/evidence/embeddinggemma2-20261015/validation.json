@@ -1,0 +1,73 @@
+{
+  "scope": "Historical initial implementation measurements from 2026-10-15. Not validation of later review fixes or the current tree. Source hashes below describe only the measured snapshot.",
+  "current_validation": "Use PR #26 checks for the exact HEAD and source-bound scripts/verify.py result records; this archived evidence is never updated to claim a later source passed.",
+  "local_checks": {
+    "make_check": {
+      "status": "passed",
+      "rust_passed": 285,
+      "swift_passed": 59
+    },
+    "make_vrt": {
+      "status": "passed",
+      "screens": 37,
+      "existing_baselines_unchanged": 35,
+      "new_reviewed_baselines": 2,
+      "unit_tests": 34,
+      "ui_tests": 21,
+      "artifact": "20261015T031201Z-15684"
+    },
+    "installed_model_lifecycle": {
+      "status": "passed",
+      "cycles": 5,
+      "startup_budget_rejection_mib": 768,
+      "admitted_budget_mib": 1536
+    },
+    "synthetic_backlog": {
+      "status": "passed",
+      "rows": 20000,
+      "dimensions": 512,
+      "shards": 40
+    },
+    "make_apple_build": {
+      "status": "passed_after_resuming_packaging",
+      "rust_release_targets": [
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+        "aarch64-apple-ios",
+        "aarch64-apple-ios-sim",
+        "x86_64-apple-ios"
+      ],
+      "xcframework": "packaged",
+      "iOS_simulator_app": "BUILD SUCCEEDED",
+      "macOS_app": "BUILD SUCCEEDED",
+      "note": "The initial make process compiled all five targets, then failed parsing the script after it had been edited while running. Packaging was resumed from the verified retained slices using the current script; both xcodebuild commands from make apple-build then exited 0. No compile or test gate was omitted."
+    }
+  },
+  "not_run": [
+    "Hosted CI",
+    "Physical iPhone inference/PhotoKit acceptance",
+    "Live Immich inference acceptance"
+  ],
+  "source_sha256": {
+    "App/SemanticSearchModel.swift": "8feac07d3e5d71fb53c510b0b8a733517dd452dd609acbf7d08fba4fdd3a368b",
+    "App/SemanticSearchView.swift": "18917510d9d86f5abca6cd3ff3ef2e4662653c2ef9f4cdee061fc0b2df2531e3",
+    "App/AppleShell.swift": "428b4d1d47897f95e6a65c1e9cfa5c1d27b3c878e171ea9be58b71354b543db4",
+    "App/SuwopApp.swift": "77b11de5dcfa6a07540325b95bf9afc2f761f9d7db55d9728c1f6c81940001d3",
+    "Sources/SuwopShell/EmbeddingRuntime.swift": "bc5f3f67c5f5d36f2150ed47b8266c5ae6fc46ce7ec6da9b85644fdb0794776f",
+    "Sources/SuwopShell/EmbeddingImage.swift": "510e405328c88c8d3186b85aebd3054aefca4b6c917bf87023a8e3f37a13ae31",
+    "Sources/SuwopShell/LocalInference.swift": "d644c3de8f98a440fa08f93e3ea1fbf59cdcf073ea88195ba9539bf894889933",
+    "crates/suwop-core/src/inference.rs": "b8d737bd085796699c0efdf8f0bd86675b42897515f4329c728d926fcb90a720",
+    "crates/suwop-local-store/src/inference.rs": "0fd4cda48cf091a408dc99722eea0ee98b85cee29e9ab46df62fd62a42ff5e16",
+    "experiments/embedding-evaluation/Sources/EmbeddingProbe/main.swift": "f1e8c800e97da556de36fdf9658780b85e2426c2f31fb6bd87cd5f736ca9f4a6"
+  },
+  "log_sha256": {
+    "suwop-embedding-check-final.log": "a3afa840d2d2c51c5614cdba2a6e2fcceb805d66ab62c484082a7abcb858e9a4",
+    "suwop-embedding-vrt-final.log": "5de812817f0a8d50a9cfd929d60df3c82c905647ecc00eecc8f5b5085ac58068",
+    "suwop-embedding-apple-build.log": "e4ce499c73c6efd646c0e0755dc991cc93987b93379e72820ee9974711c093cd",
+    "suwop-embedding-final-slices.log": "1b47817700dbf6802db2ef20a314bcd7c97bc9a881f183ea1d556ef2c63b8512",
+    "suwop-embedding-apple-package.log": "bc8bb731f913f1eed78c74f5b1143c68188e558fd4e2c467fc3eb05736788abd",
+    "suwop-embedding-apple-ios-final.log": "40f5c4f345bb7023b25aef022996a1895dbd47dfc755ec0b0e3c6a0e8d54de4c",
+    "suwop-embedding-apple-macos-final.log": "49b888ebfaae27fb2acff3505aca70612426fd5e2c709ea2ff981dbdcbd7493e",
+    "suwop-embedding-lifecycle-final.log": "7d59ec090bcb3003f7102106852aecf7697e965b19cd3f70ecda7fd7d3c8930d"
+  }
+}

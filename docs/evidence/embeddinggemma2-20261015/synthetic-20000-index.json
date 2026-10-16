@@ -1,0 +1,141 @@
+{
+  "indexSeconds": 2.859717011451721,
+  "querySeconds": 0.46799206733703613,
+  "status": {
+    "activeGeneration": 1,
+    "awaitingEmbeddings": 0,
+    "budget": {
+      "cacheBytes": 8388608,
+      "maxBatchRows": 512,
+      "workingBytes": 134217728
+    },
+    "error": null,
+    "generation": 1,
+    "indexed": 20000,
+    "model": {
+      "dimensions": 512,
+      "name": "synthetic",
+      "preprocessing": "synthetic-l2-v1",
+      "rendition": "original",
+      "version": "1"
+    },
+    "queuedVectors": 0,
+    "skipped": 0,
+    "state": "ready"
+  },
+  "implementation": "schema 2; separate temporary vector payloads; incremental vacuum",
+  "sqlite_pages": [
+    {
+      "table": "assets",
+      "allocated_bytes": 8216576,
+      "payload_bytes": 7428890,
+      "unused_bytes": 631783
+    },
+    {
+      "table": "library_state",
+      "allocated_bytes": 6037504,
+      "payload_bytes": 6029272,
+      "unused_bytes": 2321
+    },
+    {
+      "table": "jobs",
+      "allocated_bytes": 1785856,
+      "payload_bytes": 1579488,
+      "unused_bytes": 95838
+    },
+    {
+      "table": "sqlite_autoindex_jobs_1",
+      "allocated_bytes": 1728512,
+      "payload_bytes": 1459872,
+      "unused_bytes": 203580
+    },
+    {
+      "table": "sqlite_autoindex_assets_1",
+      "allocated_bytes": 1646592,
+      "payload_bytes": 1399872,
+      "unused_bytes": 181900
+    },
+    {
+      "table": "jobs_work",
+      "allocated_bytes": 348160,
+      "payload_bytes": 199872,
+      "unused_bytes": 87272
+    },
+    {
+      "table": "jobs_shard",
+      "allocated_bytes": 323584,
+      "payload_bytes": 219360,
+      "unused_bytes": 43280
+    },
+    {
+      "table": "sqlite_sequence",
+      "allocated_bytes": 4096,
+      "payload_bytes": 33,
+      "unused_bytes": 4043
+    },
+    {
+      "table": "sqlite_schema",
+      "allocated_bytes": 4096,
+      "payload_bytes": 1767,
+      "unused_bytes": 2156
+    },
+    {
+      "table": "sqlite_autoindex_models_1",
+      "allocated_bytes": 4096,
+      "payload_bytes": 68,
+      "unused_bytes": 4017
+    },
+    {
+      "table": "sqlite_autoindex_inference_runs_1",
+      "allocated_bytes": 4096,
+      "payload_bytes": 0,
+      "unused_bytes": 4088
+    },
+    {
+      "table": "shards",
+      "allocated_bytes": 4096,
+      "payload_bytes": 360,
+      "unused_bytes": 3568
+    },
+    {
+      "table": "models",
+      "allocated_bytes": 4096,
+      "payload_bytes": 179,
+      "unused_bytes": 3904
+    },
+    {
+      "table": "inference_runs",
+      "allocated_bytes": 4096,
+      "payload_bytes": 0,
+      "unused_bytes": 4088
+    },
+    {
+      "table": "generations",
+      "allocated_bytes": 4096,
+      "payload_bytes": 146,
+      "unused_bytes": 3937
+    },
+    {
+      "table": "embedding_vectors",
+      "allocated_bytes": 4096,
+      "payload_bytes": 0,
+      "unused_bytes": 4088
+    }
+  ],
+  "max_rss_bytes": 85295104,
+  "components_bytes": {
+    "lance_data": 41049314,
+    "lance_indices": 44079782,
+    "lance_metadata": 87650,
+    "catalog_allocated": 20148224,
+    "catalog_reusable_freelist": 0
+  },
+  "shards": 40,
+  "generator": "SHAKE256 of little-endian u64 seed and job ID; uniform f32; L2",
+  "random_seed": 20261014,
+  "dimensions": 512,
+  "inference": "none; normalized synthetic random vectors",
+  "producer": "fixture bulk-seeded into paused SQLite outbox",
+  "binary_sha256": "b3cb5832a25068f4b963ce03d75b5c83773941aa9d82d6a9dcfea0ba393177ce",
+  "artifact_note": "The internal synthetic model identifier is omitted from this portable report; model parameters, measurements and binary hash are retained."
+}

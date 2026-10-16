@@ -52,27 +52,35 @@ final class ImmichLiveParentArchiveUITests: XCTestCase {
         let action = app.buttons["changeDisplayedImmichArchive"]
         reveal(action, in: app)
         XCTAssertTrue(action.label.contains(destination))
+        XCTAssertTrue(action.isHittable)
         action.tap()
-        XCTAssertTrue(app.buttons["confirmImmichArchive"].waitForExistence(timeout: 10))
+        let confirmation = app.buttons["confirmImmichArchive"]
+        // Native scrolling menus can consume the first tap to stop scrolling.
+        // Retry only opening the prompt, while the original menu remains present;
+        // never retry the confirmation or a submitted mutation.
+        if !confirmation.waitForExistence(timeout: 2), action.exists, action.isHittable {
+            action.tap()
+        }
+        XCTAssertTrue(confirmation.waitForExistence(timeout: 10))
     }
 
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
         let menu = app.collectionViews.firstMatch
         for _ in 0 ..< 4 {
-            if element.exists, !element.frame.isEmpty, app.frame.intersects(element.frame) {
+            if element.exists, !element.frame.isEmpty, app.frame.contains(element.frame) {
                 return
             }
             menu.swipeDown()
         }
         for _ in 0 ..< 4 {
-            if element.exists, !element.frame.isEmpty, app.frame.intersects(element.frame) {
+            if element.exists, !element.frame.isEmpty, app.frame.contains(element.frame) {
                 return
             }
             menu.swipeUp()
         }
         XCTAssertTrue(element.exists)
         XCTAssertFalse(element.frame.isEmpty)
-        XCTAssertTrue(app.frame.intersects(element.frame))
+        XCTAssertTrue(app.frame.contains(element.frame))
     }
 
     @MainActor private func assertDisclosure(in app: XCUIApplication, largeText: Bool) {

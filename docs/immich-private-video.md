@@ -173,3 +173,34 @@ buildも成功した。対象UIはAX3 48.975秒、通常36.038秒の2件が成�
 `pr35-ax3-simulator-20261016-1-tzjpi5x8/result.json`、
 `pr35-ax3-ui-20261016-1-3lpyiyqb/result.json`。この追記は検証後の証拠整理のみで、
 製品・テスト・基準画像は変更していない。最終HEADのhosted CIは別途確認する。
+
+
+## mainの検索基盤との統合検証（2026-10-16）
+
+main `2326514`のSQLite／Lance検索基盤を統合した。生成DTOとSnapshotHostは両機能を
+保持し、AppleShellの既存credentialEffectを同じファイルのprivate extensionへ移して
+設定済みlint制限を維持した。保護動画の一時閲覧権限を通常の解析許可として扱わない。
+
+source `d9a1e6af811370632c2c58643797ddf5479bfb14128a9865903c947f41bde110`で
+以下が成功し、各実行の前後sourceは一致した。
+
+- 全体check: Rust/FFI 438／Swift 70／infra 24、534.98秒。実server用14件はこの単体検証ではignored。
+- 全Apple build: Rust全5 target、XCFramework、iOS／macOS、7802.01秒。
+- macOS native: 9件、58.8秒。
+- strict VRT: host 129／UI 57の全186件成功、2235.74秒。50画面、差分0、record=false。
+
+記録は`.tools/verification/`以下の
+`private-video-main-union-check-20261016-3-hnlxts3d/result.json`、
+`private-video-main-apple-20261016-1-u20fc93l/result.json`、
+`private-video-main-mac-20261016-1-3fxrjap1/result.json`、
+`private-video-main-strict-20261016-1-1f5o09d6/result.json`。
+VRT証拠は`DerivedData/VRTArtifacts/20261016T051314Z-26940/`に保持した。
+従来48枚とmainからの検索2枚を合わせた全50基準画像は前後byte一致で、追加記録はない。
+AX3動画UIは44.859秒、通常は36.039秒で成功し、実再生画像の11.91秒／9.50秒と
+説明・停止ボタン・閉じる操作を目視確認した。
+Xcodeのテスト後診断収集にはsimctl探索警告があったが、全テスト・全7段階と
+所有Simulatorのshutdownは成功している。これはテスト失敗とは区別して記録する。
+
+この追記は検証後の文書整理であり、製品・テスト・基準画像は変更していない。
+統合後の最終HEADのhosted CI・レビュー・マージは引き続き未完了。
+取得期限の更新、VIDEO書込み、Live複数資源操作、実機等の受入れはこの成功に含めない。

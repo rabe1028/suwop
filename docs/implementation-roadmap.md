@@ -142,3 +142,13 @@ Swift 65／infra 17件成功。同じsource `55167a9`で更新なしの全体比
 PR提出、最終HEADのhosted CIとマージは未完了。
 取得期限の更新、C-2の選択VIDEO、Live Photoの複数資源処理は残っており、
 PP-02全体の完了ではない。PP-03以降も上の範囲と到達条件を維持する。
+
+
+### PR #35と検索基盤の統合後の検証
+
+main `2326514`を取り込んだ同一source `d9a1e6a`で、全体check Rust/FFI438／Swift70／
+infra24、全Apple build、macOS native9、strict VRT host129／UI57の全186件が成功した。
+50画面の差分0、record=falseで、全50基準画像は前後不変。AX3動画操作も成功した。
+詳細と診断収集警告の扱いは[保護動画の検証記録](immich-private-video.md)に保持する。
+最終HEADのhosted CI・レビュー・マージは未完了。取得期限更新、VIDEO書込み、
+Live複数資源処理とPP-03以降の範囲は変更しない。

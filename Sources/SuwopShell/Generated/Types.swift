@@ -89,6 +89,59 @@ public struct AlbumView: Codable, Sendable {
     }
 }
 
+public struct AnalysisBudget: Codable, Sendable {
+    public var cacheBytes: Int64
+    public var maxBatchRows: Int64
+    public var workingBytes: Int64
+    public init(cacheBytes: Int64, maxBatchRows: Int64, workingBytes: Int64) {
+        self.cacheBytes = cacheBytes
+        self.maxBatchRows = maxBatchRows
+        self.workingBytes = workingBytes
+    }
+}
+
+public struct AnalysisModel: Codable, Sendable {
+    public var dimensions: Int64
+    public var name: String
+    public var preprocessing: String
+    public var rendition: String
+    public var version: String
+    public init(dimensions: Int64, name: String, preprocessing: String, rendition: String, version: String) {
+        self.dimensions = dimensions
+        self.name = name
+        self.preprocessing = preprocessing
+        self.rendition = rendition
+        self.version = version
+    }
+}
+
+public struct AnalysisStatus: Codable, Sendable {
+    public var activeGeneration: Int64?
+    public var awaitingEmbeddings: Int64
+    public var budget: AnalysisBudget
+    public var error: String?
+    public var generation: Int64
+    public var indexed: Int64
+    public var model: AnalysisModel
+    public var modelKey: String
+    public var queuedVectors: Int64
+    public var skipped: Int64
+    public var state: String
+    public init(activeGeneration: Int64? = nil, awaitingEmbeddings: Int64, budget: AnalysisBudget, error: String? = nil, generation: Int64, indexed: Int64, model: AnalysisModel, modelKey: String, queuedVectors: Int64, skipped: Int64, state: String) {
+        self.activeGeneration = activeGeneration
+        self.awaitingEmbeddings = awaitingEmbeddings
+        self.budget = budget
+        self.error = error
+        self.generation = generation
+        self.indexed = indexed
+        self.model = model
+        self.modelKey = modelKey
+        self.queuedVectors = queuedVectors
+        self.skipped = skipped
+        self.state = state
+    }
+}
+
 public struct AppleAdjustment: Codable, Sendable {
     public var data: String
     public var formatIdentifier: String
@@ -570,6 +623,30 @@ public struct EditingTarget: Codable, Sendable {
         self.disabledReason = disabledReason
         self.key = key
         self.name = name
+    }
+}
+
+public struct EmbeddingInput: Codable, Sendable {
+    public var jobId: String
+    public var vector: [Double]
+    public init(jobId: String, vector: [Double] = []) {
+        self.jobId = jobId
+        self.vector = vector
+    }
+}
+
+public struct EmbeddingJob: Codable, Sendable {
+    public var asset: StoredAsset
+    public var generation: Int64
+    public var id: String
+    public var model: AnalysisModel
+    public var modelKey: String
+    public init(asset: StoredAsset, generation: Int64, id: String, model: AnalysisModel, modelKey: String) {
+        self.asset = asset
+        self.generation = generation
+        self.id = id
+        self.model = model
+        self.modelKey = modelKey
     }
 }
 
@@ -1151,6 +1228,55 @@ public enum ImmichVisibilityWriteAvailability: String, Codable, CaseIterable, Se
     case `verificationRequired`
     case `supported`
     case `unsupported`
+}
+
+public struct InferenceSelection: Codable, Sendable {
+    public var analysis: AnalysisStatus?
+    public var inference: InferenceStatus?
+    public var model: AnalysisModel
+    public init(analysis: AnalysisStatus? = nil, inference: InferenceStatus? = nil, model: AnalysisModel) {
+        self.analysis = analysis
+        self.inference = inference
+        self.model = model
+    }
+}
+
+public struct InferenceSpec: Codable, Sendable {
+    public var bytes: Int64
+    public var filename: String
+    public var imageEdge: Int64
+    public var imageTokens: Int64
+    public var model: AnalysisModel
+    public var sha256: String
+    public var textTokens: Int64
+    public var threads: Int64
+    public var url: String
+    public init(bytes: Int64, filename: String, imageEdge: Int64, imageTokens: Int64, model: AnalysisModel, sha256: String, textTokens: Int64, threads: Int64, url: String) {
+        self.bytes = bytes
+        self.filename = filename
+        self.imageEdge = imageEdge
+        self.imageTokens = imageTokens
+        self.model = model
+        self.sha256 = sha256
+        self.textTokens = textTokens
+        self.threads = threads
+        self.url = url
+    }
+}
+
+public struct InferenceStatus: Codable, Sendable {
+    public var budgetBytes: Int64
+    public var error: String?
+    public var failedJob: String?
+    public var modelKey: String
+    public var state: String
+    public init(budgetBytes: Int64, error: String? = nil, failedJob: String? = nil, modelKey: String, state: String) {
+        self.budgetBytes = budgetBytes
+        self.error = error
+        self.failedJob = failedJob
+        self.modelKey = modelKey
+        self.state = state
+    }
 }
 
 public struct LibrarySnapshot: Codable, Sendable {
@@ -1791,6 +1917,17 @@ public struct SharePresentation: Codable, Sendable {
     public init(files: [ShareFile] = [], sourceKeys: [AssetKey]? = []) {
         self.files = files
         self.sourceKeys = sourceKeys
+    }
+}
+
+public struct SimilarityHit: Codable, Sendable {
+    public var asset: AssetKey
+    public var distance: Double
+    public var revision: String
+    public init(asset: AssetKey, distance: Double, revision: String) {
+        self.asset = asset
+        self.distance = distance
+        self.revision = revision
     }
 }
 
