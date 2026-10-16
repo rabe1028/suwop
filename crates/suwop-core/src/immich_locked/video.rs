@@ -1,6 +1,7 @@
 //! Private selected VIDEO acquisition. Never an export, ordinary read or write grant.
 mod acquisition;
 mod policy;
+mod renewal;
 use super::{
     Asset, AssetKey, Command, Context, Deserialize, ERROR, Event, HttpRequest, Model, Serialize,
     ShellOperation, StoredAsset, Value, VisibilitySession, check, current, denied, epoch, io,
@@ -8,6 +9,10 @@ use super::{
 };
 use crate::domain::FileSignature;
 pub use policy::{ImmichLockedVideoCapacityClass, ImmichLockedVideoStorageFacts};
+pub use renewal::{
+    ImmichLockedVideoAcquisitionLease, ImmichLockedVideoAcquisitionRenewed,
+    ImmichLockedVideoAcquisitionState,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +40,8 @@ pub struct ImmichLockedVideoPending {
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedVideoTicket {
     pub pending: ImmichLockedVideoPending,
+    pub acquisition_lease: ImmichLockedVideoAcquisitionLease,
+    pub initial_acquisition_lease: ImmichLockedVideoAcquisitionLease,
     #[serde(rename = "displayLeaseID")]
     pub display_lease_id: u64,
     pub deadline_unix_milliseconds: u64,
@@ -54,6 +61,8 @@ impl std::fmt::Debug for ImmichLockedVideoTicket {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedVideoResult {
+    #[serde(rename = "acquisitionLeaseID")]
+    pub acquisition_lease_id: u64,
     #[serde(rename = "requestID")]
     pub request_id: String,
     #[serde(rename = "stagedID")]
@@ -64,6 +73,8 @@ pub struct ImmichLockedVideoResult {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ImmichLockedVideoPrepared {
+    #[serde(rename = "acquisitionLeaseID")]
+    pub acquisition_lease_id: u64,
     #[serde(rename = "requestID")]
     pub request_id: String,
     #[serde(rename = "stagedID")]
@@ -83,6 +94,7 @@ pub(super) struct VideoModel {
     access: Option<ImmichLockedVideoAccess>,
     lease: Option<(ImmichLockedVideoPending, String)>,
     measured_bytes: Option<u64>,
+    renewal: renewal::RenewalModel,
 }
 impl VideoModel {
     pub(super) fn has_work(&self) -> bool {
@@ -96,6 +108,7 @@ pub struct VideoAcquisition {
     revision: String,
     sha1: String,
     bytes: Option<u64>,
+    lease: renewal::SharedLease,
 }
 fn same_request(a: &ImmichLockedVideoPending, b: &ImmichLockedVideoPending) -> bool {
     a.request_id == b.request_id
@@ -122,7 +135,7 @@ fn pending_current(model: &Model, pending: &ImmichLockedVideoPending) -> bool {
                 .is_ok()
                 && std::time::Instant::now() < a.capability.hard_deadline
         } else {
-            a.capability.valid().is_ok()
+            a.current_capability().is_ok()
         }) && model
             .immich_locked
             .entries
@@ -181,6 +194,10 @@ fn release(
 }
 pub(crate) fn stop(model: &mut Model) -> Command<crate::app::Effect, Event> {
     let video = &mut model.immich_locked.video;
+    if let Some(binding) = &video.binding {
+        binding.lease.terminalize();
+    }
+    video.renewal = renewal::RenewalModel::default();
     video.measured_bytes = None;
     video.binding = None;
     video.pending = None;
@@ -207,6 +224,9 @@ pub(crate) fn update(
     event: Event,
     model: &mut Model,
 ) -> Option<Command<crate::app::Effect, Event>> {
+    if let Some(command) = renewal::update(event.clone(), model) {
+        return Some(command);
+    }
     Some(match event {
         Event::RequestImmichLockedVideo {
             entry_id,
@@ -238,12 +258,52 @@ pub(crate) fn update(
             acquisition,
             ticket,
             result,
-        } => acquisition::read(model, acquisition, *ticket, result),
-        Event::ImmichLockedVideoPrepared { ticket, approved } => {
+        } => {
+            if model.immich_locked.video.pending.as_ref().is_some_and(|p| {
+                same_request(p, &ticket.pending) && p.phase != ImmichLockedVideoPhase::Acquiring
+            }) {
+                return Some(Command::done());
+            }
+            let event = Event::ImmichLockedVideoRead {
+                acquisition: acquisition.clone(),
+                ticket: ticket.clone(),
+                result: result.clone(),
+            };
+            if renewal::hold(model, event) {
+                Command::done()
+            } else {
+                acquisition::read(model, acquisition, *ticket, result)
+            }
+        }
+        Event::ImmichLockedVideoPrepared {
+            ticket,
+            approved,
+            acquisition_lease_id,
+        } => {
+            if model
+                .immich_locked
+                .video
+                .access
+                .as_ref()
+                .is_some_and(|access| same_request(&access.pending, &ticket.pending))
+            {
+                return Some(Command::done());
+            }
+            if renewal::hold(
+                model,
+                Event::ImmichLockedVideoPrepared {
+                    ticket: ticket.clone(),
+                    approved,
+                    acquisition_lease_id,
+                },
+            ) {
+                return Some(Command::done());
+            }
             if approved
                 && pending_current(model, &ticket.pending)
-                && policy::now_ms().is_ok_and(|now| now < ticket.deadline_unix_milliseconds)
+                && renewal::completion_current(model, &ticket, acquisition_lease_id)
             {
+                model.immich_locked.video.renewal = renewal::RenewalModel::default();
                 model.immich_locked.video.access = Some(ImmichLockedVideoAccess {
                     pending: ticket.pending,
                     staged_id: ticket.storage.lease_id,
@@ -269,18 +329,20 @@ pub(crate) fn update(
 #[cfg(test)]
 mod tests;
 
-pub(super) fn heartbeat(model: &Model) -> Option<(VideoAcquisition, Option<u64>)> {
-    let mut acquisition = model.immich_locked.video.binding.clone()?;
-    acquisition.capability = visibility_session(
-        model,
-        &acquisition.pending.grant_id,
-        &acquisition.pending.scene_id,
-    )?;
-    Some((acquisition, model.immich_locked.video.measured_bytes))
+pub use renewal::VideoHeartbeat;
+pub(super) fn heartbeat(model: &Model) -> Option<VideoHeartbeat> {
+    renewal::heartbeat(model)
 }
-pub(super) async fn check_heartbeat(
-    ctx: &Context,
-    binding: &(VideoAcquisition, Option<u64>),
-) -> Result<(), String> {
-    acquisition::metadata(ctx, &binding.0, binding.1).await
+pub(super) async fn check_heartbeat(ctx: &Context, binding: &VideoHeartbeat) -> Result<(), String> {
+    renewal::check_heartbeat(ctx, binding).await
+}
+pub(super) fn renew(
+    model: &mut Model,
+    heartbeat: Option<VideoHeartbeat>,
+    deadline: std::time::Instant,
+) -> Command<crate::app::Effect, Event> {
+    renewal::renew(model, heartbeat, deadline)
+}
+pub(super) fn acquisition_projection(model: &Model) -> Option<ImmichLockedVideoAcquisitionState> {
+    renewal::projection(model)
 }

@@ -85,6 +85,9 @@ struct Shell {
     post_read_drift: bool,
     paths: Vec<String>,
     last_ticket: Option<ImmichLockedVideoTicket>,
+    status_calls: usize,
+    fail_status: Option<usize>,
+    renewals: usize,
 }
 impl Shell {
     fn new(raw: Value) -> Self {
@@ -107,6 +110,9 @@ impl Shell {
             post_read_drift: false,
             paths: vec![],
             last_ticket: None,
+            status_calls: 0,
+            fail_status: None,
+            renewals: 0,
         }
     }
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
@@ -116,6 +122,10 @@ impl Shell {
                 assert!(!request.headers.contains_key("x-api-key"));
                 self.paths.push(request.url.clone());
                 let body = if request.url.ends_with("/auth/status") {
+                    self.status_calls += 1;
+                    if self.fail_status == Some(self.status_calls) {
+                        return Err("controlled status failure".into());
+                    }
                     json!({"isElevated":true,"pinCode":true})
                 } else if request.url.ends_with(&format!("/assets/{ID}")) {
                     self.raw.clone()
@@ -150,7 +160,7 @@ impl Shell {
                     self.raw["visibility"] = json!("timeline");
                 }
                 Ok(
-                    json!({"requestID":REQUEST,"stagedID":LEASE,"sha1":if self.bad_hash {"b".repeat(40)} else {"a".repeat(40)},"signature":{"sha256":"c".repeat(64),"bytes":123}}),
+                    json!({"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"requestID":REQUEST,"stagedID":LEASE,"sha1":if self.bad_hash {"b".repeat(40)} else {"a".repeat(40)},"signature":{"sha256":"c".repeat(64),"bytes":123}}),
                 )
             }
             ShellOperation::PrepareImmichLockedVideo { ticket, staged_id } => {
@@ -160,14 +170,27 @@ impl Shell {
                 if self.fail_prepare {
                     return Err("fixture prepare failure".into());
                 }
-                Ok(json!({"requestID":REQUEST,"stagedID":LEASE}))
+                Ok(
+                    json!({"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"requestID":REQUEST,"stagedID":LEASE}),
+                )
             }
             ShellOperation::ReleaseImmichLockedVideo { pending, lease_id } => {
                 assert_eq!(pending.request_id, REQUEST);
                 self.releases.push(lease_id.clone());
                 Ok(Value::Null)
             }
-            ShellOperation::ReleaseImmichLockedImages { .. }
+            ShellOperation::RenewImmichLockedVideoAcquisition {
+                ticket,
+                previous_lease_id,
+                lease,
+            } => {
+                self.renewals += 1;
+                Ok(
+                    json!({"requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,"previousLeaseID":previous_lease_id,"leaseID":lease.lease_id}),
+                )
+            }
+            ShellOperation::ScheduleImmichLockedVideoAcquisitionExpiry { .. }
+            | ShellOperation::ReleaseImmichLockedImages { .. }
             | ShellOperation::ReleaseImmichLockedVideos { .. } => Ok(Value::Null),
             _ => Err("unexpected privileged effect".into()),
         }
@@ -277,14 +300,20 @@ fn queued_prepared_completion_checks_captured_deadline_even_with_current_grant()
     let raw = raw();
     let c = core(&raw)?;
     let mut shell = Shell::new(raw);
-    shell.run(&c, request())?;
-    assert!(c.view().immich_locked_view.video.is_some());
-    let mut ticket = shell.last_ticket.take().ok_or("prepared ticket")?;
-    // Controlled expired captured deadline, while the original grant's lease remains live.
+    let effect = renewal_cases::pause(&c, &mut shell, c.process_event(request()), |op| {
+        matches!(op, ShellOperation::PrepareImmichLockedVideo { .. })
+    })?;
+    let Effect::Io(effect) = effect;
+    let ShellOperation::PrepareImmichLockedVideo { mut ticket, .. } = effect.operation else {
+        return Err("prepare effect".into());
+    };
+    assert!(c.view().immich_locked_view.video.is_none());
+    // Controlled expired queued completion, before any player has been approved.
     ticket.deadline_unix_milliseconds = 0;
     shell.run(
         &c,
         Event::ImmichLockedVideoPrepared {
+            acquisition_lease_id: 1,
             ticket,
             approved: true,
         },
@@ -310,9 +339,10 @@ fn approved_model() -> Result<Model, String> {
     let capability = visibility_session(&model, GRANT, SCENE).ok_or("capability")?;
     model.immich_locked.video.binding = Some(VideoAcquisition {
         pending: pending.clone(),
-        capability,
+        capability: capability.clone(),
         revision: entry.asset.revision,
         sha1: "a".repeat(40),
+        lease: super::renewal::SharedLease::new(capability.lease_deadline),
         bytes: Some(123),
     });
     model.immich_locked.video.pending = Some(pending.clone());
@@ -404,3 +434,6 @@ fn rejected_issued_refresh_reconciles_private_video_lease_on_early_return() -> R
     assert!(command.effects().any(|effect|matches!(effect,Effect::Io(req) if matches!(&req.operation,ShellOperation::ReleaseImmichLockedVideo{lease_id,..} if lease_id==LEASE))));
     Ok(())
 }
+
+#[path = "tests/renewal.rs"]
+mod renewal_cases;

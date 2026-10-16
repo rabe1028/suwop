@@ -13,6 +13,9 @@ import Network
     private var connections: [UUID: NWConnection] = [:]
     private(set) var requests = 0
     var holdResponse = false
+    var pacedChunkMilliseconds: Int64?
+    private(set) var sentBytes = 0
+    private var pacedTasks: [UUID: Task<Void, Never>] = [:]
     private var pending: [(NWConnection, UUID)] = []
     private var startContinuation: CheckedContinuation<Void, any Error>?
 
@@ -60,6 +63,10 @@ import Network
 
     func stop() {
         listener.cancel()
+        for task in pacedTasks.values {
+            task.cancel()
+        }
+        pacedTasks.removeAll()
         for connection in connections.values {
             connection.cancel()
         }
@@ -136,12 +143,47 @@ import Network
         let header = Data(
             "HTTP/1.1 \(status) Fixture\r\n\(type)\(framing)\(encoding)Connection: close\r\n\r\n".utf8
         )
+        if let delay = pacedChunkMilliseconds {
+            respondPaced(connection, id: id, header: header, body: body, delay: delay)
+            return
+        }
         connection.send(content: header + body, completion: .contentProcessed { [weak self] _ in
             Task { @MainActor in self?.close(connection, id: id) }
         })
     }
 
+    private func respondPaced(_ connection: NWConnection, id: UUID, header: Data, body: Data, delay: Int64) {
+        pacedTasks[id] = Task { [weak self] in
+            do {
+                try await Self.send(header, connection: connection)
+                for offset in stride(from: 0, to: body.count, by: 8192) {
+                    try Task.checkCancellation()
+                    let chunk = body.subdata(in: offset ..< min(offset + 8192, body.count))
+                    try await Self.send(chunk, connection: connection)
+                    self?.sentBytes += chunk.count
+                    if offset + chunk.count < body.count {
+                        try await Task.sleep(for: .milliseconds(delay))
+                    }
+                }
+            } catch {}
+            self?.close(connection, id: id)
+        }
+    }
+
+    private static func send(_ bytes: Data, connection: NWConnection) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            connection.send(content: bytes, completion: .contentProcessed { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume()
+                }
+            })
+        }
+    }
+
     private func close(_ connection: NWConnection, id: UUID) {
+        pacedTasks.removeValue(forKey: id)?.cancel()
         connection.cancel()
         connections.removeValue(forKey: id)
     }

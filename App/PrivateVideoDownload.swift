@@ -9,6 +9,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
         let sha1: String
         let signature: FileSignature
         let mimeType: String?
+        let acquisitionLeaseID: Int64
     }
 
     private struct Received: Sendable {
@@ -36,17 +37,24 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
     private let files: PrivateVideoFiles
     private let quote: PrivateVideoFiles.Quote
     private let framing: PrivateVideoResponse
-    private let deadline: Int64
+    private let acquisition: PrivateVideoAcquisition
 
-    init(files: PrivateVideoFiles, quote: PrivateVideoFiles.Quote, ticket: ImmichLockedVideoTicket) {
+    init(
+        files: PrivateVideoFiles,
+        quote: PrivateVideoFiles.Quote,
+        ticket: ImmichLockedVideoTicket,
+        acquisition: PrivateVideoAcquisition
+    ) {
         self.files = files
         self.quote = quote
         framing = PrivateVideoResponse(expectedBytes: ticket.expectedBytes, maximumBytes: ticket.maxReceivedBytes)
-        deadline = ticket.deadlineUnixMilliseconds
+        self.acquisition = acquisition
     }
 
     func run(request: URLRequest, permit: NativeSubmissionPermit) async throws -> Output {
         let hashing = try FileHashRequest()
+        let cancellation = try acquisition.onCancellation { [weak self] in self?.cancel() }
+        defer { acquisition.removeCancellation(cancellation) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.urlCache = nil
         configuration.httpCookieStorage = nil
@@ -58,16 +66,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
         queue.maxConcurrentOperationCount = 1
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: queue)
         state.withLock { $0.hashing = hashing }
-        let remaining = max(0, deadline - Int64(Date().timeIntervalSince1970 * 1000))
-        let expiry = Task { [self] in
-            do {
-                try await Task.sleep(for: .milliseconds(remaining))
-                cancel()
-                hashing.cancel()
-            } catch {}
-        }
         defer {
-            expiry.cancel()
             state.withLock { $0.hashing = nil }
             session.finishTasksAndInvalidate()
         }
@@ -98,7 +97,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 }
             }
             try Task.checkCancellation()
-            guard Int64(Date().timeIntervalSince1970 * 1000) < deadline else { throw CancellationError() }
+            try acquisition.authorized {}
             #if SUWOP_VRT
                 let barrier = state.withLock { $0.hashBarrier }
             #endif
@@ -117,10 +116,17 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 worker.cancel()
             }
             try Task.checkCancellation()
-            guard Int64(Date().timeIntervalSince1970 * 1000) < deadline,
-                  hash.signature.bytes == received.bytes else { throw CancellationError() }
-            return Output(url: received.url, sha1: hash.sha1, signature: hash.signature, mimeType: received.mimeType)
+            guard hash.signature.bytes == received.bytes else { throw CancellationError() }
+            let completedLeaseID = try acquisition.completedLeaseID()
+            return Output(
+                url: received.url,
+                sha1: hash.sha1,
+                signature: hash.signature,
+                mimeType: received.mimeType,
+                acquisitionLeaseID: completedLeaseID
+            )
         } onCancel: {
+            self.acquisition.cancel()
             self.cancel()
             hashing.cancel()
         }
@@ -184,7 +190,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 // Avoid a full-original accumulator even when Foundation provides a large callback.
                 for offset in stride(from: 0, to: data.count, by: 65536) {
                     let chunk = data.subdata(in: offset ..< min(offset + 65536, data.count))
-                    try files.append(chunk, quote: quote, deadline: deadline)
+                    try files.append(chunk, quote: quote, acquisition: acquisition)
                 }
                 value.received = next
                 return false
@@ -209,7 +215,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 }
                 guard value.accepted, !value.cancelled else { throw CancellationError() }
                 try framing.validateEnd(received: value.received, declared: value.declared)
-                let url = try files.finish(quote: quote)
+                let url = try acquisition.authorized { try files.finish(quote: quote) }
                 continuation.resume(returning: Received(url: url, bytes: value.received, mimeType: value.mimeType))
             } catch {
                 continuation.resume(throwing: error)

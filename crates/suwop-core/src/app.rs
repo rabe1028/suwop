@@ -88,6 +88,16 @@ pub enum ShellOperation {
         #[serde(rename = "stagedID")]
         staged_id: String,
     },
+    RenewImmichLockedVideoAcquisition {
+        ticket: crate::immich_locked::video::ImmichLockedVideoTicket,
+        #[serde(rename = "previousLeaseID")]
+        previous_lease_id: u64,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
+    ScheduleImmichLockedVideoAcquisitionExpiry {
+        pending: crate::immich_locked::video::ImmichLockedVideoPending,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
     ReleaseImmichLockedVideo {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
         #[serde(rename = "leaseID")]
@@ -448,6 +458,24 @@ pub enum Event {
         #[serde(rename = "requestID")]
         request_id: String,
     },
+    ExpireImmichLockedVideoAcquisition {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+    },
+    #[serde(skip)]
+    ImmichLockedVideoRenewalAcknowledged {
+        pending: crate::immich_locked::video::ImmichLockedVideoPending,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+        previous_lease_id: u64,
+        lease_id: u64,
+        result: Result<crate::immich_locked::video::ImmichLockedVideoAcquisitionRenewed, String>,
+    },
     StopImmichLockedVideo {
         #[serde(rename = "sceneID")]
         scene_id: String,
@@ -473,6 +501,7 @@ pub enum Event {
     },
     #[serde(skip)]
     ImmichLockedVideoPrepared {
+        acquisition_lease_id: u64,
         ticket: crate::immich_locked::video::ImmichLockedVideoTicket,
         approved: bool,
     },
@@ -514,6 +543,7 @@ pub enum Event {
         generation: u64,
         lease_id: u64,
         result: Option<std::time::Instant>,
+        video: Option<crate::immich_locked::video::VideoHeartbeat>,
     },
     #[serde(skip)]
     ImmichLockedImageRead {

@@ -110,6 +110,7 @@ pub struct ImmichLockedView {
     pub remote_lock_confirmed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video_pending: Option<video::ImmichLockedVideoPending>,
+    pub video_acquisition: Option<video::ImmichLockedVideoAcquisitionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<video::ImmichLockedVideoAccess>,
 }
@@ -419,6 +420,7 @@ pub fn view(model: &Model) -> ImmichLockedView {
         error: locked.error.clone(),
         remote_lock_confirmed: locked.remote_lock_confirmed,
         video_pending: video::projection(model).0,
+        video_acquisition: video::acquisition_projection(model),
         video: video::projection(model).1,
     }
 }
@@ -963,18 +965,8 @@ pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Eff
             generation,
             lease_id,
             result,
-        } => {
-            if !matching_lease(model, &grant_id, generation, lease_id) {
-                Command::done()
-            } else if !current(model) {
-                close(model)
-            } else if let Some(lease) = result {
-                timers(model, lease)
-            } else {
-                model.immich_locked.error = Some(ERROR.into());
-                close(model)
-            }
-        }
+            video,
+        } => checked(model, &grant_id, generation, lease_id, result, video),
         Event::RequestImmichLockedImage {
             entry_id,
             grant_id,
@@ -1184,8 +1176,29 @@ fn check_session(
             generation,
             lease_id,
             result,
+            video: video_binding,
         });
     })
+}
+fn checked(
+    model: &mut Model,
+    grant_id: &str,
+    generation: u64,
+    lease_id: u64,
+    result: Option<std::time::Instant>,
+    video: Option<video::VideoHeartbeat>,
+) -> Command<crate::app::Effect, Event> {
+    if !matching_lease(model, grant_id, generation, lease_id) {
+        Command::done()
+    } else if !current(model) {
+        close(model)
+    } else if let Some(lease) = result {
+        let renewed = video::renew(model, video, lease);
+        timers(model, lease).and(renewed)
+    } else {
+        model.immich_locked.error = Some(ERROR.into());
+        close(model)
+    }
 }
 fn request_image(
     model: &mut Model,
@@ -1360,6 +1373,7 @@ mod tests {
                 generation: 0,
                 lease_id: 0,
                 result: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
+                video: None,
             },
             &mut model,
         );

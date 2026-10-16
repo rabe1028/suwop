@@ -10,7 +10,7 @@ pub(super) async fn metadata(
     acquisition: &VideoAcquisition,
     measured: Option<u64>,
 ) -> Result<(), String> {
-    let cap = &acquisition.capability;
+    let cap = acquisition.current_capability()?;
     cap.status(ctx).await?;
     let raw = cap
         .json(
@@ -104,10 +104,11 @@ pub(super) fn request(
     model.immich_locked.video.pending = Some(pending.clone());
     let acquisition = VideoAcquisition {
         pending,
-        capability,
+        capability: capability.clone(),
         revision: entry.asset.revision.clone(),
         sha1,
         bytes: None,
+        lease: super::renewal::SharedLease::new(capability.lease_deadline),
     };
     model.immich_locked.video.binding = Some(acquisition.clone());
     cleanup.and(Command::new(move |ctx| async move {
@@ -167,11 +168,28 @@ pub(super) fn planned(
         return stop(model).and(rejected());
     };
     acquisition.bytes = bytes;
+    model.immich_locked.video.binding = Some(acquisition.clone());
     acquisition.pending.phase = ImmichLockedVideoPhase::Acquiring;
     model.immich_locked.video.pending = Some(acquisition.pending.clone());
     model.immich_locked.video.lease = Some((acquisition.pending.clone(), storage.lease_id.clone()));
+    let initial_lease = super::ImmichLockedVideoAcquisitionLease {
+        lease_id: 1,
+        deadline_unix_milliseconds: deadline,
+        remaining_milliseconds: u64::try_from(
+            acquisition
+                .capability
+                .lease_deadline
+                .min(acquisition.capability.hard_deadline)
+                .saturating_duration_since(std::time::Instant::now())
+                .as_millis(),
+        )
+        .unwrap_or(0),
+        extension_milliseconds: 0,
+    };
     let mut ticket = ImmichLockedVideoTicket {
         pending: acquisition.pending.clone(),
+        acquisition_lease: initial_lease.clone(),
+        initial_acquisition_lease: initial_lease,
         display_lease_id: model.immich_locked.lease_id,
         deadline_unix_milliseconds: deadline,
         expected_revision: acquisition.revision.clone(),
@@ -193,10 +211,12 @@ pub(super) fn planned(
         .request
         .headers
         .insert("Accept-Encoding".into(), "identity".into());
-    Command::new(move |ctx| async move {
+    model.immich_locked.video.renewal.ticket = Some(ticket.clone());
+    let expiry = super::renewal::schedule(ticket.pending.clone(), ticket.acquisition_lease.clone());
+    expiry.and(Command::new(move |ctx| async move {
         let result = async {
             metadata(&ctx, &acquisition, None).await?;
-            if policy::now_ms()? >= ticket.deadline_unix_milliseconds {
+            if acquisition.current_capability().is_err() {
                 return Err(ERROR.into());
             }
             let result: ImmichLockedVideoResult = io(
@@ -227,7 +247,7 @@ pub(super) fn planned(
             ticket: Box::new(ticket),
             result,
         });
-    })
+    }))
 }
 pub(super) fn read(
     model: &mut Model,
@@ -238,7 +258,11 @@ pub(super) fn read(
     let result = match result {
         Ok(result)
             if pending_current(model, &ticket.pending)
-                && acquisition.capability.valid().is_ok() =>
+                && super::renewal::completion_current(
+                    model,
+                    &ticket,
+                    result.acquisition_lease_id,
+                ) =>
         {
             result
         }
@@ -254,12 +278,16 @@ pub(super) fn read(
         }
     };
     model.immich_locked.video.measured_bytes = Some(result.signature.bytes);
+    if let Some(current) = model.immich_locked.video.renewal.ticket.as_ref() {
+        ticket.acquisition_lease = current.acquisition_lease.clone();
+        ticket.deadline_unix_milliseconds = current.deadline_unix_milliseconds;
+    }
     ticket.pending.phase = ImmichLockedVideoPhase::Preparing;
     model.immich_locked.video.pending = Some(ticket.pending.clone());
     Command::new(move |ctx| async move {
         let approved = async {
-            acquisition.capability.valid()?;
-            if policy::now_ms()? >= ticket.deadline_unix_milliseconds {
+            metadata(&ctx, &acquisition, Some(result.signature.bytes)).await?;
+            if acquisition.current_capability().is_err() {
                 return Err(ERROR.into());
             }
             let prepared: ImmichLockedVideoPrepared = io(
@@ -276,13 +304,17 @@ pub(super) fn read(
                 return Err(ERROR.into());
             }
             metadata(&ctx, &acquisition, Some(result.signature.bytes)).await?;
-            if policy::now_ms()? >= ticket.deadline_unix_milliseconds {
+            if acquisition.current_capability().is_err() {
                 return Err(ERROR.into());
             }
-            Ok::<_, String>(())
+            Ok::<_, String>(prepared.acquisition_lease_id)
         }
-        .await
-        .is_ok();
-        ctx.send_event(Event::ImmichLockedVideoPrepared { ticket, approved });
+        .await;
+        let acquisition_lease_id = approved.as_ref().copied().unwrap_or(0);
+        ctx.send_event(Event::ImmichLockedVideoPrepared {
+            ticket,
+            approved: approved.is_ok(),
+            acquisition_lease_id,
+        });
     })
 }

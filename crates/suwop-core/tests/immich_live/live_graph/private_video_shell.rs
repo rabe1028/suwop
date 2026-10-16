@@ -8,6 +8,7 @@ struct Lease {
     pending: ImmichLockedVideoPending,
     path: std::path::PathBuf,
     prepared: bool,
+    acquisition_lease_id: u64,
 }
 #[derive(PartialEq, Eq)]
 pub(super) enum Phase {
@@ -105,6 +106,37 @@ impl<'a> Shell<'a> {
                 self.quote(core, pending)
             }
             ShellOperation::ReadImmichLockedVideo { ticket } => self.read(core, ticket),
+            ShellOperation::RenewImmichLockedVideoAcquisition {
+                ticket,
+                previous_lease_id,
+                lease,
+            } => {
+                Self::current(core, &ticket.pending)?;
+                let projection = core
+                    .view()
+                    .immich_locked_view
+                    .video_acquisition
+                    .ok_or("renewal projection")?;
+                assert_eq!(projection.lease, *lease);
+                assert_eq!(projection.staged_id, ticket.storage.lease_id);
+                assert_eq!(projection.acknowledged_lease_id, *previous_lease_id);
+                let stored = self
+                    .leases
+                    .get_mut(&ticket.storage.lease_id)
+                    .ok_or("renewal lease missing")?;
+                assert_binding(&stored.pending, &ticket.pending);
+                assert_eq!(stored.acquisition_lease_id, *previous_lease_id);
+                assert_eq!(
+                    lease.lease_id,
+                    previous_lease_id.checked_add(1).ok_or("lease overflow")?
+                );
+                assert!(lease.extension_milliseconds > 0);
+                stored.acquisition_lease_id = lease.lease_id;
+                self.trace.push("renewal-native-CAS-mock".into());
+                Ok(
+                    json!({"requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,"previousLeaseID":previous_lease_id,"leaseID":lease.lease_id}),
+                )
+            }
             ShellOperation::PrepareImmichLockedVideo { ticket, staged_id } => {
                 self.prepare(core, ticket, staged_id)
             }
@@ -126,6 +158,7 @@ impl<'a> Shell<'a> {
             }
             ShellOperation::ReleaseImmichLockedImage { .. }
             | ShellOperation::ReleaseImmichLockedImages { .. }
+            | ShellOperation::ScheduleImmichLockedVideoAcquisitionExpiry { .. }
             | ShellOperation::ScheduleImmichLockedCheck { .. }
             | ShellOperation::ScheduleImmichLockedExpiry { .. }
             | ShellOperation::ReleaseOrdinarySelectedImage { .. }
@@ -237,6 +270,7 @@ impl<'a> Shell<'a> {
                     Lease {
                         pending: pending.clone(),
                         path: self.directory.join(format!("{id}.mp4")),
+                        acquisition_lease_id: 1,
                         prepared: false
                     }
                 )
@@ -304,7 +338,8 @@ impl<'a> Shell<'a> {
             assert_eq!(expected, measured_length);
             assert_eq!(ticket.max_received_bytes, expected);
         }
-        let result = transport::download(self.agent, ticket, &lease.path)?;
+        let mut result = transport::download(self.agent, ticket, &lease.path)?;
+        result.acquisition_lease_id = lease.acquisition_lease_id;
         let actual = std::fs::read(&lease.path).map_err(|_| "video result bytes")?;
         assert_eq!(actual, self.fixture.expected(&self.selected)?);
         self.trace.push("GET selected-original-stream".into());
@@ -329,7 +364,9 @@ impl<'a> Shell<'a> {
         assert!(lease.path.is_file());
         lease.prepared = true;
         self.trace.push("prepare-hidden-mock".into());
-        Ok(json!({"requestID":ticket.pending.request_id,"stagedID":id}))
+        Ok(
+            json!({"acquisitionLeaseID":lease.acquisition_lease_id,"requestID":ticket.pending.request_id,"stagedID":id}),
+        )
     }
     pub fn assert_approved(&self, core: &Core<Suwop>, request: &str) -> Result<(), String> {
         let access = core

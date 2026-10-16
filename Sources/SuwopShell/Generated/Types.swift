@@ -962,6 +962,47 @@ public struct ImmichLockedVideoAccess: Codable, Sendable {
     }
 }
 
+public struct ImmichLockedVideoAcquisitionLease: Codable, Sendable {
+    public var deadlineUnixMilliseconds: Int64
+    public var extensionMilliseconds: Int64
+    public var leaseID: Int64
+    public var remainingMilliseconds: Int64
+    public init(deadlineUnixMilliseconds: Int64, extensionMilliseconds: Int64, leaseID: Int64, remainingMilliseconds: Int64) {
+        self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
+        self.extensionMilliseconds = extensionMilliseconds
+        self.leaseID = leaseID
+        self.remainingMilliseconds = remainingMilliseconds
+    }
+}
+
+public struct ImmichLockedVideoAcquisitionRenewed: Codable, Sendable {
+    public var leaseID: Int64
+    public var previousLeaseID: Int64
+    public var requestID: String
+    public var stagedID: String
+    public init(leaseID: Int64, previousLeaseID: Int64, requestID: String, stagedID: String) {
+        self.leaseID = leaseID
+        self.previousLeaseID = previousLeaseID
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct ImmichLockedVideoAcquisitionState: Codable, Sendable {
+    public var acknowledgedLeaseID: Int64
+    public var initialLease: ImmichLockedVideoAcquisitionLease
+    public var lease: ImmichLockedVideoAcquisitionLease
+    public var pending: ImmichLockedVideoPending
+    public var stagedID: String
+    public init(acknowledgedLeaseID: Int64, initialLease: ImmichLockedVideoAcquisitionLease, lease: ImmichLockedVideoAcquisitionLease, pending: ImmichLockedVideoPending, stagedID: String) {
+        self.acknowledgedLeaseID = acknowledgedLeaseID
+        self.initialLease = initialLease
+        self.lease = lease
+        self.pending = pending
+        self.stagedID = stagedID
+    }
+}
+
 public enum ImmichLockedVideoCapacityClass: String, Codable, CaseIterable, Sendable {
     case `importantUsage`
     case `available`
@@ -993,20 +1034,24 @@ public enum ImmichLockedVideoPhase: String, Codable, CaseIterable, Sendable {
 }
 
 public struct ImmichLockedVideoPrepared: Codable, Sendable {
+    public var acquisitionLeaseID: Int64
     public var requestID: String
     public var stagedID: String
-    public init(requestID: String, stagedID: String) {
+    public init(acquisitionLeaseID: Int64, requestID: String, stagedID: String) {
+        self.acquisitionLeaseID = acquisitionLeaseID
         self.requestID = requestID
         self.stagedID = stagedID
     }
 }
 
 public struct ImmichLockedVideoResult: Codable, Sendable {
+    public var acquisitionLeaseID: Int64
     public var requestID: String
     public var sha1: String
     public var signature: FileSignature
     public var stagedID: String
-    public init(requestID: String, sha1: String, signature: FileSignature, stagedID: String) {
+    public init(acquisitionLeaseID: Int64, requestID: String, sha1: String, signature: FileSignature, stagedID: String) {
+        self.acquisitionLeaseID = acquisitionLeaseID
         self.requestID = requestID
         self.sha1 = sha1
         self.signature = signature
@@ -1034,22 +1079,26 @@ public struct ImmichLockedVideoStorageFacts: Codable, Sendable {
 }
 
 public struct ImmichLockedVideoTicket: Codable, Sendable {
+    public var acquisitionLease: ImmichLockedVideoAcquisitionLease
     public var deadlineUnixMilliseconds: Int64
     public var displayLeaseID: Int64
     public var expectedBytes: Int64?
     public var expectedRevision: String
     public var expectedSha1: String
+    public var initialAcquisitionLease: ImmichLockedVideoAcquisitionLease
     public var maxReceivedBytes: Int64
     public var minimumRemainingBytes: Int64
     public var pending: ImmichLockedVideoPending
     public var request: HttpRequest
     public var storage: ImmichLockedVideoStorageFacts
-    public init(deadlineUnixMilliseconds: Int64, displayLeaseID: Int64, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, maxReceivedBytes: Int64, minimumRemainingBytes: Int64, pending: ImmichLockedVideoPending, request: HttpRequest, storage: ImmichLockedVideoStorageFacts) {
+    public init(acquisitionLease: ImmichLockedVideoAcquisitionLease, deadlineUnixMilliseconds: Int64, displayLeaseID: Int64, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, initialAcquisitionLease: ImmichLockedVideoAcquisitionLease, maxReceivedBytes: Int64, minimumRemainingBytes: Int64, pending: ImmichLockedVideoPending, request: HttpRequest, storage: ImmichLockedVideoStorageFacts) {
+        self.acquisitionLease = acquisitionLease
         self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
         self.displayLeaseID = displayLeaseID
         self.expectedBytes = expectedBytes
         self.expectedRevision = expectedRevision
         self.expectedSha1 = expectedSha1
+        self.initialAcquisitionLease = initialAcquisitionLease
         self.maxReceivedBytes = maxReceivedBytes
         self.minimumRemainingBytes = minimumRemainingBytes
         self.pending = pending
@@ -1069,8 +1118,9 @@ public struct ImmichLockedView: Codable, Sendable {
     public var sceneID: String?
     public var state: ImmichLockedState
     public var video: ImmichLockedVideoAccess?
+    public var videoAcquisition: ImmichLockedVideoAcquisitionState?
     public var videoPending: ImmichLockedVideoPending?
-    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState, video: ImmichLockedVideoAccess? = nil, videoPending: ImmichLockedVideoPending? = nil) {
+    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState, video: ImmichLockedVideoAccess? = nil, videoAcquisition: ImmichLockedVideoAcquisitionState? = nil, videoPending: ImmichLockedVideoPending? = nil) {
         self.entries = entries
         self.error = error
         self.generation = generation
@@ -1081,6 +1131,7 @@ public struct ImmichLockedView: Codable, Sendable {
         self.sceneID = sceneID
         self.state = state
         self.video = video
+        self.videoAcquisition = videoAcquisition
         self.videoPending = videoPending
     }
 }

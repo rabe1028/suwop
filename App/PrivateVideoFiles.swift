@@ -111,10 +111,19 @@ final class PrivateVideoFiles: Sendable {
     }
 
     func append(_ bytes: Data, quote: Quote, deadline: Int64) throws {
+        try appendAuthorized(bytes, quote: quote, deadline: deadline)
+    }
+
+    func append(_ bytes: Data, quote: Quote, acquisition: PrivateVideoAcquisition) throws {
+        // Hold execution authority through the actual file write; renewal never resets the fixed budget/counters.
+        try acquisition.authorized { try appendAuthorized(bytes, quote: quote) }
+    }
+
+    private func appendAuthorized(_ bytes: Data, quote: Quote, deadline: Int64? = nil) throws {
         try records.withLock { state in
             guard var record = state[quote.leaseID], record.quote.binding == quote.binding,
                   record.quote.nonce == quote.nonce, let budget = record.budget,
-                  !record.finished, now() < deadline else { throw CancellationError() }
+                  !record.finished, deadline.map({ now() < $0 }) ?? true else { throw CancellationError() }
             let (next, overflow) = record.written.addingReportingOverflow(Int64(bytes.count))
             guard !overflow else { throw CancellationError() }
             let measurement = try volume.measure()
