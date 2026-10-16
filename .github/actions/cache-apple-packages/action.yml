@@ -1,0 +1,14 @@
+name: Cache Apple package downloads
+description: Reuse SwiftPM source checkouts and binary artifacts without caching app build results.
+runs:
+  using: composite
+  steps:
+    - name: Restore Swift package sources and binary downloads
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        # These are toolchain-independent downloads, shared by SwiftPM and Xcode.
+        # Do not also cache their multi-GB per-workspace clones or build state.
+        path: |
+          ~/Library/Caches/org.swift.swiftpm/repositories
+          ~/Library/Caches/org.swift.swiftpm/artifacts
+        key: swift-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}

@@ -38,7 +38,7 @@ No global/plugin-owned instructions need modification.
 Compare cold and warm successful runs on the same suite revision. Record
 cache restore/save time, job execution time and queue time separately. New
 tests in dependent PRs can increase runtime independently. All Rust debug
-and release tests, five Apple target builds, bridge/sharing tests, full VRT
+and release tests, the supported Apple target builds, bridge/sharing tests, full VRT
 coverage and PhotoKit acceptance remain enabled. This change does not claim
 device/iCloud acceptance or a measured token-reduction percentage.
 
@@ -46,3 +46,36 @@ The active PIN-write PR also edits `ci.yml` to add Immich 3.3.3 coverage.
 When integrating the branches, retain both release checks and their evidence
 upload along with the cache/pull changes; do not resolve by replacing the
 whole workflow with either branch's version.
+
+## Apple Silicon and cache follow-up
+
+[Successful run 38864174445](https://github.com/rabe1028/suwop/actions/runs/38864174445)
+on main `14e1bcc` provides a newer baseline after the Lance integration:
+
+| Job | Observed cache | Observed build time |
+| --- | --- | --- |
+| ARM64 macOS release slice | Exact hit, 649 MB restored | Rust release: 1m30s |
+| Apple host tests and apps | Exact hit, 101 MB restored | Rust test compilation: 12m37s; host FFI: 4m45s; whole job: 29m15s |
+| Simulator VRT | Exact hit, 678 MB restored | Whole job: 45m32s, including simulator tests |
+
+The Apple job ran `cargo clean` after testing (5.2 GiB removed), before the
+cache action saved its result. A hit therefore restored downloads but did not
+retain the compiled dependencies needed by the next run. It also fetched
+LiteRT-LM sources and binary artifacts without a persistent Swift package cache.
+
+Host tests now run in `apple-tests`, preserving their Rust dependency objects
+under a fresh cache key. App packaging runs on a separate runner after the
+host tests and release slices pass, avoiding concurrent storage of large debug
+objects and app outputs on that runner. SwiftPM's shared repository and binary
+download caches are keyed by OS, architecture and package inputs, and reused
+across Apple jobs. These raw downloads are independent of the selected Xcode;
+manifests, build state and app outputs are not cached. Per-workspace clones
+are deliberately excluded: LiteRT-LM alone used 2.7 GiB in `.build/repositories`,
+duplicating the shared cache. Xcode builds and native macOS tests also share
+the same SourcePackages directory within each job.
+
+Supported targets are ARM64 macOS, iOS devices and iOS simulators. The two
+Intel release jobs and universal-library assembly have been removed. All
+remaining slice revision/digest checks and existing test suites are retained.
+New cache keys start cold; the runtime benefit still needs a successful warm
+CI run. A cache hit does not remove simulator execution time.

@@ -38,7 +38,7 @@ HTTPS が既定です。HTTP は設定で明示的に許可した場合だけ使
 ```sh
 make format            # Rust / Swift / Python の整形
 make check             # 厳格な Lint、生成物差分、Rust と実 FFI のテスト
-make apple-build       # universal Rust library、iOS Simulator / Mac のビルド
+make apple-build       # ARM64 Rust library、iOS Simulator / Mac のビルド
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
 make setup-vrt         # SHA-256 検証付き simslim 0.12.2 をローカルに導入
 make vrt               # 一台の軽量 Simulator で SwiftUI 23 画面の画素差分を比較
@@ -76,3 +76,5 @@ Immich 3.2以降では、保存先情報または複数選択から通常のゴ�
 確認前後の検証と送信前の記録保存をRustで行い、通信断後の書き込みは再送しません。[削除・復元の手順と境界](docs/trash.md) を参照してください。
 
 Python スクリプトは `uv run --no-project python` で実行します。`make setup` の前に uv を用意してください。Python 環境と Ruff の導入も uv を使い、CI は固定バージョンを自動導入します。
+
+Appleビルドの対応アーキテクチャはARM64のみです。macOSはApple Silicon、iOS SimulatorもApple Silicon Macを対象とし、Intel Mac用スライスは生成しません。

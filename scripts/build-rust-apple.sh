@@ -29,7 +29,7 @@ if [[ "${1:-}" == "--host" ]]; then
         -headers Generated/RustHeaders -output Generated/RustCore.xcframework
     exit 0
 fi
-TARGETS=(aarch64-apple-darwin x86_64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim x86_64-apple-ios)
+TARGETS=(aarch64-apple-darwin aarch64-apple-ios aarch64-apple-ios-sim)
 build_slice() {
     local triple="$1" SDK
     rustup target add "$triple"
@@ -53,7 +53,7 @@ case "${1:-}" in
     --slice)
         [[ "$#" == 2 ]] || { echo "Expected one Apple target" >&2; exit 1; }
         case "$2" in
-            aarch64-apple-darwin|x86_64-apple-darwin|aarch64-apple-ios|aarch64-apple-ios-sim|x86_64-apple-ios) ;;
+            aarch64-apple-darwin|aarch64-apple-ios|aarch64-apple-ios-sim) ;;
             *) echo "Unsupported Apple target: $2" >&2; exit 1 ;;
         esac
         build_slice "$2"
@@ -62,7 +62,7 @@ case "${1:-}" in
         ;;
     --package)
         [[ "$#" == 1 ]] || exit 1
-        # Require all five slices from this exact clean checkout before replacing output.
+        # Require all three ARM64 slices from this exact clean checkout before replacing output.
         uv run --no-project python scripts/apple_slices.py verify
         ;;
     "")
@@ -70,13 +70,9 @@ case "${1:-}" in
         ;;
     *) echo "Unknown build mode: $1" >&2; exit 1 ;;
 esac
-mkdir -p target/apple/macos target/apple/simulator
-lipo -create Generated/RustSlices/{aarch64,x86_64}-apple-darwin/libsuwop_ffi.a -output target/apple/macos/libsuwop_ffi.a
-lipo -create Generated/RustSlices/aarch64-apple-ios-sim/libsuwop_ffi.a Generated/RustSlices/x86_64-apple-ios/libsuwop_ffi.a \
-    -output target/apple/simulator/libsuwop_ffi.a
 rm -rf Generated/RustCore.xcframework
 xcodebuild -create-xcframework \
-    -library target/apple/macos/libsuwop_ffi.a -headers Generated/RustHeaders \
-    -library target/apple/simulator/libsuwop_ffi.a -headers Generated/RustHeaders \
+    -library Generated/RustSlices/aarch64-apple-darwin/libsuwop_ffi.a -headers Generated/RustHeaders \
+    -library Generated/RustSlices/aarch64-apple-ios-sim/libsuwop_ffi.a -headers Generated/RustHeaders \
     -library Generated/RustSlices/aarch64-apple-ios/libsuwop_ffi.a -headers Generated/RustHeaders \
     -output Generated/RustCore.xcframework

@@ -99,10 +99,8 @@ jobs:
       matrix:
         target:
           - aarch64-apple-darwin
-          - x86_64-apple-darwin
           - aarch64-apple-ios
           - aarch64-apple-ios-sim
-          - x86_64-apple-ios
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install pinned uv
@@ -135,8 +133,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  apple:
-    needs: apple-rust
+  apple-tests:
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -155,27 +152,39 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
-          key: ${{ runner.os }}-${{ runner.arch }}
+          key: ${{ runner.os }}-${{ runner.arch }}-host-tests-v2
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Swift formatting and strict lint
         run: make lint-swift
+      - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
         run: make test
-      - name: Download this run's five release slices
+
+  apple:
+    needs: [apple-rust, apple-tests]
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.11.24'
+          enable-cache: true
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - uses: ./.github/actions/cache-apple-packages
+      - name: Download this run's three ARM64 release slices
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: rust-slice-*
           path: Generated/RustSlices
           merge-multiple: true
-      - name: Build universal Rust libraries, iOS and macOS apps
-        run: |
-          cargo clean
-          # Swift tests have finished; Xcode uses the shared SourcePackages cache below.
-          rm -rf .build
-          SUWOP_CLEAN_CHECK=1 make apple-build APPLE_RUST_BUILD_ARGS=--package
+      - name: Build ARM64 Rust libraries, iOS and macOS apps
+        run: make apple-build APPLE_RUST_BUILD_ARGS=--package
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
       - name: Verify private VIDEO playback and exact owner cleanup on macOS
@@ -219,6 +228,7 @@ jobs:
         run: |
           brew install xcodegen protobuf
           make setup-vrt
+      - uses: ./.github/actions/cache-apple-packages
       - name: Run the complete pinned simulator suite
         run: make "${{ matrix.suite }}"
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
