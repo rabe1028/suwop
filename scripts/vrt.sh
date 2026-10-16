@@ -76,6 +76,7 @@ stage memory simslim measure "$UDID" --json
 stage rust-simulator bash scripts/build-rust-apple.sh --simulator
 stage project xcodegen generate
 ARGS=(
+    -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
     -project Suwop.xcodeproj -scheme SuwopVRT
     -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/VRT
     -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1

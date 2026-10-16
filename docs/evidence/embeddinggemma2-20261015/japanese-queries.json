@@ -1,0 +1,142 @@
+[
+  {
+    "id": "197658",
+    "query": "空いたグラウンドで捕球に備えるキャッチャー",
+    "source": "http://images.cocodataset.org/val2017/000000197658.jpg",
+    "sha256": "f64bd0a68f5e3ad7b20d905c2cdbdbe3ac5829ba959687b99026d65b883d78be",
+    "original_query": "Cather preparing to catch ball in an empty field "
+  },
+  {
+    "id": "186422",
+    "query": "川から離れるように歩いている茶色のクマ",
+    "source": "http://images.cocodataset.org/val2017/000000186422.jpg",
+    "sha256": "32645938210dfce86c4059be71a60c9baea67135d6f737178ed4e133ab234695",
+    "original_query": "a brown bear is walking away from a river"
+  },
+  {
+    "id": "417249",
+    "query": "オフィスビルの中でたくさんの荷物を運ぶ女性",
+    "source": "http://images.cocodataset.org/val2017/000000417249.jpg",
+    "sha256": "a0788f6d609cf3a4e194b317b810b1e806fe95436588355cc76073d783a4f7d2",
+    "original_query": "A woman is carrying many packages in an office building"
+  },
+  {
+    "id": "457078",
+    "query": "デスクトップパソコンとミイラの絵がある部屋",
+    "source": "http://images.cocodataset.org/val2017/000000457078.jpg",
+    "sha256": "499deb8ae25e2796c2eedc2485dfa76c42485772240bd54a6ef6f65a82a6bcf5",
+    "original_query": "A room with a desktop computer and a picture of a mummy. "
+  },
+  {
+    "id": "8277",
+    "query": "刻んだ鶏肉にチーズとブロッコリーを添えた食事",
+    "source": "http://images.cocodataset.org/val2017/000000008277.jpg",
+    "sha256": "692fc5469af5fffdc0dac05e709a0ac1380dca32d4c57436903b122f3c3558dc",
+    "original_query": "The meal consists of chopped chicken with cheese and brocolli."
+  },
+  {
+    "id": "35326",
+    "query": "花崗岩模様のコンロの背面の壁",
+    "source": "http://images.cocodataset.org/val2017/000000035326.jpg",
+    "sha256": "585b9ab944861e297b49d352117de3ab59a5c3bd55f3a298bdf91b7a3a544678",
+    "original_query": "A stove back splash with a granite design."
+  },
+  {
+    "id": "25228",
+    "query": "海でサーフボードの上に座っている女性",
+    "source": "http://images.cocodataset.org/val2017/000000025228.jpg",
+    "sha256": "2b6b45ffe7197a9006a98ed31b8f55495bb876e0c224f1695810f04e61f626cd",
+    "original_query": "A woman sitting on a surfboard in the ocean."
+  },
+  {
+    "id": "581482",
+    "query": "石造りの駅で、大きな格子窓を背に装飾的な金属の布が見える",
+    "source": "http://images.cocodataset.org/val2017/000000581482.jpg",
+    "sha256": "746f096af1cde539f2eba4e4c16dc46e84f424dc0ba1159d9455c4ba913ef098",
+    "original_query": "A fancy metal cloth is seen against huge barred windows at a stone train station."
+  },
+  {
+    "id": "183049",
+    "query": "色とりどりの本がたくさん詰まった本棚",
+    "source": "http://images.cocodataset.org/val2017/000000183049.jpg",
+    "sha256": "fd2ee31aceafdd19a676f309d5ab6c9ff302bf28e494e5793b4481d02c594e52",
+    "original_query": "A book shelf filled with lots of colorful books."
+  },
+  {
+    "id": "498032",
+    "query": "リモコンを持って部屋に立っている人",
+    "source": "http://images.cocodataset.org/val2017/000000498032.jpg",
+    "sha256": "278fe7fbd0cbd99cf92132484659c115390436a2955695f0842933e5d954dc98",
+    "original_query": "A person standing in a room with a remote."
+  },
+  {
+    "id": "401244",
+    "query": "運動着で野原でフリスビーをしている人",
+    "source": "http://images.cocodataset.org/val2017/000000401244.jpg",
+    "sha256": "e2d84f0a45e20683e2bf5c01693f33966209c91a938a2386316543f33911bfa6",
+    "original_query": "a person playing frisbee on a field in sport wear"
+  },
+  {
+    "id": "374551",
+    "query": "枝にとまっている小さな鳥",
+    "source": "http://images.cocodataset.org/val2017/000000374551.jpg",
+    "sha256": "74d7c8949cc1578c8b67ea703dad718b053a38901f7d56001c894dfb858a472a",
+    "original_query": "There is a tiny bird on the branch."
+  },
+  {
+    "id": "546325",
+    "query": "居間に置かれたクッション付きのソファ",
+    "source": "http://images.cocodataset.org/val2017/000000546325.jpg",
+    "sha256": "31b3fd982f89b8a2550c66be16f1e15f81dcb1401a30823933f76b01361f48c3",
+    "original_query": "A couch with pillows sitting in a living room."
+  },
+  {
+    "id": "370999",
+    "query": "10セント硬貨のまわりに置かれた小さな石",
+    "source": "http://images.cocodataset.org/val2017/000000370999.jpg",
+    "sha256": "174fc27563ff6cb874ccea6f13014c75ae71fd98966c2c407d9ae36114bee32d",
+    "original_query": "some little stones sitting around a dime "
+  },
+  {
+    "id": "219578",
+    "query": "オレンジ色のソファに一緒に寝そべる犬と猫",
+    "source": "http://images.cocodataset.org/val2017/000000219578.jpg",
+    "sha256": "c812b11f47fec3b967f3e3e00ad42b1005ff9acede996b5d10c32fbe4bd3cbf1",
+    "original_query": "A dog and cat lying  together on an orange couch. "
+  },
+  {
+    "id": "471567",
+    "query": "動物園の屋外に一頭で立っているキリン",
+    "source": "http://images.cocodataset.org/val2017/000000471567.jpg",
+    "sha256": "419a8b31511158d4e0f537e94a8a9a5b3d69bbe05978f362d2c391d2639ef288",
+    "original_query": "A giraffe stands alone outdoors at the zoo."
+  },
+  {
+    "id": "53626",
+    "query": "雪の上でスキー板を履いて立つ人たち",
+    "source": "http://images.cocodataset.org/val2017/000000053626.jpg",
+    "sha256": "b609e8bb0a6363d08b129b858886c083b6729d35fba713562334dfe0a1a409ec",
+    "original_query": "A group of people standing on ski's in the snow."
+  },
+  {
+    "id": "221502",
+    "query": "両側を花の飾りに囲まれた公園のベンチ",
+    "source": "http://images.cocodataset.org/val2017/000000221502.jpg",
+    "sha256": "8f684f768d51ee5058fb6cead30953e22a1cf0bb657ad6c53e5facc522e1b3c8",
+    "original_query": "A park bench surrounded by floral arrangements on either side."
+  },
+  {
+    "id": "523807",
+    "query": "パンの上にのった約30センチの長いホットドッグ",
+    "source": "http://images.cocodataset.org/val2017/000000523807.jpg",
+    "sha256": "a6dbfae1cf8653a35f5942c134dc98df06d9fcff2333454ef0b1ec786368aaf9",
+    "original_query": "A foot long hot dog sitting on top of a bun."
+  },
+  {
+    "id": "171190",
+    "query": "テーブルの周りに集まる大勢の人たち",
+    "source": "http://images.cocodataset.org/val2017/000000171190.jpg",
+    "sha256": "f91f91529cda49927ba1f546fb9d986f8e063ee2f2c61f1f7245e462f154b3eb",
+    "original_query": "a large group of people are gathered around the table"
+  }
+]

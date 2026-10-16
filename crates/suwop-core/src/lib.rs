@@ -1,10 +1,12 @@
 pub mod albums;
+pub mod analysis;
 pub mod app;
 pub mod apple_visibility;
 pub mod browser;
 pub mod domain;
 pub mod editing;
 pub mod immich;
+pub mod inference;
 pub mod media;
 pub mod metadata;
 pub mod privacy;

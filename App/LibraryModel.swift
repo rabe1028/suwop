@@ -15,6 +15,7 @@ import SwiftUI
     @Published var thumbnailGeneration = UUID()
     private(set) var runtime: RustRuntime?
     private(set) var shell: AppleShell?
+    @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
     private var work: Task<Void, Never>?
@@ -67,9 +68,10 @@ import SwiftUI
             configurePrivateSessions(runtime: runtime, shell: shell)
         }
 
-        init(snapshotView: ViewModel, images: [AssetKey: PlatformImage]) {
+        init(snapshotView: ViewModel, images: [AssetKey: PlatformImage], semanticSearch: SemanticSearchModel? = nil) {
             view = snapshotView
             snapshotImages = images
+            self.semanticSearch = semanticSearch
             started = true
         }
     #endif
@@ -78,6 +80,7 @@ import SwiftUI
         do { runtime = try RustRuntime()
             let nativeShell = try AppleShell()
             shell = nativeShell
+            semanticSearch = .connected(to: nativeShell, library: self)
             executeEffect = { operation, context in
                 guard let context else { throw CancellationError() }
                 return try await nativeShell.execute(operation, context: context)
@@ -286,6 +289,10 @@ import SwiftUI
 
     var connection: ConnectionSettings? {
         view?.state.connection
+    }
+
+    var remoteVersion: Version? {
+        view?.remoteVersion
     }
 
     var serverVersion: String? {
@@ -562,19 +569,6 @@ extension LibraryModel {
             "now": .number(Date().timeIntervalSince1970),
         ])
         showSettings = false
-    }
-
-    func shareCurrentImage(_ photo: UnifiedPhoto) {
-        guard let source = displayedSource(photo) else {
-            errorMessage = "共有する表示元を選択してください。"
-            return
-        }
-        do {
-            try send([
-                "type": .string("shareCurrentImage"), "key": .from(source.key),
-                "id": .string(UUID().uuidString),
-            ])
-        } catch { errorMessage = error.localizedDescription }
     }
 }
 

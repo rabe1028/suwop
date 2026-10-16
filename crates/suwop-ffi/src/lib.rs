@@ -170,8 +170,16 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
         12 => {
             return color_plan(input);
         }
+        15 => {
+            return suwop_local_store::dispatch(
+                serde_json::from_str(input).map_err(|e| e.to_string())?,
+            );
+        }
         _ => {}
     }
+    execute_core(handle, action, input)
+}
+fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> {
     let registry = cores()
         .lock()
         .map_err(|_| "Rust bridge lock failed".to_owned())?;

@@ -16,9 +16,14 @@ if [[ "$OS" == "Darwin" ]]; then
   curl -fsSL https://github.com/nicklockwood/SwiftFormat/releases/download/0.63.1/swiftformat.zip -o "$TEMP/swiftformat.zip"
   unzip -q "$TEMP/swiftformat.zip" -d "$TEMP/swiftformat"
   install -m 755 "$TEMP/swiftformat/swiftformat" "$BIN/swiftformat"
-  brew install xcodegen shellcheck
+  brew install xcodegen shellcheck protobuf
   PLATFORM=darwin
 else
+  # Lance's pinned Rust crates compile protobuf schemas during the build.
+  if ! command -v protoc >/dev/null 2>&1; then
+    sudo apt-get update
+    sudo apt-get install -y protobuf-compiler
+  fi
   PLATFORM=linux
   SHELLCHECK_ARCH="$ARCH"
   if [[ "$ARCH" == "arm64" ]]; then SHELLCHECK_ARCH=aarch64; fi
