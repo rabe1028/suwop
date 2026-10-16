@@ -1,7 +1,7 @@
 import XCTest
 
 final class ImmichVisibilityUITests: XCTestCase {
-    private let sourceID = "33333333-3333-4333-8333-333333333333"
+    let sourceID = "33333333-3333-4333-8333-333333333333"
 
     @MainActor func testGalleryDisplayedSourceLockThenExplicitArchiveNeverRestoresAlbums() {
         let app = launch()
@@ -161,6 +161,8 @@ final class ImmichVisibilityUITests: XCTestCase {
         let continuing = app.staticTexts["immichVisibilityContinuingAccess"]
         XCTAssertTrue(continuing.exists)
         XCTAssertTrue(continuing.label.contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
+        XCTAssertTrue(continuing.label.contains("共有リンク以外からもこの原本を閲覧できることがあります"))
+        XCTAssertTrue(continuing.label.contains("関連項目の表示先は変更しません"))
         let action = app.buttons["confirmImmichVisibility"]
         let cancel = app.buttons["cancelImmichVisibility"]
         for _ in 0 ..< 4 {
@@ -262,15 +264,16 @@ final class ImmichVisibilityUITests: XCTestCase {
         app.terminate()
     }
 
-    @MainActor private func assertReachable(_ element: XCUIElement, in app: XCUIApplication) {
+    @MainActor func assertReachable(_ element: XCUIElement, in app: XCUIApplication) {
         XCTAssertTrue(element.isHittable)
         XCTAssertGreaterThan(element.frame.width, 0)
         XCTAssertGreaterThan(element.frame.height, 0)
         XCTAssertTrue(app.frame.contains(element.frame), "Native action must remain inside the screen")
     }
 
-    @MainActor private func launch(
+    @MainActor func launch(
         lost: Bool = false,
+        video: Bool = false,
         live: Bool = false,
         largeText: Bool = false,
         selectedLinked: Bool = false,
@@ -280,6 +283,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["--immich-visibility-fixture"]
             + (lost ? ["--lost-visibility-response"] : []) + (live ? ["--unsupported-live"] : [])
+            + (video ? ["--selected-video-source"] : [])
             + (selectedLinked ? ["--selected-linked-after-mutation"] : [])
             + (unsupportedServer ? ["--unsupported-write-server"] : [])
             + (initiallyLocked ? ["--initially-locked"] : [])
@@ -288,7 +292,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         return app
     }
 
-    @MainActor private func startLockFromViewer(_ app: XCUIApplication) {
+    @MainActor func startLockFromViewer(_ app: XCUIApplication) {
         let photo = app.buttons["photo-\(sourceID)"]
         XCTAssertTrue(photo.waitForExistence(timeout: 10))
         photo.tap()
@@ -298,7 +302,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
     }
 
-    @MainActor private func openHistory(_ app: XCUIApplication) {
+    @MainActor func openHistory(_ app: XCUIApplication) {
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
@@ -308,7 +312,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
     }
 
-    @MainActor private func authenticate(_ app: XCUIApplication) {
+    @MainActor func authenticate(_ app: XCUIApplication) {
         enter("fixture@example.invalid", into: app.textFields["immichLockedEmail"])
         enter("C1-ONLY-SYNTHETIC-PASSWORD", into: app.secureTextFields["immichLockedPassword"])
         enter("135790", into: app.secureTextFields["immichLockedPIN"])
@@ -338,7 +342,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTFail("The credential field did not acquire keyboard focus: " + field.identifier)
     }
 
-    @MainActor private func confirm(_ app: XCUIApplication, destination: String, lock: Bool) {
+    @MainActor func confirm(_ app: XCUIApplication, destination: String, lock: Bool) {
         let action = app.buttons["confirmImmichVisibility"]
         XCTAssertTrue(action.waitForExistence(timeout: 10))
         XCTAssertEqual(app.staticTexts["immichVisibilityConfirmationTitle"].label, destination + "へ変更しますか？")
@@ -349,6 +353,9 @@ final class ImmichVisibilityUITests: XCTestCase {
             XCTAssertTrue(disclosure.label.contains("すべてのアルバム"))
             XCTAssertTrue(app.staticTexts["immichVisibilityContinuingAccess"].label
                 .contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
+            XCTAssertTrue(app.staticTexts["immichVisibilityContinuingAccess"].label
+                .contains("共有リンク以外からもこの原本を閲覧できることがあります"))
+            XCTAssertTrue(app.staticTexts["immichVisibilityContinuingAccess"].label.contains("関連項目の表示先は変更しません"))
         } else {
             XCTAssertFalse(app.staticTexts["immichVisibilityContinuingAccess"].exists)
         }
@@ -357,7 +364,7 @@ final class ImmichVisibilityUITests: XCTestCase {
         XCTAssertTrue(action.waitForNonExistence(timeout: 10))
     }
 
-    @MainActor private func expect(_ value: String, element: XCUIElement) {
+    @MainActor func expect(_ value: String, element: XCUIElement) {
         let expected = XCTNSPredicateExpectation(predicate: NSPredicate(format: "label == %@", value), object: element)
         XCTAssertEqual(XCTWaiter.wait(for: [expected], timeout: 10), .completed)
     }

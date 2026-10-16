@@ -10,7 +10,7 @@ import SuwopShell
         let epoch: UUID
     }
 
-    private struct Stage {
+    struct Stage {
         let quote: PrivateVideoFiles.Quote
         let url: URL
         let mimeType: String?
@@ -27,39 +27,44 @@ import SuwopShell
         }
     }
 
-    private let injectedFiles: PrivateVideoFiles?
-    private var files: Result<PrivateVideoFiles, any Error> {
+    private var injectedFiles: PrivateVideoFiles?
+    var files: Result<PrivateVideoFiles, any Error> {
         injectedFiles.map(Result.success) ?? PrivateVideoFiles.shared
     }
 
-    private var runtime: RustRuntime?
-    private var ownerSceneID: String?
-    private var expectedRequestID: String?
-    private var active = false
-    private var epoch = UUID()
+    var runtime: RustRuntime?
+    var ownerSceneID: String?
+    var expectedRequestID: String?
+    var active = false
+    var epoch = UUID()
     private let submission = NativeSubmissionGate()
-    private var stages: [String: Stage] = [:]
-    private var quotes: [String: PrivateVideoFiles.Quote] = [:]
+    var stages: [String: Stage] = [:]
+    var quotes: [String: PrivateVideoFiles.Quote] = [:]
     private var acquisitionAnchors: [String: ContinuousClock.Instant] = [:]
     private var acquisitions: [String: PrivateVideoAcquisition] = [:]
     private var initialAcquisitionLeases: [String: ImmichLockedVideoAcquisitionLease] = [:]
     private var acquisitionContracts: [String: PrivateVideoAcquisitionContract] = [:]
     private var acquisitionExpiryTasks: [String: Task<Void, Never>] = [:]
     var acquisitionExpired: (@MainActor (ImmichLockedVideoPending, Int64) -> Void)?
-    private var readTask: Task<PrivateVideoDownload.Output, any Error>?
-    private var prepareTask: Task<Int64, any Error>?
-    private var readBinding: PrivateVideoBinding?
-    private var readLeaseID: String?
+    var readTask: Task<PrivateVideoDownload.Output, any Error>?
+    var prepareTask: Task<Int64, any Error>?
+    var readBinding: PrivateVideoBinding?
+    var readLeaseID: String?
     private var readOperationID: UUID?
-    private var prepareBinding: PrivateVideoBinding?
-    private var prepareLeaseID: String?
+    var prepareBinding: PrivateVideoBinding?
+    var prepareLeaseID: String?
     private var prepareOperationID: UUID?
-    private var displayDeadline: Int64 = 0
+    var displayDeadline: Int64 = 0
     private var displayLeaseID: Int64?
-    private var currentGrantID: String?
-    private var currentGeneration: Int64?
-    private var currentAccess: ImmichLockedVideoAccess?
-    private var teardownTask: Task<Void, Never>?
+    var currentGrantID: String?
+    var currentGeneration: Int64?
+    var currentAccess: ImmichLockedVideoAccess?
+    var teardownTask: Task<Void, Never>?
+    var observedPending: ImmichLockedVideoPending?
+    var revokedBinding: PrivateVideoBinding?
+    var operations: [UUID: (binding: PrivateVideoBinding, completion: PrivateVideoOperationCompletion)] = [:]
+    var failedReleases: [String: PrivateVideoBinding] = [:]
+    var retiredOwners: [String: PrivateVideoBinding] = [:]
     var cancelOtherMedia: (@MainActor () -> Task<Void, Error>?)?
     var shieldPlayer: (@MainActor (PrivateVideoBinding?, String?) -> Task<Void, Never>?)?
 
@@ -86,6 +91,13 @@ import SuwopShell
 
         var quotedVideoCount: Int {
             quotes.count
+        }
+    #endif
+
+    #if SUWOP_VRT
+        func installFilesForTesting(_ files: PrivateVideoFiles) {
+            precondition(runtime == nil && quotes.isEmpty && stages.isEmpty)
+            injectedFiles = files
         }
     #endif
 
@@ -126,6 +138,9 @@ import SuwopShell
             currentAccess = nil
             return
         }
+        if let pending = view.videoPending {
+            observedPending = pending
+        }
         currentGrantID = view.grantID
         currentGeneration = view.generation
         displayLeaseID = view.leaseID
@@ -138,7 +153,8 @@ import SuwopShell
         }
         if let approved = view.video, view.videoAcquisition == nil {
             let id = approved.stagedID
-            guard expectedRequestID == approved.pending.requestID,
+            guard revokedBinding != PrivateVideoBinding(approved.pending),
+                  expectedRequestID == approved.pending.requestID,
                   quotes[id]?.binding == PrivateVideoBinding(approved.pending),
                   var stage = stages[id], stage.quote.binding == PrivateVideoBinding(approved.pending)
             else { currentAccess = nil
@@ -171,6 +187,9 @@ import SuwopShell
         submission.invalidate()
         epoch = UUID()
         expectedRequestID = nil
+        observedPending = nil
+        // Rotating the epoch above already invalidates every old effect and previously returned Attachment.
+        revokedBinding = nil
         let consumer = shieldPlayer?(nil, nil)
         for acquisition in acquisitions.values {
             acquisition.cancel()
@@ -191,21 +210,26 @@ import SuwopShell
         let read = readTask
         let prepare = prepareTask
         let previous = teardownTask
-        let storage = old.isEmpty ? nil : try? files.get()
+        for (id, quote) in old {
+            retiredOwners[id] = quote.binding
+        }
         teardownTask = Task {
             await previous?.value
             await consumer?.value
             _ = await read?.result
             _ = await prepare?.result
-            if let files = storage {
-                for (id, quote) in old {
-                    try? files.release(binding: quote.binding, leaseID: id)
+            for (id, quote) in old {
+                try? releaseFile(binding: quote.binding, leaseID: id)
+                if retiredOwners[id] == quote.binding {
+                    retiredOwners.removeValue(forKey: id)
                 }
             }
         }
     }
 
     func inspect(_ pending: ImmichLockedVideoPending) async throws -> ImmichLockedVideoStorageFacts {
+        let operation = beginOperation(pending)
+        defer { finishOperation(operation) }
         let captured = epoch
         await teardownTask?.value
         if let other = cancelOtherMedia?() {
@@ -231,12 +255,14 @@ import SuwopShell
                 otherUnallocatedBytes: files.otherUnallocated(excluding: quote.leaseID)
             )
         } catch {
-            try? files.release(binding: quote.binding, leaseID: quote.leaseID)
+            try? releaseFile(binding: quote.binding, leaseID: quote.leaseID)
             throw error
         }
     }
 
     func read(_ ticket: ImmichLockedVideoTicket) async throws -> ImmichLockedVideoResult {
+        let operation = beginOperation(ticket.pending)
+        defer { finishOperation(operation) }
         let captured = epoch
         await teardownTask?.value
         let previous = readTask
@@ -253,7 +279,8 @@ import SuwopShell
             try files.commit(quote: quote, budget: .init(
                 maximum: ticket.maxReceivedBytes,
                 minimumRemaining: ticket.minimumRemainingBytes,
-                unit: ticket.storage.allocationUnitBytes
+                unit: ticket.storage.allocationUnitBytes,
+                mode: ticket.commitmentMode
             ))
             let request = try PrivateVideoRequest.make(ticket.request)
             let download = PrivateVideoDownload(files: files, quote: quote, ticket: ticket, acquisition: acquisition)
@@ -295,12 +322,16 @@ import SuwopShell
             )
         } catch {
             retireAcquisition(quote.leaseID)
-            try? files.release(binding: quote.binding, leaseID: quote.leaseID)
+            try? releaseFile(binding: quote.binding, leaseID: quote.leaseID)
             throw error
         }
     }
+}
 
+extension ImmichLockedVideoNativeAccess {
     func prepare(_ ticket: ImmichLockedVideoTicket, stagedID: String) async throws -> ImmichLockedVideoPrepared {
+        let operation = beginOperation(ticket.pending)
+        defer { finishOperation(operation) }
         let captured = epoch
         try await validate(ticket.pending, epoch: captured)
         guard var stage = stages[stagedID], stagedID == ticket.storage.leaseID,
@@ -394,33 +425,9 @@ extension ImmichLockedVideoNativeAccess {
         if stages[leaseID] != nil {
             stages.removeValue(forKey: leaseID)
         }
-        try files.get().release(binding: binding, leaseID: leaseID)
+        try releaseFile(binding: binding, leaseID: leaseID)
         if quotes[leaseID]?.binding == binding {
             quotes.removeValue(forKey: leaseID)
-        }
-    }
-
-    func release(generation: Int64) async throws {
-        let revoked = quotes.filter { $0.value.binding.generation <= generation }
-        for (id, quote) in revoked {
-            retireAcquisition(id)
-            let consumer = shieldPlayer?(quote.binding, id)
-            await consumer?.value
-            if readBinding == quote.binding, readLeaseID == id {
-                readTask?.cancel()
-                _ = await readTask?.result
-            }
-            if prepareBinding == quote.binding, prepareLeaseID == id {
-                prepareTask?.cancel()
-                _ = await prepareTask?.result
-            }
-            if stages[id] != nil {
-                stages.removeValue(forKey: id)
-            }
-            try files.get().release(binding: quote.binding, leaseID: id)
-            if quotes[id]?.binding == quote.binding {
-                quotes.removeValue(forKey: id)
-            }
         }
     }
 
@@ -431,13 +438,14 @@ extension ImmichLockedVideoNativeAccess {
 
 extension ImmichLockedVideoNativeAccess {
     @discardableResult
-    private func validate(
+    func validate(
         _ pending: ImmichLockedVideoPending, epoch captured: UUID, revision: String? = nil
     ) async throws -> ImmichLockedView {
-        guard let runtime, active, ownerSceneID == pending.sceneID,
+        let binding = PrivateVideoBinding(pending)
+        guard revokedBinding != binding, let runtime, active, ownerSceneID == pending.sceneID,
               expectedRequestID == pending.requestID, epoch == captured else { throw CancellationError() }
         let view = try await runtime.snapshot().view.immichLockedView
-        guard active, epoch == captured, ownerSceneID == pending.sceneID,
+        guard revokedBinding != binding, active, epoch == captured, ownerSceneID == pending.sceneID,
               expectedRequestID == pending.requestID, view.state == .open,
               view.grantID == pending.grantID, view.sceneID == pending.sceneID,
               view.generation == pending.generation, let live = view.videoPending,
@@ -508,7 +516,9 @@ extension ImmichLockedVideoNativeAccess {
     private func initialAcquisition(
         pending: ImmichLockedVideoPending, stagedID: String, lease: ImmichLockedVideoAcquisitionLease
     ) throws -> PrivateVideoAcquisition {
-        guard quotes[stagedID]?.binding == PrivateVideoBinding(pending), lease.leaseID == 1,
+        guard revokedBinding != PrivateVideoBinding(pending),
+              expectedRequestID == pending.requestID,
+              quotes[stagedID]?.binding == PrivateVideoBinding(pending), lease.leaseID == 1,
               lease.extensionMilliseconds == 0 else { throw CancellationError() }
         if let existing = acquisitions[stagedID] {
             guard let initial = initialAcquisitionLeases[stagedID], sameLease(initial, lease) else {
@@ -555,43 +565,11 @@ extension ImmichLockedVideoNativeAccess {
             && first.deadlineUnixMilliseconds == second.deadlineUnixMilliseconds
     }
 
-    private func retireAcquisition(_ stagedID: String) {
+    func retireAcquisition(_ stagedID: String) {
         acquisitions.removeValue(forKey: stagedID)?.cancel()
         acquisitionContracts.removeValue(forKey: stagedID)
         initialAcquisitionLeases.removeValue(forKey: stagedID)
         acquisitionExpiryTasks.removeValue(forKey: stagedID)?.cancel()
         acquisitionAnchors.removeValue(forKey: stagedID)
-    }
-}
-
-extension ImmichLockedVideoNativeAccess {
-    func approvedAsset(_ access: ImmichLockedVideoAccess) async throws -> Attachment {
-        let captured = epoch
-        try await validate(access.pending, epoch: captured)
-        guard let runtime else { throw CancellationError() }
-        let view = try await runtime.snapshot().view.immichLockedView
-        guard let current = view.video, current.stagedID == access.stagedID,
-              PrivateVideoBinding(current.pending) == PrivateVideoBinding(access.pending),
-              let stage = stages[access.stagedID], stage.quote.binding == PrivateVideoBinding(access.pending),
-              stage.publishedLeaseID != nil, let asset = stage.asset, epoch == captured,
-              Int64(Date().timeIntervalSince1970 * 1000) < displayDeadline
-        else {
-            throw CancellationError()
-        }
-        return Attachment(asset: asset, access: access, epoch: captured)
-    }
-
-    func attach(_ attachment: Attachment, ownerCurrent: () -> Bool, action: () -> Void) throws {
-        let access = attachment.access
-        guard active, attachment.epoch == epoch, ownerSceneID == access.pending.sceneID,
-              expectedRequestID == access.pending.requestID, currentGrantID == access.pending.grantID,
-              currentGeneration == access.pending.generation,
-              currentAccess?.stagedID == access.stagedID,
-              currentAccess.map({ PrivateVideoBinding($0.pending) }) == PrivateVideoBinding(access.pending),
-              stages[access.stagedID]?.asset === attachment.asset,
-              stages[access.stagedID]?.publishedLeaseID != nil,
-              Int64(Date().timeIntervalSince1970 * 1000) < displayDeadline,
-              ownerCurrent() else { throw CancellationError() }
-        action()
     }
 }

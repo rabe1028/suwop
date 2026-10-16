@@ -20,6 +20,8 @@ final class ImmichSelectedObservationTests: XCTestCase {
         let disclosure = try XCTUnwrap(fixture.confirmations.first?.continuingAccessDisclosure)
         XCTAssertTrue(disclosure.contains("既存の共有リンクからこの原本を表示・ダウンロードできる場合があります"))
         XCTAssertTrue(disclosure.contains("共有リンクは自動では解除されません"))
+        XCTAssertTrue(disclosure.contains("共有リンク以外からもこの原本を閲覧できることがあります"))
+        XCTAssertTrue(disclosure.contains("関連項目の表示先は変更しません"))
         let cases: [(ImmichVisibilityFixtureServer.SourceKind, SelectedConfiguration)] = [
             (.live, .linked), (.stacked, .stacked), (.unknownStack, .unverified),
         ]

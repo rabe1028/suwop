@@ -20,7 +20,8 @@ final class ImmichArchiveTests: XCTestCase {
             XCTAssertTrue(asset.inventoryComplete)
             XCTAssertEqual(view.immichArchiveActions.first?.to, destination)
             XCTAssertFalse(view.immichVisibilityActions.first?.canLock ?? true)
-            XCTAssertEqual(view.immichVisibilityActions.first?.reason, .video)
+            XCTAssertNil(view.immichVisibilityActions.first?.reason)
+            XCTAssertEqual(view.immichVisibilityActions.first?.writeAvailability, .unsupported)
             fixture.prepare(destination)
             try await fixture
                 .settle { !model.immichArchive.busy && !fixture.journal.immichVisibilityOperations.isEmpty }

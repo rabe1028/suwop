@@ -77,6 +77,8 @@ fn two_successors_keep_exact_storage_budget_and_acknowledge_only_the_issued_tran
         assert_eq!(next.acquisition_lease.extension_milliseconds, 5_000);
         assert_eq!(next.storage.lease_id, first.storage.lease_id);
         assert_eq!(next.max_received_bytes, first.max_received_bytes);
+        assert_eq!(next.commitment_mode, first.commitment_mode);
+        assert_eq!(next.storage, first.storage);
         assert_eq!(next.expected_sha1, first.expected_sha1);
         let projection = acquisition_projection(&model).ok_or("projection")?;
         assert_eq!(projection.acknowledged_lease_id, id - 1);
@@ -612,5 +614,148 @@ fn queued_initial_read_survives_renewal_without_initial_schedule_delivery_or_tic
     assert!(core.view().immich_locked_view.video.is_some());
     assert_eq!(shell.reads, 1);
     assert_eq!(shell.prepares, 1);
+    Ok(())
+}
+
+#[test]
+fn selected_quiescence_terminalizes_successor_and_discards_held_publication_before_ack()
+-> Result<(), String> {
+    let mut model = acquiring_model()?;
+    let initial = ticket(&model)?;
+    let binding = model.immich_locked.video.binding.clone().ok_or("binding")?;
+    let next = candidate(&mut model)?;
+    assert!(renewal::hold(
+        &mut model,
+        Event::ImmichLockedVideoPrepared {
+            ticket: initial.clone(),
+            approved: true,
+            acquisition_lease_id: 1,
+        }
+    ));
+    let captured = quiesce_visibility(&mut model, &initial.pending.key).ok_or("captured")?;
+    assert_eq!(captured.request_id, initial.pending.request_id);
+    assert!(
+        binding.current_capability().is_err(),
+        "shared authority is terminal before JOIN"
+    );
+    assert!(renewal::projection(&model).is_none());
+    assert!(model.immich_locked.video.renewal.held.is_none());
+    assert!(model.immich_locked.video.renewal.ticket.is_none());
+    acknowledge(&mut model, &next);
+    let mut late = update(
+        Event::ImmichLockedVideoPrepared {
+            ticket: initial,
+            approved: true,
+            acquisition_lease_id: 1,
+        },
+        &mut model,
+    )
+    .ok_or("late completion")?;
+    assert!(model.immich_locked.video.access.is_none());
+    assert!(model.immich_locked.video.pending.is_none());
+    assert!(
+        late.effects()
+            .all(|effect| matches!(effect, Effect::Io(request)
+        if matches!(request.operation, ShellOperation::ReleaseImmichLockedVideo { .. })))
+    );
+    Ok(())
+}
+
+#[test]
+fn old_quiesced_ack_and_expiry_cannot_terminalize_a_replacement_acquisition() -> Result<(), String>
+{
+    let mut model = acquiring_model()?;
+    let next = candidate(&mut model)?;
+    let _ = quiesce_visibility(&mut model, &next.pending.key);
+    let request_id = "77777777-7777-4777-8777-777777777777";
+    let _ = update(
+        Event::RequestImmichLockedVideo {
+            entry_id: ID.into(),
+            grant_id: GRANT.into(),
+            scene_id: SCENE.into(),
+            request_id: request_id.into(),
+        },
+        &mut model,
+    )
+    .ok_or("replacement request")?;
+    let binding = model
+        .immich_locked
+        .video
+        .binding
+        .clone()
+        .ok_or("replacement binding")?;
+    let mut storage = Shell::new(raw()).storage;
+    storage.lease_id = "88888888-8888-4888-8888-888888888888".into();
+    let _ = acquisition::planned(&mut model, binding.clone(), Ok((storage, Some(123))));
+    let replacement = candidate(&mut model)?;
+    let pending = model
+        .immich_locked
+        .video
+        .pending
+        .clone()
+        .ok_or("replacement pending")?;
+    assert_eq!(pending.request_id, request_id);
+    assert_eq!(replacement.pending, pending);
+    assert_eq!(binding.pending.request_id, request_id);
+    acknowledge(&mut model, &next);
+    expire(&mut model, next.acquisition_lease.lease_id);
+    assert_eq!(model.immich_locked.video.pending.as_ref(), Some(&pending));
+    let retained = ticket(&model)?;
+    assert_eq!(retained.pending, replacement.pending);
+    assert_eq!(retained.storage.lease_id, replacement.storage.lease_id);
+    let projected = renewal::projection(&model).ok_or("replacement projection")?;
+    assert_eq!(projected.lease.lease_id, 2);
+    assert_eq!(projected.acknowledged_lease_id, 1);
+    assert!(binding.current_capability().is_ok());
+    Ok(())
+}
+
+#[test]
+fn completion_cannot_change_commitment_mode_ceiling_or_original_storage_measurement()
+-> Result<(), String> {
+    let model = acquiring_model()?;
+    let original = ticket(&model)?;
+    assert!(renewal::completion_current(&model, &original, 1));
+    for field in 0..5 {
+        let mut changed = original.clone();
+        match field {
+            0 => changed.commitment_mode = ImmichLockedVideoCommitmentMode::Incremental,
+            1 => changed.max_received_bytes += 1,
+            2 => changed.minimum_remaining_bytes -= 1,
+            3 => changed.storage.measurement_nonce = "99999999-9999-4999-8999-999999999999".into(),
+            _ => changed.storage.allocation_unit_bytes += 1,
+        }
+        assert!(!renewal::completion_current(&model, &changed, 1));
+    }
+    let mut value = serde_json::to_value(&original).map_err(|_| "ticket encode")?;
+    value
+        .as_object_mut()
+        .ok_or("ticket object")?
+        .remove("commitmentMode");
+    assert!(serde_json::from_value::<ImmichLockedVideoTicket>(value.clone()).is_err());
+    value["commitmentMode"] = json!("inferFromLength");
+    assert!(serde_json::from_value::<ImmichLockedVideoTicket>(value).is_err());
+    Ok(())
+}
+
+#[test]
+fn incremental_plan_keeps_the_same_mode_and_ceiling_through_two_successors() -> Result<(), String> {
+    let mut model = acquiring_model()?;
+    let binding = model.immich_locked.video.binding.clone().ok_or("binding")?;
+    let _ = acquisition::planned(&mut model, binding, Ok((Shell::new(raw()).storage, None)));
+    let first = ticket(&model)?;
+    assert_eq!(
+        first.commitment_mode,
+        ImmichLockedVideoCommitmentMode::Incremental
+    );
+    assert!(first.expected_bytes.is_none());
+    for _ in 0..2 {
+        let next = candidate(&mut model)?;
+        assert_eq!(next.commitment_mode, first.commitment_mode);
+        assert_eq!(next.max_received_bytes, first.max_received_bytes);
+        assert_eq!(next.minimum_remaining_bytes, first.minimum_remaining_bytes);
+        assert_eq!(next.storage, first.storage);
+        acknowledge(&mut model, &next);
+    }
     Ok(())
 }

@@ -252,10 +252,11 @@ pub(super) fn completion_current(
             .as_ref()
             .is_some_and(|current| {
                 current.initial_acquisition_lease == ticket.initial_acquisition_lease
-                    && current.storage.lease_id == ticket.storage.lease_id
+                    && current.storage == ticket.storage
                     && current.expected_revision == ticket.expected_revision
                     && current.expected_sha1 == ticket.expected_sha1
                     && current.expected_bytes == ticket.expected_bytes
+                    && current.commitment_mode == ticket.commitment_mode
                     && current.max_received_bytes == ticket.max_received_bytes
                     && current.minimum_remaining_bytes == ticket.minimum_remaining_bytes
             })

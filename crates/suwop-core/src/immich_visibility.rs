@@ -246,7 +246,7 @@ pub fn locked_action(key: AssetKey) -> ImmichVisibilityActionHint {
 
 #[derive(Clone, Copy)]
 enum MediaPolicy {
-    LockedImage,
+    SelectedLockedMedia,
     OrdinaryArchive,
 }
 
@@ -268,11 +268,10 @@ pub(crate) fn ordinary_archive_reason(
             .is_none()
             .then_some(ImmichVisibilityUnsupportedReason::Unknown);
     }
-    unsupported_reason(asset, MediaPolicy::OrdinaryArchive)
+    unsupported_reason(asset)
 }
 fn unsupported_reason(
     asset: &crate::domain::StoredAsset,
-    policy: MediaPolicy,
 ) -> Option<ImmichVisibilityUnsupportedReason> {
     use crate::domain::{Provider, ResourceRole};
     if asset.key.provider != Provider::Immich || asset.is_offline {
@@ -283,21 +282,16 @@ fn unsupported_reason(
         .any(|r| r.role == ResourceRole::LiveVideo)
     {
         Some(ImmichVisibilityUnsupportedReason::Live)
-    } else if matches!(policy, MediaPolicy::LockedImage)
-        && asset
-            .resources
-            .iter()
-            .any(|r| r.role == ResourceRole::Video)
-    {
-        Some(ImmichVisibilityUnsupportedReason::Video)
     } else if asset.immich_stack == crate::domain::ImmichStackState::Stacked {
         Some(ImmichVisibilityUnsupportedReason::Stack)
     } else if asset.immich_stack == crate::domain::ImmichStackState::Unknown
         || !asset.inventory_complete
         || asset.originals().count() != 1
         || !asset.originals().any(|r| {
-            matches!(r.role, ResourceRole::Image | ResourceRole::RawImage)
-                || matches!(policy, MediaPolicy::OrdinaryArchive) && r.role == ResourceRole::Video
+            matches!(
+                r.role,
+                ResourceRole::Image | ResourceRole::RawImage | ResourceRole::Video
+            )
         })
     {
         Some(ImmichVisibilityUnsupportedReason::Unknown)
@@ -306,7 +300,7 @@ fn unsupported_reason(
     }
 }
 pub(crate) fn hint(asset: &crate::domain::StoredAsset, locked: bool) -> ImmichVisibilityActionHint {
-    let reason = unsupported_reason(asset, MediaPolicy::LockedImage);
+    let reason = unsupported_reason(asset);
 
     ImmichVisibilityActionHint {
         write_availability: if reason.is_none() {
@@ -531,7 +525,7 @@ pub(crate) fn facts(
     scope: &str,
     owner: &str,
 ) -> Result<VisibilityFacts, String> {
-    facts_with_policy(value, scope, owner, MediaPolicy::LockedImage)
+    facts_with_policy(value, scope, owner, MediaPolicy::SelectedLockedMedia)
 }
 pub(crate) fn ordinary_facts(
     value: &serde_json::Value,
@@ -553,7 +547,7 @@ pub(crate) fn reconciliation_facts(
     {
         MediaPolicy::OrdinaryArchive
     } else {
-        MediaPolicy::LockedImage
+        MediaPolicy::SelectedLockedMedia
     };
     facts_with_policy(value, scope, owner, policy)
 }
@@ -574,7 +568,7 @@ fn facts_with_policy(
     }
     let media = match (asset.media_type.as_str(), policy) {
         ("IMAGE", _) => IdentityMedia::Image,
-        ("VIDEO", MediaPolicy::OrdinaryArchive) => IdentityMedia::Video,
+        ("VIDEO", _) => IdentityMedia::Video,
         _ => return Err("この形式の可視性変更はまだ対応していません。".into()),
     };
     let linked_child =
@@ -602,7 +596,9 @@ fn facts_with_policy(
     let visibility = match asset.visibility.as_deref() {
         Some("timeline") => ImmichVisibility::Timeline,
         Some("archive") => ImmichVisibility::Archive,
-        Some("locked") if matches!(policy, MediaPolicy::LockedImage) => ImmichVisibility::Locked,
+        Some("locked") if matches!(policy, MediaPolicy::SelectedLockedMedia) => {
+            ImmichVisibility::Locked
+        }
         _ => return Err("写真の可視性を確認できません。".into()),
     };
     let checksum = crate::domain::normalize_sha1(Some(&asset.checksum))
@@ -654,7 +650,7 @@ pub struct VisibilityCompletion {
 }
 #[path = "workflow/immich_visibility.rs"]
 pub(crate) mod workflow;
-use workflow::{apply, inspect, invalidate_remote, prepare};
+use workflow::{apply_quiesced, inspect, invalidate_remote, prepare};
 const SAFE_ERROR: &str = "写真の状態を確認できません。変更は再送せず状態を確認してください。";
 
 pub(crate) fn update(
@@ -675,14 +671,7 @@ pub(crate) fn update(
             let prepared = match result {
                 Ok(prepared) => prepared,
                 Err(message) => {
-                    model.busy = false;
-                    if model.immich_archive.working {
-                        model.immich_archive.message = Some(message);
-                    } else {
-                        model.immich_visibility.message = Some(message);
-                    }
-                    model.immich_archive.working = false;
-                    model.immich_archive.active_operation = None;
+                    preparation_failed(model, message);
                     return Some(Command::done());
                 }
             };
@@ -703,9 +692,15 @@ pub(crate) fn update(
                 .denied
                 .insert(prepared.operation.key.clone());
             crate::immich_locked::remove_visibility_entry(model, &prepared.operation.key);
+            let pending =
+                if prepared.operation.kind == ImmichVisibilityOperationKind::LockedTransition {
+                    crate::immich_locked::video::quiesce_visibility(model, &prepared.operation.key)
+                } else {
+                    None
+                };
             let before = model.state.clone();
             Some(Command::new(move |ctx| async move {
-                let result = apply(&ctx, before, prepared).await;
+                let result = apply_quiesced(&ctx, before, prepared, pending).await;
                 ctx.send_event(Event::ImmichVisibilityFinished { result });
             }))
         }
@@ -743,12 +738,13 @@ pub(crate) fn update(
             };
             // Keep the row, but revoke only its preview/pending read before fresh inspection.
             crate::immich_locked::clear_visibility_key_image(model, &operation.key);
+            let cleanup = crate::immich_locked::video::stop_for_key(model, &operation.key);
             model.busy = true;
             let before = model.state.clone();
-            Some(Command::new(move |ctx| async move {
+            Some(cleanup.and(Command::new(move |ctx| async move {
                 let result = inspect(&ctx, before, capability.into(), operation).await;
                 ctx.send_event(Event::ImmichVisibilityFinished { result });
-            }))
+            })))
         }
         Event::RecoverImmichVisibilityState { grant_id, scene_id } => {
             Some(recover(model, &grant_id, &scene_id))
@@ -756,6 +752,17 @@ pub(crate) fn update(
         Event::ImmichVisibilityFinished { result } => Some(finish(model, result)),
         _ => None,
     }
+}
+
+fn preparation_failed(model: &mut Model, message: String) {
+    model.busy = false;
+    if model.immich_archive.working {
+        model.immich_archive.message = Some(message);
+    } else {
+        model.immich_visibility.message = Some(message);
+    }
+    model.immich_archive.working = false;
+    model.immich_archive.active_operation = None;
 }
 
 fn begin(
@@ -1059,16 +1066,18 @@ mod media_policy_tests {
     }
 
     #[test]
-    fn video_facts_are_ordinary_only_and_require_explicit_forward_null() -> Result<(), String> {
+    fn selected_video_facts_preserve_typed_direction_and_explicit_forward_null()
+    -> Result<(), String> {
         let raw = video();
         assert!(ordinary_facts(&raw, "scope", "owner").is_ok());
-        assert!(facts(&raw, "scope", "owner").is_err());
+        assert!(facts(&raw, "scope", "owner").is_ok());
         let mut missing = raw.clone();
         missing
             .as_object_mut()
             .ok_or("object")?
             .remove("livePhotoVideoId");
         assert!(ordinary_facts(&missing, "scope", "owner").is_err());
+        assert!(facts(&missing, "scope", "owner").is_err());
         for patch in [
             json!({"livePhotoVideoId":"44444444-4444-4444-8444-444444444444"}),
             json!({"stack":{}}),
@@ -1081,13 +1090,17 @@ mod media_policy_tests {
                 .ok_or("object")?
                 .extend(patch.as_object().ok_or("patch")?.clone());
             assert!(ordinary_facts(&changed, "scope", "owner").is_err());
+            assert_eq!(
+                facts(&changed, "scope", "owner").is_ok(),
+                changed["visibility"] == "locked"
+            );
         }
         Ok(())
     }
 
     #[test]
-    fn video_reconciliation_never_borrows_ordinary_policy_for_mixed_history() -> Result<(), String>
-    {
+    fn video_reconciliation_matches_selected_video_but_keeps_unresolved_mixed_history_fenced()
+    -> Result<(), String> {
         let raw = video();
         let fresh = ordinary_facts(&raw, "scope", "owner")?;
         let ordinary: ImmichVisibilityOperation = serde_json::from_value(json!({
@@ -1100,9 +1113,9 @@ mod media_policy_tests {
         let mut locked = ordinary.clone();
         locked.kind = ImmichVisibilityOperationKind::LockedTransition;
         locked.to = ImmichVisibility::Locked;
-        assert!(reconciliation_facts(&raw, "scope", "owner", &[&ordinary, &locked]).is_err());
-        assert!(reconciliation_facts(&raw, "scope", "owner", &[&locked]).is_err());
-        assert!(reconciliation_facts(&raw, "scope", "owner", &[]).is_err());
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[&ordinary, &locked]).is_ok());
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[&locked]).is_ok());
+        assert!(reconciliation_facts(&raw, "scope", "owner", &[]).is_ok());
         // Refresh tracks observed records only. An unobserved Unknown of
         // either kind remains an independent canonical content/write fence.
         locked.outcome = crate::apple_visibility::VisibilityOutcome::Unknown;

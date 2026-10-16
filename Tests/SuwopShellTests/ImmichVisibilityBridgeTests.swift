@@ -16,6 +16,8 @@ private final class VisibilityABI {
     var stackFact: JSONValue? = .null
     var detailFault = DetailFault.none
     private(set) var detailReads = 0
+    private(set) var writeOrder: [String] = []
+    private var quiescenceAcknowledged = false
 
     init(saved: SavedLibrary? = nil, visibility: String = "timeline") throws {
         driver = try LockedSessionABI()
@@ -27,14 +29,39 @@ private final class VisibilityABI {
         }
         self.visibility = visibility
         driver.effectReply = { [weak self] operation in
-            guard let self, operation.type == "confirmImmichVisibility" else { return nil }
-            try confirmations.append((operation.data ?? .null)["prompt"].decode(ImmichVisibilityPrompt.self))
-            return .bool(accept)
+            guard let self else { return nil }
+            let data = operation.data ?? .null
+            switch operation.type {
+            case "confirmImmichVisibility":
+                try confirmations.append(data["prompt"].decode(ImmichVisibilityPrompt.self))
+                writeOrder.append("confirm")
+                return .bool(accept)
+            case "quiesceImmichLockedVideo":
+                #expect(try data["key"].decode(AssetKey.self) == key)
+                #expect(try data["pending"].decode(ImmichLockedVideoPending?.self) == nil)
+                #expect(!driver.saved.immichVisibilityOperations.contains { $0.key == key && $0.outcome == .unknown })
+                #expect(puts == 0)
+                quiescenceAcknowledged = true
+                writeOrder.append("quiesce")
+                return .null
+            case "persist":
+                let saved = try data.decode(SavedLibrary.self)
+                let existingIDs = Set(driver.saved.immichVisibilityOperations.map(\.id))
+                if saved.immichVisibilityOperations.contains(where: {
+                    $0.key == key && $0.outcome == .unknown && !existingIDs.contains($0.id)
+                }) {
+                    #expect(quiescenceAcknowledged, "The unit ACK must precede durable intent")
+                    writeOrder.append("intent")
+                }
+                return nil // The shared driver still performs the actual durable-state replacement.
+            default: return nil
+            }
         }
         driver.httpReply = { [weak self] request in try self?.http(request) }
     }
 
     func prepare(_ to: ImmichVisibility, id: String = "55555555-5555-4555-8555-555555555555") throws {
+        quiescenceAcknowledged = false
         try driver.drain(driver.event([
             "type": .string("prepareImmichVisibility"), "key": .from(key), "to": .string(to.rawValue),
             "operationID": .string(id), "grantID": .string(driver.grant), "sceneID": .string(driver.scene),
@@ -56,6 +83,8 @@ private final class VisibilityABI {
                 $0.key == key && $0.to.rawValue == destination && $0.outcome == .unknown && !$0.witnessDigest.isEmpty
             }
             #expect(durableBeforePUT)
+            #expect(quiescenceAcknowledged)
+            writeOrder.append("put")
             puts += 1
             visibility = destination
             return HttpResponse(body: .null, status: loseReply ? 503 : 204)
@@ -121,6 +150,7 @@ private final class VisibilityABI {
     #expect(prompt.removesAllAlbumMembership && prompt.noAutomaticAlbumRestore)
     #expect(prompt.grantID == driver.grant && prompt.sceneID == driver.scene)
     #expect(fixture.puts == 1 && fixture.durableBeforePUT)
+    #expect(fixture.writeOrder == ["confirm", "quiesce", "intent", "put"])
     #expect(driver.saved.immichVisibilityOperations.first?.outcome == .applied)
     #expect(try !driver.view().ordinaryContentKeys.contains(fixture.key))
     try driver.drain(driver.event(["type": .string("closeImmichLocked")]))

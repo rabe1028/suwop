@@ -1008,6 +1008,11 @@ public enum ImmichLockedVideoCapacityClass: String, Codable, CaseIterable, Senda
     case `available`
 }
 
+public enum ImmichLockedVideoCommitmentMode: String, Codable, CaseIterable, Sendable {
+    case `fullUpfront`
+    case `incremental`
+}
+
 public struct ImmichLockedVideoPending: Codable, Sendable {
     public var entryID: String
     public var generation: Int64
@@ -1080,6 +1085,7 @@ public struct ImmichLockedVideoStorageFacts: Codable, Sendable {
 
 public struct ImmichLockedVideoTicket: Codable, Sendable {
     public var acquisitionLease: ImmichLockedVideoAcquisitionLease
+    public var commitmentMode: ImmichLockedVideoCommitmentMode
     public var deadlineUnixMilliseconds: Int64
     public var displayLeaseID: Int64
     public var expectedBytes: Int64?
@@ -1091,8 +1097,9 @@ public struct ImmichLockedVideoTicket: Codable, Sendable {
     public var pending: ImmichLockedVideoPending
     public var request: HttpRequest
     public var storage: ImmichLockedVideoStorageFacts
-    public init(acquisitionLease: ImmichLockedVideoAcquisitionLease, deadlineUnixMilliseconds: Int64, displayLeaseID: Int64, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, initialAcquisitionLease: ImmichLockedVideoAcquisitionLease, maxReceivedBytes: Int64, minimumRemainingBytes: Int64, pending: ImmichLockedVideoPending, request: HttpRequest, storage: ImmichLockedVideoStorageFacts) {
+    public init(acquisitionLease: ImmichLockedVideoAcquisitionLease, commitmentMode: ImmichLockedVideoCommitmentMode, deadlineUnixMilliseconds: Int64, displayLeaseID: Int64, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, initialAcquisitionLease: ImmichLockedVideoAcquisitionLease, maxReceivedBytes: Int64, minimumRemainingBytes: Int64, pending: ImmichLockedVideoPending, request: HttpRequest, storage: ImmichLockedVideoStorageFacts) {
         self.acquisitionLease = acquisitionLease
+        self.commitmentMode = commitmentMode
         self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
         self.displayLeaseID = displayLeaseID
         self.expectedBytes = expectedBytes

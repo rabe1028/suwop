@@ -2,7 +2,8 @@
 use super::*;
 use std::collections::BTreeMap;
 use suwop_core::immich_locked::video::{
-    ImmichLockedVideoPending, ImmichLockedVideoStorageFacts, ImmichLockedVideoTicket,
+    ImmichLockedVideoCommitmentMode, ImmichLockedVideoPending, ImmichLockedVideoStorageFacts,
+    ImmichLockedVideoTicket,
 };
 struct Lease {
     pending: ImmichLockedVideoPending,
@@ -321,6 +322,10 @@ impl<'a> Shell<'a> {
         let measured_length =
             u64::try_from(expected_bytes.len()).map_err(|_| "fixture video size")?;
         if self.absent_size {
+            assert_eq!(
+                ticket.commitment_mode,
+                ImmichLockedVideoCommitmentMode::Incremental
+            );
             assert!(ticket.expected_bytes.is_none());
             let usable = ticket
                 .storage
@@ -335,6 +340,10 @@ impl<'a> Shell<'a> {
             );
             assert!(ticket.max_received_bytes > measured_length);
         } else if let Some(expected) = ticket.expected_bytes {
+            assert_eq!(
+                ticket.commitment_mode,
+                ImmichLockedVideoCommitmentMode::FullUpfront
+            );
             assert_eq!(expected, measured_length);
             assert_eq!(ticket.max_received_bytes, expected);
         }

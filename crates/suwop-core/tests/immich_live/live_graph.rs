@@ -940,3 +940,28 @@ async fn scenario(ctx: &Context, session: &Elevated, directory: &Path) -> Result
         json!({"fixtureOwnerID":session.ordinary.user_id,"fixtureMotionID":graph.motion,"knownOwnedParentAlbumIDs":parent_albums,"knownOwnedVideoAlbumIDs":video_albums,"observations":observations,"apiLinkedNotAppleLive":true,"multipleParentsAccepted":true,"originalsVerified":true,"ordinaryVideoArchivePreservesOwnedAlbums":true,"parentOnlyLockMotionVisibility":"hidden","parentOnlyLockOrdinaryMotionOriginalStatus":motion_status,"beforeStack":before_stack,"whileParentLocked":while_locked,"graphAtomicityProven":false,"reverseAbsenceProven":false,"productMutationSupportClaimed":false}),
     )
 }
+
+#[path = "live_graph/selected_video_fixture.rs"]
+pub(super) mod selected_video_fixture;
+
+fn drive_setup(agent: &ureq::Agent, command: &mut Command<Effect, Event>) -> Result<(), String> {
+    loop {
+        let effects = command.effects().collect::<Vec<_>>();
+        if effects.is_empty() {
+            return Ok(());
+        }
+        for Effect::Io(mut request) in effects {
+            let result = match &request.operation {
+                ShellOperation::Http(http) => execute(agent, http),
+                ShellOperation::Wait { milliseconds } => {
+                    std::thread::sleep(Duration::from_millis(u64::from(*milliseconds)));
+                    Ok(Value::Null)
+                }
+                _ => Err("unexpected external video setup effect".into()),
+            };
+            request
+                .resolve(live_response(result))
+                .map_err(|_| "video setup resolve")?;
+        }
+    }
+}

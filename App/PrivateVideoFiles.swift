@@ -22,15 +22,35 @@ final class PrivateVideoFiles: Sendable {
         let quote: Quote
         let url: URL
         var budget: PrivateVideoAllocation.Budget?
+        var claimedThrough: Int64 = 0
+        var failed = false
         var written: Int64 = 0
         var finished = false
     }
 
+    private let measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?
     private let volume: PrivateVideoVolume
     private let namespace: PrivateVideoNamespace
     private let records = OSAllocatedUnfairLock(initialState: [String: Record]())
 
-    init(root explicitRoot: URL? = nil) throws {
+    convenience init(root explicitRoot: URL? = nil) throws {
+        try self.init(root: explicitRoot, measurementProvider: nil)
+    }
+
+    #if SUWOP_VRT
+        convenience init(
+            testingRoot: URL,
+            availableBytes: @escaping @Sendable (PrivateVideoVolume.Measurement) throws -> Int64
+        ) throws {
+            try self.init(root: testingRoot, measurementProvider: availableBytes)
+        }
+    #endif
+
+    private init(
+        root explicitRoot: URL?,
+        measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?
+    ) throws {
+        self.measurementProvider = measurementProvider
         let root: URL = if let explicitRoot {
             explicitRoot
         } else {
@@ -66,7 +86,7 @@ final class PrivateVideoFiles: Sendable {
                     leaseID: leaseID,
                     nonce: UUID().uuidString,
                     deadline: freshnessDeadline,
-                    volume: volume.measure()
+                    volume: measure()
                 )
                 state[leaseID] = Record(quote: quote, url: url)
                 return quote
@@ -95,16 +115,18 @@ final class PrivateVideoFiles: Sendable {
             guard var record = state[quote.leaseID], record.quote.binding == quote.binding,
                   record.quote.nonce == quote.nonce, record.budget == nil,
                   now() < quote.deadline else { throw CancellationError() }
-            let measurement = try volume.measure()
+            let measurement = try measure()
             guard measurement.volumeIdentifier == quote.volume.volumeIdentifier,
                   measurement.allocationUnitBytes == budget.unit else { throw CancellationError() }
+            let claim = try PrivateVideoAllocation.initialClaim(budget)
             try PrivateVideoAllocation.verify(
                 available: measurement.availableBytes,
                 otherUnallocated: commitments(state, excluding: quote.leaseID),
                 allocated: allocated(record.url),
-                nextWritten: budget.maximum,
+                nextWritten: claim,
                 budget: budget
             )
+            record.claimedThrough = claim
             record.budget = budget
             state[quote.leaseID] = record
         }
@@ -123,31 +145,45 @@ final class PrivateVideoFiles: Sendable {
         try records.withLock { state in
             guard var record = state[quote.leaseID], record.quote.binding == quote.binding,
                   record.quote.nonce == quote.nonce, let budget = record.budget,
-                  !record.finished, deadline.map({ now() < $0 }) ?? true else { throw CancellationError() }
+                  !record.finished, !record.failed,
+                  deadline.map({ now() < $0 }) ?? true else { throw CancellationError() }
             let (next, overflow) = record.written.addingReportingOverflow(Int64(bytes.count))
             guard !overflow else { throw CancellationError() }
-            let measurement = try volume.measure()
-            guard measurement.volumeIdentifier == quote.volume.volumeIdentifier else { throw CancellationError() }
+            let claim = try PrivateVideoAllocation.extendedClaim(
+                current: record.claimedThrough, nextWritten: next, budget: budget
+            )
+            let measurement = try measure()
+            guard measurement.volumeIdentifier == quote.volume.volumeIdentifier,
+                  measurement.allocationUnitBytes == budget.unit else { throw CancellationError() }
             try PrivateVideoAllocation.verify(
                 available: measurement.availableBytes,
                 otherUnallocated: commitments(state, excluding: quote.leaseID),
                 allocated: allocated(record.url),
-                nextWritten: next,
+                nextWritten: claim,
                 budget: budget
             )
-            let handle = try FileHandle(forWritingTo: record.url)
-            defer { try? handle.close() }
-            try handle.seekToEnd()
-            try handle.write(contentsOf: bytes)
-            record.written = next
+            // Persist the attempted allocation claim before I/O: a partial write can allocate even when it throws.
+            record.claimedThrough = claim
             state[quote.leaseID] = record
+            do {
+                let handle = try FileHandle(forWritingTo: record.url)
+                defer { try? handle.close() }
+                try handle.seekToEnd()
+                try handle.write(contentsOf: bytes)
+                record.written = next
+                state[quote.leaseID] = record
+            } catch {
+                record.failed = true
+                state[quote.leaseID] = record
+                throw error
+            }
         }
     }
 
     func finish(quote: Quote) throws -> URL {
         try records.withLock { state in
             guard var record = state[quote.leaseID], record.quote.binding == quote.binding,
-                  record.quote.nonce == quote.nonce, record.budget != nil, !record.finished
+                  record.quote.nonce == quote.nonce, record.budget != nil, !record.finished, !record.failed
             else {
                 throw CancellationError()
             }
@@ -160,6 +196,30 @@ final class PrivateVideoFiles: Sendable {
         }
     }
 
+    #if SUWOP_VRT
+        struct TestState {
+            let url: URL
+            let claimed: Int64
+            let written: Int64
+            let finished: Bool
+            let failed: Bool
+        }
+
+        func stateForTesting(leaseID: String) -> TestState? {
+            records.withLock { state in
+                state[leaseID].map {
+                    TestState(
+                        url: $0.url,
+                        claimed: $0.claimedThrough,
+                        written: $0.written,
+                        finished: $0.finished,
+                        failed: $0.failed
+                    )
+                }
+            }
+        }
+    #endif
+
     func release(binding: PrivateVideoBinding, leaseID: String) throws {
         try records.withLock { state in
             guard let record = state[leaseID], record.quote.binding == binding else { return }
@@ -170,9 +230,9 @@ final class PrivateVideoFiles: Sendable {
 
     private func commitments(_ state: [String: Record], excluding leaseID: String) throws -> Int64 {
         try state.filter { $0.key != leaseID }.values.reduce(0) { sum, record in
-            guard let budget = record.budget, !record.finished else { return sum }
+            guard let budget = record.budget else { return sum }
             let outstanding = try PrivateVideoAllocation.unallocated(
-                maximum: budget.maximum, allocated: allocated(record.url), unit: budget.unit
+                maximum: record.claimedThrough, allocated: allocated(record.url), unit: budget.unit
             )
             let (total, overflow) = sum.addingReportingOverflow(outstanding)
             guard !overflow else { throw CancellationError() }
@@ -186,6 +246,18 @@ final class PrivateVideoFiles: Sendable {
         let values = try freshURL.resourceValues(forKeys: [.fileAllocatedSizeKey])
         guard let value = values.fileAllocatedSize, value >= 0 else { throw CancellationError() }
         return Int64(value)
+    }
+
+    /// Called synchronously under records' lock. Providers must not re-enter this owner.
+    private func measure() throws -> PrivateVideoVolume.Measurement {
+        let actual = try volume.measure()
+        guard let measurementProvider else { return actual }
+        return try PrivateVideoVolume.Measurement(
+            availableBytes: measurementProvider(actual),
+            allocationUnitBytes: actual.allocationUnitBytes,
+            capacityClass: actual.capacityClass,
+            volumeIdentifier: actual.volumeIdentifier
+        )
     }
 
     private func now() -> Int64 {
