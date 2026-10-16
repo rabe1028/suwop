@@ -1,0 +1,11 @@
+{
+  "file": "synthetic-private-video.mp4",
+  "bytes": 335902,
+  "sha1": "924a8a9905852f5c8af20fd6de410e65e6a5b995",
+  "sha256": "54daf4078e6c11054b67e8d789916e52bd7a9158b3c1675117de395c912f38c2",
+  "decodedVideoFrames": 360,
+  "synthetic": true,
+  "width": 96,
+  "height": 96,
+  "durationSeconds": 30
+}

@@ -13,12 +13,15 @@
         static let shared = NativeScenePresentationAnchors()
         private var windows: [String: WeakWindow] = [:]
         func register(sceneID: String, window: NSWindow) {
+            guard windows[sceneID]?.value !== window else { return }
             windows[sceneID] = WeakWindow(window)
+            NativeSceneAnchorChanges.notify(sceneID: sceneID)
         }
 
         func unregister(sceneID: String, window: NSWindow) {
             guard windows[sceneID]?.value === window else { return }
             windows.removeValue(forKey: sceneID)
+            NativeSceneAnchorChanges.notify(sceneID: sceneID)
         }
 
         func window(for sceneID: String) -> NSWindow? {

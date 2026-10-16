@@ -92,3 +92,7 @@ sharing-test:
 .PHONY: test-infra
 test-infra:
 	uv run --no-project python -m unittest discover -s scripts -p 'test_*.py' -v
+
+.PHONY: private-video-mac-test
+private-video-mac-test:
+	bash scripts/private-video-mac-test.sh

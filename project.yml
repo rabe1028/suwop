@@ -71,6 +71,10 @@ targets:
       - path: App
         excludes: [SuwopApp.swift]
       - path: VRT/Host
+      - path: Tests/fixtures/private_video/synthetic-private-video.mp4
+        buildPhase: resources
+      - path: Tests/fixtures/private_video/synthetic-private-video.mov
+        buildPhase: resources
     dependencies:
       - package: SuwopShell
         product: SuwopShell
@@ -152,6 +156,7 @@ targets:
       - path: App/SystemSharing.swift
       - path: App/ContentPresentationEpoch.swift
       - path: App/MacScenePresentationAnchor.swift
+      - path: App/NativeSceneAnchorChanges.swift
       - path: App/ImmichVisibilityPresentation.swift
       - path: App/MacImmichVisibilityConfirmation.swift
       - path: App/MacImmichArchiveConfirmation.swift
@@ -165,6 +170,41 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.sharing.tests
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_SHARING_TEST'
+  SuwopPrivateVideoMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: App/ImmichLockedVideoNativeAccess.swift
+      - path: App/ImmichLockedVideoEffects.swift
+      - path: App/ImmichLockedVideoPlayer.swift
+      - path: App/ImmichLockedVideoSurface.swift
+      - path: App/PrivateVideoBinding.swift
+      - path: App/PrivateVideoAllocation.swift
+      - path: App/PrivateVideoFiles.swift
+      - path: App/PrivateVideoNamespace.swift
+      - path: App/PrivateVideoVolume.swift
+      - path: App/PrivateVideoDownload.swift
+      - path: App/PrivateVideoResponse.swift
+      - path: App/NativeSubmissionGate.swift
+      - path: App/MacScenePresentationAnchor.swift
+      - path: App/NativeSceneAnchorChanges.swift
+      - path: VRT/Host/PrivateVideoHTTPServer.swift
+      - path: VRT/Host/ImmichVisibilityFixtureServer.swift
+      - path: VRT/Host/ImmichVisibilityFixtureData.swift
+      - path: VRT/Host/ImmichLockedFixtureData.swift
+      - path: NativeAcceptance/PrivateVideoMacTests
+      - path: Tests/fixtures/private_video/synthetic-private-video.mp4
+        buildPhase: resources
+      - path: Tests/fixtures/private_video/synthetic-private-video.mov
+        buildPhase: resources
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-video.tests
 schemes:
   SuwopiOS:
     build:
@@ -203,3 +243,10 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopSharingTests]
+  SuwopPrivateVideoMac:
+    build:
+      targets:
+        SuwopPrivateVideoMacTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopPrivateVideoMacTests]

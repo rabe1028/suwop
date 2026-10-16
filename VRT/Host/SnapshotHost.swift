@@ -4,7 +4,9 @@ import SwiftUI
 @main @MainActor struct SnapshotHost: App {
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--ordinary-selected-fixture") {
+            if CommandLine.arguments.contains("--private-video-fixture") {
+                InteractivePrivateVideoHost()
+            } else if CommandLine.arguments.contains("--ordinary-selected-fixture") {
                 InteractiveOrdinarySelectedHost()
             } else if CommandLine.arguments.contains("--archive-busy-fixture") {
                 ImmichArchiveBusyHost()

@@ -41,6 +41,7 @@ import SuwopShell
     private var phase: ProtectionScenePhase = .background
     private var currentView: (@MainActor () async throws -> ImmichLockedView)?
     private var readTask: Task<Void, Error>?
+    var beforeRead: (@MainActor () async -> Void)?
     private var activeReadID: String?
     private var readingGeneration: Int64?
     private var latestReadID: String?
@@ -90,6 +91,11 @@ import SuwopShell
         readTask?.cancel()
     }
 
+    func cancellationHandle() -> Task<Void, Error>? {
+        readTask?.cancel()
+        return readTask
+    }
+
     func read(_ ticket: ImmichLockedImageTicket, http: HTTPExecutor) async throws -> ImmichLockedImageResult {
         let binding = Binding(ticket)
         let captured = epoch
@@ -98,6 +104,7 @@ import SuwopShell
             previous.cancel()
             _ = try? await previous.value
         }
+        await beforeRead?()
         try await validate(binding)
         guard epoch == captured, latestReadID == ticket.requestID else { throw CancellationError() }
         let raster = RasterRead()

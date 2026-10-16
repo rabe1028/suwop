@@ -1,0 +1,10 @@
+{
+  "file": "synthetic-private-video.mov",
+  "bytes": 335953,
+  "sha1": "70015b7e85652829471217488b1bffacff7ee0bd",
+  "sha256": "4648cf79b15db050d7417d34b4a0f69fc02459d8b404c69c4e19ed69912aed97",
+  "synthetic": true,
+  "container": "QuickTime MOV",
+  "source": "synthetic-private-video.mp4",
+  "remuxOnly": true
+}

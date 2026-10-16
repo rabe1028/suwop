@@ -812,10 +812,12 @@ public struct ImmichArchiveView: Codable, Sendable {
 
 public struct ImmichLockedEntry: Codable, Sendable {
     public var asset: StoredAsset
+    public var canPlayVideo: Bool
     public var id: String
     public var visibilityAction: ImmichVisibilityActionHint
-    public init(asset: StoredAsset, id: String, visibilityAction: ImmichVisibilityActionHint) {
+    public init(asset: StoredAsset, canPlayVideo: Bool = false, id: String, visibilityAction: ImmichVisibilityActionHint) {
         self.asset = asset
+        self.canPlayVideo = canPlayVideo
         self.id = id
         self.visibilityAction = visibilityAction
     }
@@ -874,6 +876,111 @@ public enum ImmichLockedState: String, Codable, CaseIterable, Sendable {
     case `open`
 }
 
+public struct ImmichLockedVideoAccess: Codable, Sendable {
+    public var pending: ImmichLockedVideoPending
+    public var stagedID: String
+    public init(pending: ImmichLockedVideoPending, stagedID: String) {
+        self.pending = pending
+        self.stagedID = stagedID
+    }
+}
+
+public enum ImmichLockedVideoCapacityClass: String, Codable, CaseIterable, Sendable {
+    case `importantUsage`
+    case `available`
+}
+
+public struct ImmichLockedVideoPending: Codable, Sendable {
+    public var entryID: String
+    public var generation: Int64
+    public var grantID: String
+    public var key: AssetKey
+    public var phase: ImmichLockedVideoPhase
+    public var requestID: String
+    public var sceneID: String
+    public init(entryID: String, generation: Int64, grantID: String, key: AssetKey, phase: ImmichLockedVideoPhase, requestID: String, sceneID: String) {
+        self.entryID = entryID
+        self.generation = generation
+        self.grantID = grantID
+        self.key = key
+        self.phase = phase
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public enum ImmichLockedVideoPhase: String, Codable, CaseIterable, Sendable {
+    case `checking`
+    case `acquiring`
+    case `preparing`
+}
+
+public struct ImmichLockedVideoPrepared: Codable, Sendable {
+    public var requestID: String
+    public var stagedID: String
+    public init(requestID: String, stagedID: String) {
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct ImmichLockedVideoResult: Codable, Sendable {
+    public var requestID: String
+    public var sha1: String
+    public var signature: FileSignature
+    public var stagedID: String
+    public init(requestID: String, sha1: String, signature: FileSignature, stagedID: String) {
+        self.requestID = requestID
+        self.sha1 = sha1
+        self.signature = signature
+        self.stagedID = stagedID
+    }
+}
+
+public struct ImmichLockedVideoStorageFacts: Codable, Sendable {
+    public var allocationUnitBytes: Int64
+    public var availableBytes: Int64
+    public var capacityClass: ImmichLockedVideoCapacityClass
+    public var deadlineUnixMilliseconds: Int64
+    public var leaseID: String
+    public var measurementNonce: String
+    public var otherUnallocatedBytes: Int64
+    public init(allocationUnitBytes: Int64, availableBytes: Int64, capacityClass: ImmichLockedVideoCapacityClass, deadlineUnixMilliseconds: Int64, leaseID: String, measurementNonce: String, otherUnallocatedBytes: Int64) {
+        self.allocationUnitBytes = allocationUnitBytes
+        self.availableBytes = availableBytes
+        self.capacityClass = capacityClass
+        self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
+        self.leaseID = leaseID
+        self.measurementNonce = measurementNonce
+        self.otherUnallocatedBytes = otherUnallocatedBytes
+    }
+}
+
+public struct ImmichLockedVideoTicket: Codable, Sendable {
+    public var deadlineUnixMilliseconds: Int64
+    public var displayLeaseID: Int64
+    public var expectedBytes: Int64?
+    public var expectedRevision: String
+    public var expectedSha1: String
+    public var maxReceivedBytes: Int64
+    public var minimumRemainingBytes: Int64
+    public var pending: ImmichLockedVideoPending
+    public var request: HttpRequest
+    public var storage: ImmichLockedVideoStorageFacts
+    public init(deadlineUnixMilliseconds: Int64, displayLeaseID: Int64, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, maxReceivedBytes: Int64, minimumRemainingBytes: Int64, pending: ImmichLockedVideoPending, request: HttpRequest, storage: ImmichLockedVideoStorageFacts) {
+        self.deadlineUnixMilliseconds = deadlineUnixMilliseconds
+        self.displayLeaseID = displayLeaseID
+        self.expectedBytes = expectedBytes
+        self.expectedRevision = expectedRevision
+        self.expectedSha1 = expectedSha1
+        self.maxReceivedBytes = maxReceivedBytes
+        self.minimumRemainingBytes = minimumRemainingBytes
+        self.pending = pending
+        self.request = request
+        self.storage = storage
+    }
+}
+
 public struct ImmichLockedView: Codable, Sendable {
     public var entries: [ImmichLockedEntry]?
     public var error: String?
@@ -884,7 +991,9 @@ public struct ImmichLockedView: Codable, Sendable {
     public var remoteLockConfirmed: Bool?
     public var sceneID: String?
     public var state: ImmichLockedState
-    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState) {
+    public var video: ImmichLockedVideoAccess?
+    public var videoPending: ImmichLockedVideoPending?
+    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState, video: ImmichLockedVideoAccess? = nil, videoPending: ImmichLockedVideoPending? = nil) {
         self.entries = entries
         self.error = error
         self.generation = generation
@@ -894,6 +1003,8 @@ public struct ImmichLockedView: Codable, Sendable {
         self.remoteLockConfirmed = remoteLockConfirmed
         self.sceneID = sceneID
         self.state = state
+        self.video = video
+        self.videoPending = videoPending
     }
 }
 

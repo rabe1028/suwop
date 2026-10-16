@@ -17,9 +17,10 @@ import SuwopShell
     private let confirmation = SystemConfirmation()
     private let visibilityConfirmation = ImmichVisibilityConfirmation()
     private let photoReversion = ApplePhotoReversion()
-    private let presentationEpoch = ContentPresentationEpoch()
+    let presentationEpoch = ContentPresentationEpoch()
     let protectedAccess = ProtectedNativeAccess()
     let immichLockedAccess = ImmichLockedNativeAccess()
+    let immichLockedVideoAccess = ImmichLockedVideoNativeAccess()
     var immichVisibilityConfirmationCurrent: (@MainActor (ImmichVisibilityPrompt) async throws -> Bool)?
     var immichLockedTimerEffect: (@MainActor (ImmichLockedTimer) -> Void)?
     #if SUWOP_VRT
@@ -30,14 +31,11 @@ import SuwopShell
         ) async throws -> Bool)?
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
-    func beginWorkflow() -> ContentPresentationContext {
-        presentationEpoch.beginWorkflow()
-    }
-
     /// Cancel presentation leases while preserving outcome persistence and native cleanup.
     func invalidateContentPresentations() {
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
+        immichLockedVideoAccess.invalidate()
         presentationEpoch.invalidate()
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
@@ -49,6 +47,7 @@ import SuwopShell
 
     func invalidateImmichLockedPresentations() {
         immichLockedAccess.invalidate()
+        immichLockedVideoAccess.invalidate()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
     }
@@ -56,6 +55,7 @@ import SuwopShell
     func invalidateProtectedPresentations() {
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
+        immichLockedVideoAccess.invalidate()
         presentationEpoch.invalidateProtection()
         imageEditing.invalidateForProtection()
         playback.invalidateForProtection()
@@ -90,6 +90,7 @@ import SuwopShell
             "releaseProtectedImages", "releaseProtectedImage",
             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
+            "releaseImmichLockedVideo", "releaseImmichLockedVideos",
         ]
         if !completionEffects.contains(operation.type) {
             try Task.checkCancellation()
@@ -151,7 +152,9 @@ import SuwopShell
         case "readState", "persist", "authenticateProtected", "readProtectedImage", "publishProtectedImage",
              "releaseProtectedImages", "releaseProtectedImage", "readImmichLockedImage", "publishImmichLockedImage",
              "releaseImmichLockedImages", "releaseImmichLockedImage", "scheduleImmichLockedExpiry",
-             "scheduleImmichLockedCheck", "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
+             "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
+             "prepareImmichLockedVideo", "releaseImmichLockedVideo", "releaseImmichLockedVideos",
+             "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
              "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
             return try await appStateEffect(operation.type, data: data, context: context)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(

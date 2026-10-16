@@ -77,6 +77,25 @@ pub enum ShellOperation {
     ReleaseOrdinarySelectedImages {
         generation: u64,
     },
+    InspectImmichLockedVideoStorage {
+        pending: crate::immich_locked::video::ImmichLockedVideoPending,
+    },
+    ReadImmichLockedVideo {
+        ticket: crate::immich_locked::video::ImmichLockedVideoTicket,
+    },
+    PrepareImmichLockedVideo {
+        ticket: crate::immich_locked::video::ImmichLockedVideoTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseImmichLockedVideo {
+        pending: crate::immich_locked::video::ImmichLockedVideoPending,
+        #[serde(rename = "leaseID")]
+        lease_id: String,
+    },
+    ReleaseImmichLockedVideos {
+        generation: u64,
+    },
     ReadImmichLockedImage {
         ticket: crate::immich_locked::ImmichLockedImageTicket,
     },
@@ -417,6 +436,44 @@ pub enum Event {
         ticket: crate::ordinary_selected::OrdinarySelectedImageTicket,
         #[serde(rename = "stagedID")]
         staged_id: String,
+        approved: bool,
+    },
+    RequestImmichLockedVideo {
+        #[serde(rename = "entryID")]
+        entry_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    StopImmichLockedVideo {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    #[serde(skip)]
+    ImmichLockedVideoPlanned {
+        acquisition: crate::immich_locked::video::VideoAcquisition,
+        storage: Result<
+            (
+                crate::immich_locked::video::ImmichLockedVideoStorageFacts,
+                Option<u64>,
+            ),
+            String,
+        >,
+    },
+    #[serde(skip)]
+    ImmichLockedVideoRead {
+        acquisition: crate::immich_locked::video::VideoAcquisition,
+        ticket: Box<crate::immich_locked::video::ImmichLockedVideoTicket>,
+        result: Result<crate::immich_locked::video::ImmichLockedVideoResult, String>,
+    },
+    #[serde(skip)]
+    ImmichLockedVideoPrepared {
+        ticket: crate::immich_locked::video::ImmichLockedVideoTicket,
         approved: bool,
     },
     RequestImmichLockedImage {
@@ -774,7 +831,8 @@ impl crux_core::App for Suwop {
         if let Some(command) = crate::ordinary_selected::update(&event, model) {
             return selected_cleanup
                 .and(command)
-                .and(crate::ordinary_selected::reconcile_current(model));
+                .and(crate::ordinary_selected::reconcile_current(model))
+                .and(crate::immich_locked::video::reconcile(model));
         }
         if let Event::OrdinarySelectedRefreshFinished {
             result,
@@ -783,28 +841,33 @@ impl crux_core::App for Suwop {
             origin,
         } = event.clone()
         {
-            return selected_cleanup.and(crate::ordinary_selected::finish_refresh(
-                model,
-                result,
-                expected_generation,
-                refresh_id,
-                &origin,
-            ));
+            return selected_cleanup
+                .and(crate::ordinary_selected::finish_refresh(
+                    model,
+                    result,
+                    expected_generation,
+                    refresh_id,
+                    &origin,
+                ))
+                .and(crate::immich_locked::video::reconcile(model));
         }
         if let Some(command) = crate::immich_archive::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
-                .and(crate::ordinary_selected::reconcile_current(model));
+                .and(crate::ordinary_selected::reconcile_current(model))
+                .and(crate::immich_locked::video::reconcile(model));
         }
         if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
-                .and(crate::ordinary_selected::reconcile_current(model));
+                .and(crate::ordinary_selected::reconcile_current(model))
+                .and(crate::immich_locked::video::reconcile(model));
         }
         if let Some(command) = crate::immich_locked::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
-                .and(crate::ordinary_selected::reconcile_current(model));
+                .and(crate::ordinary_selected::reconcile_current(model))
+                .and(crate::immich_locked::video::reconcile(model));
         }
         let cleanup = if crate::immich_locked::invalidates(&event) {
             crate::immich_locked::close(model)
@@ -816,6 +879,7 @@ impl crux_core::App for Suwop {
             .and(cleanup)
             .and(library)
             .and(crate::ordinary_selected::reconcile_current(model))
+            .and(crate::immich_locked::video::reconcile(model))
     }
     fn view(&self, model: &Model) -> ViewModel {
         Self::library_view(model)

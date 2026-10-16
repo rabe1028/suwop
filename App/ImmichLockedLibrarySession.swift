@@ -15,6 +15,7 @@ struct ImmichLockedTimer: Sendable {
 /// ordinary API-key connection. The form's secrets are passed once to Rust.
 @MainActor final class ImmichLockedLibrarySession: ObservableObject {
     let visibility = ImmichVisibilityPresentation()
+    let videoPlayer = ImmichLockedVideoPlayer()
     @Published private(set) var serverAddress: String?
     @Published private(set) var projection: ImmichLockedView?
     @Published private(set) var shielded = true
@@ -28,6 +29,7 @@ struct ImmichLockedTimer: Sendable {
     private var phases: [String: ProtectionScenePhase] = [:]
     private var expectedGrantID: String?
     private var expectedImageID: String?
+    private var expectedVideoID: String?
     private var revision: UInt64 = 0
     private var coreBusy = false
     private var pendingRefresh: (id: UUID, grantID: String)?
@@ -56,6 +58,16 @@ struct ImmichLockedTimer: Sendable {
                 .generation
         }
         shell.immichLockedAccess.configure(runtime: runtime)
+        shell.immichLockedVideoAccess.configure(runtime: runtime)
+        shell.immichLockedVideoAccess.cancelOtherMedia = { [weak raster = shell.immichLockedAccess] in
+            raster?.cancellationHandle()
+        }
+        shell.immichLockedAccess.beforeRead = { [weak video = shell.immichLockedVideoAccess] in
+            await video?.joinCleanup()
+        }
+        shell.immichLockedVideoAccess.shieldPlayer = { [weak videoPlayer] binding, leaseID in
+            videoPlayer?.shield(binding: binding, leaseID: leaseID)
+        }
         shell.immichLockedTimerEffect = { [weak self] in self?.schedule($0) }
     }
 
@@ -80,6 +92,7 @@ struct ImmichLockedTimer: Sendable {
         expectedGrantID = id
         error = nil
         shell.immichLockedAccess.activate(sceneID: sceneID)
+        shell.immichLockedVideoAccess.activate(sceneID: sceneID)
         let context = shell.beginWorkflow()
         Task {
             await run([
@@ -111,6 +124,7 @@ struct ImmichLockedTimer: Sendable {
         phases[sceneID] = phase
         guard ownerSceneID == sceneID, let shell else { return }
         shell.immichLockedAccess.sceneChanged(sceneID: sceneID, phase: phase)
+        shell.immichLockedVideoAccess.sceneChanged(sceneID: sceneID, phase: phase)
         if phase != .active {
             shield()
             expectedGrantID = nil
@@ -148,10 +162,44 @@ struct ImmichLockedTimer: Sendable {
         }
     }
 
+    var videoAccess: ImmichLockedVideoNativeAccess? {
+        shell?.immichLockedVideoAccess
+    }
+
+    func requestVideo(entryID: String, sceneID: String) {
+        guard !busy, let view = view(for: sceneID), let grant = view.grantID, let shell else { return }
+        let id = UUID().uuidString
+        expectedVideoID = id
+        expectedImageID = nil
+        projection?.image = nil
+        projection?.video = nil
+        shell.immichLockedAccess.invalidate()
+        shell.immichLockedVideoAccess.expect(requestID: id)
+        send([
+            "type": .string("requestImmichLockedVideo"), "entryID": .string(entryID),
+            "grantID": .string(grant), "sceneID": .string(sceneID), "requestID": .string(id),
+        ])
+    }
+
+    func stopVideo(sceneID: String) {
+        guard let id = expectedVideoID else { return }
+        expectedVideoID = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        shell?.immichLockedVideoAccess.invalidate()
+        send([
+            "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+        ])
+    }
+
     func requestImage(entryID: String, sceneID: String) {
         guard let view = view(for: sceneID), let grant = view.grantID else { return }
         let id = UUID().uuidString
         expectedImageID = id
+        expectedVideoID = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        shell?.immichLockedVideoAccess.invalidate()
         projection?.image = nil
         shell?.immichLockedAccess.expectImageRequest(id)
         send([
@@ -175,6 +223,12 @@ struct ImmichLockedTimer: Sendable {
         let address = snapshot.view.state.connection?.address
         serverAddress = address?.isEmpty == false ? address : nil
         var fresh = snapshot.view.immichLockedView
+        if fresh.video?.pending.requestID != expectedVideoID {
+            fresh.video = nil
+        }
+        if fresh.videoPending?.requestID != expectedVideoID {
+            fresh.videoPending = nil
+        }
         if fresh.image?.requestID != expectedImageID {
             fresh.image = nil
         }
@@ -189,6 +243,7 @@ struct ImmichLockedTimer: Sendable {
         }
         projection = fresh.state == .open && !mayRender ? nil : fresh
         shielded = !mayRender
+        shell?.immichLockedVideoAccess.receive(fresh)
         error = fresh.error
         visibility.receive(snapshot, sceneID: mayRender ? ownerSceneID : nil)
         if mayRender, let ownerSceneID {
@@ -205,6 +260,7 @@ struct ImmichLockedTimer: Sendable {
         connecting = false
         projection = nil
         expectedImageID = nil
+        expectedVideoID = nil
         expiryTask?.cancel()
         checkTask?.cancel()
         shell?.invalidateImmichLockedPresentations()
@@ -213,6 +269,14 @@ struct ImmichLockedTimer: Sendable {
     private func schedule(_ timer: ImmichLockedTimer) {
         guard expectedGrantID == timer.grantID, projection?.generation == timer.generation,
               projection?.leaseID == timer.leaseID else { return }
+        if timer.expiry {
+            shell?.immichLockedVideoAccess.deadline(
+                grantID: timer.grantID,
+                generation: timer.generation,
+                leaseID: timer.leaseID,
+                milliseconds: timer.deadlineUnixMilliseconds
+            )
+        }
         let remaining = max(0, timer.deadlineUnixMilliseconds - Int64(Date().timeIntervalSince1970 * 1000))
         let delay = min(timer.milliseconds, remaining)
         let task = Task { [weak self] in

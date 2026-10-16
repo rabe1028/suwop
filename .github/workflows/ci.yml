@@ -116,6 +116,8 @@ jobs:
         run: make apple-build
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
+      - name: Verify private VIDEO playback and exact owner cleanup on macOS
+        run: make private-video-mac-test
 
   simulator:
     runs-on: macos-26
