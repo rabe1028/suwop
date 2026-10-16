@@ -202,3 +202,8 @@ C-2では選択した物理VIDEOのlocked／timeline／archive変更をImmich 3.
 関連写真や動画から原本へ引き続きアクセスできる場合があることは実サーバーで確認し、確認画面に明記した。今回の変更は関連資源の配置を変更せず、全経路での秘匿を保証しない。Live複数資源処理、PP-03〜16、実機・iCloud受入れは引き続き残る。
 
 詳細は[選択動画の表示先変更](immich-selected-video-visibility.md)を参照。これらはPR #37のARM64ビルド変更を統合する前の証拠であり、統合後の確認は別記する。
+
+
+## C2 VIDEOのARM64構成統合後の検証（2026-10-17）
+
+PR #37を取り込んだ`a3bd6a9`で、check Rust467／Swift70／infra24、ARM64 3構成の全Apple build、Mac native9件、strict VRT229件／50画面が成功した。strictはrecord=false、失敗・skip0、基準50枚と検証sourceの前後hash不変。詳細と統合前の実サーバー証拠との区別は[選択動画の表示先変更](immich-selected-video-visibility.md)に記録した。提出HEADのCI・レビュー・マージは未完了。Live複数資源、PP-03〜16、実機・iCloudの受入れは残る。

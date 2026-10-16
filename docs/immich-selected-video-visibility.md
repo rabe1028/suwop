@@ -53,3 +53,18 @@ incrementalは最初の1 allocation unit以下から始め、各書込み前に�
 履歴を同一treeの`3c23ca5`へ整合した際、600ファイル・未追跡11ファイル・index・差分・既存stashの保持を確認した。上記はPR #37のARM64ビルド変更を取り込む前のローカル証拠であり、その統合後の確認、提出HEADのCI、レビュー、マージは別途記録する。
 
 実機・iCloud・実Face ID／Touch ID、Live複数資源処理、PP-03〜16はこの変更のローカル成功で完了扱いにしない。
+
+## PR #37統合後の検証
+
+ARM64ビルド構成を取り込んだHEAD `a3bd6a9191a65db5daf8b2f90e50bab1a7543005`、source `b403e453880f36180e16f1b23a29edfb7f0abafe3e4f92e4282fbb4a9a2f4513`で再確認した。統合によるApp／Sources／Tests／NativeAcceptance／VRT／crates／Cargo.toml／Cargo.lockの差分はない。
+
+| 検証 | 結果 | result.jsonの親ディレクトリ |
+| --- | --- | --- |
+| make check | Rust467／Swift70／infra24成功 | video-visibility-pr37-check-20261017-1-t633lips |
+| make apple-build | ARM64 macOS／iOS／Simulatorの3 release、XCFramework、両アプリ成功、4907.03秒 | video-visibility-pr37-apple-full-20261017-1-jh2n2bt5 |
+| Mac native | 9成功、失敗0、47.1秒 | video-visibility-pr37-mac-native-20261017-1-7b2mvy3a |
+| strict VRT | 229成功、失敗0、skip0、2907.87秒 | video-visibility-pr37-strict-20261017-1-q51sjzpn |
+
+すべて検証前後のsourceは一致。strictの`DerivedData/VRTArtifacts/20261016T193043Z-75745/Tests.xcresult`から実件数を確認した。50画面のcoverage検査成功、比較成功、record=false、基準50枚の前後hash不変。ホスト168件とUI61件を含む。選択VIDEOの通常／AX3操作、Timelineの明示選択、応答消失後の再送防止も成功した。
+
+実Immichの14／15件は上記の統合前の実行記録であり、今回再実行したとは記載しない。製品・fixtureソースが統合で変わらないことを確認している。提出HEADのCI・レビュー・マージ結果はローカル検証とは別に確認する。
