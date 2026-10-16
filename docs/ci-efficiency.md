@@ -66,10 +66,13 @@ LiteRT-LM sources and binary artifacts without a persistent Swift package cache.
 Host tests now run in `apple-tests`, preserving their Rust dependency objects
 under a fresh cache key. App packaging runs on a separate runner after the
 host tests and release slices pass, avoiding concurrent storage of large debug
-objects and app outputs on that runner. SwiftPM repositories, checkouts and
-binary downloads are cached by job, runner architecture, selected Xcode and
-package inputs; app build outputs are not cached. Xcode builds and native
-macOS tests share the same SourcePackages directory.
+objects and app outputs on that runner. SwiftPM's shared repository and binary
+download caches are keyed by OS, architecture and package inputs, and reused
+across Apple jobs. These raw downloads are independent of the selected Xcode;
+manifests, build state and app outputs are not cached. Per-workspace clones
+are deliberately excluded: LiteRT-LM alone used 2.7 GiB in `.build/repositories`,
+duplicating the shared cache. Xcode builds and native macOS tests also share
+the same SourcePackages directory within each job.
 
 Supported targets are ARM64 macOS, iOS devices and iOS simulators. The two
 Intel release jobs and universal-library assembly have been removed. All

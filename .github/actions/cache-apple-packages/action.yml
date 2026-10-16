@@ -3,19 +3,12 @@ description: Reuse SwiftPM source checkouts and binary artifacts without caching
 runs:
   using: composite
   steps:
-    - name: Identify the selected Xcode toolchain
-      id: xcode
-      shell: bash
-      run: |
-        export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
-        echo "version=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
     - name: Restore Swift package sources and binary downloads
       uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
       with:
+        # These are toolchain-independent downloads, shared by SwiftPM and Xcode.
+        # Do not also cache their multi-GB per-workspace clones or build state.
         path: |
-          .build/repositories
-          .build/checkouts
-          .build/artifacts
-          ~/Library/Caches/org.swift.swiftpm
-          DerivedData/SourcePackages
-        key: swift-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', '**/Package.resolved') }}
+          ~/Library/Caches/org.swift.swiftpm/repositories
+          ~/Library/Caches/org.swift.swiftpm/artifacts
+        key: swift-downloads-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Package.swift', 'Package.resolved') }}
