@@ -1,0 +1,21 @@
+name: Cache Apple package downloads
+description: Reuse SwiftPM source checkouts and binary artifacts without caching app build results.
+runs:
+  using: composite
+  steps:
+    - name: Identify the selected Xcode toolchain
+      id: xcode
+      shell: bash
+      run: |
+        export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
+        echo "version=$(xcodebuild -version | shasum -a 256 | cut -d ' ' -f 1)" >> "$GITHUB_OUTPUT"
+    - name: Restore Swift package sources and binary downloads
+      uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+      with:
+        path: |
+          .build/repositories
+          .build/checkouts
+          .build/artifacts
+          ~/Library/Caches/org.swift.swiftpm
+          DerivedData/SourcePackages
+        key: swift-packages-v1-${{ runner.os }}-${{ runner.arch }}-${{ github.job }}-${{ steps.xcode.outputs.version }}-${{ hashFiles('Package.swift', '**/Package.resolved') }}
