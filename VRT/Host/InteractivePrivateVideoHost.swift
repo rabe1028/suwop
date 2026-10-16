@@ -58,6 +58,7 @@ import UIKit
                 Text(evidence.state).accessibilityIdentifier("privateVideoUIState")
                 Text(evidence.motion ? "motion=verified" : "motion=pending")
                     .accessibilityIdentifier("privateVideoUIMotion")
+                    .accessibilityValue("sample=\(evidence.frameSerial)")
             }
             HStack {
                 Text("originals=\(fixture.issuedOriginals)").accessibilityIdentifier("privateVideoUIOriginals")
@@ -71,10 +72,13 @@ import UIKit
     @Published private(set) var trait = "type=pending"
     @Published private(set) var state = "player=stopped"
     @Published private(set) var motion = false
+    @Published private(set) var frameSerial = 0
     private weak var item: AVPlayerItem?
     private var output: AVPlayerItemVideoOutput?
     private var firstFrame: Data?
     private var firstTime: Double?
+    private var previousFrame: Data?
+    private var previousTime: Double?
 
     func observe(_ model: LibraryModel, sceneID: String, largeText: Bool) async {
         defer { detach() }
@@ -108,6 +112,13 @@ import UIKit
         guard let output, let next = fingerprint(output, time: player.currentTime()) else { return }
         let time = player.currentTime().seconds
         guard time.isFinite else { return }
+        if let previousFrame, let previousTime {
+            if state == "player=playing", next != previousFrame, time > previousTime {
+                frameSerial += 1
+            }
+        }
+        previousFrame = next
+        previousTime = time
         if firstFrame == nil {
             firstFrame = next
             firstTime = time
@@ -118,6 +129,9 @@ import UIKit
 
     private func detach() {
         motion = false
+        frameSerial = 0
+        previousFrame = nil
+        previousTime = nil
         if let item, let output {
             item.remove(output)
         }

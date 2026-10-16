@@ -39,7 +39,8 @@ final class PrivateVideoUITests: XCTestCase {
         }
         XCTAssertTrue(surface.waitForExistence(timeout: 15))
         expect("player=playing", in: app.staticTexts["privateVideoUIState"])
-        expect("motion=verified", in: app.staticTexts["privateVideoUIMotion"])
+        let motion = app.staticTexts["privateVideoUIMotion"]
+        expect("motion=verified", in: motion)
         let stop = app.buttons["stopImmichLockedVideo"]
         reveal(stop, in: app)
         XCTAssertTrue(stop.isHittable)
@@ -50,7 +51,18 @@ final class PrivateVideoUITests: XCTestCase {
         expect("mutations=0", in: app.staticTexts["privateVideoUIMutations"])
         // Recheck after scrolling: an earlier motion sample alone is not current playback.
         expect("player=playing", in: app.staticTexts["privateVideoUIState"])
-        expect("motion=verified", in: app.staticTexts["privateVideoUIMotion"])
+        expect("motion=verified", in: motion)
+        guard let sample = motion.value as? String, sample.hasPrefix("sample=") else {
+            XCTFail("Missing actual decoded-frame observation")
+            return
+        }
+        let freshMotion = XCTNSPredicateExpectation(
+            predicate: NSPredicate(
+                format: "label == %@ AND value BEGINSWITH %@ AND value != %@", "motion=verified", "sample=", sample
+            ),
+            object: motion
+        )
+        XCTAssertEqual(XCTWaiter.wait(for: [freshMotion], timeout: 15), .completed)
         let screenshot = XCTAttachment(screenshot: app.screenshot())
         screenshot.name = largeText ? "private-C1-moving-video-AX3" : "private-C1-moving-video-normal"
         screenshot.lifetime = .keepAlways
@@ -110,25 +122,39 @@ final class PrivateVideoUITests: XCTestCase {
                     XCTFail("C1 List has no usable gesture viewport")
                     return
                 }
-                let visible = element.exists && element.isHittable && !element.frame.isEmpty
-                    && viewport.contains(element.frame)
+                let exists = element.exists
+                let frame = exists ? element.frame : .zero
+                let visible = exists && !frame.isEmpty && viewport.contains(frame) && element.isHittable
                 if visible {
                     return
                 }
+                // Realized rows tell us which edge clips them. Lazy/unrealized rows use the bounded search direction.
+                let upward = scrollUp(to: frame, within: viewport, fallback: direction)
                 let start = list.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(
                         dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (direction ? viewport.maxY - 20 : viewport.minY + 20) - list.frame.minY
+                        dy: (upward ? viewport.maxY - 20 : viewport.minY + 20) - list.frame.minY
                     ))
                 let end = list.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(
                         dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (direction ? viewport.minY + 20 : viewport.maxY - 20) - list.frame.minY
+                        dy: (upward ? viewport.minY + 20 : viewport.maxY - 20) - list.frame.minY
                     ))
                 start.press(forDuration: 0.05, thenDragTo: end)
             }
         }
         XCTFail("C1 control did not become fully visible inside its actual List viewport")
+    }
+
+    @MainActor private func scrollUp(to frame: CGRect, within viewport: CGRect, fallback: Bool) -> Bool {
+        guard !frame.isEmpty, !frame.isNull, !frame.isInfinite else { return fallback }
+        if frame.minY < viewport.minY {
+            return false
+        }
+        if frame.maxY > viewport.maxY {
+            return true
+        }
+        return fallback
     }
 
     @MainActor private func expect(_ label: String, in element: XCUIElement) {

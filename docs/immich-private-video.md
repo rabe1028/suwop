@@ -147,3 +147,29 @@ iOS focused 30件（host 28／UI 2）が成功した。各実行の前後source�
 `pr35-sendable-mac-20261016-1-43fvpua9/result.json`、
 `pr35-sendable-ios-20261016-1-xy287o58/result.json`。
 この追記は検証後の文書変更である。Xcode 16.4での互換性は最終HEADのhosted CIで確認する。
+
+## PR #35のAX3操作テスト
+
+HEAD `4653774`のCI 38835197338ではcore、Apple（旧SDKを含む）、PhotoKit、実Immichが成功した。
+strict VRTはhost 117件成功、UI 55件中1件失敗で、全体は未通過である。
+失敗したAX3動画ケースは最初の再生・実画素の動きを確認した後、停止ボタンを探すために
+逆方向へ8回ドラッグし、正しい方向へ戻ってから再び再生中を検査していた。
+最初の再生確認33.56秒に対し再確認は71.14秒で、30秒・360フレームの検証動画は
+既に終端へ到達する。CI添付画像でも00:00:29.91／frame 359を確認した。
+過去の動きの記録だけで再生中と判定せず、実際の要素位置に従う操作へ修正する。
+
+失敗証拠はCI artifact `12020282596`、ZIP SHA-256
+`b98d9e0aa506412e6eac8be3f9386e8da840853ed0cc4af6146d046206dcbaa0`に保持する。
+通常文字サイズの動画UIは成功している。製品の期限や動画の長さ、基準画像を変更して
+この失敗を回避しない。操作テスト修正後の対象検証と最終HEAD CIは未完了。
+
+
+修正後source `34c45434245c43ac55df600a20ad8399cde0a7e55ac3cf3f567009e707493d44`で
+全体check（Rust/FFI 407／Swift 65／infra 17）が150.88秒で成功し、Simulator用Rust
+buildも成功した。対象UIはAX3 48.975秒、通常36.038秒の2件が成功し、wrapperは
+113.66秒、exit 0。スクロール後に新しくdecodeされた異なる画素と進行した再生時刻も
+確認する。sourceは各runの前後一致、全48基準画像のhashは不変だった。
+記録は`.tools/verification/pr35-ax3-check-20261016-1-x_ojzyht/result.json`、
+`pr35-ax3-simulator-20261016-1-tzjpi5x8/result.json`、
+`pr35-ax3-ui-20261016-1-3lpyiyqb/result.json`。この追記は検証後の証拠整理のみで、
+製品・テスト・基準画像は変更していない。最終HEADのhosted CIは別途確認する。
