@@ -129,3 +129,21 @@ source `55167a91673bf912fe85e23f41a907502a218c8ab9952bb96214f435438c5914`
 最終HEADのhosted CIとマージは残る。
 baselineは自動更新しない。
 実機、物理スピーカー、iCloud、署名・配布は別の受入れである。
+
+## PR #35の旧SDK互換性修正
+
+初回HEAD `b506a13`のCI 38833182213ではApple job 116756309368が失敗した。
+Xcode 16.4のSDKで、MainActorの準備処理が非SendableのAVAssetTrack配列を
+非isolatedなasync APIから受け取っていた。新しいローカルSDKでの成功とは区別する。
+同じ保護対象assetのcompletion-handler API内で配列を検査し、Boolだけを返す方式へ変更した。
+外部参照禁止、実フレームdecode、終了待ちを維持し、decode直前にも取消を確認する。
+
+修正source `879af459caab445b8b069db0323d8d34859cbe2c60c7325809cd4d9916df2541`
+で全体check（Rust/FFI 407／Swift 65／infra 17）、全Apple build、macOS 9件、
+iOS focused 30件（host 28／UI 2）が成功した。各実行の前後sourceは一致し、
+48基準画像は不変だった。記録は`.tools/verification/`以下の
+`pr35-sendable-check-20261016-1-gd1n2bui/result.json`、
+`pr35-sendable-apple-20261016-1-_lz_zjqq/result.json`、
+`pr35-sendable-mac-20261016-1-43fvpua9/result.json`、
+`pr35-sendable-ios-20261016-1-xy287o58/result.json`。
+この追記は検証後の文書変更である。Xcode 16.4での互換性は最終HEADのhosted CIで確認する。

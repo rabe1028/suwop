@@ -135,11 +135,12 @@ import SuwopShell
         try await withTaskCancellationHandler {
             try Task.checkCancellation()
             let playable = try await asset.load(.isPlayable)
-            let tracks = try await asset.loadTracks(withMediaType: .video)
+            let hasVideo = try await hasVideoTracks()
             let duration = try await asset.load(.duration)
-            guard playable, !tracks.isEmpty, duration.seconds.isFinite, duration.seconds > 0 else {
+            guard playable, hasVideo, duration.seconds.isFinite, duration.seconds > 0 else {
                 throw SuwopError("この動画を再生できません。")
             }
+            try Task.checkCancellation()
             try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
                 generator.generateCGImageAsynchronously(for: .zero) { image, _, error in
                     if let error {
@@ -154,6 +155,19 @@ import SuwopShell
             try Task.checkCancellation()
         } onCancel: {
             Task { @MainActor [self] in cancel() }
+        }
+    }
+
+    private func hasVideoTracks() async throws -> Bool {
+        // Older SDKs do not make AVAssetTrack Sendable. Consume tracks only in the callback.
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+            asset.loadTracks(withMediaType: .video) { tracks, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: tracks.map { !$0.isEmpty } ?? false)
+                }
+            }
         }
     }
 
