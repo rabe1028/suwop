@@ -275,13 +275,14 @@ import SuwopShell
         let quote = try files.quote(binding: PrivateVideoBinding(ticket.pending), facts: ticket.storage)
         do {
             let acquisition = try acquisition(ticket: ticket)
-            try acquisition.authorized {}
-            try files.commit(quote: quote, budget: .init(
-                maximum: ticket.maxReceivedBytes,
-                minimumRemaining: ticket.minimumRemainingBytes,
-                unit: ticket.storage.allocationUnitBytes,
-                mode: ticket.commitmentMode
-            ))
+            try acquisition.authorized {
+                try files.commit(quote: quote, budget: .init(
+                    maximum: ticket.maxReceivedBytes,
+                    minimumRemaining: ticket.minimumRemainingBytes,
+                    unit: ticket.storage.allocationUnitBytes,
+                    mode: ticket.commitmentMode
+                ))
+            }
             let request = try PrivateVideoRequest.make(ticket.request)
             let download = PrivateVideoDownload(files: files, quote: quote, ticket: ticket, acquisition: acquisition)
             #if SUWOP_VRT

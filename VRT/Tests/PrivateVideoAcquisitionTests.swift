@@ -1,4 +1,5 @@
 import Foundation
+import os
 import SuwopShell
 @testable import SuwopVRTHost
 import XCTest
@@ -108,5 +109,44 @@ final class PrivateVideoAcquisitionTests: XCTestCase {
         XCTAssertThrowsError(try files.append(Data([4, 5]), quote: quote, acquisition: acquisition))
         try files.append(Data([4]), quote: quote, acquisition: acquisition)
         XCTAssertEqual(try Data(contentsOf: files.finish(quote: quote)), Data([1, 2, 3, 4]))
+    }
+}
+
+/// Shared execution primitive compatibility; paired manager and PhotoKit ownership remain separate.
+extension PrivateVideoAcquisitionTests {
+    func testExpectedLeaseMismatchDoesNotConsumeCurrentPublicationAuthority() throws {
+        let acquisition = try PrivateMediaAcquisition(
+            leaseID: 1, anchor: .now, remainingMilliseconds: 10000
+        )
+        try acquisition.renew(previousID: 1, successorID: 2, extensionMilliseconds: 1000)
+        XCTAssertThrowsError(try acquisition.handoffToDisplay(expectedLeaseID: 1))
+        XCTAssertEqual(try acquisition.completedLeaseID(), 2)
+        XCTAssertEqual(try acquisition.handoffToDisplay(expectedLeaseID: 2), 2)
+        XCTAssertFalse(acquisition.expire(leaseID: 1))
+        XCTAssertFalse(acquisition.expire(leaseID: 2))
+    }
+
+    func testExpectedLeaseHandoffCannotReviveExpiredPrimitive() async throws {
+        let acquisition = try PrivateMediaAcquisition(
+            leaseID: 1, anchor: .now, remainingMilliseconds: 10
+        )
+        try await ContinuousClock().sleep(for: .milliseconds(30))
+        XCTAssertTrue(acquisition.expire(leaseID: 1))
+        XCTAssertThrowsError(try acquisition.handoffToDisplay(expectedLeaseID: 1))
+        XCTAssertThrowsError(try acquisition.handoffToDisplay())
+    }
+
+    func testVideoAliasRetainsNoArgumentHandoffAndCancellationCompatibility() throws {
+        let acquisition = try PrivateVideoAcquisition(
+            leaseID: 1, anchor: .now, remainingMilliseconds: 10000
+        )
+        let cancelled = OSAllocatedUnfairLock(initialState: false)
+        let token = try acquisition.onCancellation { cancelled.withLock { $0 = true } }
+        XCTAssertThrowsError(try acquisition.handoffToDisplay())
+        acquisition.removeCancellation(token)
+        XCTAssertEqual(try acquisition.handoffToDisplay(), 1)
+        acquisition.cancel()
+        XCTAssertFalse(cancelled.withLock { $0 })
+        XCTAssertFalse(acquisition.expire(leaseID: 1))
     }
 }
