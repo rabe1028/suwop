@@ -185,8 +185,11 @@ targets:
       - path: App/ImmichLockedVideoPlayer.swift
       - path: App/ImmichLockedVideoSurface.swift
       - path: App/PrivateVideoAcquisition.swift
+      - path: App/PrivateMediaAcquisition.swift
       - path: App/PrivateVideoBinding.swift
       - path: App/PrivateVideoAllocation.swift
+      - path: App/PrivateMediaAllocationTypes.swift
+      - path: App/PrivateMediaAllocationLedger.swift
       - path: App/PrivateVideoFiles.swift
       - path: App/PrivateVideoNamespace.swift
       - path: App/PrivateVideoVolume.swift
