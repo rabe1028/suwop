@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
+# SwiftPM and other dependencies must discover their own Git repositories.
+while IFS= read -r variable; do
+  unset "$variable"
+done < <(git rev-parse --local-env-vars)
 make test
