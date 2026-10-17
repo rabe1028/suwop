@@ -326,6 +326,20 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    InspectImmichLiveResources {
+        #[serde(rename = "parentKey")]
+        parent_key: crate::domain::AssetKey,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    #[serde(skip)]
+    ImmichLiveResourcesInspected {
+        completion: crate::immich_live_resources::Completion,
+    },
     RefreshImmichLocked {
         #[serde(rename = "grantID")]
         grant_id: String,
@@ -780,6 +794,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub immich_live_resources: crate::immich_live_resources::LiveResourcesModel,
     pub ordinary_selected: crate::ordinary_selected::OrdinarySelectedModel,
     pub immich_archive: crate::immich_archive::ImmichArchiveModel,
     pub immich_visibility: crate::immich_visibility::ImmichVisibilityModel,
@@ -801,6 +816,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub immich_live_resources: Option<crate::immich_live_resources::ImmichLiveResourcesView>,
     pub ordinary_selected_presentation: Vec<crate::ordinary_selected::OrdinarySelectedPresentation>,
     pub ordinary_selected_pending: Vec<crate::ordinary_selected::OrdinarySelectedImageRequest>,
     pub ordinary_selected_images: Vec<crate::ordinary_selected::OrdinarySelectedImageAccess>,
@@ -840,6 +856,9 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Some(command) = crate::immich_live_resources::update(&event, model) {
+            return command;
+        }
         if crate::ordinary_selected::security_progress_changed(&event, model)
             || matches!(
                 event,
@@ -1082,6 +1101,7 @@ impl Suwop {
             immich_archive_actions: crate::immich_archive::actions(model),
             immich_visibility_actions: crate::immich_visibility::actions(model),
             immich_visibility_view: crate::immich_visibility::view(model),
+            immich_live_resources: crate::immich_live_resources::view(model),
             immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
             apple_visibility_hide_keys: if model.ready

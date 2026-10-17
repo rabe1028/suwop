@@ -1,6 +1,7 @@
 # Photos parity 実装・受入れロードマップ
 
-2026-10-14。監査基準は main `eb47377`（PR #19）。到達条件は
+2026-10-14の監査を基準とし、PP-02のPR #32〜38の状態を2026-10-17に追補。
+監査基準は main `eb47377`（PR #19）。到達条件は
 [photos-parity.md](photos-parity.md)、実機受入れは
 [verification.md](verification.md)を参照する。この文書は残作業の管理用であり、
 実装・検証・マージの完了を代わりに宣言しない。
@@ -34,7 +35,7 @@ PP-08のImmich幾何保存は色編集の保存方針と独立して進められ
 | ID | 監査状態と実装範囲 | 完了に必要な証拠 |
 | --- | --- | --- |
 | PP-01 Apple通常削除・復元案内 | **PR #20 merge 済み（main `8351ea7`、最終HEAD／merge後 hosted CI 全4 job成功）**。Moveと独立した確認・原本照合・永続意図・PhotoKit応答・可視性検査とApple Photosでの復元案内。Rust202/Swift50、VRT26/UI5、生成JPEGのNative12段階を通過。 | 単独/複数、確認取消、権限/ID変更、応答消失/再起動、結果不明時の書込み停止と同じ原本の転送保護。公開復元APIの制約を表示。実PhotoKit保存と実機/iCloudは別記録。 |
-| PP-02 非表示・再表示 | **#21〜25、通常Archive #27、関連グラフ契約 #28はマージ済み**。#27は最終HEADとmerge後CI全4 job成功。#28は最終HEAD CI全4 job成功、main `700ce6b` とtree一致、[merge後CI](https://github.com/rabe1028/suwop/actions/runs/38751403708)も全4 job成功。[通常Archive](immich-archive.md)、[グラフ](immich-live-graph.md)。**#29通常VIDEOはマージ済み**。メタデータ付きLive動画でbulk更新が後続処理による非表示化・所属削除を起こしたため、通常操作を単一asset PUTへ修正。修正後check Rust336／Swift65、実Immich8件が成功。Apple再ビルド・strict VRT77host／41UI／46画面差分0が成功。HEAD `d2746a5` のCI全4 job成功・未解決レビュー0を確認し、`d91269e` にマージ。mainと検証HEADのtree一致、merge後CI 38763928780の初回は認証欄のkeyboard focusでUI1件失敗。証拠を保持。同一HEADの再実行は新しいmain CIを優先するconcurrency設定によりキャンセル。初回失敗の解消証拠には含めない。[動画](immich-video-archive.md)。**Live親はPR #30でマージ済み**。bulk更新後の子の所属消失を検出し、#29の単一資産API修正を取り込み済み。修正後check Rust343／Swift65、実Immich10件が成功。native親・動画双方で各3資産の所属と原本を保持。新しいAppleビルド・host16／UI6成功。46画面比較で意図した確認文2枚のみレビュー後更新、残44枚不変。strict VRTはhost79／UI43／46画面差分0・record=falseで成功。tree同一のmain `d91269e` へ410ソースhash不変で履歴を整合。親写真PR #30（09cee1c）のCI全4 job成功。実Immich jobはimage取得のrate limit後、同一HEADの再実行で成功。未解決レビュー0を確認し、991a111へマージ、検証HEADとmainのtree一致。merge後CI 38772157202もPhotoKitを含む全4 job成功。[親写真](immich-live-parent-archive.md)。PIN付きVIDEO／Liveは未対応。既存IMAGE/PINのnull forward linkでもnative CID再リンクの可能性があり、製品C2経路で関連動画の再リンク／所属消失と、既存個別共有リンクの原本アクセス継続を再現。写真自身のlocked状態・通常原本拒否とは区別する。**選択原本の回復観測はPR #31でマージ済み**。[回復契約](immich-selected-observation.md)は旧witness／outcomeを保持したまま、別のselectedObservationをschema8に保存する。最終check Rust360／Swift65、実Immich11件、Apple build、Mac14／host11／UI4は成功。レビュー済み4画像のみ記録し、他44画像は不変。strict VRTはhost81／UI45／48画面差分0、record=false・前後hash不変で成功。回復観測は[PR #31](https://github.com/rabe1028/suwop/pull/31)、HEAD `0c57577` で提出済み。最終HEADのCI 38775561500はPhotoKitを含む全4 job成功、未解決レビュー0。3417b0bへマージしmainと検証HEADのtree一致。merge後CI 38781173202もPhotoKitを含む全4 job成功。 | #29の初回UI失敗は記録を保持。#30のmerge後CIは成功。回復観測PR #31のmerge後CIも成功。旧serverの読み取りを維持する[正確なrelease単位の書込み制限](immich-visibility-write-contract.md)を実装・検証中。DTO生成、判定単体2件、既存を含む可視性Rust52件成功。全体checkはRust368／Swift65で成功。実serverは3.2.4の11件／3.3.3の12件で成功。旧版は意図保存・PUTなし、新版は関連原本・所属と観測窓内queue不変。既存共有リンクの原本アクセス継続は制約として明示。Apple buildも全5 Rust target／XCFramework／iOS／macOS成功。native host9、UI個別検証と大文字preview到達を確認。レビュー済み3画像だけ更新し他45画像は不変。最終strict VRTはhost84／UI48／48画面差分0、record=false・前後baseline hash不変で成功。PR #32は未マージ。HEAD79800a8のhosted strict VRTはhost84／UI48／48画像一致で成功したが、後続PhotoKit中にjobの40分上限へ到達。統合jobはimage取得制限でテスト前に停止。job枠を60分へ変更し、全体check Rust368／Swift65と通常hooksを通過してe584601をpush済み。最終CI成功を待つ。外部unlock後の[通常一覧への表示専用復帰](immich-ordinary-selected-presentation.md)を実装済み。実Immich3.2.4の12件／3.3.3の13件、最終Apple build、strict VRT host89／UI53／48画面差分0が成功。record=false、ソース448件と基準画像48枚の前後hash不変。最終全体checkはRust396／Swift65で成功。PR提出・hosted CI・マージは未完了。PIN付きVIDEO／Liveは関係グラフと権限・原本・非同期処理後の影響を検証する。APIで関連の完全性を証明できない対象を独立VIDEOと推定しない。実時間PIN期限、全アルバムへの影響、実Face ID／Touch ID／パスコード、複数window、実機／iCloudは別途検証。Apple hideはApplied、restoreはPhotos案内であり、直接unhideとhidden原本readbackは未確認。 |
+| PP-02 非表示・再表示 | **#21〜25、通常Archive #27、関連グラフ契約 #28はマージ済み**。#27は最終HEADとmerge後CI全4 job成功。#28は最終HEAD CI全4 job成功、main `700ce6b` とtree一致、[merge後CI](https://github.com/rabe1028/suwop/actions/runs/38751403708)も全4 job成功。[通常Archive](immich-archive.md)、[グラフ](immich-live-graph.md)。**#29通常VIDEOはマージ済み**。メタデータ付きLive動画でbulk更新が後続処理による非表示化・所属削除を起こしたため、通常操作を単一asset PUTへ修正。修正後check Rust336／Swift65、実Immich8件が成功。Apple再ビルド・strict VRT77host／41UI／46画面差分0が成功。HEAD `d2746a5` のCI全4 job成功・未解決レビュー0を確認し、`d91269e` にマージ。mainと検証HEADのtree一致、merge後CI 38763928780の初回は認証欄のkeyboard focusでUI1件失敗。証拠を保持。同一HEADの再実行は新しいmain CIを優先するconcurrency設定によりキャンセル。初回失敗の解消証拠には含めない。[動画](immich-video-archive.md)。**Live親はPR #30でマージ済み**。bulk更新後の子の所属消失を検出し、#29の単一資産API修正を取り込み済み。修正後check Rust343／Swift65、実Immich10件が成功。native親・動画双方で各3資産の所属と原本を保持。新しいAppleビルド・host16／UI6成功。46画面比較で意図した確認文2枚のみレビュー後更新、残44枚不変。strict VRTはhost79／UI43／46画面差分0・record=falseで成功。tree同一のmain `d91269e` へ410ソースhash不変で履歴を整合。親写真PR #30（09cee1c）のCI全4 job成功。実Immich jobはimage取得のrate limit後、同一HEADの再実行で成功。未解決レビュー0を確認し、991a111へマージ、検証HEADとmainのtree一致。merge後CI 38772157202もPhotoKitを含む全4 job成功。[親写真](immich-live-parent-archive.md)。PIN付きVIDEOの後続実装は下記PR #35／36／38の最新状態を参照。Live複数原本の取得・再生／変更は未完了。旧Immich 3.2.4では既存IMAGE/PINのnull forward linkでもnative CID再リンクの可能性があり、製品C2経路で関連動画の再リンク／所属消失と、既存個別共有リンクの原本アクセス継続を再現。写真自身のlocked状態・通常原本拒否とは区別する。**選択原本の回復観測はPR #31でマージ済み**。[回復契約](immich-selected-observation.md)は旧witness／outcomeを保持したまま、別のselectedObservationをschema8に保存する。最終check Rust360／Swift65、実Immich11件、Apple build、Mac14／host11／UI4は成功。レビュー済み4画像のみ記録し、他44画像は不変。strict VRTはhost81／UI45／48画面差分0、record=false・前後hash不変で成功。回復観測は[PR #31](https://github.com/rabe1028/suwop/pull/31)、HEAD `0c57577` で提出済み。最終HEADのCI 38775561500はPhotoKitを含む全4 job成功、未解決レビュー0。3417b0bへマージしmainと検証HEADのtree一致。merge後CI 38781173202もPhotoKitを含む全4 job成功。 | **PR #32〜38はマージ済み。提出HEADとmerge後のCIは下記の最新表で区別する。** [正確なrelease単位の書込み制限](immich-visibility-write-contract.md)はstable 3.3.3だけへC-2を許可し、旧serverの読取り・Inspectを維持。[通常一覧への表示専用復帰](immich-ordinary-selected-presentation.md)、[選択VIDEOの読取り](immich-private-video.md)・[取得期限更新](immich-private-video-renewal.md)・[表示先変更](immich-selected-video-visibility.md)を実装済み。Liveのペア原本取得・保護された実再生、複数資源の明示的な書込み・部分結果／通常表示への回復は必須残作業。関係グラフの完全性をAPIで証明できない対象を独立媒体と推定せず、locked成功を全経路での秘匿と説明しない。実時間PIN期限、全アルバムへの影響、実Face ID／Touch ID／パスコード、複数window、実機／iCloudは別途検証。Apple hideはApplied、restoreはPhotos案内であり、直接unhideとhidden原本readbackは未確認。 |
 | PP-03 外部ファイル取り込み | 未実装。転送用AppleImport effectを完了証拠にしない。native picker/読取りとRustの構成検証・保存先選択・永続化を追加する。 | JPEG/HEIC/PNG/動画、RAW+JPEG/Live関連ファイル。元バイト・名前・日時・位置、欠落した組の拒否、キャンセル、送信前保存失敗、応答消失/再起動、PhotoKit/実Immichの保存結果。 |
 | PP-04 複製 | 未実装。原本の複製と現在の編集済み見た目の複製を区別し、新しい保存先IDを確認する。PP-03に依存。 | 元写真/履歴を保持、新ID・バイト・メタデータ、RAW/Liveの組、再起動。Immichのchecksum重複排除を先に確認し、既存IDが返ることを複製成功としない。 |
 | PP-05 現在の内容の共有・書き出し・片付け | 単独の現在静止画と単独/複数の原本共有は実装済み。現在の内容の複数選択、動画/Live、位置情報を除去する書き出し、強制終了後の回収は未実装。 | 表示元/原本の選択、受信先で開いた実結果、寸法・向き・色・メタデータ、組の完全性、キャンセル、iPad/Mac共有、強制終了後の安全な片付け。原本共有では元バイトを保持。 |
@@ -49,6 +50,42 @@ PP-08のImmich幾何保存は色編集の保存方針と独立して進められ
 | PP-14 場所・人物・分類・思い出・重複整理 | 未実装。座標による場所、Immichの対応する検索/分類、アプリ自身の整理と重複レビューへ分解する。 | 実データの検索/分類、空/誤分類、scope別ID、再照合後の選択、複数原本の多重度。既存catalogの統合を重複のmerge操作の証拠にしない。削除を伴う整理では保存すべき編集/メタデータ/所属を明示。 |
 | PP-15 権限・回復・性能・アクセシビリティ | core/cancellation/一部大文字VRTは実装済み。広いnative受入れ・性能測定は未完了。fixtureと測定手順を整備し、各PRで拡張する。 | 拒否/限定/フルと途中変更、断線/アカウント変更/iCloud-only、process/OS再起動、検索/並べ替え/統合分割後の選択、VoiceOver/大文字/keyboard/回転、iPhone/iPad/Mac。大量libraryと一括編集の時間/ピークメモリを記録し、10k/100k規模は測定ケースの提案とする。 |
 | PP-16 署名・配布・実機・iCloud | 使用許可文言/bundle ID/Mac sandbox設定は存在。署名/配布/実機/iCloud受入れは未確認。 | 実機インストール/更新と状態移行、小さなテストlibraryで両方向Copy、RAW/Live/burst/iCloud、正常Moveの転送元のみ削除、他端末の同期。選んだ配布方式の署名/Mac notarization等。テスト端末・account・配布資格の入手を別に記録。 |
+
+## PP-02の最新状態（2026-10-17、PR #32〜38）
+
+GitHubのmerge状態、提出HEAD／merge commitに対応するworkflowとjobを確認した追補。
+下表の成功はそれぞれのrunの証拠であり、別HEADやmerge後runへ引き継がない。
+過去の失敗・cancelledを後続の成功だけで解消済みとしない。
+
+| PR・マージ済み範囲 | 提出HEAD → main | 提出HEADに対応するCI | merge後CI |
+| --- | --- | --- | --- |
+| [#32](https://github.com/rabe1028/suwop/pull/32)：C-2を実測したstable 3.3.3へ制限。3.2.4のC-1読取り・Inspectは保持。 | `c41c769` → `59be38b` | [38812742496](https://github.com/rabe1028/suwop/actions/runs/38812742496)：全6job成功 | [38817742538](https://github.com/rabe1028/suwop/actions/runs/38817742538)：workflow cancelled、VRT lane cancelled／集約failure、他4job成功 |
+| [#33](https://github.com/rabe1028/suwop/pull/33)：外部unlock後の明示Refreshで、検証したIMAGEだけを通常一覧へ表示専用で戻す。履歴／操作権限は書き換えない。 | `2bb60e3` → `cea093a` | [38819942512](https://github.com/rabe1028/suwop/actions/runs/38819942512)：全6job成功 | [38824326795](https://github.com/rabe1028/suwop/actions/runs/38824326795)：全6job成功 |
+| [#34](https://github.com/rabe1028/suwop/pull/34)：VRT／PhotoKitの独立runnerと両成功必須の集約、依存cache、image取得限定のbounded retry、source-bound検証記録。 | `15c78d6` → `4388946` | [38809900339](https://github.com/rabe1028/suwop/actions/runs/38809900339)：Apple失敗、他5job成功 | [38810795925](https://github.com/rabe1028/suwop/actions/runs/38810795925)：全6job成功 |
+| [#35](https://github.com/rabe1028/suwop/pull/35)：選択した物理VIDEOの専用PIN原本取得・実再生、有限容量、実hash／非表示decode、取消JOIN後の解放。関連資源へ暗黙に展開しない。 | `9382a93` → `14e1bcc` | [38859373793](https://github.com/rabe1028/suwop/actions/runs/38859373793)：全11job成功 | [38864174445](https://github.com/rabe1028/suwop/actions/runs/38864174445)：全11job成功 |
+| [#36](https://github.com/rabe1028/suwop/pull/36)：同一原本・sessionの再検証による取得lease更新。native ACK、期限切れ／公開の排他、固定予算とPIN上限を保持。 | `f34a85a` → `3c23ca5` | [38881521005](https://github.com/rabe1028/suwop/actions/runs/38881521005)：全11job成功 | [38887593424](https://github.com/rabe1028/suwop/actions/runs/38887593424)：VRT lane／集約失敗、他9job成功 |
+| [#37](https://github.com/rabe1028/suwop/pull/37)：ARM64のmacOS／iOS実機／Simulatorの3sliceとrevision／digest検証、host test分離、依存cache保持。Intel対応済みとはしない。 | `84721c4` → `d6601f3` | [38893651883](https://github.com/rabe1028/suwop/actions/runs/38893651883)：全10job成功 | [38932599638](https://github.com/rabe1028/suwop/actions/runs/38932599638)：全10job成功 |
+| [#38](https://github.com/rabe1028/suwop/pull/38)：3.3.3の選択VIDEO C-2、native終了待ち→永続intent→単一選択資産の変更。未知サイズの段階的容量計上、Unknownの自動再送禁止。 | `774e266` → `77d3691` | [38963285833](https://github.com/rabe1028/suwop/actions/runs/38963285833)：全10job成功 | [38970289720](https://github.com/rabe1028/suwop/actions/runs/38970289720)：workflow cancelled、VRT lane cancelled／集約failure、他8job成功 |
+
+ローカル・native・実serverの記録は上表のhosted CIと分ける。
+C-1 VIDEOの実Immich3.2.4／3.3.3は13／14件成功したが、real harnessのnative prepareはmock。
+iOS／Macの実AV再生・seek・owner取消は別のnativeテストであり、実機／speaker／iCloudの証拠ではない。
+#38のARM64統合後はcheck Rust467／Swift70／infra24、Apple 3slice／両アプリ、Mac9、
+strict VRT host168／UI61・50画面差分0、record=false・source／baseline前後不変を確認した。
+実Immich3.2.4の14件／3.3.3の15件はその統合前の同一製品・fixture内容の別runで、
+統合後に再実行したとはしない。各source・receiptと失敗履歴は[選択VIDEO](immich-selected-video-visibility.md)、
+[取得期限更新](immich-private-video-renewal.md)、[初回再生](immich-private-video.md)を参照。
+
+#36 merge後のabsent-sizeテストのDecodingErrorは記録済みで、原因未確定のまま保持する。
+#38の成功をその原因・修正の証明にしない。#34提出HEADのApple失敗も、この追補では原因を調査していない。
+#32／#38のcancelledを成功に読み替えず、その後のCI手順修正は別のHEADで確認する。
+#38はworkflow結論がcancelledで、GitHubのjob annotationは`1h0m0s`の実行時間上限超過を明示する。
+別に途中ログにはEditor 1ケース・3assertの失敗があり、host168成功／完了UI59・失敗1の部分記録を全229件の成功としない。
+
+共有リンクや関連写真・動画からlocked原本へアクセスが続くserver経路は実測した制約で、
+release gateや選択VIDEO変更が全経路の秘匿を保証するものではない。
+Liveメタデータ観測のローカル候補はペアの原本取得／実再生／複数資源変更の完了ではない。
+PP-02の残作業とPP-03〜16の範囲・順序・実機／iCloud到達条件は維持する。
 
 ## APIの制約、代替、判断が必要になる地点
 
@@ -120,7 +157,9 @@ Immich が編集レシピとして保存できない色・動画・Live Photo �
 
 ## PP-02の追加進捗（2026-10-16）
 
-上の監査表には各段階の履歴を保持している。現在のPR状態はこの節を参照する。
+以下は当時の実行履歴。途中の未完了表記は時点の記録として保持し、PR #32〜38の現在のmerge／CI状態は前掲の最新表を参照する。
+
+この節は2026-10-16当時の実行・提出状況の記録であり、後続の各日付の追記もその時点の履歴として扱う。
 PR #32は最終HEAD `c41c769` のCI 38812742496で全job成功後、main `59be38b`へ
 マージした。検証HEADとmainのtreeは一致する。merge後CI 38817742538は
 core／Apple／PhotoKit／Immichが成功したがVRTはキャンセルされ、全体成功ではない。
@@ -207,3 +246,48 @@ C-2では選択した物理VIDEOのlocked／timeline／archive変更をImmich 3.
 ## C2 VIDEOのARM64構成統合後の検証（2026-10-17）
 
 PR #37を取り込んだ`a3bd6a9`で、check Rust467／Swift70／infra24、ARM64 3構成の全Apple build、Mac native9件、strict VRT229件／50画面が成功した。strictはrecord=false、失敗・skip0、基準50枚と検証sourceの前後hash不変。詳細と統合前の実サーバー証拠との区別は[選択動画の表示先変更](immich-selected-video-visibility.md)に記録した。提出HEADのCI・レビュー・マージは未完了。Live複数資源、PP-03〜16、実機・iCloudの受入れは残る。
+
+
+### Live Photo メタデータ検査の初期検証（2026-10-17）
+
+レビュー済み C2 提出 HEAD `774e266` を取り込んだ作業ベースで、
+[Live Photo resource observation](immich-live-resource-plan.md) の初期検証を実施した。
+Rust unit 4件・reducer 12件・core-only Clippy、host Rust/XCFramework、
+warnings-as-errors付き Swift ABI 4件が成功。実 Immich 3.3.3 は16件、
+3.2.4 は14件が成功し、両検証専用stackの削除を確認した。
+新しいLiveメタデータケースは3.3.3だけで実行しており、3.2.4での新機能受入れではない。
+実サーバー検証はソース `34b54799` 前後一致。メタデータ・所属・永続状態を保ち、
+親／動画の独立観測値と照合した。逆方向の探索結果は情報のみで、完全なグラフとは扱わない。
+最終mainでの全体gate・hosted CI・マージは未完了。ペア原本取得／再生、
+複数資源の明示的な書込み・部分結果の回復、PP-03以降の範囲は維持する。
+
+
+### Liveメタデータの最終ローカルgateと基点のマージ（2026-10-17）
+
+上の初期検証後、同じ候補は通常の全体checkでRust/FFI483件、Swift74件、infra24件が成功した。
+Rustのignored16件はこのcheckでの実サーバー再実行ではなく、実Immich3.3.3の16件／3.2.4の14件は
+既述の独立した証拠として区別する。新しいLiveケースは3.3.3のみで、3.2.4の新機能受入れとはしない。
+checkは1,033.91秒、source `504ce8a` 前後一致で終了コード0。
+
+基点の[PR #38](https://github.com/rabe1028/suwop/pull/38)は提出HEAD `774e266` の
+[CI 38963285833](https://github.com/rabe1028/suwop/actions/runs/38963285833)全10job成功後、
+main `77d3691f91d03ae01699d75716c4c04acc8e8ab5`へマージ済み。両基点treeの一致を確認し、
+Liveの608ソースファイルを変更せず履歴を整合した。その後、同じsource `504ce8a` で通常の
+全Apple buildが4,993.92秒、終了コード0で成功。ARM64のmacOS／iOS実機／Simulatorの3slice、
+XCFramework、iOS Simulator／macOSアプリを含む。これはローカルビルド証拠で、実機・iCloudの受入れではない。
+
+基点の[merge後CI 38970289720](https://github.com/rabe1028/suwop/actions/runs/38970289720)は
+Editorテスト失敗を伴いVRTが60分上限でキャンセルされ、提出HEADの全成功とは区別する。
+CI修正の[PR #39](https://github.com/rabe1028/suwop/pull/39)は提出HEAD `22e4cacd29547391e844f6035e09c87303354622` の
+[CI 38992566368](https://github.com/rabe1028/suwop/actions/runs/38992566368)全11job成功後、2026-10-17 02:41:34 UTCに
+main `b620e1e5c3aef575faa7d106274f7dfcd05089b2`へマージ済み。集約記録はhost168／UI61の計229件・50画面、
+record=false、source `8fda3c987e23ae0b230a49d10b732f0873844a29948914e608706300001b1032`、tested merge `d6ac1039a30bb74dde246a46b89641f3d9485c9c`。
+[merge後CI 38995919492](https://github.com/rabe1028/suwop/actions/runs/38995919492)は統合checkpoint時点ではpendingで、成功扱いにしない。
+
+Live metadata checkoutもこのmainへ通常のfast-forwardで整合し、元の15件のdirty/index差分を保持した。
+CI・Makefile・Editor UIテスト・Python設定・VRT scriptなどの流入を含む統合sourceは
+`e1e432c5660c6d056854bbe21da3fc22c527f70c3cfb327536eb6a946a9450bf`。
+先のmetadata source `504ce8a` のcheck／Apple成功、PR #39の提出HEAD CI、統合後のmetadata自身の検証を分ける。
+統合後sourceの必須最終gate、新規metadata PRの提出HEAD CI、レビュー・マージは未完了。
+ペア原本の取得・更新・保護された再生、明示的な複数資源書込み、部分結果／通常表示への回復は
+引き続きPP-02の必須残作業であり、PP-03〜16も完了扱いにしない。

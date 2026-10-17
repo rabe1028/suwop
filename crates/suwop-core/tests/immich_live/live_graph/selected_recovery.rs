@@ -298,3 +298,6 @@ fn reload(
     }
     Ok(())
 }
+
+#[path = "live_resource_plan.rs"]
+mod live_resource_plan;

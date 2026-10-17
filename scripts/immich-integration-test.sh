@@ -59,6 +59,7 @@ TEST_ARGS=(--ignored --test-threads=1)
 if [[ "$IMMICH_VERSION" == v3.2.4 ]]; then
   # Positive mutations belong to the verified-write release. The native matrix case
   # instead asserts zero confirmation/Persist/PUT on this real old server.
+  TEST_ARGS+=(--skip real_live_resource_plan_observes_shared_motion_without_mutation_authority)
   TEST_ARGS+=(--skip visibility::real_immich_single_image_visibility_removes_two_owned_albums_and_never_restores_them)
 fi
 cargo test --locked -p suwop-core --test immich_live -- "${TEST_ARGS[@]}" --list > "$SUWOP_NATIVE_LIVE_EVIDENCE_DIR/applicable-tests.txt"
@@ -67,8 +68,11 @@ import os
 from pathlib import Path
 
 names = [line.removesuffix(": test") for line in Path(os.environ["SUWOP_NATIVE_LIVE_EVIDENCE_DIR"], "applicable-tests.txt").read_text().splitlines() if line.endswith(": test")]
-expected = 14 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 15
+expected = 14 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 16
 required = {"real_exact_release_native_image_write_gate_preserves_related_resources", "real_private_video_originals_are_pin_bound_read_only_and_cleanup_drift"}
+required.add("real_selected_video_pin_writes_preserve_nonselected_native_graph_and_originals")
+if os.environ["IMMICH_VERSION"] == "v3.3.3":
+    required.add("real_live_resource_plan_observes_shared_motion_without_mutation_authority")
 if len(names) != expected or not all(any(name.endswith(case) for name in names) for case in required):
     raise SystemExit("Applicable integration case list does not match the explicit release matrix")
 LIST

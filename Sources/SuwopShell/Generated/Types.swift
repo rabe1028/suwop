@@ -887,6 +887,30 @@ public struct ImmichArchiveView: Codable, Sendable {
     }
 }
 
+public struct ImmichLiveResourcePlan: Codable, Sendable {
+    public var additionalParents: LiveParentObservation
+    public var planID: String
+    public var readTargets: [LiveResourceReadFact]
+    public init(additionalParents: LiveParentObservation, planID: String, readTargets: [LiveResourceReadFact] = []) {
+        self.additionalParents = additionalParents
+        self.planID = planID
+        self.readTargets = readTargets
+    }
+}
+
+public struct ImmichLiveResourcesView: Codable, Sendable {
+    public var error: String?
+    public var pending: Bool
+    public var plan: ImmichLiveResourcePlan?
+    public var requestID: String
+    public init(error: String? = nil, pending: Bool, plan: ImmichLiveResourcePlan? = nil, requestID: String) {
+        self.error = error
+        self.pending = pending
+        self.plan = plan
+        self.requestID = requestID
+    }
+}
+
 public struct ImmichLockedEntry: Codable, Sendable {
     public var asset: StoredAsset
     public var canPlayVideo: Bool
@@ -1350,6 +1374,75 @@ public struct LibrarySnapshot: Codable, Sendable {
         self.access = access
         self.scannedAt = scannedAt
     }
+}
+
+public struct LiveAdditionalParent: Codable, Sendable {
+    public var hasStack: Bool?
+    public var isOffline: Bool?
+    public var isTrashed: Bool?
+    public var key: AssetKey
+    public var revision: String
+    public var visibility: LiveObservedVisibility?
+    public init(hasStack: Bool? = nil, isOffline: Bool? = false, isTrashed: Bool? = nil, key: AssetKey, revision: String, visibility: LiveObservedVisibility? = nil) {
+        self.hasStack = hasStack
+        self.isOffline = isOffline
+        self.isTrashed = isTrashed
+        self.key = key
+        self.revision = revision
+        self.visibility = visibility
+    }
+}
+
+public enum LiveDiscoveryTermination: String, Codable, CaseIterable, Sendable {
+    case `exhaustedPages`
+    case `pageBudget`
+    case `unavailable`
+}
+
+public enum LiveObservedVisibility: String, Codable, CaseIterable, Sendable {
+    case `timeline`
+    case `archive`
+    case `hidden`
+    case `locked`
+}
+
+public struct LiveParentObservation: Codable, Sendable {
+    public var graphComplete: Bool
+    public var malformedCandidates: Int64
+    public var observations: Int64
+    public var pagesObserved: Int64
+    public var parents: [LiveAdditionalParent]
+    public var protectedCandidates: Int64
+    public var termination: LiveDiscoveryTermination
+    public init(graphComplete: Bool, malformedCandidates: Int64, observations: Int64, pagesObserved: Int64, parents: [LiveAdditionalParent] = [], protectedCandidates: Int64, termination: LiveDiscoveryTermination) {
+        self.graphComplete = graphComplete
+        self.malformedCandidates = malformedCandidates
+        self.observations = observations
+        self.pagesObserved = pagesObserved
+        self.parents = parents
+        self.protectedCandidates = protectedCandidates
+        self.termination = termination
+    }
+}
+
+public struct LiveResourceReadFact: Codable, Sendable {
+    public var checksum: String
+    public var key: AssetKey
+    public var revision: String
+    public var role: LiveResourceRole
+    public var visibility: LiveObservedVisibility
+    public init(checksum: String, key: AssetKey, revision: String, role: LiveResourceRole, visibility: LiveObservedVisibility) {
+        self.checksum = checksum
+        self.key = key
+        self.revision = revision
+        self.role = role
+        self.visibility = visibility
+    }
+}
+
+public enum LiveResourceRole: String, Codable, CaseIterable, Sendable {
+    case `parent`
+    case `motion`
 }
 
 public enum MetadataAction: String, Codable, CaseIterable, Sendable {
@@ -2257,6 +2350,7 @@ public struct ViewModel: Codable, Sendable {
     public var error: String?
     public var immichArchiveActions: [ImmichArchiveActionHint]
     public var immichArchiveView: ImmichArchiveView
+    public var immichLiveResources: ImmichLiveResourcesView?
     public var immichLockedView: ImmichLockedView
     public var immichVisibilityActions: [ImmichVisibilityActionHint]
     public var immichVisibilityView: ImmichVisibilityView
@@ -2278,7 +2372,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -2288,6 +2382,7 @@ public struct ViewModel: Codable, Sendable {
         self.error = error
         self.immichArchiveActions = immichArchiveActions
         self.immichArchiveView = immichArchiveView
+        self.immichLiveResources = immichLiveResources
         self.immichLockedView = immichLockedView
         self.immichVisibilityActions = immichVisibilityActions
         self.immichVisibilityView = immichVisibilityView
