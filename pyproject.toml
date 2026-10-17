@@ -1,6 +1,8 @@
 [tool.ruff]
 target-version = "py311"
 line-length = 100
+# Python helpers live here; do not infer `vrt` from uppercase root VRT on macOS.
+src = ["scripts"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "S", "RUF"]

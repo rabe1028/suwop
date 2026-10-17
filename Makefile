@@ -104,3 +104,10 @@ test-infra:
 .PHONY: private-video-mac-test
 private-video-mac-test:
 	bash scripts/private-video-mac-test.sh
+
+.PHONY: vrt-ci-host vrt-ci-ui
+vrt-ci-host:
+	bash scripts/vrt.sh --ci-lane host-snapshots
+
+vrt-ci-ui:
+	bash scripts/vrt.sh --ci-lane ui
