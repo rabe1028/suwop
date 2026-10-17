@@ -197,7 +197,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [vrt, apple-native-test]
+        suite: [vrt-ci-host, vrt-ci-ui, apple-native-test]
     timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
@@ -229,13 +229,13 @@ jobs:
           brew install xcodegen protobuf
           make setup-vrt
       - uses: ./.github/actions/cache-apple-packages
-      - name: Run the complete pinned simulator suite
+      - name: Run the selected pinned simulator lane
         run: make "${{ matrix.suite }}"
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: ${{ matrix.suite }}-${{ github.sha }}
+          name: ${{ matrix.suite }}-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
           path: |
             DerivedData/VRTArtifacts/
             DerivedData/PhotoKitArtifacts/
@@ -248,7 +248,31 @@ jobs:
     needs: simulator
     if: always()
     steps:
-      - name: Require both screenshot and PhotoKit acceptance
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.11.24'
+          enable-cache: true
+      - name: Require successful screenshot, UI and unchanged PhotoKit gates
         env:
           SIMULATOR_RESULT: ${{ needs.simulator.result }}
         run: test "$SIMULATOR_RESULT" = success
+      - name: Read only this run attempt's two VRT lane artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: vrt-ci-*-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: DerivedData/VRTLanes
+      - name: Validate the complete exact-head VRT union
+        env:
+          SIMULATOR_RESULT: ${{ needs.simulator.result }}
+        run: |
+          uv run --no-project python scripts/vrt_lanes.py aggregate \
+            DerivedData/VRTLanes "$GITHUB_SHA" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$SIMULATOR_RESULT"
+      - name: Preserve complete VRT union receipt
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: vrt-union-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: DerivedData/VRTLanes/aggregate.json
+          if-no-files-found: warn

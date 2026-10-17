@@ -12,9 +12,12 @@ if [[ "$(uname -s)" != Darwin || "$(uname -m)" != arm64 ]]; then
 fi
 RECORD=0
 CAPTURE=0
+LANE=""
 if [[ "${1:-}" == --record && $# == 1 ]]; then RECORD=1
 elif [[ "${1:-}" == --capture && $# == 1 ]]; then CAPTURE=1
-elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture]' >&2; exit 1
+elif [[ "${1:-}" == --ci-lane && $# == 2 ]]; then
+    case "$2" in host-snapshots|ui) LANE="$2" ;; *) echo 'Unknown CI VRT lane' >&2; exit 1 ;; esac
+elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture|--ci-lane host-snapshots|ui]' >&2; exit 1
 fi
 if [[ ( "$RECORD" == 1 || "$CAPTURE" == 1 ) && -n "${CI:-}" ]]; then
     echo 'Baseline recording and incomplete-baseline capture are forbidden in CI.' >&2
@@ -54,7 +57,11 @@ cleanup() {
         status=1
         PASSED=0
     fi
-    uv run --no-project python scripts/vrt.py report "$ARTIFACTS" "$RECORD" "$PASSED" "$UDID"
+    if [[ -n "$LANE" ]]; then
+        uv run --no-project python scripts/vrt_lanes.py report "$ARTIFACTS" "$LANE" "$status" "$PASSED" || status=1
+    else
+        uv run --no-project python scripts/vrt.py report "$ARTIFACTS" "$RECORD" "$PASSED" "$UDID"
+    fi
     rmdir DerivedData/VRT.lock
     echo "VRT artifacts: $ARTIFACTS"
     exit "$status"
@@ -70,6 +77,7 @@ stage() {
     printf '%s\t%s\t%s\n' "$label" "$((SECONDS - started))" "$status" >> "$ARTIFACTS/stages.tsv"
     if [[ "$status" != 0 ]]; then tail -100 "$ARTIFACTS/$label.log"; return "$status"; fi
 }
+if [[ -n "$LANE" ]]; then stage begin uv run --no-project python scripts/vrt_lanes.py begin "$ARTIFACTS"; fi
 stage slim simslim on "$UDID" --profile VRT/simslim.json
 stage verify-profile simslim verify "$UDID" --profile VRT/simslim.json --json
 stage memory simslim measure "$UDID" --json
@@ -85,8 +93,26 @@ ARGS=(
     "SUWOP_VRT_ARTIFACTS=$ARTIFACTS"
 )
 stage build xcodebuild "${ARGS[@]}" build-for-testing
-stage compare xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
-uv run --no-project python scripts/vrt.py coverage "$ARTIFACTS"
+if [[ -n "$LANE" ]]; then
+    stage enumerate xcodebuild "${ARGS[@]}" test-without-building -enumerate-tests \
+        -test-enumeration-style flat -test-enumeration-format json \
+        -test-enumeration-output-path "$ARTIFACTS/registered-raw.json"
+    stage inventory uv run --no-project python scripts/vrt_lanes.py inventory \
+        "$ARTIFACTS/registered-raw.json" "$ARTIFACTS/registered-tests.json"
+    if [[ "$LANE" == host-snapshots ]]; then BUNDLE=SuwopVRT
+    else BUNDLE=SuwopVRTUI; fi
+    stage compare xcodebuild "${ARGS[@]}" "-only-testing:$BUNDLE" \
+        -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
+else
+    stage compare xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
+fi
+if [[ -n "$LANE" ]]; then
+    stage test-inventory xcrun xcresulttool get test-results tests --path "$ARTIFACTS/Tests.xcresult" --compact
+    stage test-summary xcrun xcresulttool get test-results summary --path "$ARTIFACTS/Tests.xcresult" --compact
+    stage lane-validation uv run --no-project python scripts/vrt_lanes.py validate "$ARTIFACTS" "$LANE"
+else
+    uv run --no-project python scripts/vrt.py coverage "$ARTIFACTS"
+fi
 if [[ "$RECORD" == 0 && "$(uv run --no-project python scripts/vrt.py hashes)" != "$BEFORE" ]]; then
     echo 'Comparison modified baseline images.' >&2
     exit 1

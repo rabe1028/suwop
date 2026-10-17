@@ -1,0 +1,702 @@
+{
+  "errors" : [
+
+  ],
+  "values" : [
+    {
+      "disabledTests" : [
+
+      ],
+      "enabledTests" : [
+        {
+          "identifier" : "SuwopVRT/AppleTrashCompletionTests/testDeletionCompletionQueuesRefreshAfterBusyClearsAndKeepsKnownFailureAndUnknownFence()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityActionsTests/testExplicitInspectionAndUnhideUseKnownRecordAndNewUUIDWithoutClearingUnknown()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityActionsTests/testHideCancellationLeavesVisibleContentAndNoIntent()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityActionsTests/testUnknownResultRefreshRetainsAnonymousHistoryAndUnavailablePhotosGuidance()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityTests/testCachedThumbnailAndNativeErrorAreDiscardedAfterVisibilityChanges()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityTests/testCoreErrorFromVisibleSourceIsRedactedAfterManualHiddenRefresh()"
+        },
+        {
+          "identifier" : "SuwopVRT/AppleVisibilityTests/testLateThumbnailAndPreviewCannotCrossVisibilityGeneration()"
+        },
+        {
+          "identifier" : "SuwopVRT/BridgeJSONValueTests/testNumericEffectGenerationsKeepBooleansAcrossBoundedWireRoundTrips()"
+        },
+        {
+          "identifier" : "SuwopVRT/EditorPresentationTests/testUncommittedInputTrackingSurvivesOverlappingControlsAndClearsOnClose()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testAppProtectedSourceAndPreviouslyChangedProtectedHistoryDenyOrdinaryAuthority()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testBackgroundDuringHeldConfirmationHidesHistoryAndCannotPersistOrSubmit()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testQueuedActualRustPUTIsRevokedBeforeTransportByCloseOrDisconnect()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testQueuedPrepareDoesNotReviveAfterSceneReactivation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testSubmittedResponseSurvivesCloseAndDurableUnknownIsNeverReplayed()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveRevocationTests/testUnrelatedSceneCannotDismissTheOwnersActualConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveScreensTests/testOrdinaryArchiveScreens()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveSubmissionTests/testRealRustPUTRejectsExtraBodyFieldsAndConflictingAuthoritiesBeforeTransport()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveSubmissionTests/testWrongDestinationPromptCannotRegisterConfirmationForTheLiveOperation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testAmbiguousPersistenceStopsOrdinaryWritesAndExplicitRecoveryOnlyReads()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testCancellationAndProvenUnwrittenIntentPreserveOrdinaryAccessWithoutSubmitting()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testLostResponseRestartsInspectOnlyAndExternalLockCannotAcquirePINPermission()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testPINFreeBothDirectionsPreserveAlbumsOriginalFactsAndIndependentAppleCopy()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testUnwrittenIntentWithUnavailableReadbackDeniesAllOrdinaryWrites()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichArchiveTests/testVideoOrdinaryRoundtripRetainsOriginalFactsAndNeverAcquiresPINAuthority()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLiveParentArchiveTests/testCancelledOrRevokedParentConfirmationCannotPersistOrExpandTheTarget()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLiveParentArchiveTests/testSelectedParentRoundtripNeverExpandsToItsMotionOrAnotherParent()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testDelayedPositiveStatusAfterLocalExpiryCannotRenewOrReopenTheUI()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testExpiredLocalLeaseShieldsBeforeUnavailableRemoteCleanupAndOldTimerCannotCloseReauth()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testLateLoginAfterCloseIsRevokedAndCannotReopenTheSurface()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testNativeReleaseCancelsAnExactGenerationFetchBeforeItCanStage()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testNativeReleasePurgesTheExactRevokedGenerationAndRetainsNewerRaster()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testPasswordPINOwnerAndUnsupportedAuthenticationFailuresPublishNoContent()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testServerAuthenticationIsDistinctAndNeverExposesAppProtectedOrOrdinarySources()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichLockedPhotosTests/testSingleFlightSkipsIntermediateSelectionAndInactiveCancelsHeldRaster()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichSelectedObservationTests/testExplicitInspectReportsTheSelectedOriginalWithoutRewritingAnUnknownOperation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityGuardTests/testAmbiguousPersistenceStopsUnrelatedWritesAndAuthenticatedRecoveryOnlyReadsSavedState()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityGuardTests/testAppProtectionAndLiveSourcesRejectChangesBeforeConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityGuardTests/testCachedAndCancellationInsensitiveLateOrdinaryRastersCannotSurviveLockFence()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityGuardTests/testLockIntentRejectsQueuedEmbeddingImageBeforeNativeIO()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityGuardTests/testPrivateExactSourceRejectsQueuedAndLateOrdinaryHTTPWhileAppleCopyRemainsReadable()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityPresentationTests/testExternalDetachCompletesFalseAndLateAnswersCannotReviveIt()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityPresentationTests/testInteractiveDismissalAndOldCallbacksCannotCompleteTheNextConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityPresentationTests/testInvalidationDismissesBeforeFalseCompletionAndRejectsLateConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityPresentationTests/testRefusedMountCompletesFalseAndTheNextHealthyPresentationStillWorks()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityPresentationTests/testUnknownSceneFailsClosedAndNonKeyOwnerWindowIsChosenExactly()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRefreshTests/testExpiryWhileRefreshIsHeldShieldsAndDiscardsItsLateRosterWithoutReauthentication()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRefreshTests/testKnownBeforeIntentFailureCanRefreshTheRemovedRowWithoutPINOrJournalChanges()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRefreshTests/testLateRefreshCannotReplaceANewGrantOrItsApprovedRaster()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRefreshTests/testOldRefreshCannotBlockNewGrantOrClearItsPendingRefresh()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRosterTests/testCancelledUnlockKeepsRosterButConfirmedUnlockRemovesRowAndPreviewInTheSameSession()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRosterTests/testConfirmedLockPublishesOnlyFreshEntryAfterFinalPersistenceWithoutReauthentication()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRosterTests/testRevocationBeforeFinalPersistAcknowledgementCannotInstallFreshRosterOrImage()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityRosterTests/testUnknownResultDoesNotExposeServerMutationUntilExplicitFreshInspection()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityScreensTests/testSelectedObservationScreens()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityScreensTests/testVisibilityScreens()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityStackTests/testStackAndMissingDetailFactsDisableOrdinaryAndLockedActionsWithoutMutation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilitySubmissionTests/testRealRustVisibilityPUTQueuedBeforeCloseNeverReachesTransport()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilitySubmissionTests/testSubmittedRealRustVisibilityPUTKeepsResponseAndDurableOutcomeAfterClose()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityTests/testBackgroundDuringConfirmationClearsPendingIntentAndDoesNotCreateJournal()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityTests/testCancelledConfirmationAndFailedPrewriteCannotSubmitVisibilityMutation()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityTests/testExactLockPersistsFirstRemovesAlbumsAndExplicitUnlockNeverRestoresMembership()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityTests/testLostResponseRestartsWithPrivateHistoryAndExplicitInspectionNeverReplays()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityTests/testProtectingPreviouslyChangedSourceHidesHistoryAndDeniesInspectionWithoutAssetIO()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityWriteContractTests/testFreshDowngradeDisablesThePreviouslySupportedActionWithoutClosingReading()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityWriteContractTests/testOrdinaryHintOffersVerificationWithoutAuthorizingMutationAndCloseRevokesIt()"
+        },
+        {
+          "identifier" : "SuwopVRT/ImmichVisibilityWriteContractTests/testUnsupportedServerRetainsLockedPreviewAndUnknownInspectionWithoutAnotherMutation()"
+        },
+        {
+          "identifier" : "SuwopVRT/LibraryPresentationContextTests/testRealSendCapturesBeforeRuntimeUpdateAndKeepsContextThroughDelayedPresentation()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testConfirmationInvalidationClearsNamesReturnsFalseAndNextAlertRemainsActive()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testEditorInvalidationHidesRenderedImageAndOldCloseCannotEndNextEditor()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testInvalidationDuringPlayerPreparationNeverPresentsLateWindow()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testPlaybackInvalidationStopsRealPlayerAndOldDismissCannotEndNextPlayer()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testStaleAppleAndLegacyContextNeverRegistersShareEditorPlayerOrConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativePresentationVisibilityTests/testStaleImmichSharingStillPresentsAndRetainsLeaseUntilActualCompletion()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativeSubmissionGateTests/testExpiredPermitNeverExecutesSubmissionActionWithoutAnySleep()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativeSubmissionGateTests/testRevokedPermitNeverExecutesSubmissionAction()"
+        },
+        {
+          "identifier" : "SuwopVRT/NativeSubmissionGateTests/testValidPermitExecutesSubmissionActionOnce()"
+        },
+        {
+          "identifier" : "SuwopVRT/OrdinarySelectedNativeTests/testCancellationInsensitiveReadCannotStageAfterSceneShield()"
+        },
+        {
+          "identifier" : "SuwopVRT/OrdinarySelectedNativeTests/testFinalApprovedStillIsSceneScopedAndShieldedSynchronously()"
+        },
+        {
+          "identifier" : "SuwopVRT/OrdinarySelectedNativeTests/testOneReadFailureRetiresOnlyItsProofAndKeepsOtherKeyAndSceneDrawable()"
+        },
+        {
+          "identifier" : "SuwopVRT/OrdinarySelectedNativeTests/testOperationalRemovalAndSecurityRefreshStillRevokeCapturedContext()"
+        },
+        {
+          "identifier" : "SuwopVRT/OrdinarySelectedNativeTests/testReplayAdmissionRejectionLeavesDescriptorCurrentWithoutProducingAccess()"
+        },
+        {
+          "identifier" : "SuwopVRT/PresentationEpochTests/testContextIsBoundToOwningShellAndRefreshCannotRevalidateOldContext()"
+        },
+        {
+          "identifier" : "SuwopVRT/PresentationEpochTests/testInvalidationDuringReadonlyInspectionBlocksItsResultAndFollowingConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRT/PresentationEpochTests/testStaleVisibilityConfirmationReturnsFalseWithoutRegisteringNativeAlert()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testAtomicExpiryWinnerCannotBePublishedFromAnEarlierCompletedStage()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testAtomicPublicationWinnerCannotBeExpiredOrRenewedAfterTransfer()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testCASBeforeExpiryMakesOldCallbackInertAndKeepsCompletionIdentity()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testDelayedInitialDeliveryCannotReanchorAtReceiptOrWallClockRollback()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testDuplicateStaleAndNonIncreasingSuccessorsDoNotReplaceCurrentLease()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testExpiryBeforeCASIsTerminalAndCannotResurrect()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoAcquisitionTests/testRenewalKeepsCommittedFileBudgetAndReceivedByteCount()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testExactReleaseCannotDeleteAnotherLeaseOrDifferentRequest()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testExpiredOrReplayedQuoteCannotCommitAndNonceIsExact()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testFailedWriteKeepsAttemptedClaimUntilExactCleanup()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testFinishedUnallocatedClaimBlocksSecondAdmissionUntilExactRelease()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testIncrementalClaimsKeepDelayedAllocationRoundingAndOtherStageHeadroom()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testStoredBytesAreBoundedAndFinishedFileCannotBeAppended()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoFileTests/testTwoStagesCountOnlyIncrementalClaimsAndKeepKnownFullCommitment()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoHashCancellationTests/testBackgroundDuringHeldHashKeepsFileUntilWorkerJoinAndNeverPublishesAccess()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoNamespaceTests/testCoordinatorContentionFailsImmediatelyAndFactoryCanRecover()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoNamespaceTests/testSecondLiveOwnerSurvivesStartupAndOnlyUnlockedOrphanIsSwept()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoNamespaceTests/testSymlinksUnknownNamesAndMissingOwnerLockAreNeverTreatedAsDeadOwners()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testAbsentMetadataAndContentLengthStillUseFiniteRustBudgetAndActualPlayer()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testActualDecodedMotionSeekAndAudioStateRequireFinalAccessAndExactOwner()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testActualStreamRejectsPartialEncodingMalformedLengthCorruptionAndTruncation()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testBackgroundDuringHeldOriginalShieldsBeforeAwaitAndNeverAttachesLateResult()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testCloseBackgroundAndExpiryEachShieldAnActuallyPlayingItem()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testHeldOldPreparationIsJoinedBeforeLatestRequestAndMiddleRequestIsSkipped()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testMissingMIMEAndUnrecognizedBoundFilenameFailsWithoutHangingOrAttachment()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testMissingOrGenericMIMEUsesExactBoundMP4AndMOVFilenameHints()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testReassigningAndUnregisteringOwnerSynchronouslyDetachesActualPlayer()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testReusedSurfaceDetachesCurrentAccessAndOldDismantleCannotPauseFreshPlayback()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testScriptedOneUnitCapacityDropKeepsUnknownOriginalPlayable()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testScriptedStableUnknownCapacityKeepsRealEOFHashAndPlayerPipeline()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testUnknownAdmissionBelowOneUnitRejectsBeforeHTTPAndCleansLease()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testUnknownMidstreamCapacityLossRejectsAndCleansLease()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testUnregisteringOwnerStopsFreshActualPlayback()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPlaybackTests/testWrongOwnerCannotAttachAndLateOldReleaseCannotStopNewPlayback()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoPublicationTests/testNativeExpiryWinsBeforeLateRustPublicationAndCannotStopNewRequest()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testBarrierForDifferentPhysicalKeyLeavesCurrentApprovedVideoAndLeaseIntact()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testHashAndPreparationMustJoinBeforeSelectedBarrierAcknowledgesOrUnlinks()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testNewRequestDuringOldBarrierIsNotCancelledOrUnlinkedByLateCleanup()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testPreviouslyApprovedAttachmentCannotReattachWhileQuiescenceJoinIsHeld()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testStopBeforeKeyOnlyBarrierStillJoinsAlreadyRetiredHashWorker()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testSuppliedPendingRejectsInspectionQueuedBeforeAnyNativeQuote()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoQuiescenceTests/testUnlinkFailureCannotAcknowledgeUntilExactLeaseCanBeReleased()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalCancellationTests/testMissingScheduleAndExpiryBeforeRegistrationStillJoinBeforeUnlink()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testCompletedOldLeaseResultIsNotRelabeledAfterSuccessorAcknowledgement()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testCompletedReadWaitsForExactAcknowledgementBeforePreparation()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testEarlyGenuineCheckRenewsBeforeFirstReadWithinOriginalFreshQuote()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testLateRenewalForReplacedRequestCannotInstallOrCancelFreshAcquisition()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testLostAcknowledgementCannotPublishCompletedReadOrPrepare()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testRenewalRejectsChangedCommitmentModeWithoutChangingTheLiveController()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalOrderingTests/testRenewedAcquisitionCannotCommitExpiredInitialStorageQuote()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalQuiescenceTests/testActualSelectedWriteWaitsForRenewedPreparationJoinBeforeIntentAndPUT()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalQuiescenceTests/testQuiesceRetiresSuccessorAndRejectsHeldGenuinePreparePublication()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalQuiescenceTests/testQuiescedQuoteCannotBootstrapDelayedScheduleOrFirstRead()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalTests/testHeldActualHashWorkerSurvivesOldDeadlineUsingSameFile()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalTests/testHeldHiddenPreparationSurvivesOldDeadlineWithoutEarlyAccess()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoRenewalTests/testRealStreamCrossesProductionDeadlineAndTwoRenewalsWithoutBudgetReset()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testAbsentLengthHasFiniteBudgetAndRequiresNonemptyEOF()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testAllocatedBytesAreNotSubtractedFromAvailableCapacityTwice()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testAnchorObserverCancellationAndDeinitCannotInvokeStaleOwner()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testDeclaredLengthTightensBoundBeforeWritingNotOnlyAtEOF()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testDelayedAllocationOtherCommitmentsAndRoundingRemainConservative()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testFullUpfrontCeilingRejectsCapacityLossWhileIncrementalClaimCanFit()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testKnownLengthAndIntegerOverflowFailBeforeWrite()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testMIMEHintsAreSanitizedAndGenericHeadersUseFilenameFallback()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testMalformedLengthIsDifferentFromAbsentLength()"
+        },
+        {
+          "identifier" : "SuwopVRT/PrivateVideoResourceTests/testPartialRedirectLoginAndEncodedResponsesCannotBecomeOriginals()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testInactiveAuthenticationPromptHoldsSuccessUntilOwnerReturnsActive()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testLateRasterAfterCloseCannotStageAndFreshPreviewIsPurgedOnBackground()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testLockDuringHeldFetchDiscardsPendingSelectionAndJoinsCleanup()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testOrdinaryRefreshUpdatesProtectedProjectionAndReleasesApprovedRaster()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testRapidSelectionJoinsFirstFetchSkipsIntermediateAndPublishesOnlyLatest()"
+        },
+        {
+          "identifier" : "SuwopVRT/ProtectedPhotosTests/testSceneOwnershipAndCloseRequireFreshAuthenticationBeforeNamesOrImages()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testBudgetChangeIsPersistedBeforeAutomaticInference()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testDimensionChangeImmediatelyInvalidatesPreviousModel()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testEmptyJournalWakeDoesNotReadOrPrepareTheModel()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testForegroundRetriesInterruptedModelPreparationWithoutPausingJournal()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testInvalidSearchTextDoesNotPausePhotoIndexing()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testPauseDrainsConfigurationBeforePersistingPause()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testPublicationWaitsAcrossEmptyQueueAndStopsForNewInference()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testRestoreUsesPersistedSelectionInsteadOfNewestGeneration()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testSearchPreparationFailureDoesNotPausePhotoIndexing()"
+        },
+        {
+          "identifier" : "SuwopVRT/SemanticSearchSchedulingTests/testUnreadablePhotoCanBeExplicitlyExcludedWithoutDeletingOriginal()"
+        },
+        {
+          "identifier" : "SuwopVRT/VisualRegressionTests/testScreens()"
+        },
+        {
+          "identifier" : "SuwopVRT/VisualRegressionTests/testSemanticSearch()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleTrashUITests/testAppleOnlyPhotoInfoExposesDestinationSpecificDeletionAndDisablesWhenBusy()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleTrashUITests/testPendingVisibilityActionIsReachableAtAccessibilityTextSize()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleVisibilityActionsUITests/testHideConfirmationCancellationKeepsPhotoAndCreatesNoHistory()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleVisibilityActionsUITests/testUnavailableHiddenTargetOffersPhotosGuidanceAndDisablesUnhide()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleVisibilityActionsUITests/testUnknownHistoryAllowsExplicitInspectionAndNewUnhideOperation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleVisibilityUITests/testOpenInfoRemovesNamesLocationAndResourcesAfterHiddenRefresh()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/AppleVisibilityUITests/testOpenMetadataSheetClosesAfterItsAppleSourceIsExcluded()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/EditCopyUITests/testExcludeCategoriesAndCopyOnlyGeometry()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/EditorUITests/testCancelClosesWithoutReturningADraft()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/EditorUITests/testSliderUndoRedoFilterAndConfirmedDraft()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveBusyUITests/testCoreHTTPWorkDisablesTheMenuActionUntilTheResponseCompletes()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveBusyUITests/testPendingOnlyCommandDisablesTheObservedMenuActionBeforeRustIsBusy()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveHistoryRecoveryUITests/testBusyHistoryRequiresAnExplicitOpenAndDisplacedOwnerCanReopen()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveHistoryRecoveryUITests/testLargeTextHistoryRecoveryRemainsExplicitAndReachable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveUITests/testGalleryArchiveAndTimelineUseNoPINAndPreserveOriginalsAndBothAlbums()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveUITests/testLostReplyIsInspectOnlyAndNeverReplaysTheMutation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveUITests/testVideoAX3ConfirmationScrollCancelThenConfirmKeepsButtonsAndDisclosureReadable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichArchiveUITests/testVideoViewerRoundtripDisclosesSelectedItemWithoutPINAndPreservesAlbums()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLiveParentArchiveUITests/testLargeTextSelectedParentDisclosureAndActionsRemainReachable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLiveParentArchiveUITests/testSelectedLiveParentCancelsThenRoundtripsWithoutChangingRelatedAssets()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLockedPhotosUITests/testActualGalleryEntryServerAuthenticationPreviewAndCloseNeverExposeOrdinaryContent()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLockedPhotosUITests/testBackgroundRelocksOpenedServerSessionAndDoesNotReuseItsRaster()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLockedPhotosUITests/testWrongPINPublishesNoContentAndClearsAllSubmittedFields()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichLockedPhotosUITests/testWrongPasswordPublishesNoContentAndClearsAllSubmittedFields()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityRosterUITests/testExistingLockedRasterAndBothActionsDisappearAfterArchiveUnlockInTheSameSession()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityRosterUITests/testFailedUnwrittenIntentCanRestoreItsRowWithExplicitRefreshAndNoNewPIN()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityRosterUITests/testNewlyLockedRowAppearsAndTimelineUnlockRemovesItsPreviewWithoutReauthentication()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityStackUITests/testLockedStackedPhotoDisablesBothDestinationsWithoutFurtherPINOrConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityStackUITests/testOrdinaryStackedPhotoDisablesLockAndExplainsBeforeAnyPINOrConfirmation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testAX3LinkedSelectedObservationGuidanceAndActionsRemainReachable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testAX3SelectedVideoDisclosureCancelLockAndExplicitArchive()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testAX3UnsupportedWriteServerKeepsPreviewAndCloseReachableAfterScrolling()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testActualAX3NativeDisclosureAndBothActionsRemainReachable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testBackgroundDuringConfirmationCancelsNativeSheetAndDoesNotCreateIntent()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testGalleryDisplayedSourceLockThenExplicitArchiveNeverRestoresAlbums()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testInteractiveConfirmationDismissalDoesNotCreateIntentOrMutation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testLinkedSelectedObservationDoesNotReplaceTheUnknownOperationResult()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testLiveSourceHasVisibleUnsupportedReasonAndCannotOpenMutation()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testLostResponseHistoryIsInspectOnlyAndBackgroundHidesVisiblePrivateRaster()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testNativeConfirmationCancelLeavesOriginalAndHasNoDurableIntent()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testSelectedVideoCancelThenLockAndExplicitArchive()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testSelectedVideoExplicitTimelineDoesNotChooseAdjacentArchive()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testSelectedVideoLostResponseKeepsUnknownInspectOnlyWithoutReplay()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testTimelineDestinationDoesNotInvokeTheAdjacentArchiveAction()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testUnsupportedWriteServerDisablesOrdinaryLockBeforeAnyPIN()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ImmichVisibilityUITests/testUnsupportedWriteServerKeepsPINReadingAndLockedPreviewAvailable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/OrdinarySelectedUITests/testActualSourceSwitchKeepsAppleOperationsSeparateFromReadOnlyImmich()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/OrdinarySelectedUITests/testLargeTextReadOnlyOriginalKeepsPreviewAndCloseReachable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/OrdinarySelectedUITests/testReadFailureRevokesTheSelectedProofAndKeepsIndependentAppleAvailable()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/OrdinarySelectedUITests/testReadOnlyOriginalRendersWithoutGrantingOperations()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/OrdinarySelectedUITests/testRejectedRasterShowsGuidanceInsteadOfIndefiniteLoading()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/PrivateVideoUITests/testActualAX3C1VideoAuthenticationMovingPlaybackStopAndClose()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/PrivateVideoUITests/testActualC1VideoAuthenticationMovingPlaybackStopAndClose()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testBackgroundRelocksAnActuallyVisibleProtectedRaster()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testDisplayButtonDoesNotUnprotectOrWriteMembership()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testGalleryViewerFailedAuthenticationDoesNotPersistProtection()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testGalleryViewerProtectionPersistsOnlyTheDisplayedPhysicalCopy()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testLockedSurfaceDisclosesNoNamesOrRasterAndCloseRelocks()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/ProtectedPhotosUITests/testUnprotectButtonDoesNotReadOrDisplayImage()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/SemanticSearchUITests/testSearchTabSwitchesDimensionWithoutResumingPausedAnalysis()"
+        },
+        {
+          "identifier" : "SuwopVRTUI/SemanticSearchUITests/testUnreadablePhotoCanBeExcludedAndAnalysisContinues()"
+        }
+      ],
+      "testPlan" : "SuwopVRT"
+    }
+  ]
+}
