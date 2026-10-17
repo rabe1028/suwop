@@ -1,0 +1,46 @@
+# Immich Live Photo resource observation
+
+This increment observes the selected Live Photo's parent and motion metadata through the dedicated Immich session. It is groundwork for paired playback and explicit visibility changes; it does not grant original-byte access or mutate either resource.
+
+## Contract
+
+`InspectImmichLiveResources` carries the parent key and exact request, grant, and scene IDs. Rust requires a current dedicated session, ordinary/protected-content generations, and admission for both resources. The selected parent must be an owned IMAGE with an explicit motion relation; the motion must be an owned VIDEO with an explicit null forward relation. Both require exact IDs, checksums, nonempty opaque revisions, explicit unstacked state, and no offline/trash state.
+
+The observation performs status, parent/motion reads, bounded reverse discovery, fresh parent/motion reads, and status again. Any change in the selected pair's facts rejects the plan. A stale completion cannot replace a newer request, and revoked authority cannot publish metadata. The plan ID is opaque and does not authorize downloading or writing.
+
+Reverse discovery is informational. It requests all four placements, including stacked assets, in pages of at most 100 with an eight-page budget. The result reports the termination condition, malformed/protected candidate counts, and admissible additional parents. `graphComplete` remains false even after pagination ends. An additional parent's missing flags stay unknown; its presence does not grant access or make it a mutation target. Protected identities are not exposed by this observation.
+
+Observed `hidden` and `locked` values remain distinct. Neither the motion relation nor the reverse observations prove that locking the selected asset makes its bytes inaccessible through all related resources or shares.
+
+## Validation evidence
+
+Initial checks run on the reviewed C2 submitted base `774e266ee642e9e68d6313116607ca55faf1c2ab`; they are separate from final merged-main checks and hosted CI for this increment.
+
+- Focused Rust: four unit and twelve reducer tests pass. Core-only Clippy with warnings denied passes after fixing the opaque internal completion type's visibility and lint findings without suppressions.
+- Normal DTO generation succeeds. The generator changes the Swift DTO file intentionally; the verification wrapper's `source_changed` result is not a test pass.
+- Host Rust/XCFramework build and Swift compilation with warnings as errors pass. Four Swift tests use the actual RustRuntime event/effect/view boundary with synthetic HTTP: exact ordered pair metadata, informational reverse discovery, owner/revision rejection, replacement/revocation, and foreign grant/scene denial. Persist/PUT/original-media effects are rejected and saved state remains unchanged.
+- The host/Swift runs use unchanged source fingerprint `e01f3d4fd2a89e3898748f366a3bbabb3dd156655749168ebf60da04c0779ecc`. Subsequent changes strengthen only the actual-server test's independent metadata comparisons.
+- Actual isolated Immich 3.3.3: 16 passed, zero failed or ignored, six filtered cases; wrapper exit 0 with unchanged source `34b54799a860699fcab830a3e5a06bbca6c03e0be0ae532b930b7ba307632093`. Independent version response is stable 3.3.3. The two new-case receipts contain parent/motion roles with locked/hidden and locked/locked placements, one additional parent, and graphComplete=false. The owned containers, volumes, and network were removed.
+- Actual isolated Immich 3.2.4: 14 passed, zero failed or ignored, eight filtered cases; wrapper exit 0 and the same unchanged source fingerprint as the 3.3.3 run. Independent version response is stable 3.2.4. Its owned containers, volumes, and network were removed. The new metadata case is explicitly excluded on 3.2.4; these regression results do not establish the new behavior on that release.
+
+The actual-server case observes a native-associated P/M/P2 graph with the motion first hidden and then locked. Returned pair role, physical identity, account/scope, checksum, revision, and visibility are compared to independent server reads. Full resource metadata, album membership, and the saved journal must remain unchanged; the product observation must not request PUT or originals. This case does not test paired byte acquisition or playback.
+
+Earlier missing-import and Clippy failures are retained with their original logs. The synthetic Swift fixture's expected reverse-discovery termination was corrected to `unavailable` when it includes a malformed candidate; product rejection semantics were preserved. Completed build outputs were removed only after process termination and protected-source/evidence hash checks; results and logs remain available.
+
+## Remaining acceptance
+
+The earlier source-bound local check and full Apple build are recorded below; final gates for the PR #39-integrated metadata source remain pending. A metadata pull request, its submitted-HEAD CI, review, and merge have not been completed. Physical devices, iCloud, real biometric/PIN expiry behavior, paired original acquisition/renewal/materialization, explicit multi-resource writes, durable partial-outcome recovery, and ordinary recovery remain separate required work. PP-02 and PP-03 through PP-16 are not completed by this metadata increment.
+
+## Source-bound local gates and integrated base provenance
+
+Before PR #39 integration, the metadata candidate passed normal `make check`: Rust/FFI 483 passed, zero failed, 16 ignored; Swift 74 passed; infrastructure 24 passed. The wrapper exited 0 after 1,033.91 seconds with source fingerprint `504ce8a03427f9e6c480a9624a9eb089704d1fa6b8635f9849a414777b60457a` unchanged. The ignored actual-server tests are not additional executions within this check; the separate 3.3.3 16-case and 3.2.4 14-case results above remain their evidence.
+
+The reviewed C2 base [PR #38](https://github.com/rabe1028/suwop/pull/38), submitted HEAD `774e266ee642e9e68d6313116607ca55faf1c2ab`, passed all ten jobs in [submitted-head CI 38963285833](https://github.com/rabe1028/suwop/actions/runs/38963285833) and was merged as main `77d3691f91d03ae01699d75716c4c04acc8e8ab5`. Both base trees are `86413b5dfa3ce59c977526f6d4bd822fd0829a8d`. The metadata checkout was aligned to that main history without changing its 608 source files. The full check ran before this history-only alignment; the subsequent full Apple build ran at main `77d3691f` with the same source fingerprint.
+
+Normal full `make apple-build` passed, exit 0 after 4,993.92 seconds: all three ARM64 release slices (macOS, iOS device, iOS Simulator), the final XCFramework, and both iOS Simulator/macOS app builds. Source fingerprint `504ce8a` was unchanged. This is a normal nonhermetic local build, not device, iCloud, or new metadata-PR CI acceptance. The independently preserved final framework and header hashes are recorded before any host-only build can replace them.
+
+The base's [post-merge CI 38970289720](https://github.com/rabe1028/suwop/actions/runs/38970289720) does not inherit the submitted-head success: its VRT job was cancelled following an Editor test failure at the 60-minute limit. The CI repair [PR #39](https://github.com/rabe1028/suwop/pull/39) subsequently passed all eleven jobs in [submitted-head CI 38992566368](https://github.com/rabe1028/suwop/actions/runs/38992566368) for HEAD `22e4cacd29547391e844f6035e09c87303354622`. Its aggregate records 168 host and 61 UI tests (229 total), 50 screens, `record=false`, source `8fda3c987e23ae0b230a49d10b732f0873844a29948914e608706300001b1032`, and tested merge commit `d6ac1039a30bb74dde246a46b89641f3d9485c9c`. PR #39 merged on 2026-10-17 at 02:41:34 UTC as `b620e1e5c3aef575faa7d106274f7dfcd05089b2`. Its [post-merge CI 38995919492](https://github.com/rabe1028/suwop/actions/runs/38995919492) was pending at the integration checkpoint; no completed post-merge result is claimed.
+
+The metadata checkout then advanced by normal fast-forward to that merged base. The original fifteen dirty/index diffs were preserved. Incoming tracked inputs changed in `.github/workflows/ci.yml`, `Makefile`, `VRT/UITests/EditorUITests.swift`, `pyproject.toml`, and `scripts/vrt.sh`, with thirteen incoming files recorded separately. The integrated source fingerprint is `e1e432c5660c6d056854bbe21da3fc22c527f70c3cfb327536eb6a946a9450bf`. The earlier metadata check and Apple receipts remain bound to `504ce8a`; PR #39's CI is repair/base evidence, not a new metadata pass. Final required gates for the integrated metadata source, its own submitted-HEAD CI, review and merge remain pending.
+
+Local receipts: `.tools/verification/live-plan-check-20261017-1-kd49rinq/result.json` and `.tools/verification/live-plan-apple-20261017-1-n_4mhsc6/result.json`. Separate actual-server receipts are `.tools/verification/live-plan-real333-20261017-1-3uxl_a3l/result.json` and `.tools/verification/live-plan-real324-20261017-1-9qr1yfgl/result.json`. Completed-build cleanup preserved source, generated DTOs, logs, receipts, and the independent framework snapshot. Physical devices and the remaining paired read/write/recovery work are still outstanding.

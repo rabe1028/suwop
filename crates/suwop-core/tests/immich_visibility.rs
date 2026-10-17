@@ -1820,3 +1820,6 @@ mod ordinary_selected;
 
 #[path = "immich_visibility/selected_video.rs"]
 mod selected_video;
+
+#[path = "immich_visibility/live_resources.rs"]
+mod live_resources;

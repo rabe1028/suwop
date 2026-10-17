@@ -303,6 +303,9 @@ async fn cleanup(ctx: &Context, session: &DedicatedSession) -> bool {
         .is_ok_and(|r| r.body["successful"] == true);
     locked || logout
 }
+pub(crate) fn live_metadata_denied(model: &Model, key: &AssetKey) -> bool {
+    denied(model, key) || model.immich_visibility.persistence_uncertain
+}
 fn denied(model: &Model, key: &AssetKey) -> bool {
     model.state.immich_visibility_operations.iter().any(|o| {
         o.key == *key

@@ -22,3 +22,5 @@ pub mod immich_visibility;
 pub mod immich_archive;
 
 pub mod ordinary_selected;
+
+pub mod immich_live_resources;
