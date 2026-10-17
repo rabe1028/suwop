@@ -10,10 +10,9 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import vrt
 import vrt_lanes as lanes
 import vrt_test_inventory as inventory
-
-import vrt
 
 FIXTURES = Path(__file__).parent / "fixtures/vrt26"
 

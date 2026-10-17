@@ -8,14 +8,13 @@ import sys
 from pathlib import Path
 
 import verify
+import vrt
 from vrt_test_inventory import (
     enumerate_inventory,
     executed_inventory,
     registered_inventory,
     require,
 )
-
-import vrt
 
 SCOPES = {"host-snapshots": "SuwopVRT", "ui": "SuwopVRTUI"}
 STAGES = {
