@@ -300,6 +300,88 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-live.tests
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT'
+  SuwopPrivateLiveUIProbeHost:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: App/ImmichLockedLiveNativeAccess.swift
+      - path: App/ImmichLockedLiveLifecycle.swift
+      - path: App/ImmichLockedLiveIO.swift
+      - path: App/ImmichLockedLivePublication.swift
+      - path: App/ImmichLockedLiveEffects.swift
+      - path: App/ImmichLockedLiveDisplay.swift
+      - path: App/ImmichLockedLiveSurface.swift
+      - path: App/PrivateLivePlatformView.swift
+      - path: App/PrivateLiveBinding.swift
+      - path: App/PrivateLiveFiles.swift
+      - path: App/PrivateLiveResourceFormat.swift
+      - path: App/PrivateLivePreparation.swift
+      - path: App/PrivateLivePhotoKitRequest.swift
+      - path: App/PrivateLivePreparedRegistry.swift
+      - path: App/PrivateMediaAcquisition.swift
+      - path: App/PrivateMediaConsumerRegistry.swift
+      - path: App/PrivateMediaAllocationTypes.swift
+      - path: App/PrivateMediaAllocationLedger.swift
+      - path: App/PrivateVideoAcquisition.swift
+      - path: App/PrivateVideoBinding.swift
+      - path: App/PrivateVideoAllocation.swift
+      - path: App/PrivateVideoFiles.swift
+      - path: App/PrivateVideoNamespace.swift
+      - path: App/PrivateVideoVolume.swift
+      - path: App/PrivateVideoDownload.swift
+      - path: App/PrivateVideoResponse.swift
+      - path: App/NativeSubmissionGate.swift
+      - path: App/MacScenePresentationAnchor.swift
+      - path: App/NativeSceneAnchorChanges.swift
+      - path: VRT/Host/PrivateVideoHTTPServer.swift
+      - path: VRT/Host/ImmichVisibilityFixtureServer.swift
+      - path: VRT/Host/ImmichVisibilityFixtureData.swift
+      - path: VRT/Host/ImmichLockedFixtureData.swift
+      - path: VRT/Host/PrivateLiveRenderedMotion.swift
+      - path: NativeAcceptance/PrivateLiveTests/PrivateLiveNativeFixture.swift
+      - path: NativeAcceptance/PrivateLiveTests/PrivateLiveTestWindow.swift
+      - path: NativeAcceptance/PrivateLiveUIProbeHost
+      - path: NativeAcceptance/PrivateLiveUIProbeShared
+      - path: Tests/fixtures/native_live_motion/media/synthetic-still.jpg
+        buildPhase: resources
+      - path: Tests/fixtures/native_live_motion/media/synthetic-motion.mov
+        buildPhase: resources
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+      - sdk: Photos.framework
+      - sdk: PhotosUI.framework
+      - sdk: ImageIO.framework
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-live.ui-probe.host
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT SUWOP_LIVE_EXTERNAL_ACCEPTANCE'
+    info:
+      path: Generated/PrivateLiveUIProbeHost-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop Independent Live Probe
+        NSPrincipalClass: NSApplication
+        LSUIElement: false
+        NSHighResolutionCapable: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+  SuwopPrivateLiveUIProbeTests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: NativeAcceptance/PrivateLiveUIProbeTests
+      - path: NativeAcceptance/PrivateLiveUIProbeShared
+      - path: VRT/Host/PrivateLiveRenderedMotion.swift
+    dependencies:
+      - target: SuwopPrivateLiveUIProbeHost
+      - target: SuwopPrivateLiveMacHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-live.ui-probe.tests
+        TEST_TARGET_NAME: SuwopPrivateLiveUIProbeHost
 schemes:
   SuwopiOS:
     build:
@@ -353,3 +435,11 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopPrivateLiveMacTests]
+  SuwopPrivateLiveUIProbe:
+    build:
+      targets:
+        SuwopPrivateLiveUIProbeHost: all
+        SuwopPrivateLiveUIProbeTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopPrivateLiveUIProbeTests]

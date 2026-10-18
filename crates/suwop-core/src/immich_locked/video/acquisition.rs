@@ -61,6 +61,9 @@ pub(super) fn request(
     scene_id: String,
     request_id: String,
 ) -> Command<crate::app::Effect, Event> {
+    if model.immich_locked.video.retired.len() >= super::cleanup::CAPACITY - 1 {
+        return Command::done();
+    }
     let Some(capability) = visibility_session(model, &grant_id, &scene_id) else {
         return Command::done();
     };
@@ -175,17 +178,22 @@ pub(super) fn planned(
         }
         return Command::done();
     };
-    let rejected = || release(acquisition.pending.clone(), storage.lease_id.clone());
+    if pending_current(model, &acquisition.pending) {
+        // Retain the exact returned quote before a policy/expiry guard can stop this request.
+        model.immich_locked.video.lease =
+            Some((acquisition.pending.clone(), storage.lease_id.clone()));
+    }
+    let rejected = |model: &mut Model| release(model, &acquisition.pending);
     if !pending_current(model, &acquisition.pending) || acquisition.capability.valid().is_err() {
-        return rejected();
+        return rejected(model);
     }
     let Ok(maximum) = policy::budget(&storage, bytes) else {
-        let command = rejected();
+        let command = rejected(model);
         model.immich_locked.error = Some("動画を取得する空き容量を確認してください。".into());
         return stop(model).and(command);
     };
     let Ok(deadline) = acquisition.capability.visibility_deadline() else {
-        return stop(model).and(rejected());
+        return stop(model).and(rejected(model));
     };
     acquisition.bytes = bytes;
     model.immich_locked.video.binding = Some(acquisition.clone());
@@ -282,7 +290,7 @@ pub(super) fn read(
             } else {
                 Command::done()
             };
-            return cleanup.and(release(ticket.pending, ticket.storage.lease_id));
+            return cleanup.and(release(model, &ticket.pending));
         }
     };
     model.immich_locked.video.measured_bytes = Some(result.signature.bytes);

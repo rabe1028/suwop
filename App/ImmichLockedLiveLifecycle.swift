@@ -2,6 +2,29 @@ import Foundation
 import SuwopShell
 
 extension ImmichLockedLiveNativeAccess {
+    /// Synchronous exact pending seal/capture, including a worker with no quote yet.
+    /// The returned task observes only the captured registration; it never searches by key.
+    func retireCapturedPending(
+        _ pending: ImmichLockedLivePending,
+        deadline: ContinuousClock.Instant,
+        retryCleanup: Bool
+    ) throws -> Task<Void, Error> {
+        let binding = PrivateLiveBinding(pending)
+        if !capturedPendingRetirements.contains(binding) {
+            guard capturedPendingRetirements.count < 64
+            else { throw PrivateMediaConsumerRegistry.Failure.captureCapacity }
+            capturedPendingRetirements.append(binding)
+        }
+        guard let owner = matching(pending) else {
+            // No worker can exist without registration. The synchronous seal rejects
+            // a queued Inspect before registration, even if Rust still exposes old state.
+            return Task {}
+        }
+        guard let handle = owner.registration else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        let join = try consumers.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+        return Task { @MainActor in try await join(deadline) }
+    }
+
     func cancellationHandle() -> Task<Void, Error> {
         let captured = Array(owners.values).filter { !$0.released }
         invalidate()
@@ -120,15 +143,17 @@ extension ImmichLockedLiveNativeAccess {
         _ = capture(owner)
     }
 
-    func release(_ pending: ImmichLockedLivePending, pairLeaseID: String?) async throws -> ImmichLockedLiveReleased {
+    func release(
+        _ pending: ImmichLockedLivePending,
+        pairLeaseID: String?,
+        retryCleanup: Bool = false
+    ) async throws -> ImmichLockedLiveReleased {
         let binding = PrivateLiveBinding(pending)
         if let owner = matching(pending) {
             guard pairLeaseID == nil || pairLeaseID == owner.quote?.leaseID,
                   let handle = owner.registration else { throw CancellationError() }
-            _ = try await consumers.retireAndJoin(
-                owner: handle,
-                deadline: ContinuousClock.now.advanced(by: .seconds(5))
-            )
+            let join = try consumers.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+            try await join(.now.advanced(by: .seconds(5)))
         } else {
             guard completed.contains(where: {
                 $0.binding == binding && (pairLeaseID == nil || pairLeaseID == $0.pairLeaseID)
@@ -137,7 +162,7 @@ extension ImmichLockedLiveNativeAccess {
         return .init(pairLeaseID: pairLeaseID, pending: pending)
     }
 
-    func release(generation: Int64) async throws {
+    func release(generation: Int64, retryCleanup: Bool = false) async throws {
         let selected = owners.values.filter { $0.issued.generation <= generation }
         for owner in selected {
             _ = capture(owner)
@@ -147,7 +172,8 @@ extension ImmichLockedLiveNativeAccess {
         let deadline = ContinuousClock.now.advanced(by: .seconds(5))
         for handle in captured {
             do {
-                _ = try await consumers.retireAndJoin(owner: handle, deadline: deadline)
+                let join = try consumers.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+                try await join(deadline)
             } catch { failure = failure ?? error }
         }
         if let failure {

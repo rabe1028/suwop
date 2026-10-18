@@ -31,7 +31,8 @@ import SuwopShell
     init(
         sharing: PrivateLiveManagerFixture? = nil,
         motionVisibility: String = "hidden",
-        unlink: (@Sendable (URL) throws -> Void)? = nil
+        unlink: (@Sendable (URL) throws -> Void)? = nil,
+        videoUnlink: (@Sendable (URL) throws -> Void)? = nil
     ) throws {
         runtime = try RustRuntime()
         shell = try AppleShell()
@@ -43,9 +44,17 @@ import SuwopShell
         } else {
             shell.immichLockedLiveAccess.storedFiles = try PrivateLiveFiles(root: root)
         }
-        try shell.immichLockedVideoAccess.installFilesForTesting(
-            PrivateVideoFiles(root: root.appendingPathExtension("video"))
-        )
+        let videoFiles: PrivateVideoFiles = if let videoUnlink {
+            try PrivateVideoFiles(
+                testingRoot: root.appendingPathExtension("video"),
+                ledger: .shared,
+                availableBytes: { $0.availableBytes },
+                unlink: videoUnlink
+            )
+        } else {
+            try PrivateVideoFiles(root: root.appendingPathExtension("video"))
+        }
+        shell.immichLockedVideoAccess.installFilesForTesting(videoFiles)
         let parent = try Self.bytes("synthetic-still", "jpg")
         let motion = try Self.bytes("synthetic-motion", "mov")
         ownsTransport = sharing == nil

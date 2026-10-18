@@ -5,8 +5,8 @@ import json
 import sys
 from pathlib import Path
 
-BUNDLE = "SuwopPrivateLiveMacTests"
-SUITE = "PrivateLiveSurfaceTests"
+BUNDLE = "SuwopPrivateLiveUIProbeTests"
+SUITE = "PrivateLiveIndependentCompositorTests"
 METHODS = frozenset(
     {
         "testActualFullPlaybackHasCurrentCallbacksAndChangingRenderedSurfaceFrames",
@@ -21,6 +21,10 @@ METHODS = frozenset(
         "testActualSwiftUIContentDisappearanceStopsAndClearsHostedSurface",
     }
 )
+
+UI_BUNDLE = BUNDLE
+UI_SUITE = SUITE
+UI_METHODS = METHODS
 
 
 def require(condition, message):
@@ -43,16 +47,25 @@ def container(node, kind, name, url=None):
     return children
 
 
-def audit(summary, tests):
+def audit(
+    summary,
+    tests,
+    *,
+    bundle=BUNDLE,
+    suite=SUITE,
+    methods=METHODS,
+    plan="SuwopPrivateLiveUIProbe",
+    bundle_kind="UI test bundle",
+):
     require(isinstance(summary, dict) and isinstance(tests, dict), "Invalid result document")
     nodes = tests.get("testNodes")
     require(isinstance(nodes, list) and len(nodes) == 1, "Expected one complete test plan")
-    bundles = container(nodes[0], "Test Plan", "SuwopPrivateLiveMac")
+    bundles = container(nodes[0], "Test Plan", plan)
     require(len(bundles) == 1, "Expected exactly the Live bundle")
-    base = f"test://com.apple.xcode/Suwop/{BUNDLE}"
-    suites = container(bundles[0], "Unit test bundle", BUNDLE, base)
+    base = f"test://com.apple.xcode/Suwop/{bundle}"
+    suites = container(bundles[0], bundle_kind, bundle, base)
     require(len(suites) == 1, "Expected exactly the Live surface suite")
-    cases = container(suites[0], "Test Suite", SUITE, f"{base}/{SUITE}")
+    cases = container(suites[0], "Test Suite", suite, f"{base}/{suite}")
     identifiers = set()
     for case in cases:
         require(isinstance(case, dict), "Invalid case")
@@ -62,9 +75,9 @@ def audit(summary, tests):
         require(
             case.get("nodeType") == "Test Case"
             and case.get("result") == "Passed"
-            and method in METHODS
-            and case.get("nodeIdentifier") == f"{SUITE}/{method}()"
-            and case.get("nodeIdentifierURL") == f"{base}/{SUITE}/{method}",
+            and method in methods
+            and case.get("nodeIdentifier") == f"{suite}/{method}()"
+            and case.get("nodeIdentifierURL") == f"{base}/{suite}/{method}",
             "Unaccepted status or wrong/unknown case identity",
         )
         require(method not in identifiers, "Duplicate execution or retry")
@@ -76,7 +89,7 @@ def audit(summary, tests):
                 and not child.get("children"),
                 "Failure, repetition or unknown case child",
             )
-    require(identifiers == METHODS, "Missing required Live surface case")
+    require(identifiers == methods, "Missing required Live surface case")
     devices = tests.get("devices")
     configs = summary.get("devicesAndConfigurations")
     require(
@@ -103,7 +116,7 @@ def audit(summary, tests):
     require(summary.get("testFailures") == [], "Missing or nonempty failures list")
     for stats in (summary, configs[0]):
         for key, value in (
-            ("passedTests", len(METHODS)),
+            ("passedTests", len(methods)),
             ("failedTests", 0),
             ("skippedTests", 0),
             ("expectedFailures", 0),
@@ -112,16 +125,16 @@ def audit(summary, tests):
                 type(stats.get(key)) is int and stats[key] == value, "Summary/inventory mismatch"
             )
     require(
-        type(summary.get("totalTestCount")) is int and summary["totalTestCount"] == len(METHODS),
+        type(summary.get("totalTestCount")) is int and summary["totalTestCount"] == len(methods),
         "Total/inventory mismatch",
     )
-    return sorted(f"{BUNDLE}/{SUITE}/{method}" for method in identifiers)
+    return sorted(f"{bundle}/{suite}/{method}" for method in identifiers)
 
 
 def main():
     summary_path, tests_path, output = map(Path, sys.argv[1:])
     receipt = {
-        "schema_version": 1,
+        "schema_version": 3,
         "summary_sha256": hashlib.sha256(summary_path.read_bytes()).hexdigest(),
         "tests_sha256": hashlib.sha256(tests_path.read_bytes()).hexdigest(),
     }

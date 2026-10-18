@@ -47,7 +47,7 @@ def completed():
     }
     bundle = {
         "name": results.BUNDLE,
-        "nodeType": "Unit test bundle",
+        "nodeType": "UI test bundle",
         "nodeIdentifierURL": base,
         "result": "Passed",
         "children": [suite],
@@ -56,7 +56,7 @@ def completed():
         "devices": [device],
         "testNodes": [
             {
-                "name": "SuwopPrivateLiveMac",
+                "name": "SuwopPrivateLiveUIProbe",
                 "nodeType": "Test Plan",
                 "result": "Passed",
                 "children": [bundle],
@@ -66,19 +66,105 @@ def completed():
     return summary, tests, cases
 
 
+PROBE_GUARD = "#if os(macOS) && SUWOP_LIVE_COMPOSITOR_PROBE"
+PROBE_METHOD = "testOwnedCompositorScreenshotObservesActualProtectedLiveMotion"
+
+
+def surface_source():
+    return (
+        Path(__file__).resolve().parents[1]
+        / "NativeAcceptance/PrivateLiveTests/PrivateLiveSurfaceTests.swift"
+    ).read_text()
+
+
+def normal_source_methods(source):
+    # Accept only this single trailing experiment. Runtime audit still requires all ten normal IDs.
+    if source.count(PROBE_GUARD) != 1:
+        raise ValueError("Expected one exact compositor probe guard")
+    normal, probe = source.split(PROBE_GUARD + "\n")
+    block = re.fullmatch(
+        r"    extension PrivateLiveSurfaceTests \{(?P<body>[\s\S]+)\n    \}\n#endif\n?",
+        probe,
+    )
+    if block is None or re.search(r"^\s*#", block["body"], re.MULTILINE):
+        raise ValueError("Probe must be one final independent conditional extension")
+    # This deliberately narrow fixture check rejects additional top-level declarations.
+    unquoted = re.sub(r'"(?:\\.|[^"\\])*"', '""', block["body"])
+    depth = 1
+    for character in unquoted:
+        depth += (character == "{") - (character == "}")
+        if depth < 1:
+            raise ValueError("Probe extension ended before its final delimiter")
+    if depth != 1 or re.findall(r"func (test[A-Za-z0-9_]+)\(", probe) != [PROBE_METHOD]:
+        raise ValueError("Unknown, missing or duplicate experimental test")
+    return re.findall(r"func (test[A-Za-z0-9_]+)\(", normal)
+
+
 class PrivateLiveMacResultTests(unittest.TestCase):
     def test_all_exact_source_methods_match_audited_inventory(self):
-        source = (
-            Path(__file__).resolve().parents[1]
-            / "NativeAcceptance/PrivateLiveTests/PrivateLiveSurfaceTests.swift"
-        ).read_text()
-        declared = re.findall(r"func (test[A-Za-z0-9_]+)\(", source)
+        declared = normal_source_methods(surface_source())
         self.assertEqual(len(declared), 10)
         self.assertEqual(set(declared), results.METHODS)
         summary, tests, _ = completed()
         identifiers = results.audit(summary, tests)
         self.assertEqual(len(identifiers), 10)
         self.assertTrue(all(item.startswith(results.BUNDLE + "/") for item in identifiers))
+
+    def test_external_ui_inventory_exactly_preserves_all_ten_native_scenarios(self):
+        root = Path(__file__).resolve().parents[1]
+        ui = (
+            root
+            / "NativeAcceptance/PrivateLiveUIProbeTests/PrivateLiveIndependentCompositorTests.swift"
+        ).read_text()
+        declared = re.findall(r"func (test[A-Za-z0-9_]+)\(", ui)
+        self.assertEqual(len(declared), 10)
+        self.assertEqual(set(declared), results.METHODS)
+        wire = (
+            root / "NativeAcceptance/PrivateLiveUIProbeShared/PrivateLiveAcceptanceCase.swift"
+        ).read_text()
+        cases = re.findall(r'case ([a-zA-Z]+) = "(test[A-Za-z0-9_]+)"', wire)
+        self.assertEqual(len(cases), 10)
+        self.assertEqual({method for _, method in cases}, results.METHODS)
+        for case, method in cases:
+            if case in {"fullPlayback", "activeReplay"}:
+                self.assertIn("PrivateLiveUIProbeSession(test: ." + case + ")", ui)
+            else:
+                self.assertIn(
+                    "func "
+                    + method
+                    + "() async throws {\n        try await nativeScenario(."
+                    + case
+                    + ")",
+                    ui,
+                )
+        self.assertNotIn("XCTSkip", ui)
+
+    def test_only_exact_final_guarded_probe_can_be_separated(self):
+        source = surface_source()
+        for changed in (
+            source.replace(PROBE_GUARD, "#if os(macOS)"),
+            source.replace(PROBE_GUARD, PROBE_GUARD + "\n" + PROBE_GUARD),
+            source.removesuffix("#endif\n"),
+            source + "// trailing declaration\n",
+            source.replace("    extension PrivateLiveSurfaceTests {", "    extension OtherTests {"),
+            source.replace(PROBE_METHOD, "testUnrelated"),
+            source.replace(PROBE_GUARD, PROBE_GUARD + "\n#if UNKNOWN"),
+            source.replace("\n    }\n#endif", "\n    }\n    extension OtherTests {}\n#endif"),
+            source.replace(PROBE_METHOD, PROBE_METHOD + "() {}\n        func testExtra"),
+        ):
+            with self.subTest(tail=changed[-160:]), self.assertRaises(ValueError):
+                normal_source_methods(changed)
+
+    def test_normal_methods_are_never_excluded_by_name_or_other_guards(self):
+        source = surface_source()
+        normal, probe = source.split(PROBE_GUARD)
+        for extra in (
+            f"func {PROBE_METHOD}() {{}}\n",
+            "#if UNKNOWN\nfunc testUnrelated() {}\n#endif\n",
+        ):
+            declared = normal_source_methods(normal + extra + PROBE_GUARD + probe)
+            self.assertEqual(len(declared), 11)
+            self.assertNotEqual(set(declared), results.METHODS)
 
     def test_same_count_with_substituted_missing_or_duplicate_case_fails(self):
         for mode in ("unknown", "duplicate", "missing", "extra"):

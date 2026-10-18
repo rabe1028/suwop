@@ -3,13 +3,35 @@ import Foundation
 import SuwopShell
 
 extension ImmichLockedVideoNativeAccess {
-    func release(generation: Int64) async throws {
+    /// Synchronous full-binding retirement, not a key-wide cancellation or quote-absence ACK.
+    func retireCapturedPending(
+        _ pending: ImmichLockedVideoPending,
+        deadline: ContinuousClock.Instant,
+        retryCleanup: Bool
+    ) throws -> Task<Void, Error> {
+        let binding = PrivateVideoBinding(pending)
+        if !capturedPendingRetirements.contains(binding) {
+            guard capturedPendingRetirements.count < 64
+            else { throw PrivateMediaConsumerRegistry.Failure.captureCapacity }
+            capturedPendingRetirements.append(binding)
+        }
+        guard let owner = consumerOwners.values.first(where: { $0.binding == binding }) else {
+            // All effect lifetimes register before first await. A future queued Inspect
+            // is rejected by the exact tombstone before registration or original I/O.
+            return Task {}
+        }
+        guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        let join = try consumerRegistry.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+        return Task { @MainActor in try await join(deadline) }
+    }
+
+    func release(generation: Int64, retryCleanup: Bool = false) async throws {
         let selected = consumerOwners.values.filter { $0.binding.generation <= generation }
         for owner in selected {
             _ = captureConsumerCleanup(owner)
         }
         for owner in selected {
-            try await retireConsumer(owner)
+            try await retireConsumer(owner, retryCleanup: retryCleanup)
         }
     }
 
@@ -73,7 +95,8 @@ extension ImmichLockedVideoNativeAccess {
 
     func consumer(_ pending: ImmichLockedVideoPending) throws -> PrivateVideoConsumerOwner {
         let binding = PrivateVideoBinding(pending)
-        guard active, ownerSceneID == pending.sceneID, expectedRequestID == pending.requestID,
+        guard !capturedPendingRetirements.contains(binding),
+              active, ownerSceneID == pending.sceneID, expectedRequestID == pending.requestID,
               revokedBinding != binding else { throw CancellationError() }
         if let owner = consumerOwners.values.first(where: { $0.binding == binding && $0.epoch == epoch }) {
             guard !owner.retired else { throw CancellationError() }
@@ -189,12 +212,13 @@ extension ImmichLockedVideoNativeAccess {
         }
     }
 
-    func retireConsumer(_ owner: PrivateVideoConsumerOwner) async throws {
+    func retireConsumer(_ owner: PrivateVideoConsumerOwner, retryCleanup: Bool = false) async throws {
         if owner.released {
             return
         } // Exact retained success, never a quote-absence inference.
         guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
-        _ = try await consumerRegistry.retireAndJoin(owner: handle, deadline: .now.advanced(by: .seconds(5)))
+        let join = try consumerRegistry.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+        try await join(.now.advanced(by: .seconds(5)))
     }
 
     private func unlinkConsumer(

@@ -670,7 +670,7 @@ impl ArchiveShell<'_> {
             for effect in &effects {
                 let Effect::Io(request) = effect;
                 assert!(
-                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key } if key == &selected)
+                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key, .. } if key == &selected)
                 );
             }
             assert_eq!((self.confirmations, self.writes), before_capture);
@@ -742,6 +742,10 @@ impl ArchiveShell<'_> {
                 let response = execute(self.agent, request);
                 self.diagnostics.observe(request, &response);
                 response
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                // Explicit synthetic no-consumer receipt; not native JOIN acceptance.
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
             }
             ShellOperation::CapturePrivateMediaKey { .. } => {
                 // The actual Prepare key/order is checked at the dispatch boundary.

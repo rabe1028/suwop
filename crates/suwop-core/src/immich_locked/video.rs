@@ -1,5 +1,8 @@
 //! Private selected VIDEO acquisition. Never an export, ordinary read or write grant.
 mod acquisition;
+mod cleanup;
+pub use cleanup::CleanupCompletion;
+pub(crate) use cleanup::{projection as cleanup_projection, retry as retry_cleanup};
 mod policy;
 mod renewal;
 use super::{
@@ -98,10 +101,14 @@ pub(super) struct VideoModel {
     lease: Option<(ImmichLockedVideoPending, String)>,
     measured_bytes: Option<u64>,
     renewal: renewal::RenewalModel,
+    retired: Vec<cleanup::Retired>,
 }
 impl VideoModel {
     pub(super) fn has_work(&self) -> bool {
-        self.pending.is_some() || self.lease.is_some() || self.access.is_some()
+        self.pending.is_some()
+            || self.lease.is_some()
+            || self.access.is_some()
+            || !self.retired.is_empty()
     }
 }
 #[derive(Clone, Debug)]
@@ -183,19 +190,29 @@ pub(super) fn projection(
         .filter(|a| pending_current(model, &a.pending));
     (pending, access)
 }
+/// Delayed acquisition replies cannot restart cleanup or pick up a new failure token.
 fn release(
-    pending: ImmichLockedVideoPending,
-    lease_id: String,
+    model: &mut Model,
+    pending: &ImmichLockedVideoPending,
 ) -> Command<crate::app::Effect, Event> {
-    Command::new(move |ctx| async move {
-        let _: Result<Value, _> = io(
-            &ctx,
-            ShellOperation::ReleaseImmichLockedVideo { pending, lease_id },
-        )
-        .await;
-    })
+    if model
+        .immich_locked
+        .video
+        .pending
+        .as_ref()
+        .is_some_and(|p| same_request(p, pending))
+    {
+        stop(model)
+    } else {
+        // Stop captured/sealed the entire original worker before the first await. Once
+        // its successful JOIN is observed, a queued reply cannot own additional files.
+        Command::done()
+    }
 }
 pub(crate) fn stop(model: &mut Model) -> Command<crate::app::Effect, Event> {
+    stop_with_retry(model, false)
+}
+fn stop_with_retry(model: &mut Model, retry_cleanup: bool) -> Command<crate::app::Effect, Event> {
     let video = &mut model.immich_locked.video;
     if let Some(binding) = &video.binding {
         binding.lease.terminalize();
@@ -203,12 +220,12 @@ pub(crate) fn stop(model: &mut Model) -> Command<crate::app::Effect, Event> {
     video.renewal = renewal::RenewalModel::default();
     video.measured_bytes = None;
     video.binding = None;
-    video.pending = None;
+    let pending = video.pending.take();
     video.access = None;
-    video
-        .lease
-        .take()
-        .map_or_else(Command::done, |(p, id)| release(p, id))
+    let lease = video.lease.take().map(|(_, id)| id);
+    pending.map_or_else(Command::done, |pending| {
+        cleanup::retire(model, pending, lease, retry_cleanup)
+    })
 }
 /// Retire only the selected request synchronously. Native quiescence owns its JOIN/cleanup.
 pub(crate) fn stop_for_key(
@@ -227,20 +244,92 @@ pub(crate) fn stop_for_key(
         Command::done()
     }
 }
+/// Full request identity is immutable and request IDs are never reused in this grant lifetime.
+#[derive(Debug, Clone)]
+pub(crate) struct CapturedOwner {
+    pending: Option<ImmichLockedVideoPending>,
+    retired: Vec<cleanup::Captured>,
+}
+impl CapturedOwner {
+    pub(crate) fn pending(&self) -> Vec<ImmichLockedVideoPending> {
+        let mut result: Vec<_> = self.pending.iter().cloned().collect();
+        for pending in cleanup::pending(&self.retired) {
+            if !result.iter().any(|p| same_request(p, &pending)) {
+                result.push(pending);
+            }
+        }
+        result
+    }
+    pub(crate) fn owns_pending(&self, pending: &ImmichLockedVideoPending) -> bool {
+        self.pending
+            .as_ref()
+            .is_some_and(|p| same_request(p, pending))
+            || cleanup::owns(&self.retired, pending)
+    }
+}
+pub(crate) fn capture_owner(model: &Model, key: &AssetKey) -> CapturedOwner {
+    CapturedOwner {
+        pending: model
+            .immich_locked
+            .video
+            .pending
+            .clone()
+            .filter(|p| p.key == *key),
+        retired: cleanup::capture(model, key),
+    }
+}
+pub(crate) fn captured_drained(model: &mut Model, captured: &CapturedOwner) {
+    cleanup::drained(model, &captured.retired);
+}
+pub(crate) fn retire_captured(
+    model: &mut Model,
+    captured: &CapturedOwner,
+) -> Command<crate::app::Effect, Event> {
+    if captured.pending.as_ref().is_some_and(|old| {
+        model
+            .immich_locked
+            .video
+            .pending
+            .as_ref()
+            .is_some_and(|current| same_request(old, current))
+    }) {
+        // Native same-capture Drain retains the actual pending worker/quote until JOIN.
+        // No normal Release may race it and acquire an automatic unlink retry token.
+        let video = &mut model.immich_locked.video;
+        if let Some(binding) = &video.binding {
+            binding.lease.terminalize();
+        }
+        video.renewal = renewal::RenewalModel::default();
+        video.measured_bytes = None;
+        video.binding = None;
+        video.pending = None;
+        video.access = None;
+        video.lease = None;
+        Command::done()
+    } else {
+        Command::done()
+    }
+}
+
 pub(crate) fn quiesce_visibility(
     model: &mut Model,
     key: &AssetKey,
-) -> Option<ImmichLockedVideoPending> {
+) -> (
+    Option<ImmichLockedVideoPending>,
+    Command<crate::app::Effect, Event>,
+) {
     let pending = model
         .immich_locked
         .video
         .pending
         .clone()
         .filter(|p| &p.key == key);
-    if pending.is_some() {
-        let _ = stop(model);
-    }
-    pending
+    let cleanup = if pending.is_some() {
+        stop(model)
+    } else {
+        Command::done()
+    };
+    (pending, cleanup)
 }
 pub(crate) fn reconcile(model: &mut Model) -> Command<crate::app::Effect, Event> {
     if model
@@ -263,6 +352,9 @@ pub(crate) fn update(
         return Some(command);
     }
     Some(match event {
+        Event::PrivateMediaVideoCleanupCompleted { completion } => {
+            cleanup::completed(model, completion)
+        }
         Event::RequestImmichLockedVideo {
             entry_id,
             grant_id,
@@ -272,6 +364,7 @@ pub(crate) fn update(
         Event::StopImmichLockedVideo {
             scene_id,
             request_id,
+            retry_cleanup: _,
         } => {
             if model
                 .immich_locked
@@ -280,7 +373,7 @@ pub(crate) fn update(
                 .as_ref()
                 .is_some_and(|p| p.scene_id == scene_id && p.request_id == request_id)
             {
-                stop(model)
+                stop_with_retry(model, false)
             } else {
                 Command::done()
             }
@@ -314,51 +407,58 @@ pub(crate) fn update(
             ticket,
             approved,
             acquisition_lease_id,
-        } => {
-            if model
-                .immich_locked
-                .video
-                .access
-                .as_ref()
-                .is_some_and(|access| same_request(&access.pending, &ticket.pending))
-            {
-                return Some(Command::done());
-            }
-            if renewal::hold(
-                model,
-                Event::ImmichLockedVideoPrepared {
-                    ticket: ticket.clone(),
-                    approved,
-                    acquisition_lease_id,
-                },
-            ) {
-                return Some(Command::done());
-            }
-            if approved
-                && pending_current(model, &ticket.pending)
-                && renewal::completion_current(model, &ticket, acquisition_lease_id)
-            {
-                model.immich_locked.video.renewal = renewal::RenewalModel::default();
-                model.immich_locked.video.access = Some(ImmichLockedVideoAccess {
-                    pending: ticket.pending,
-                    staged_id: ticket.storage.lease_id,
-                });
-                Command::done()
-            } else {
-                if pending_current(model, &ticket.pending) {
-                    model.immich_locked.error =
-                        Some("動画を確認できません。もう一度選んでください。".into());
-                }
-                let cleanup = if pending_current(model, &ticket.pending) {
-                    stop(model)
-                } else {
-                    Command::done()
-                };
-                cleanup.and(release(ticket.pending, ticket.storage.lease_id))
-            }
-        }
+        } => prepared(model, ticket, approved, acquisition_lease_id),
         _ => return None,
     })
+}
+
+fn prepared(
+    model: &mut Model,
+    ticket: ImmichLockedVideoTicket,
+    approved: bool,
+    acquisition_lease_id: u64,
+) -> Command<crate::app::Effect, Event> {
+    if model
+        .immich_locked
+        .video
+        .access
+        .as_ref()
+        .is_some_and(|access| same_request(&access.pending, &ticket.pending))
+    {
+        return Command::done();
+    }
+    if renewal::hold(
+        model,
+        Event::ImmichLockedVideoPrepared {
+            ticket: ticket.clone(),
+            approved,
+            acquisition_lease_id,
+        },
+    ) {
+        return Command::done();
+    }
+    if approved
+        && pending_current(model, &ticket.pending)
+        && renewal::completion_current(model, &ticket, acquisition_lease_id)
+    {
+        model.immich_locked.video.renewal = renewal::RenewalModel::default();
+        model.immich_locked.video.access = Some(ImmichLockedVideoAccess {
+            pending: ticket.pending,
+            staged_id: ticket.storage.lease_id,
+        });
+        Command::done()
+    } else {
+        if pending_current(model, &ticket.pending) {
+            model.immich_locked.error =
+                Some("動画を確認できません。もう一度選んでください。".into());
+        }
+        let cleanup = if pending_current(model, &ticket.pending) {
+            stop(model)
+        } else {
+            Command::done()
+        };
+        cleanup.and(release(model, &ticket.pending))
+    }
 }
 
 #[cfg(test)]

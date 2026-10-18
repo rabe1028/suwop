@@ -35,6 +35,7 @@ struct PairedShell {
     archive_confirmations: usize,
     ordinary_mutations: usize,
     live_barriers: Vec<AssetKey>,
+    preflight_fault: Option<&'static str>,
 }
 impl PairedShell {
     fn new(base: Shell) -> Self {
@@ -56,6 +57,7 @@ impl PairedShell {
             archive_confirmations: 0,
             ordinary_mutations: 0,
             live_barriers: vec![],
+            preflight_fault: None,
         }
     }
     fn metadata(&mut self, op: &ShellOperation) -> Result<Value, String> {
@@ -84,6 +86,9 @@ impl PairedShell {
                 if r.url.ends_with(&format!("/assets/{ASSET}"))
                     || r.url.ends_with(&format!("/assets/{MOTION}")) =>
             {
+                if self.preflight_fault == Some("network") {
+                    return Err("preflight network refused".into());
+                }
                 assert_eq!(r.method, "GET");
                 if r.headers.contains_key("x-api-key") {
                     assert!(r.url.ends_with(MOTION));
@@ -118,6 +123,12 @@ impl PairedShell {
                 }
                 if self.malformed_size {
                     raw["exifInfo"] = json!({"fileSizeInByte":"16"});
+                }
+                if self.preflight_fault == Some("offline") {
+                    raw["isOffline"] = json!(true);
+                }
+                if self.preflight_fault == Some("drift") && self.archive_confirmations > 0 {
+                    raw["updatedAt"] = json!("preflight-drift");
                 }
                 if self.drift.active {
                     raw["updatedAt"] = json!("different-revision");
@@ -156,7 +167,7 @@ impl PairedShell {
                     suwop_core::immich_archive::ImmichArchiveDestination::Archive
                 );
                 self.archive_confirmations += 1;
-                Ok(json!(true))
+                Ok(json!(self.preflight_fault != Some("declined")))
             }
             ShellOperation::QuiesceImmichLockedLive { key, .. } => {
                 self.live_barriers.push(key.clone());
@@ -206,6 +217,7 @@ impl PairedShell {
             ShellOperation::ReleaseImmichLockedLive {
                 pending,
                 pair_lease_id,
+                ..
             } => {
                 self.releases += 1;
                 if self.native_faults.release {
@@ -375,6 +387,7 @@ fn stop(id: &str) -> Event {
     Event::StopImmichLockedLive {
         scene_id: SCENE.into(),
         request_id: id.into(),
+        retry_cleanup: true,
     }
 }
 #[test]
@@ -444,24 +457,55 @@ fn stopped_preinspect_callback_cannot_start_original_or_resurrect_projection() -
     Ok(())
 }
 #[test]
-fn failed_join_blocks_latest_request_until_exact_retry_ack() -> Result<(), String> {
+fn failed_join_recovery_discards_old_queue_and_requires_a_fresh_request() -> Result<(), String> {
     let (c, mut s, plan) = setup()?;
     s.drain(&c, c.process_event(request(plan.clone(), NEXT)))?;
     s.native_faults.release = true;
-    s.drain(&c, c.process_event(request(plan, PREPARED)))?;
+    s.drain(&c, c.process_event(request(plan.clone(), PREPARED)))?;
     assert_eq!(s.original_roles.len(), 2);
     assert!(c.view().immich_locked_view.live.is_none());
+    let row = c
+        .view()
+        .private_media_cleanup
+        .into_iter()
+        .next()
+        .ok_or("cleanup row")?;
+    let recovery_id = row.recovery_id.ok_or("locator")?;
     s.native_faults.release = false;
-    s.drain(&c, c.process_event(stop(NEXT)))?;
+    assert!(
+        c.process_event(stop(NEXT)).is_empty(),
+        "An old Stop=true cannot retry a failed obligation"
+    );
+    let retry = Event::RetryPrivateMediaCleanup {
+        recovery_id: recovery_id.clone(),
+        expected_attempt: row.expected_attempt,
+    };
+    let effects = c.process_event(retry.clone());
+    assert!(
+        c.process_event(retry.clone()).is_empty(),
+        "Same attempt cannot be dispatched twice"
+    );
+    s.drain(&c, effects)?;
+    assert!(c.view().private_media_cleanup.is_empty());
+    assert_eq!(
+        s.original_roles.len(),
+        2,
+        "Cleanup receipt never restarts the previously queued request"
+    );
+    assert!(c.process_event(retry).is_empty());
+    s.drain(
+        &c,
+        c.process_event(request(plan, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
+    )?;
     assert_eq!(s.original_roles.len(), 4);
     assert_eq!(
         c.view()
             .immich_locked_view
             .live
-            .ok_or("replacement")?
+            .ok_or("fresh access")?
             .pending
             .request_id,
-        PREPARED
+        "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
     );
     s.assert_read_only();
     Ok(())
@@ -737,17 +781,10 @@ fn ordinary_shared_motion_requires_live_join_before_intent_for_active_prequote_r
                 return Err("expected live barrier".into());
             };
             assert_eq!(target.asset_id, MOTION);
-            assert_eq!(
-                pending.is_some(),
-                matches!(
-                    state,
-                    PairConsumerState::Published | PairConsumerState::Prequote
-                )
+            assert!(
+                pending.is_none(),
+                "Exact captured owner is retired and drained BEFORE preflight, including prequote"
             );
-            if let Some(p) = pending {
-                assert_eq!(p.parent_key.asset_id, ASSET);
-                assert_eq!(p.motion_key.asset_id, MOTION);
-            }
             assert_eq!(s.archive_confirmations, 1);
             assert_eq!(s.base.confirmations, 0);
             assert_eq!(s.base.persist_calls, 0);
@@ -839,7 +876,7 @@ fn selected_motion_capture_precedes_live_projection_revocation_and_all_release_e
         );
         let effect = effects.into_iter().next().ok_or("capture")?;
         let Effect::Io(io) = &effect;
-        let ShellOperation::CapturePrivateMediaKey { key } = &io.operation else {
+        let ShellOperation::CapturePrivateMediaKey { key, .. } = &io.operation else {
             return Err("capture first".into());
         };
         assert_eq!(key.asset_id, MOTION);
@@ -852,6 +889,135 @@ fn selected_motion_capture_precedes_live_projection_revocation_and_all_release_e
         s.drain(&c, deferred)?;
         assert_eq!(s.ordinary_mutations, 1);
         assert_eq!(s.live_barriers.len(), 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn published_pair_is_exactly_retired_on_declined_network_or_drift_preflight() -> Result<(), String>
+{
+    for fault in ["declined", "offline", "network", "drift"] {
+        let (c, mut s, plan) = ordinary_motion_setup()?;
+        s.drain(&c, c.process_event(request(plan, NEXT)))?;
+        assert!(c.view().immich_locked_view.live.is_some());
+        let before_originals = s.original_roles.len();
+        let (held, rest) = s.hold(&c, c.process_event(prepare_motion_archive()), |op| {
+            matches!(op, ShellOperation::DrainCapturedPrivateMedia { .. })
+        })?;
+        // Core has retired the exact old owner before any preflight, while native JOIN is held.
+        assert!(c.view().immich_locked_view.live.is_none());
+        assert!(c.view().immich_locked_view.live_pending.is_none());
+        assert_eq!(
+            (
+                s.archive_confirmations,
+                s.base.persist_calls,
+                s.ordinary_mutations
+            ),
+            (0, 0, 0)
+        );
+        s.drain(&c, rest)?;
+        assert_eq!(
+            s.releases, 0,
+            "Captured drain owns cleanup; no parallel normal Release"
+        );
+        assert_eq!(
+            s.base.capture_drains.len(),
+            0,
+            "Native drain response is still held"
+        );
+        s.preflight_fault = Some(fault);
+        let next = s.resolve(&c, held)?;
+        s.drain(&c, next)?;
+        assert_eq!(s.base.capture_drains.len(), 1);
+        assert!(c.view().immich_locked_view.live.is_none());
+        assert!(c.view().immich_locked_view.live_pending.is_none());
+        assert_eq!(s.original_roles.len(), before_originals);
+        assert_eq!((s.base.persist_calls, s.ordinary_mutations), (0, 0));
+        if fault == "declined" {
+            assert_eq!(
+                s.archive_confirmations, 1,
+                "User actually declined the confirmation"
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn failed_captured_pair_has_one_cleanup_path_and_only_locator_retry_can_retry() -> Result<(), String>
+{
+    for originally_retired in [false, true] {
+        let (c, mut s, plan) = ordinary_motion_setup()?;
+        s.drain(&c, c.process_event(request(plan.clone(), NEXT)))?;
+        if originally_retired {
+            s.native_faults.release = true;
+            s.drain(
+                &c,
+                c.process_event(Event::StopImmichLockedLive {
+                    scene_id: SCENE.into(),
+                    request_id: NEXT.into(),
+                    retry_cleanup: false,
+                }),
+            )?;
+        }
+        let releases = s.releases;
+        s.base.capture_drain_outcome = CaptureDrainOutcome::Failed;
+        s.drain(&c, c.process_event(prepare_motion_archive()))?;
+        assert_eq!(
+            s.releases, releases,
+            "Capture must never retry a failed normal Release"
+        );
+        assert_eq!(
+            (
+                s.archive_confirmations,
+                s.base.persist_calls,
+                s.ordinary_mutations
+            ),
+            (0, 0, 0)
+        );
+        for retry_cleanup in [false, true] {
+            assert!(
+                c.process_event(Event::StopImmichLockedLive {
+                    scene_id: SCENE.into(),
+                    request_id: NEXT.into(),
+                    retry_cleanup
+                })
+                .is_empty(),
+                "Old Stop cannot acquire a retry token"
+            );
+        }
+        let row = c
+            .view()
+            .private_media_cleanup
+            .into_iter()
+            .next()
+            .ok_or("capture recovery")?;
+        let explicit = c.process_event(Event::RetryPrivateMediaCleanup {
+            recovery_id: row.recovery_id.ok_or("locator")?,
+            expected_attempt: row.expected_attempt,
+        });
+        let Effect::Io(io) = explicit.first().ok_or("explicit same-capture drain")?;
+        assert!(matches!(
+            &io.operation,
+            ShellOperation::DrainCapturedPrivateMedia {
+                retry_cleanup: true,
+                ..
+            }
+        ));
+        assert_eq!(explicit.len(), 1);
+        s.base.capture_drain_outcome = CaptureDrainOutcome::Joined;
+        s.drain(&c, explicit)?;
+        assert_eq!(s.releases, releases);
+        s.native_faults.release = false;
+        s.drain(
+            &c,
+            c.process_event(request(plan, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")),
+        )?;
+        assert!(
+            c.view().immich_locked_view.live.is_some(),
+            "Success drains exact old retirement and admits fresh request"
+        );
+        assert_eq!((s.base.persist_calls, s.ordinary_mutations), (0, 0));
     }
     Ok(())
 }

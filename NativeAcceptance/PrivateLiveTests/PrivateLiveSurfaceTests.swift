@@ -338,3 +338,94 @@ final class PrivateLiveSurfaceTests: XCTestCase {
         throw SuwopError("Protected Live surface did not reach \(stage)")
     }
 }
+
+#if os(macOS) && SUWOP_LIVE_COMPOSITOR_PROBE
+    extension PrivateLiveSurfaceTests {
+        @MainActor func testOwnedCompositorScreenshotObservesActualProtectedLiveMotion() async throws {
+            try await withCompositorSurface { fixture, window, view, state, access, probe in
+                try probe.beginSampling()
+                try await wait("actual full playback for compositor probe") { state.playing && state.began > 0 }
+                let began = state.began
+                var frames = Set<String>()
+                var markers: [PrivateLiveRenderedMotion.Sample] = []
+                for index in 0 ..< 6 {
+                    let frame = try probe.capture(sample: index) {
+                        NativeScenePresentationAnchors.shared.window(for: fixture.sceneID) === window.window
+                            && fixture.manager.displayCurrent(access) && state.owns(view.consumerID)
+                            && view.livePhoto != nil && !state.failed && !view.isMuted
+                            && state.playing && state.began == began
+                    }
+                    frames.insert(SHA256.hash(data: frame.rgba).map { String(format: "%02x", $0) }.joined())
+                    if let marker = frame.marker {
+                        markers.append(marker)
+                    }
+                    let attachment = XCTAttachment(data: frame.png, uniformTypeIdentifier: "public.png")
+                    attachment.name = "owned-compositor-live-frame-\(index)"
+                    attachment.lifetime = .keepAlways
+                    add(attachment)
+                    if index < 5 {
+                        try await Task.sleep(for: .milliseconds(80))
+                    }
+                }
+                let positions = markers.map { [
+                    "centreX": $0.centreX, "markerWidth": $0.markerWidth, "redPixels": Double($0.redPixels),
+                ] }
+                let metrics = try XCTAttachment(
+                    data: JSONSerialization.data(withJSONObject: positions), uniformTypeIdentifier: "public.json"
+                )
+                metrics.name = "owned-compositor-live-marker-centroids"
+                metrics.lifetime = .keepAlways
+                add(metrics)
+                try probe.record("six-samples-complete")
+                XCTAssertGreaterThanOrEqual(frames.count, 3, "Require two actual rendered frame changes")
+                XCTAssertTrue(
+                    PrivateLiveRenderedMotion.moved(markers),
+                    "Require three real marker positions/displacement"
+                )
+                XCTAssertTrue(state.playing)
+                XCTAssertEqual(state.began, began)
+                XCTAssertTrue(state.owns(view.consumerID))
+                XCTAssertTrue(fixture.manager.displayCurrent(access))
+                XCTAssertTrue(fixture.failures.isEmpty)
+            }
+        }
+
+        @MainActor private func withCompositorSurface(
+            _ body: @MainActor (
+                PrivateLiveNativeFixture, PrivateLiveTestWindow, PrivateLiveNativeView,
+                ImmichLockedLivePlaybackState, ImmichLockedLivePublication, PrivateLiveCompositorProbe
+            ) async throws -> Void
+        ) async throws {
+            let fixture = try PrivateLiveNativeFixture(bundle: Bundle(for: PrivateLiveSurfaceTests.self))
+            let window = try PrivateLiveTestWindow(sceneID: fixture.sceneID)
+            defer { window.close() }
+            let view = PrivateLiveNativeView(), state = ImmichLockedLivePlaybackState()
+            do {
+                // Empty/unconfigured surface only. No original I/O or publication before real readiness.
+                window.mount(view)
+                let probe = try PrivateLiveCompositorProbe(window: window.window, view: view)
+                try await probe.waitForForegroundHandoff()
+                try await window.waitForActiveOwner()
+                try await fixture.start()
+                let access = try await fixture.acquire()
+                window.register()
+                view.configure(access: access, manager: fixture.manager, state: state)
+                fixture.trace("surface-attachment-wait")
+                window.reportReadiness(view: view, state: state, manager: fixture.manager)
+                try await wait("actual native object attachment") { view.livePhoto != nil }
+                try await body(fixture, window, view, state, access, probe)
+                view.detach()
+                try await fixture.close()
+            } catch {
+                fixture.report(error, label: "primary")
+                window.reportReadiness(view: view, state: state, manager: fixture.manager)
+                view.detach()
+                do { try await fixture.close() } catch {
+                    fixture.report(error, label: "cleanup")
+                    XCTFail("Native Live cleanup failed; see separate sanitized diagnostic")
+                }
+                throw error
+            }
+        }
+    }
+#endif

@@ -28,6 +28,7 @@ final class PrivateVideoFiles: Sendable {
         var registered = false
     }
 
+    private let unlinkDirectory: @Sendable (URL) throws -> Void
     private let measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?
     private let ledger: PrivateMediaAllocationLedger
     private let volume: PrivateVideoVolume
@@ -35,25 +36,28 @@ final class PrivateVideoFiles: Sendable {
     private let records = OSAllocatedUnfairLock(initialState: [String: Record]())
 
     convenience init(root explicitRoot: URL? = nil) throws {
-        try self.init(root: explicitRoot, ledger: .shared, measurementProvider: nil)
+        try self.init(root: explicitRoot, ledger: .shared, measurementProvider: nil, unlink: Self.removeDirectory)
     }
 
     #if SUWOP_VRT
         convenience init(
             testingRoot: URL,
             ledger: PrivateMediaAllocationLedger = PrivateMediaAllocationLedger(),
-            availableBytes: @escaping @Sendable (PrivateVideoVolume.Measurement) throws -> Int64
+            availableBytes: @escaping @Sendable (PrivateVideoVolume.Measurement) throws -> Int64,
+            unlink: @escaping @Sendable (URL) throws -> Void = PrivateVideoFiles.removeDirectory
         ) throws {
-            try self.init(root: testingRoot, ledger: ledger, measurementProvider: availableBytes)
+            try self.init(root: testingRoot, ledger: ledger, measurementProvider: availableBytes, unlink: unlink)
         }
     #endif
 
     private init(
         root explicitRoot: URL?,
         ledger: PrivateMediaAllocationLedger,
-        measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?
+        measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?,
+        unlink: @escaping @Sendable (URL) throws -> Void
     ) throws {
         self.ledger = ledger
+        unlinkDirectory = unlink
         self.measurementProvider = measurementProvider
         let root: URL = if let explicitRoot {
             explicitRoot
@@ -241,15 +245,17 @@ final class PrivateVideoFiles: Sendable {
 
     private func releaseRecord(_ record: Record) throws {
         let directory = record.url.deletingLastPathComponent()
-        let unlink: @Sendable () throws -> Void = {
-            if FileManager.default.fileExists(atPath: directory.path) {
-                try FileManager.default.removeItem(at: directory)
-            }
-        }
+        let unlink: @Sendable () throws -> Void = { [unlinkDirectory] in try unlinkDirectory(directory) }
         if record.registered {
             try ledger.release(owner: record.owner, unlink: unlink)
         } else {
             try unlink()
+        }
+    }
+
+    static func removeDirectory(_ directory: URL) throws {
+        if FileManager.default.fileExists(atPath: directory.path) {
+            try FileManager.default.removeItem(at: directory)
         }
     }
 

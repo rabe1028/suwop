@@ -490,6 +490,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
             let _: Result<Value, _> = io(
                 &ctx,
                 ShellOperation::ReleaseImmichLockedVideos {
+                    retry_cleanup: false,
                     generation: revoked_generation.saturating_sub(1),
                 },
             )
@@ -499,6 +500,7 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
             let _: Result<Value, _> = io(
                 &ctx,
                 ShellOperation::ReleaseImmichLockedLives {
+                    retry_cleanup: false,
                     generation: revoked_generation.saturating_sub(1),
                 },
             )

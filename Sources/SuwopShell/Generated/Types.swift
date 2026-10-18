@@ -1982,6 +1982,23 @@ public struct PreviewChoice: Codable, Sendable {
     }
 }
 
+public enum PrivateMediaCleanupState: String, Codable, CaseIterable, Sendable {
+    case `joining`
+    case `needsAttention`
+    case `quarantined`
+}
+
+public struct PrivateMediaCleanupView: Codable, Sendable {
+    public var expectedAttempt: Int64
+    public var recoveryID: String?
+    public var state: PrivateMediaCleanupState
+    public init(expectedAttempt: Int64, recoveryID: String? = nil, state: PrivateMediaCleanupState) {
+        self.expectedAttempt = expectedAttempt
+        self.recoveryID = recoveryID
+        self.state = state
+    }
+}
+
 public enum ProtectedAuthOutcome: String, Codable, CaseIterable, Sendable {
     case `success`
     case `cancelled`
@@ -2574,12 +2591,13 @@ public struct ViewModel: Codable, Sendable {
     public var previewChoices: [String: [PreviewChoice]]
     public var previewSources: [String: AssetKey]
     public var privateContentRevision: String
+    public var privateMediaCleanup: [PrivateMediaCleanupView]
     public var protectedView: ProtectedView
     public var remoteVersion: Version?
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -2606,6 +2624,7 @@ public struct ViewModel: Codable, Sendable {
         self.previewChoices = previewChoices
         self.previewSources = previewSources
         self.privateContentRevision = privateContentRevision
+        self.privateMediaCleanup = privateMediaCleanup
         self.protectedView = protectedView
         self.remoteVersion = remoteVersion
         self.serverVersion = serverVersion

@@ -1,4 +1,5 @@
 import AppKit
+import Foundation
 
 /// A normal, data-free application lifecycle for injected macOS component tests.
 /// No production app/library startup and no automatic reactivation on resign.
@@ -21,6 +22,13 @@ import AppKit
             backing: .buffered,
             defer: false
         )
+        do {
+            try recordFocusLaunch(window: owned)
+        } catch {
+            print("LIVE_FOCUS initialization-failed")
+            NSApp.terminate(nil)
+            return
+        }
         owned.title = "Suwop Live Acceptance"
         owned.isReleasedWhenClosed = false
         window = owned
@@ -29,6 +37,35 @@ import AppKit
         NSApp.activate()
         print("LIVE_NATIVE host launched running=\(NSApp.isRunning) active=\(NSApp.isActive) "
             + "regular=\(NSApp.activationPolicy() == .regular)")
+    }
+
+    private func recordFocusLaunch(window: NSWindow) throws {
+        let environment = ProcessInfo.processInfo.environment
+        guard let path = environment["SUWOP_LIVE_FOCUS_OUT"] else { return } // Legacy unit host unchanged.
+        guard path.hasPrefix("/"), let nonce = environment["SUWOP_LIVE_FOCUS_NONCE"],
+              UUID(uuidString: nonce) != nil,
+              environment["SUWOP_LIVE_FOCUS_CASE"] == "testActualPlatformWindowUnavailableEventsClearNativeObject",
+              Bundle.main.bundleIdentifier == "jp.rabe1028.suwop.private-live.host",
+              let executable = Bundle.main.executableURL,
+              let launched = NSRunningApplication.current.launchDate
+        else { throw CocoaError(.fileWriteUnknown) }
+        let directory = URL(fileURLWithPath: path, isDirectory: true)
+        let facts = try directory.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        let receipt = directory.appendingPathComponent("host-identity.json")
+        guard facts.isDirectory == true, facts.isSymbolicLink != true,
+              !FileManager.default.fileExists(atPath: receipt.path) else { throw CocoaError(.fileWriteUnknown) }
+        let windowID = "live-focus-window-" + nonce
+        window.setAccessibilityIdentifier(windowID)
+        try JSONSerialization.data(withJSONObject: [
+            "nonce": nonce,
+            "caseID": "testActualPlatformWindowUnavailableEventsClearNativeObject",
+            "pid": ProcessInfo.processInfo.processIdentifier,
+            "bundleID": "jp.rabe1028.suwop.private-live.host",
+            "executable": executable.resolvingSymlinksInPath().path,
+            "launched": launched.timeIntervalSince1970,
+            "windowID": windowID,
+            "viewID": "no-media-view",
+        ]).write(to: receipt, options: .atomic)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_: NSApplication) -> Bool {

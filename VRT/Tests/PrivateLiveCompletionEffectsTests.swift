@@ -50,7 +50,7 @@ final class PrivateLiveCompletionEffectsTests: XCTestCase {
             let generation = resources.owner.issued.generation
             XCTAssertGreaterThan(generation, 0)
             let olderCutoff = try operation("releaseImmichLockedLives", data: [
-                "generation": .from(generation - 1),
+                "generation": .from(generation - 1), "retryCleanup": .bool(false),
             ])
             // The same actual Rust-issued owner is newer than this cutoff; no generation is fabricated.
             let (older, _) = try await cancelledDriver(olderCutoff, fixture: fixture)
@@ -60,7 +60,10 @@ final class PrivateLiveCompletionEffectsTests: XCTestCase {
             }
             XCTAssertFalse(resources.owner.retired)
             resources.assertRetained()
-            let exact = try operation("releaseImmichLockedLives", data: ["generation": .from(generation)])
+            let exact = try operation(
+                "releaseImmichLockedLives",
+                data: ["generation": .from(generation), "retryCleanup": .bool(false)]
+            )
             try await heldRelease(exact, resources: resources, fixture: fixture)
         }
     }
@@ -174,7 +177,7 @@ final class PrivateLiveCompletionEffectsTests: XCTestCase {
 
     @MainActor private func release(_ owner: PrivateLiveConsumerOwner) throws -> ShellOperation {
         try operation("releaseImmichLockedLive", data: [
-            "pending": .from(owner.issued), "pairLeaseID": .from(owner.quote?.leaseID),
+            "pending": .from(owner.issued), "pairLeaseID": .from(owner.quote?.leaseID), "retryCleanup": .bool(false),
         ])
     }
 

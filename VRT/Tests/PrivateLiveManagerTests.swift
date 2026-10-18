@@ -439,7 +439,7 @@ extension PrivateLiveManagerTests {
             XCTAssertNotNil(try files.stateForTesting(quote: quote, role: .parent))
             XCTAssertNotNil(try files.stateForTesting(quote: quote, role: .motion))
             fail.withLock { $0 = false }
-            _ = try await manager.release(owner.issued, pairLeaseID: quote.leaseID)
+            _ = try await manager.release(owner.issued, pairLeaseID: quote.leaseID, retryCleanup: true)
             XCTAssertTrue(owner.released)
             XCTAssertFalse(files.retainedForTesting(owner: owner.identity))
             XCTAssertTrue(originals.allSatisfy { !FileManager.default.fileExists(atPath: $0.path) })

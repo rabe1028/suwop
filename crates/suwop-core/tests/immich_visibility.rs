@@ -103,8 +103,16 @@ enum WriteFault {
     Contradictory,
 }
 #[derive(Default)]
+enum CaptureDrainOutcome {
+    #[default]
+    Joined,
+    Failed,
+}
+#[derive(Default)]
 struct Shell {
     versions: std::collections::VecDeque<Value>,
+    capture_drains: Vec<String>,
+    capture_drain_outcome: CaptureDrainOutcome,
     version_reads: usize,
     fail_version: Option<usize>,
     confirmations: usize,
@@ -113,6 +121,8 @@ struct Shell {
     status_reads: usize,
     fail_status: Option<usize>,
     stages: usize,
+    video_reads: Vec<suwop_core::immich_locked::video::ImmichLockedVideoPending>,
+    video_pending_retirements: Vec<suwop_core::immich_locked::video::ImmichLockedVideoPending>,
     releases: Vec<String>,
     visibility: Option<String>,
     confirmed: bool,
@@ -176,9 +186,18 @@ impl Shell {
     }
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
-            ShellOperation::CapturePrivateMediaKey { key } => {
+            ShellOperation::CapturePrivateMediaKey { key, .. } => {
                 self.captures.push(key.clone());
                 Ok(Value::Null)
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                self.capture_drains.push(capture_id.clone());
+                match self.capture_drain_outcome {
+                    CaptureDrainOutcome::Failed => Err("unconfirmed captured JOIN".into()),
+                    CaptureDrainOutcome::Joined => {
+                        Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
+                    }
+                }
             }
             ShellOperation::ConfirmImmichArchive { .. } => Ok(json!(true)),
             ShellOperation::QuiesceImmichLockedLive { key, .. } => self.live_quiesce_response(key),
@@ -186,31 +205,7 @@ impl Shell {
                 self.quiesce_response(key, pending.as_ref())
             }
 
-            ShellOperation::Http(request)
-                if request.headers.contains_key("x-api-key")
-                    && self
-                        .ordinary_asset
-                        .as_ref()
-                        .and_then(|a| a["id"].as_str())
-                        .is_some_and(|id| {
-                            request.url == format!("https://fixture.example/api/assets/{id}")
-                        }) =>
-            {
-                assert_eq!(request.method, "GET");
-                assert!(!request.headers.contains_key("Authorization"));
-                Ok(json!({"status":200,"body":self.ordinary_asset}))
-            }
-            ShellOperation::Http(request)
-                if request.headers.contains_key("x-api-key")
-                    && request.method == "GET"
-                    && request.url == format!("https://fixture.example/api/assets/{ASSET}") =>
-            {
-                assert!(!request.headers.contains_key("Authorization"));
-                self.paths.push(format!("assets/{ASSET}"));
-                self.ordinary_reads += 1;
-                Ok(json!({"status":403,"body":null}))
-            }
-            ShellOperation::Http(request) => self.http(request),
+            ShellOperation::Http(request) => self.http_response(request),
             ShellOperation::ConfirmImmichVisibility { prompt } => {
                 self.confirmations += 1;
                 assert!([GRANT, NEXT].contains(&prompt.grant_id.as_str()));
@@ -228,9 +223,12 @@ impl Shell {
             ShellOperation::InspectImmichLockedVideoStorage { pending } => Ok(
                 json!({"leaseID":pending.request_id,"measurementNonce":OP,"deadlineUnixMilliseconds":u64::MAX,"availableBytes":1_073_741_824_u64,"otherUnallocatedBytes":0,"allocationUnitBytes":4096,"capacityClass":"available"}),
             ),
-            ShellOperation::ReadImmichLockedVideo { ticket } => Ok(
-                json!({"requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"sha1":"a".repeat(40),"signature":{"sha256":"c".repeat(64),"bytes":123}}),
-            ),
+            ShellOperation::ReadImmichLockedVideo { ticket } => {
+                self.video_reads.push(ticket.pending.clone());
+                Ok(
+                    json!({"requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"sha1":"a".repeat(40),"signature":{"sha256":"c".repeat(64),"bytes":123}}),
+                )
+            }
             ShellOperation::PrepareImmichLockedVideo { ticket, staged_id } => Ok(
                 json!({"requestID":ticket.pending.request_id,"stagedID":staged_id,"acquisitionLeaseID":ticket.acquisition_lease.lease_id}),
             ),
@@ -242,6 +240,25 @@ impl Shell {
                 "requestID":ticket.pending.request_id,"stagedID":ticket.storage.lease_id,
                 "previousLeaseID":previous_lease_id,"leaseID":lease.lease_id
             })),
+            ShellOperation::ReleaseImmichLockedVideos { retry_cleanup, .. }
+            | ShellOperation::ReleaseImmichLockedLives { retry_cleanup, .. } => {
+                assert!(
+                    !retry_cleanup,
+                    "Automatic generation cleanup cannot retry unlink"
+                );
+                Ok(Value::Null)
+            }
+            ShellOperation::RetireImmichLockedVideoPending {
+                pending,
+                retry_cleanup,
+            } => {
+                assert!(
+                    !retry_cleanup,
+                    "Automatic no-quote retirement cannot retry cleanup"
+                );
+                self.video_pending_retirements.push(pending.clone());
+                Ok(Value::Null)
+            }
             ShellOperation::ReleaseImmichLockedVideo { pending, .. } => {
                 self.releases.push(pending.request_id.clone());
                 Ok(Value::Null)
@@ -265,6 +282,38 @@ impl Shell {
             | ShellOperation::ScheduleImmichLockedExpiry { .. }
             | ShellOperation::ScheduleImmichLockedCheck { .. } => Ok(Value::Null),
             _ => Err("unexpected ordinary/native mutation".into()),
+        }
+    }
+    fn http_response(
+        &mut self,
+        request: &suwop_core::immich::HttpRequest,
+    ) -> Result<Value, String> {
+        match request {
+            request
+                if request.headers.contains_key("x-api-key")
+                    && self
+                        .ordinary_asset
+                        .as_ref()
+                        .and_then(|a| a["id"].as_str())
+                        .is_some_and(|id| {
+                            request.url == format!("https://fixture.example/api/assets/{id}")
+                        }) =>
+            {
+                assert_eq!(request.method, "GET");
+                assert!(!request.headers.contains_key("Authorization"));
+                Ok(json!({"status":200,"body":self.ordinary_asset}))
+            }
+            request
+                if request.headers.contains_key("x-api-key")
+                    && request.method == "GET"
+                    && request.url == format!("https://fixture.example/api/assets/{ASSET}") =>
+            {
+                assert!(!request.headers.contains_key("Authorization"));
+                self.paths.push(format!("assets/{ASSET}"));
+                self.ordinary_reads += 1;
+                Ok(json!({"status":403,"body":null}))
+            }
+            request => self.http(request),
         }
     }
     fn asset_read_failure(&self, path: &str, method: &str) -> Option<Result<Value, String>> {

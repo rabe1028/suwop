@@ -59,6 +59,7 @@ fn real_private_live_pair_originals_are_pin_bound_read_only_and_reject_drift() -
             Event::StopImmichLockedLive {
                 request_id: REQUEST.into(),
                 scene_id: SCENE.into(),
+                retry_cleanup: true,
             },
         )?;
         assert!(core.view().immich_locked_view.live.is_none());

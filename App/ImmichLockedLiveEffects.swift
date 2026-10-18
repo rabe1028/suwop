@@ -41,10 +41,14 @@ import SuwopShell
             ))
         case "releaseImmichLockedLive": return try await .from(access.release(
                 data["pending"].decode(ImmichLockedLivePending.self),
-                pairLeaseID: data["pairLeaseID"].decode(String?.self)
+                pairLeaseID: data["pairLeaseID"].decode(String?.self),
+                retryCleanup: data["retryCleanup"].decode(Bool.self)
             ))
         case "releaseImmichLockedLives":
-            try await access.release(generation: data["generation"].decode(Int64.self))
+            try await access.release(
+                generation: data["generation"].decode(Int64.self),
+                retryCleanup: data["retryCleanup"].decode(Bool.self)
+            )
             return .null
         case "quiesceImmichLockedLive":
             try await access.quiesce(

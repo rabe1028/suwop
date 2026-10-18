@@ -204,6 +204,7 @@ fn positive(
         Event::StopImmichLockedVideo {
             scene_id: SCENE.into(),
             request_id: request_id.into(),
+            retry_cleanup: true,
         },
     )?;
     assert!(core.view().immich_locked_view.video.is_none());

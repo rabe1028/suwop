@@ -16,7 +16,10 @@ pub(super) enum Outcome {
     Checked(Result<PairProof, String>),
     Final(Result<(ProvisionalAccess, ImmichLockedLivePublication), String>),
     Published(Result<(coordinator::NativePublicationReceipt, PairProof), String>),
-    Joined(Result<ImmichLockedLiveReleased, String>),
+    Joined(
+        crate::private_media_cleanup::Attempt,
+        Result<ImmichLockedLiveReleased, String>,
+    ),
 }
 type Work = std::pin::Pin<Box<dyn std::future::Future<Output = Outcome> + Send>>;
 fn emit(
@@ -339,7 +342,7 @@ fn guard_completion(
         if let Outcome::Planned(Ok((_, facts, _))) = &completion.outcome {
             return Some(lifecycle::late_quote(
                 model,
-                completion.binding.clone(),
+                &completion.binding,
                 facts.storage.lease_id.clone(),
             ));
         }
@@ -361,8 +364,8 @@ pub(super) fn completed(
     model: &mut Model,
     completion: Completion,
 ) -> Command<crate::app::Effect, Event> {
-    if let Outcome::Joined(result) = &completion.outcome {
-        return lifecycle::joined(model, &completion.owner, result.clone());
+    if let Outcome::Joined(attempt, result) = &completion.outcome {
+        return lifecycle::joined(model, &completion.owner, Some(attempt), result.clone());
     }
     if let Some(command) = guard_completion(model, &completion) {
         return command;
@@ -468,15 +471,21 @@ pub(super) fn schedule(b: &Binding) -> Command<crate::app::Effect, Event> {
         .await;
     })
 }
-pub(super) fn release(retired: Retired) -> Command<crate::app::Effect, Event> {
+pub(super) fn release(
+    retired: Retired,
+    retry_cleanup: bool,
+    attempt: crate::private_media_cleanup::Attempt,
+) -> Command<crate::app::Effect, Event> {
     emit(retired.binding, move |ctx, b| {
         Box::pin(async move {
             Outcome::Joined(
+                attempt,
                 io(
                     &ctx,
                     ShellOperation::ReleaseImmichLockedLive {
                         pending: b.pending,
                         pair_lease_id: retired.lease_id,
+                        retry_cleanup,
                     },
                 )
                 .await,

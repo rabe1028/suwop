@@ -84,6 +84,24 @@ private final class ArchiveABI {
         try bridge.call(2).decode(ViewModel.self)
     }
 
+    private func capturedMedia(_ type: String, data: JSONValue) throws -> JSONValue {
+        switch type {
+        case "drainCapturedPrivateMedia":
+            #expect(try data["retryCleanup"].decode(Bool.self) == false)
+            #expect(try data["captureID"].decode(String.self).isEmpty == false)
+            return .object(["captureID": data["captureID"], "cancelledBeforeCapture": .bool(false)])
+        case "capturePrivateMediaKey":
+            #expect(try data["key"].decode(AssetKey.self) == key)
+            let before = try #require(prepareBaseline)
+            #expect(puts == before.puts)
+            #expect(writes == before.writes)
+            #expect(prompts.count == before.confirmations)
+            writeOrder.append("capture")
+            return .null
+        default: throw SuwopError("Unexpected captured media effect")
+        }
+    }
+
     private func drain(_ initial: [EffectRequest]) throws {
         var pending = initial
         while !pending.isEmpty {
@@ -117,14 +135,8 @@ private final class ArchiveABI {
             return .null
         case "readCredential": return .string("ordinary-archive-api-key")
         case "appleScan": return try .from(LibrarySnapshot(provider: .apple, scope: "archive-library", access: .full))
-        case "capturePrivateMediaKey":
-            #expect(try data["key"].decode(AssetKey.self) == key)
-            let before = try #require(prepareBaseline)
-            #expect(puts == before.puts)
-            #expect(writes == before.writes)
-            #expect(prompts.count == before.confirmations)
-            writeOrder.append("capture")
-            return .null
+        case "capturePrivateMediaKey", "drainCapturedPrivateMedia":
+            return try capturedMedia(operation.type, data: data)
         case "quiesceImmichLockedLive":
             #expect(try data["key"].decode(AssetKey.self) == key)
             #expect(try data["pending"].decode(ImmichLockedLivePending?.self) == nil)

@@ -256,7 +256,7 @@ impl LiveVisibilityShell<'_> {
             for effect in &effects {
                 let Effect::Io(request) = effect;
                 assert!(
-                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key } if key == &selected)
+                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key, .. } if key == &selected)
                 );
             }
             assert_eq!(
@@ -417,6 +417,10 @@ impl LiveVisibilityShell<'_> {
             .map_err(|_| "scan encode".into()),
             ShellOperation::AppleAlbums { scope } => {
                 Ok(json!({"provider":"apple","scope":scope,"albums":[],"access":"full"}))
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                // Explicit synthetic no-consumer receipt; not native JOIN acceptance.
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
             }
             ShellOperation::CapturePrivateMediaKey { .. } => {
                 // The actual Prepare key/order is checked at the dispatch boundary.

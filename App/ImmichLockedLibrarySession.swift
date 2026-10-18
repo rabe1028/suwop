@@ -24,6 +24,7 @@ struct ImmichLockedTimer: Sendable {
     @Published private(set) var error: String?
     @Published private(set) var connecting = false
     @Published private(set) var busy = false
+    @Published private(set) var privateMediaCleanup: [PrivateMediaCleanupView] = []
     private var runtime: RustRuntime?
     private var shell: AppleShell?
     private var publish: (@MainActor (RuntimeSnapshot) -> Void)?
@@ -215,6 +216,7 @@ struct ImmichLockedTimer: Sendable {
     func receive(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= revision else { return }
         revision = snapshot.revision
+        privateMediaCleanup = snapshot.view.privateMediaCleanup
         coreBusy = snapshot.view.busy
         busy = coreBusy || pendingRefresh != nil
         let address = snapshot.view.state.connection?.address
@@ -382,7 +384,12 @@ extension ImmichLockedLibrarySession {
         projection?.live = nil
         projection?.livePending = nil
         shell?.immichLockedLiveAccess.invalidate()
-        send(["type": .string("stopImmichLockedLive"), "sceneID": .string(sceneID), "requestID": .string(id)])
+        send([
+            "type": .string("stopImmichLockedLive"),
+            "sceneID": .string(sceneID),
+            "requestID": .string(id),
+            "retryCleanup": .bool(true),
+        ])
     }
 }
 
@@ -423,6 +430,7 @@ extension ImmichLockedLibrarySession {
         shell?.immichLockedVideoAccess.invalidate()
         send([
             "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+            "retryCleanup": .bool(true),
         ])
     }
 }
@@ -436,11 +444,13 @@ extension ImmichLockedLibrarySession {
         if let id = expectedLiveID {
             stops.append([
                 "type": .string("stopImmichLockedLive"), "sceneID": .string(sceneID), "requestID": .string(id),
+                "retryCleanup": .bool(false),
             ])
         }
         if let id = expectedVideoID {
             stops.append([
                 "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+                "retryCleanup": .bool(false),
             ])
         }
         expectedLiveID = nil
@@ -530,5 +540,19 @@ extension ImmichLockedLibrarySession {
             checkTask?.cancel()
             checkTask = task
         }
+    }
+}
+
+extension ImmichLockedLibrarySession {
+    func retryPrivateMediaCleanup(_ recovery: PrivateMediaCleanupView) {
+        guard recovery.state == .needsAttention, let id = recovery.recoveryID,
+              let attempt = Int64(exactly: Double(recovery.expectedAttempt)), attempt == recovery.expectedAttempt,
+              privateMediaCleanup
+              .contains(where: { $0.recoveryID == id && $0.expectedAttempt == attempt && $0.state == .needsAttention })
+        else { return }
+        send([
+            "type": .string("retryPrivateMediaCleanup"), "recoveryID": .string(id),
+            "expectedAttempt": .number(Double(attempt)),
+        ])
     }
 }

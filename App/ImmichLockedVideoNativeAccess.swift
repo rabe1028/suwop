@@ -36,6 +36,7 @@ import SuwopShell
     var consumerOwners: [UUID: PrivateVideoConsumerOwner] = [:]
     var consumerQuoteOwners: [String: UUID] = [:]
     var completedConsumer: PrivateVideoCompletedConsumer?
+    var capturedPendingRetirements: [PrivateVideoBinding] = []
     var runtime: RustRuntime?
     var ownerSceneID: String?
     var expectedRequestID: String?
@@ -127,6 +128,8 @@ import SuwopShell
     func expect(requestID: String) {
         invalidate()
         expectedRequestID = requestID
+        // Old operations carry the previous epoch; queued calls fail expectedRequestID.
+        capturedPendingRetirements.removeAll { $0.requestID != requestID }
     }
 
     func deadline(grantID: String, generation: Int64, leaseID: Int64, milliseconds: Int64) {
@@ -397,11 +400,11 @@ extension ImmichLockedVideoNativeAccess {
 }
 
 extension ImmichLockedVideoNativeAccess {
-    func release(_ pending: ImmichLockedVideoPending, leaseID: String) async throws {
+    func release(_ pending: ImmichLockedVideoPending, leaseID: String, retryCleanup: Bool = false) async throws {
         let binding = PrivateVideoBinding(pending)
         if let ownerID = consumerQuoteOwners[leaseID], let owner = consumerOwners[ownerID] {
             guard owner.binding == binding else { throw CancellationError() }
-            try await retireConsumer(owner)
+            try await retireConsumer(owner, retryCleanup: retryCleanup)
             return
         }
         // Only a retained actual cleanup receipt can establish an already completed exact release.

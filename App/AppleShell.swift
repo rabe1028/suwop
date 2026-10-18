@@ -24,6 +24,7 @@ import SuwopShell
     let immichLockedAccess = ImmichLockedNativeAccess()
     let immichLockedVideoAccess = ImmichLockedVideoNativeAccess()
     let immichLockedLiveAccess = ImmichLockedLiveNativeAccess()
+    let privateMediaCaptureScope = PrivateMediaConsumerRegistry.SelectedWriteScope()
     var immichVisibilityConfirmationCurrent: (@MainActor (ImmichVisibilityPrompt) async throws -> Bool)?
     var immichLockedTimerEffect: (@MainActor (ImmichLockedTimer) -> Void)?
     #if SUWOP_VRT
@@ -34,7 +35,6 @@ import SuwopShell
         ) async throws -> Bool)?
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
-    /// Cancel presentation leases while preserving outcome persistence and native cleanup.
     func invalidateContentPresentations() {
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
@@ -97,10 +97,9 @@ import SuwopShell
             "releaseProtectedImages", "releaseProtectedImage",
             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
-            "releaseImmichLockedVideo", "releaseImmichLockedVideos",
-            "releaseImmichLockedLive", "releaseImmichLockedLives",
+            "releaseImmichLockedLive", "releaseImmichLockedLives", "drainCapturedPrivateMedia",
         ]
-        if !completionEffects.contains(operation.type) {
+        if !completionEffects.contains(operation.type), !ImmichLockedVideoEffects.isCleanup(operation.type) {
             try Task.checkCancellation()
         }
         if operation.type == "randomId" {
@@ -164,13 +163,14 @@ extension AppleShell {
              "releaseImmichLockedImages", "releaseImmichLockedImage", "scheduleImmichLockedExpiry",
              "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
              "prepareImmichLockedVideo", "releaseImmichLockedVideo", "releaseImmichLockedVideos",
-             "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
-             "quiesceImmichLockedVideo", "inspectImmichLockedLiveStorage", "readImmichLockedLiveMember",
-             "prepareImmichLockedLive", "renewImmichLockedLiveAcquisition", "scheduleImmichLockedLiveAcquisitionExpiry",
+             "retireImmichLockedVideoPending", "renewImmichLockedVideoAcquisition",
+             "scheduleImmichLockedVideoAcquisitionExpiry", "quiesceImmichLockedVideo",
+             "inspectImmichLockedLiveStorage", "readImmichLockedLiveMember", "prepareImmichLockedLive",
+             "renewImmichLockedLiveAcquisition", "scheduleImmichLockedLiveAcquisitionExpiry",
              "publishImmichLockedLive", "releaseImmichLockedLive", "releaseImmichLockedLives",
-             "quiesceImmichLockedLive", "capturePrivateMediaKey",
-             "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
-             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
+             "quiesceImmichLockedLive", "capturePrivateMediaKey", "drainCapturedPrivateMedia",
+             "readOrdinarySelectedImage", "publishOrdinarySelectedImage", "releaseOrdinarySelectedImage",
+             "releaseOrdinarySelectedImages":
             return try await appStateEffect(operation.type, data: data, context: context)
         case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
                 operation.type,
@@ -406,7 +406,7 @@ private extension AppleShell {
         if ["readState", "persist"].contains(type) {
             return try await stateEffect(type, data: data)
         }
-        if type == "capturePrivateMediaKey" || type.contains("ImmichLocked") {
+        if type == "capturePrivateMediaKey" || type == "drainCapturedPrivateMedia" || type.contains("ImmichLocked") {
             return try await immichLockedEffect(type, data: data, http: http)
         }
         return try await protectedEffect(type, data: data)

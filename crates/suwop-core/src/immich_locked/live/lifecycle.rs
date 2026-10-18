@@ -172,6 +172,15 @@ pub(super) fn request(model: &mut Model, r: Request) -> Command<crate::app::Effe
 }
 /// Terminalize BEFORE awaiting native exact-owner JOIN. Quote absence is not ACK.
 pub(in crate::immich_locked) fn stop(model: &mut Model) -> Command<crate::app::Effect, Event> {
+    retire(model, false)
+}
+pub(super) fn stop_with_retry(
+    model: &mut Model,
+    retry_cleanup: bool,
+) -> Command<crate::app::Effect, Event> {
+    retire(model, retry_cleanup)
+}
+fn retire(model: &mut Model, retry_cleanup: bool) -> Command<crate::app::Effect, Event> {
     model.immich_locked.live.queued = None;
     let state = &mut model.immich_locked.live;
     if let Some(active) = state.active.take() {
@@ -180,20 +189,22 @@ pub(in crate::immich_locked) fn stop(model: &mut Model) -> Command<crate::app::E
             let _ = k.stop();
         }
         let lease_id = active.binding.quote_id.clone();
-        state.retired = Some(Retired {
-            binding: active.binding,
-            lease_id,
-            releasing: false,
-        });
+        state.retired = Some(Retired::new(active.binding, lease_id));
     }
-    retry_retired(model)
+    retry_retired(model, retry_cleanup)
 }
-pub(super) fn retry_retired(model: &mut Model) -> Command<crate::app::Effect, Event> {
+pub(super) fn retry_retired(
+    model: &mut Model,
+    retry_cleanup: bool,
+) -> Command<crate::app::Effect, Event> {
     if let Some(retired) = model.immich_locked.live.retired.as_mut()
         && !retired.releasing
     {
+        let Some(attempt) = retired.recovery.begin(retry_cleanup) else {
+            return Command::done();
+        };
         retired.releasing = true;
-        return driver::release(retired.clone());
+        return driver::release(retired.clone(), retry_cleanup, attempt);
     }
     Command::done()
 }
@@ -207,6 +218,7 @@ pub(crate) fn reconcile(model: &mut Model) -> Command<crate::app::Effect, Event>
 pub(super) fn joined(
     model: &mut Model,
     owner: &Owner,
+    attempt: Option<&crate::private_media_cleanup::Attempt>,
     result: Result<ImmichLockedLiveReleased, String>,
 ) -> Command<crate::app::Effect, Event> {
     let state = &mut model.immich_locked.live;
@@ -217,6 +229,9 @@ pub(super) fn joined(
     else {
         return Command::done();
     };
+    if attempt.is_some_and(|a| !retired.recovery.matches(a)) {
+        return Command::done();
+    }
     // Full exact identity includes the two physical keys and original phase.
     let matches = match result {
         Ok(released) => {
@@ -226,8 +241,12 @@ pub(super) fn joined(
         Err(_) => false,
     };
     if !matches {
+        if let Some(attempt) = attempt {
+            retired.recovery.finish(attempt, false);
+        }
         retired.releasing = false;
         model.immich_locked.error = Some(ERROR.into());
+        state.queued = None; // A failed cleanup never retains a playback intent for recovery.
         return Command::done();
     }
     if retired
@@ -236,7 +255,11 @@ pub(super) fn joined(
         .as_ref()
         .is_some_and(|k| k.joined().is_err())
     {
+        if let Some(attempt) = attempt {
+            retired.recovery.finish(attempt, false);
+        }
         retired.releasing = false;
+        state.queued = None;
         return Command::done();
     }
     state.retired = None;
@@ -245,26 +268,28 @@ pub(super) fn joined(
 }
 pub(super) fn late_quote(
     model: &mut Model,
-    binding: Binding,
+    binding: &Binding,
     lease_id: String,
 ) -> Command<crate::app::Effect, Event> {
-    // A JOIN response can be processed before an already queued quote-completion
-    // event. Keep that old owner isolated; its idempotent release cannot touch B.
+    if crate::private_media_capture::owns_live(model, &binding.pending) {
+        return Command::done();
+    }
     if let Some(retired) = model
         .immich_locked
         .live
         .retired
         .as_mut()
         .filter(|r| r.binding.owner.same(&binding.owner))
-        && retired.lease_id.as_ref() != Some(&lease_id)
     {
+        // The original exact-pending release JOINs the entire worker, including a quote
+        // whose completion is only delivered now. Do not mutate its in-flight receipt binding.
+        if retired.releasing {
+            return Command::done();
+        }
         retired.lease_id = Some(lease_id);
-        retired.releasing = true;
-        return driver::release(retired.clone());
+        return retry_retired(model, false);
     }
-    driver::release(Retired {
-        binding,
-        lease_id: Some(lease_id),
-        releasing: true,
-    })
+    // No matching retired owner means its exact pending worker was already JOINed.
+    // A queued metadata response cannot create a new native owner or new retry authority.
+    Command::done()
 }

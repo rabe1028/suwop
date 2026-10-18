@@ -8,6 +8,10 @@ included:
   - VRT/UITests
   - NativeAcceptance/Host
   - NativeAcceptance/UITests
+  - NativeAcceptance/PrivateLiveHost/PrivateLiveMacHost.swift
+  - NativeAcceptance/PrivateLiveUIProbeHost
+  - NativeAcceptance/PrivateLiveUIProbeShared
+  - NativeAcceptance/PrivateLiveUIProbeTests
   - NativeAcceptance/SharingTests
 excluded:
   - Sources/SuwopShell/Generated

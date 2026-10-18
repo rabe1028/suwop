@@ -221,6 +221,7 @@ impl<'a> Shell<'a> {
             ShellOperation::ReleaseImmichLockedLive {
                 pending,
                 pair_lease_id,
+                ..
             } => {
                 assert_eq!(pending.parent_key, self.fixture.key());
                 assert_eq!(pending.motion_key.asset_id, self.fixture.motion);

@@ -70,18 +70,24 @@ struct PrivateLivePreparedHandle: Sendable, Hashable {
                 }
             }
             if let failure = error as? PrivateMediaConsumerRegistry.Failure {
-                switch failure {
-                case .duplicateOwner: return "consumer.duplicateOwner"
-                case .invalidResources: return "consumer.invalidResources"
-                case .unknownOwner: return "consumer.unknownOwner"
-                case .cleanupUnconfirmed: return "consumer.cleanupUnconfirmed"
-                }
+                return consumerDiagnosticFailure(failure)
             }
             if error is CancellationError {
                 return "CancellationError"
             }
             let native = error as NSError
             return "type=\(String(reflecting: type(of: error))) domain=\(native.domain) code=\(native.code)"
+        }
+
+        private static func consumerDiagnosticFailure(_ failure: PrivateMediaConsumerRegistry.Failure) -> String {
+            switch failure {
+            case .duplicateOwner: "consumer.duplicateOwner"
+            case .invalidResources: "consumer.invalidResources"
+            case .unknownOwner: "consumer.unknownOwner"
+            case .cleanupUnconfirmed: "consumer.cleanupUnconfirmed"
+            case .invalidCapture: "consumer.invalidCapture"
+            case .captureCapacity: "consumer.captureCapacity"
+            }
         }
     #endif
 

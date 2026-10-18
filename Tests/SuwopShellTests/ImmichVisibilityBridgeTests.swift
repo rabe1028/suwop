@@ -34,6 +34,10 @@ private final class VisibilityABI {
             guard let self else { return nil }
             let data = operation.data ?? .null
             switch operation.type {
+            case "drainCapturedPrivateMedia":
+                #expect(try data["retryCleanup"].decode(Bool.self) == false)
+                #expect(try data["captureID"].decode(String.self).isEmpty == false)
+                return .object(["captureID": data["captureID"], "cancelledBeforeCapture": .bool(false)])
             case "capturePrivateMediaKey":
                 #expect(try data["key"].decode(AssetKey.self) == key)
                 #expect(puts == 0)

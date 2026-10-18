@@ -6,7 +6,9 @@ import SuwopShell
     static let shared = PrivateMediaConsumerRegistry()
 
     enum Phase: Equatable { case prequote, active, retired, failedCleanup }
-    enum Failure: Error { case duplicateOwner, invalidResources, unknownOwner, cleanupUnconfirmed }
+    enum Failure: Error { case duplicateOwner, invalidResources, unknownOwner, cleanupUnconfirmed, invalidCapture,
+                               captureCapacity
+    }
 
     struct Handle: Sendable, Hashable {
         let ownerID: UUID
@@ -27,7 +29,7 @@ import SuwopShell
         let owner: Handle
     }
 
-    private struct Capture {
+    fileprivate struct Capture {
         let owner: Handle
         let work: CapturedCleanup
         let retryAttempt: UInt64?
@@ -48,6 +50,165 @@ import SuwopShell
     }
 
     private var entries: [UUID: Entry] = [:]
+
+    /// One AppleShell/core lifetime. The first core nonce is immutable; high-water rejects
+    /// replay after completed-receipt eviction. Incomplete captures are never evicted.
+    final class SelectedWriteScope {
+        fileprivate var nonce: String?
+        fileprivate var highWater: UInt32 = 0
+        fileprivate var records: [String: SelectedWriteCapture] = [:]
+        fileprivate var completed: [String] = []
+    }
+
+    fileprivate final class SelectedWriteCapture {
+        let key: AssetKey
+        let ownership: Data
+        let cancelledBeforeCapture: Bool
+        var owners: [Capture] = []
+        var failure: Error?
+        var completed = false
+        init(key: AssetKey, ownership: Data, cancelledBeforeCapture: Bool = false) {
+            self.key = key
+            self.ownership = ownership
+            self.cancelledBeforeCapture = cancelledBeforeCapture
+        }
+    }
+
+    /// Store the exact snapshot BEFORE any revocation. Even a partial failure remains
+    /// addressable by this ID. This is capture only, never a JOIN or write receipt.
+    func captureForSelectedWrite(
+        key: AssetKey,
+        captureID: String,
+        scope: SelectedWriteScope,
+        ownership: Data = Data()
+    ) throws {
+        if let retained = scope.records[captureID] {
+            guard retained.key == key, retained.ownership == ownership,
+                  !retained.cancelledBeforeCapture else { throw Failure.invalidCapture }
+            if let failure = retained.failure {
+                throw failure
+            }
+            return
+        }
+        try admitCaptureID(captureID, scope: scope)
+        let record = SelectedWriteCapture(key: key, ownership: ownership)
+        scope.records[captureID] = record
+        let selected = entries.values.filter { $0.resources.contains(key) }.map(\.handle)
+        // No await: all current matching owners are captured/revoked synchronously.
+        for owner in selected {
+            do {
+                let captured = try capture(owner)
+                record.owners.append(Capture(owner: captured.owner, work: captured.work, retryAttempt: nil))
+            } catch { record.failure = record.failure ?? error }
+        }
+        if let failure = record.failure {
+            throw failure
+        }
+    }
+
+    func validateSelectedWrite(key: AssetKey, captureID: String, scope: SelectedWriteScope, ownership: Data) throws {
+        guard let record = scope.records[captureID], record.key == key, record.ownership == ownership else {
+            throw Failure.invalidCapture
+        }
+    }
+
+    /// Explicit cancellation seals a never-executed ID before any suspension. Late Capture
+    /// cannot select a replacement; this alone is NOT worker JOIN or a write receipt.
+    func sealSelectedWrite(key: AssetKey, captureID: String, scope: SelectedWriteScope, ownership: Data) throws {
+        if let record = scope.records[captureID] {
+            guard record.key == key, record.ownership == ownership else { throw Failure.invalidCapture }
+            return
+        }
+        try admitCaptureID(captureID, scope: scope)
+        scope.records[captureID] = SelectedWriteCapture(key: key, ownership: ownership, cancelledBeforeCapture: true)
+    }
+
+    private func admitCaptureID(_ captureID: String, scope: SelectedWriteScope) throws {
+        let parts = captureID.split(separator: ":", omittingEmptySubsequences: false)
+        guard parts.count == 2, parts[0].count == 32,
+              parts[0].allSatisfy({ $0.isASCII && ($0.isNumber || ("a" ... "f").contains(String($0))) }),
+              let sequence = UInt32(parts[1]), sequence > scope.highWater,
+              String(sequence) == parts[1], scope.nonce == nil || scope.nonce == String(parts[0])
+        else {
+            throw Failure.invalidCapture
+        }
+        guard scope.records.values.filter({ !$0.completed }).count < 64 else { throw Failure.captureCapacity }
+        scope.nonce = String(parts[0])
+        scope.highWater = sequence
+    }
+
+    struct SelectedWriteDrain {
+        fileprivate let record: SelectedWriteCapture
+        fileprivate let captures: [Capture]
+        fileprivate let captureID: String
+        fileprivate let scope: SelectedWriteScope
+    }
+
+    /// Snapshot ALL retry tokens synchronously at this explicit intent boundary.
+    /// A new failure while any other owner is awaited cannot gain retry authority.
+    func prepareSelectedDrain(
+        captureID: String,
+        scope: SelectedWriteScope,
+        ownership: Data = Data(),
+        cancelBeforeCapture: Bool = false,
+        retryCleanup: Bool = false
+    ) throws -> SelectedWriteDrain {
+        guard let record = scope.records[captureID], record.ownership == ownership,
+              !record.cancelledBeforeCapture || cancelBeforeCapture else { throw Failure.invalidCapture }
+        let captures = record.owners.map { owner in
+            Capture(
+                owner: owner.owner,
+                work: owner.work,
+                retryAttempt: retryCleanup ? owner.work.failedUnlinkAttempt : nil
+            )
+        }
+        return SelectedWriteDrain(record: record, captures: captures, captureID: captureID, scope: scope)
+    }
+
+    /// Convenience for native callers without additional pending ownership.
+    func drainSelectedWrite(
+        captureID: String,
+        scope: SelectedWriteScope,
+        ownership: Data = Data(),
+        cancelBeforeCapture: Bool = false,
+        retryCleanup: Bool = false,
+        deadline: ContinuousClock.Instant
+    ) async throws -> Bool {
+        let retained = try prepareSelectedDrain(
+            captureID: captureID,
+            scope: scope,
+            ownership: ownership,
+            cancelBeforeCapture: cancelBeforeCapture,
+            retryCleanup: retryCleanup
+        )
+        return try await drainSelectedWrite(retained, deadline: deadline)
+    }
+
+    /// Drain ONLY the original snapshot/intent tokens. Caller cancellation cannot cancel owned JOIN.
+    func drainSelectedWrite(
+        _ retained: SelectedWriteDrain,
+        deadline: ContinuousClock.Instant,
+        pendingCleanup: @MainActor () async throws -> Void = {}
+    ) async throws -> Bool {
+        let record = retained.record, scope = retained.scope, captureID = retained.captureID
+        var failure = record.failure
+        for owner in retained.captures {
+            do { try await join(owner, deadline: deadline) } catch { failure = failure ?? error }
+        }
+        do { try await pendingCleanup() } catch { failure = failure ?? error }
+        if let failure {
+            throw failure
+        }
+        if !record.completed {
+            record.completed = true
+            scope.completed.append(captureID)
+            if scope.completed.count > 64 {
+                let expired = scope.completed.removeFirst()
+                scope.records.removeValue(forKey: expired)
+            }
+        }
+        return record.cancelledBeforeCapture
+    }
 
     /// Register before a quote exists; keep this exact registration through retired/failed cleanup.
     func register(
@@ -114,6 +275,25 @@ import SuwopShell
             throw failure
         }
         return Receipt(key: key, captured: captured)
+    }
+
+    /// Capture the actual shared work synchronously, before the returned observer can
+    /// suspend. Another observer may remove registration first without invalidating this proof.
+    func captureOwnerWithoutRetry(owner: Handle) throws -> @MainActor (ContinuousClock.Instant) async throws -> Void {
+        try captureOwnerForCleanup(owner: owner, retryCleanup: false)
+    }
+
+    func captureOwnerForCleanup(
+        owner: Handle,
+        retryCleanup: Bool
+    ) throws -> @MainActor (ContinuousClock.Instant) async throws -> Void {
+        let original = try capture(owner)
+        let retained = Capture(
+            owner: owner,
+            work: original.work,
+            retryAttempt: retryCleanup ? original.retryAttempt : nil
+        )
+        return { [self] deadline in try await join(retained, deadline: deadline) }
     }
 
     /// Normal Stop/replacement drains one exact registration, never sibling owners of a shared key.

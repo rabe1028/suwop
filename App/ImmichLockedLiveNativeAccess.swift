@@ -13,6 +13,7 @@ import SuwopShell
     var targetSize: CGSize?
     var owners: [UUID: PrivateLiveConsumerOwner] = [:]
     var completed: [PrivateLiveBindingReceipt] = []
+    var capturedPendingRetirements: [PrivateLiveBinding] = []
     var currentAccess: ImmichLockedLivePublication?
     var displayLease: DisplayLease?
     var displayExpiry: Task<Void, Never>?
@@ -56,6 +57,9 @@ import SuwopShell
               targetSize.width > 0, targetSize.height > 0 else { throw CancellationError() }
         invalidate()
         expectedRequestID = requestID
+        // Epoch rotated above; old effects fail their captured epoch, and new calls
+        // for older IDs fail expectedRequestID before registering/performing I/O.
+        capturedPendingRetirements.removeAll { $0.files.requestID != requestID }
         self.targetSize = targetSize
         otherMedia = cancelOtherMedia?()
     }
@@ -114,7 +118,8 @@ import SuwopShell
             guard !existing.retired, existing.identity.epoch == epoch else { throw CancellationError() }
             return existing
         }
-        guard active, sceneID == pending.sceneID, expectedRequestID == pending.requestID,
+        guard !capturedPendingRetirements.contains(PrivateLiveBinding(pending)),
+              active, sceneID == pending.sceneID, expectedRequestID == pending.requestID,
               pending.parentKey != pending.motionKey,
               pending.generation >= 0, !pending.requestID.isEmpty, !pending.planID.isEmpty,
               !pending.grantID.isEmpty, !pending.sceneID.isEmpty,

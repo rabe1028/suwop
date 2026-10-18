@@ -120,6 +120,18 @@ struct Retired {
     binding: Binding,
     lease_id: Option<String>,
     releasing: bool,
+    recovery: crate::private_media_cleanup::Recovery,
+}
+impl Retired {
+    fn new(binding: Binding, lease_id: Option<String>) -> Self {
+        let recovery = crate::private_media_cleanup::Recovery::new();
+        Self {
+            binding,
+            lease_id,
+            releasing: false,
+            recovery,
+        }
+    }
 }
 #[derive(Debug, Clone)]
 struct Request {
@@ -178,6 +190,7 @@ pub(super) fn update(
         Event::StopImmichLockedLive {
             scene_id,
             request_id,
+            retry_cleanup: _,
         } => {
             let state = &model.immich_locked.live;
             let matches = state
@@ -188,9 +201,9 @@ pub(super) fn update(
                 .is_some_and(|p| p.scene_id == *scene_id && p.request_id == *request_id);
             Some(if matches {
                 if state.active.is_some() {
-                    stop(model)
+                    lifecycle::stop_with_retry(model, false)
                 } else {
-                    lifecycle::retry_retired(model)
+                    lifecycle::retry_retired(model, false)
                 }
             } else {
                 Command::done()
@@ -253,6 +266,77 @@ fn fresh_id() -> Result<String, String> {
     ))
 }
 
+/// Private pointer identity captured before native revocation; never a key-based late lookup.
+#[derive(Debug, Clone)]
+pub(crate) struct CapturedOwners(Vec<(Owner, ImmichLockedLivePending)>);
+impl CapturedOwners {
+    pub(crate) fn pending(&self) -> Vec<ImmichLockedLivePending> {
+        self.0.iter().map(|(_, p)| p.clone()).collect()
+    }
+}
+pub(crate) fn capture_owners(model: &Model, key: &AssetKey) -> CapturedOwners {
+    let s = &model.immich_locked.live;
+    CapturedOwners(
+        s.active
+            .iter()
+            .map(|a| &a.binding)
+            .chain(s.retired.iter().map(|r| &r.binding))
+            .filter(|b| b.pending.parent_key == *key || b.pending.motion_key == *key)
+            .map(|b| (b.owner.clone(), b.pending.clone()))
+            .collect(),
+    )
+}
+/// Capture retirement never issues a retry-capable normal Release. Its exact
+/// retained native drain completion, not a key lookup, discharges this obligation.
+pub(crate) fn retire_captured(
+    model: &mut Model,
+    captured: &CapturedOwners,
+) -> Command<crate::app::Effect, Event> {
+    let state = &mut model.immich_locked.live;
+    if state
+        .active
+        .as_ref()
+        .is_some_and(|a| captured.0.iter().any(|(o, _)| o.same(&a.binding.owner)))
+    {
+        let Some(active) = state.active.take() else {
+            return Command::done();
+        };
+        next_request_epoch(state);
+        if let Some(k) = &active.binding.kernel {
+            let _ = k.stop();
+        }
+        state.retired = Some(Retired::new(
+            active.binding.clone(),
+            active.binding.quote_id.clone(),
+        ));
+    }
+    Command::done()
+}
+pub(crate) fn captured_drained(
+    model: &mut Model,
+    captured: &CapturedOwners,
+) -> Command<crate::app::Effect, Event> {
+    let Some(retired) = model
+        .immich_locked
+        .live
+        .retired
+        .as_ref()
+        .filter(|r| captured.0.iter().any(|(o, _)| o.same(&r.binding.owner)))
+        .cloned()
+    else {
+        return Command::done();
+    };
+    lifecycle::joined(
+        model,
+        &retired.binding.owner,
+        None,
+        Ok(ImmichLockedLiveReleased {
+            pending: retired.binding.pending,
+            pair_lease_id: retired.lease_id,
+        }),
+    )
+}
+
 pub(crate) fn quiesce_visibility(
     model: &mut Model,
     key: &AssetKey,
@@ -310,4 +394,31 @@ fn phase(step: Step) -> ImmichLockedLivePhase {
         Step::Final | Step::Publish | Step::Done => ImmichLockedLivePhase::Publishing,
         _ => ImmichLockedLivePhase::Acquiring,
     }
+}
+
+pub(crate) fn cleanup_projection(
+    model: &Model,
+) -> Vec<crate::private_media_cleanup::PrivateMediaCleanupView> {
+    model
+        .immich_locked
+        .live
+        .retired
+        .iter()
+        .filter(|r| !crate::private_media_capture::owns_live(model, &r.binding.pending))
+        .filter_map(|r| r.recovery.view())
+        .collect()
+}
+pub(crate) fn retry_cleanup(
+    model: &mut Model,
+    id: &str,
+    expected: u64,
+) -> Option<Command<crate::app::Effect, Event>> {
+    let r = model.immich_locked.live.retired.as_ref()?;
+    if !r.recovery.accepts_retry(id, expected)
+        || crate::private_media_capture::owns_live(model, &r.binding.pending)
+    {
+        return None;
+    }
+    model.immich_locked.live.queued = None;
+    Some(lifecycle::retry_retired(model, true))
 }

@@ -141,11 +141,16 @@ impl<'a> Shell<'a> {
             ShellOperation::PrepareImmichLockedVideo { ticket, staged_id } => {
                 self.prepare(core, ticket, staged_id)
             }
-            ShellOperation::ReleaseImmichLockedVideo { pending, lease_id } => {
+            ShellOperation::ReleaseImmichLockedVideo {
+                pending, lease_id, ..
+            } => {
                 self.release(lease_id, Some(pending))?;
                 Ok(Value::Null)
             }
-            ShellOperation::ReleaseImmichLockedVideos { generation } => {
+            ShellOperation::RetireImmichLockedVideoPending { pending, .. } => {
+                self.retire_pending(pending)
+            }
+            ShellOperation::ReleaseImmichLockedVideos { generation, .. } => {
                 let ids = self
                     .leases
                     .iter()
@@ -174,6 +179,25 @@ impl<'a> Shell<'a> {
                     .into(),
             ),
         }
+    }
+    fn retire_pending(&mut self, pending: &ImmichLockedVideoPending) -> Result<Value, String> {
+        let ids = self
+            .leases
+            .iter()
+            .filter(|(_, lease)| {
+                let p = &lease.pending;
+                p.request_id == pending.request_id
+                    && p.scene_id == pending.scene_id
+                    && p.grant_id == pending.grant_id
+                    && p.generation == pending.generation
+                    && p.key == pending.key
+            })
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        for id in ids {
+            self.release(&id, Some(pending))?;
+        }
+        Ok(Value::Null)
     }
     fn http(&mut self, request: &HttpRequest) -> Result<Value, String> {
         let prefix = format!("{}/", self.fixture.elevated.ordinary.endpoint);

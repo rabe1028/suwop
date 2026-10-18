@@ -136,10 +136,13 @@ impl Shell {
     }
     fn respond(&mut self, c: &Core<Suwop>, op: &ShellOperation) -> Result<Value, String> {
         match op {
-            ShellOperation::CapturePrivateMediaKey { key: selected } => {
+            ShellOperation::CapturePrivateMediaKey { key: selected, .. } => {
                 assert_eq!(selected, &key());
                 // Synthetic no-consumer capture only; not native JOIN evidence.
                 Ok(Value::Null)
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
             }
             ShellOperation::QuiesceImmichLockedLive { pending, .. } => {
                 if pending.is_some() {
