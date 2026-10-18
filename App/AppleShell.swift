@@ -98,6 +98,7 @@ import SuwopShell
             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
             "releaseImmichLockedVideo", "releaseImmichLockedVideos",
+            "releaseImmichLockedLive", "releaseImmichLockedLives",
         ]
         if !completionEffects.contains(operation.type) {
             try Task.checkCancellation()

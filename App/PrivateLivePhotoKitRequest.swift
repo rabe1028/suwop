@@ -2,6 +2,28 @@ import Foundation
 import os
 import Photos
 
+// Compatibility boundary for SDKs where PHLivePhoto is not Sendable.
+// This private envelope is constructed ONLY after the callback's main-thread
+// guard, captured only by the immediately invoked assumeIsolated closure, and
+// synchronously consumed before that same callback returns. It is never stored,
+// put in a Task, or used across an await. Only MainActor can access the object.
+// PhotoKit documents synchronous delivery during the MainActor request and
+// subsequent delivery on the main queue. The checked actor assertion verifies
+// that executor; the earlier guard rejects violations without moving the photo.
+// Remove this bridge when every supported SDK declares PHLivePhoto Sendable.
+// swiftlint:disable:next no_force_sendable
+private struct PrivateLiveMainQueuePhoto: @unchecked Sendable {
+    private let photo: PHLivePhoto?
+
+    init(_ photo: PHLivePhoto?) {
+        self.photo = photo
+    }
+
+    @MainActor func consume(_ receive: @MainActor (PHLivePhoto?) -> Void) {
+        receive(photo)
+    }
+}
+
 /// Signals are thread safe; PhotoKit objects and request state never leave MainActor.
 private final class PrivateLiveCallbackFence: Sendable {
     private struct State {
@@ -126,14 +148,18 @@ private final class PrivateLiveCallbackFence: Sendable {
                         Task { @MainActor [weak self] in self?.callbackViolation() }
                         return // Never transfer the object or NSDictionary to another executor.
                     }
-                    // Extract immutable Sendable facts on the callback executor. PHLivePhoto
-                    // is SDK-declared Sendable; the raw info dictionary never crosses isolation.
+                    // The dictionary stays on this callback executor. Older SDKs do not
+                    // declare PHLivePhoto Sendable; only the guarded, synchronous envelope
+                    // enters the actor assertion, with no dispatch or retained callback work.
                     let cancelled = (info[PHLivePhotoInfoCancelledKey] as? Bool) == true
                     let degraded = (info[PHLivePhotoInfoIsDegradedKey] as? Bool) == true
                     let error = info[PHLivePhotoInfoErrorKey] as? Error
                     guard let request = self else { return }
+                    let delivery = PrivateLiveMainQueuePhoto(photo)
                     MainActor.assumeIsolated {
-                        request.receive(photo, cancelled: cancelled, degraded: degraded, error: error)
+                        delivery.consume { photo in
+                            request.receive(photo, cancelled: cancelled, degraded: degraded, error: error)
+                        }
                     }
                 }
                 requestID = id

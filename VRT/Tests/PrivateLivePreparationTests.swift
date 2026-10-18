@@ -111,6 +111,31 @@ final class PrivateLivePreparationTests: XCTestCase {
         XCTAssertFalse(fixture.registry.retains(preparation.handle))
     }
 
+    @MainActor func testLateMainQueueCancellationCannotRepairOffMainContractViolation() async throws {
+        let fixture = try PrivateLivePreparationFixture()
+        let captured = PrivateLiveTestCallback()
+        let driver = PrivateLivePhotoKitRequest.Driver(request: { _, _, callback in
+            captured.callback = callback
+            DispatchQueue.global().async { callback(nil, [:]) }
+            return 19
+        }, cancel: { _ in captured.cancels += 1 })
+        let preparation = try fixture.preparation(driver: driver, timeout: .milliseconds(50))
+        do { _ = try await preparation.run()
+            XCTFail("Off-main delivery must not prepare or acknowledge cleanup")
+        } catch {}
+        // A subsequent correctly queued terminal callback cannot erase the
+        // earlier affinity violation or turn retained files into a JOIN ACK.
+        captured.callback?(nil, [PHLivePhotoInfoCancelledKey: true])
+        do { try await preparation.cancelAndJoin()
+            XCTFail("A violated callback contract remains quarantined")
+        } catch {}
+        XCTAssertEqual(captured.cancels, 1)
+        XCTAssertEqual(fixture.releases, 0)
+        XCTAssertTrue(fixture.registry.retains(preparation.handle))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.parent.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: fixture.motion.path))
+    }
+
     @MainActor func testUncooperativeWorkTimesOutRetainsFilesThenExactRetryJoinsCompletion() async throws {
         let fixture = try PrivateLivePreparationFixture()
         let driver = PrivateLivePhotoKitRequest.Driver(request: { _, _, _ in
