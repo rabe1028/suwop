@@ -13,11 +13,22 @@ private final class ArchiveABI {
     var visibility = "timeline"
     var accept = true
     var loseReply = false
+    var failLiveJoin = false
+    private var liveJoinAcknowledged = false
+    private(set) var liveJoins = 0
+    private(set) var writeOrder: [String] = []
     private(set) var writes = 0
     private(set) var puts = 0
     private(set) var routes: [String] = []
     private(set) var prompts: [ImmichArchivePrompt] = []
     private(set) var durableBeforePUT = false
+    private struct PrepareBaseline {
+        let writes: Int
+        let puts: Int
+        let confirmations: Int
+    }
+
+    private var prepareBaseline: PrepareBaseline?
 
     init(saved: SavedLibrary? = nil, visibility: String = "timeline") throws {
         bridge = try CoreBridge()
@@ -49,6 +60,10 @@ private final class ArchiveABI {
     }
 
     func prepare(_ to: ImmichArchiveDestination, id: String = "55555555-5555-4555-8555-555555555555") throws {
+        liveJoinAcknowledged = false
+        writeOrder = []
+        prepareBaseline = PrepareBaseline(writes: writes, puts: puts, confirmations: prompts.count)
+        defer { prepareBaseline = nil }
         try drain(event([
             "type": .string("prepareImmichArchive"), "key": .from(key), "to": .string(to.rawValue),
             "operationID": .string(id), "sceneID": .string(scene),
@@ -76,7 +91,11 @@ private final class ArchiveABI {
             let operation = try #require(request.effect["Io"])
             let value = try reply(operation)
             pending += try bridge.call(1, input: .object([
-                "id": .number(Double(request.id)), "response": .object(["value": value, "error": .null]),
+                "id": .number(Double(request.id)), "response": .object([
+                    "value": value,
+                    "error": operation.type == "quiesceImmichLockedLive" && failLiveJoin
+                        ? .string("Exact Live JOIN failed") : .null,
+                ]),
             ])).decode([EffectRequest].self)
         }
     }
@@ -86,13 +105,38 @@ private final class ArchiveABI {
         switch operation.type {
         case "readState": return rawState
         case "persist":
-            saved = try data.decode(SavedLibrary.self)
+            let next = try data.decode(SavedLibrary.self)
+            let existingIDs = Set(saved.immichVisibilityOperations.map(\.id))
+            if next.immichVisibilityOperations.contains(where: { $0.key == key && !existingIDs.contains($0.id) }) {
+                #expect(liveJoinAcknowledged, "Live JOIN must complete before durable ordinary intent")
+                writeOrder.append("intent")
+            }
+            saved = next
             rawState = data
             writes += 1
             return .null
         case "readCredential": return .string("ordinary-archive-api-key")
         case "appleScan": return try .from(LibrarySnapshot(provider: .apple, scope: "archive-library", access: .full))
+        case "capturePrivateMediaKey":
+            #expect(try data["key"].decode(AssetKey.self) == key)
+            let before = try #require(prepareBaseline)
+            #expect(puts == before.puts)
+            #expect(writes == before.writes)
+            #expect(prompts.count == before.confirmations)
+            writeOrder.append("capture")
+            return .null
+        case "quiesceImmichLockedLive":
+            #expect(try data["key"].decode(AssetKey.self) == key)
+            #expect(try data["pending"].decode(ImmichLockedLivePending?.self) == nil)
+            let before = try #require(prepareBaseline)
+            #expect(writes == before.writes && puts == before.puts)
+            #expect(prompts.count == before.confirmations + 1)
+            liveJoins += 1
+            liveJoinAcknowledged = !failLiveJoin
+            writeOrder.append("quiesce-live")
+            return .null
         case "confirmImmichArchive":
+            writeOrder.append("confirm")
             try prompts.append(data["prompt"].decode(ImmichArchivePrompt.self))
             return .bool(accept)
         case "http": return try .from(http(data.decode(HttpRequest.self)))
@@ -141,7 +185,8 @@ private final class ArchiveABI {
         durableBeforePUT = saved.immichVisibilityOperations.contains {
             $0.key == key && $0.kind == .ordinaryArchive && $0.outcome == .unknown && $0.to.rawValue == to
         }
-        #expect(durableBeforePUT)
+        #expect(durableBeforePUT && liveJoinAcknowledged)
+        writeOrder.append("put")
         puts += 1
         visibility = to
         return response(loseReply ? .null : asset(), status: loseReply ? 503 : 200)
@@ -183,12 +228,14 @@ private final class ArchiveABI {
     #expect(prompt.from == .timeline && prompt.to == .archive && prompt.sceneID == fixture.scene)
     let promptText = try #require(String(data: JSONEncoder().encode(prompt), encoding: .utf8))
     #expect(!promptText.contains("grantID") && !promptText.contains("Album"))
-    #expect(fixture.puts == 1 && fixture.durableBeforePUT)
+    #expect(fixture.puts == 1 && fixture.durableBeforePUT && fixture.liveJoins == 1)
+    #expect(fixture.writeOrder == ["capture", "confirm", "quiesce-live", "intent", "put"])
     #expect(fixture.saved.immichVisibilityOperations.first?.kind == .ordinaryArchive)
     #expect(fixture.saved.immichVisibilityOperations.first?.outcome == .applied)
     try fixture.refresh()
     try fixture.prepare(.timeline, id: "66666666-6666-4666-8666-666666666666")
-    #expect(fixture.puts == 2 && fixture.visibility == "timeline")
+    #expect(fixture.puts == 2 && fixture.visibility == "timeline" && fixture.liveJoins == 2)
+    #expect(fixture.writeOrder == ["capture", "confirm", "quiesce-live", "intent", "put"])
     #expect(try fixture.view().immichLockedView.state == .locked)
     #expect(try fixture.view().immichVisibilityView.history == nil)
 }
@@ -200,6 +247,7 @@ private final class ArchiveABI {
     try fixture.prepare(.archive)
     #expect(fixture.prompts.count == 1 && fixture.puts == 0 && fixture.writes == 0)
     #expect(fixture.saved.immichVisibilityOperations.isEmpty && fixture.visibility == "timeline")
+    #expect(fixture.liveJoins == 0)
 }
 
 @Test func ordinaryArchiveABIUnknownAcrossRestartInspectsWithoutMutationReplayOrPIN() throws {
@@ -220,4 +268,15 @@ private final class ArchiveABI {
     restarted.visibility = "locked"
     try restarted.inspect(record.id)
     #expect(restarted.puts == 0 && restarted.saved.immichVisibilityOperations.first?.outcome == .unknown)
+}
+
+@Test func ordinaryArchiveABIFailedLiveJoinStartsNoIntentOrPUT() throws {
+    let fixture = try ArchiveABI()
+    try fixture.ready()
+    fixture.failLiveJoin = true
+    try fixture.prepare(.archive)
+    #expect(fixture.liveJoins == 1 && fixture.prompts.count == 1)
+    #expect(fixture.writes == 0 && fixture.puts == 0 && fixture.visibility == "timeline")
+    #expect(fixture.saved.immichVisibilityOperations.isEmpty)
+    #expect(fixture.writeOrder == ["capture", "confirm", "quiesce-live"])
 }

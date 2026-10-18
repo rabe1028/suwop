@@ -31,6 +31,13 @@ fn core_denials(
     operations: Vec<suwop_core::immich_visibility::ImmichVisibilityOperation>,
     denied: std::collections::BTreeSet<AssetKey>,
 ) -> Core<Suwop> {
+    Core::new_with(Suwop, model_denials(protected, operations, denied))
+}
+fn model_denials(
+    protected: bool,
+    operations: Vec<suwop_core::immich_visibility::ImmichVisibilityOperation>,
+    denied: std::collections::BTreeSet<AssetKey>,
+) -> Model {
     let session = Session {
         ordinary_content_guard: None,
         ordinary_content_context: None,
@@ -67,19 +74,16 @@ fn core_denials(
         },
         ..SavedLibrary::default()
     };
-    Core::new_with(
-        Suwop,
-        Model {
-            protection: suwop_core::protection::ProtectionModel {
-                denied,
-                ..suwop_core::protection::ProtectionModel::default()
-            },
-            state,
-            session: Some(session),
-            ready: true,
-            ..Model::default()
+    Model {
+        protection: suwop_core::protection::ProtectionModel {
+            denied,
+            ..suwop_core::protection::ProtectionModel::default()
         },
-    )
+        state,
+        session: Some(session),
+        ready: true,
+        ..Model::default()
+    }
 }
 fn open(id: &str) -> Event {
     Event::OpenImmichLocked {
@@ -129,6 +133,9 @@ struct Shell {
     asset_transport_failure: Option<()>,
     patch_after_stage: Option<Value>,
     quiescence_failure: Option<String>,
+    live_quiescence_failure: Option<String>,
+    live_quiescences: Vec<AssetKey>,
+    captures: Vec<AssetKey>,
     quiescence_ack: Option<Value>,
     quiescences: Vec<AssetKey>,
     quiescence_pending: Vec<Option<suwop_core::immich_locked::video::ImmichLockedVideoPending>>,
@@ -147,9 +154,34 @@ impl Shell {
             Ok(self.quiescence_ack.clone().unwrap_or(Value::Null))
         }
     }
+    fn live_quiesce_response(&mut self, key: &AssetKey) -> Result<Value, String> {
+        self.live_quiescences.push(key.clone());
+        if let Some(message) = &self.live_quiescence_failure {
+            Err(message.clone())
+        } else {
+            Ok(Value::Null)
+        }
+    }
+    fn persist_response(&mut self, state: &SavedLibrary) -> Result<Value, String> {
+        self.persist_calls += 1;
+        let raw = serde_json::to_value(state).map_err(|_| "encode")?;
+        if self.fail_persist == Some(self.persist_calls) {
+            if self.persist_after_failure {
+                self.disk = Some(raw);
+            }
+            return Err("persistence unavailable".into());
+        }
+        self.disk = Some(raw);
+        Ok(Value::Null)
+    }
     fn respond(&mut self, op: &ShellOperation) -> Result<Value, String> {
         match op {
+            ShellOperation::CapturePrivateMediaKey { key } => {
+                self.captures.push(key.clone());
+                Ok(Value::Null)
+            }
             ShellOperation::ConfirmImmichArchive { .. } => Ok(json!(true)),
+            ShellOperation::QuiesceImmichLockedLive { key, .. } => self.live_quiesce_response(key),
             ShellOperation::QuiesceImmichLockedVideo { key, pending } => {
                 self.quiesce_response(key, pending.as_ref())
             }
@@ -185,18 +217,7 @@ impl Shell {
                 assert_eq!(prompt.scene_id, SCENE);
                 Ok(json!(self.confirmed))
             }
-            ShellOperation::Persist(state) => {
-                self.persist_calls += 1;
-                let raw = serde_json::to_value(state).map_err(|_| "encode")?;
-                if self.fail_persist == Some(self.persist_calls) {
-                    if self.persist_after_failure {
-                        self.disk = Some(raw);
-                    }
-                    return Err("persistence unavailable".into());
-                }
-                self.disk = Some(raw);
-                Ok(Value::Null)
-            }
+            ShellOperation::Persist(state) => self.persist_response(state),
             ShellOperation::ReadState => {
                 if self.read_fail {
                     Err("unavailable".into())
@@ -758,6 +779,7 @@ fn atomic_write_lost_ack_can_be_recovered_without_replay_or_old_state_overwrite(
         "unknown"
     );
     shell.read_fail = false;
+    let captures_before_recovery = shell.captures.len();
     shell.run(
         &c,
         Event::RecoverImmichVisibilityState {
@@ -766,6 +788,11 @@ fn atomic_write_lost_ack_can_be_recovered_without_replay_or_old_state_overwrite(
         },
     )?;
     assert!(!c.view().immich_visibility_view.persistence_uncertain);
+    assert_eq!(
+        shell.captures.len(),
+        captures_before_recovery,
+        "Recovery does not re-enter the write capture protocol"
+    );
     assert_eq!(shell.persist_calls, 1);
     assert_eq!(shell.writes, 0);
     assert_eq!(
@@ -1821,5 +1848,13 @@ mod ordinary_selected;
 #[path = "immich_visibility/selected_video.rs"]
 mod selected_video;
 
+#[path = "immich_visibility/live_discovery.rs"]
+mod live_discovery;
 #[path = "immich_visibility/live_resources.rs"]
 mod live_resources;
+
+#[path = "immich_visibility/paired_read.rs"]
+mod paired_read;
+
+#[path = "immich_visibility/private_media_capture.rs"]
+mod private_media_capture;

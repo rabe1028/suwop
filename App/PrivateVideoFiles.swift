@@ -19,9 +19,13 @@ final class PrivateVideoFiles: Sendable {
     }
 
     private struct Record: Sendable {
-        let quote: Quote
+        let binding: PrivateVideoBinding
+        let inspectionOwnerID: UUID
+        let leaseID: String
         let url: URL
         let owner: PrivateMediaAllocation.Owner
+        var quote: Quote?
+        var registered = false
     }
 
     private let measurementProvider: (@Sendable (PrivateVideoVolume.Measurement) throws -> Int64)?
@@ -65,15 +69,26 @@ final class PrivateVideoFiles: Sendable {
         volume = PrivateVideoVolume(directory: namespace.directory)
     }
 
-    func inspect(binding: PrivateVideoBinding, freshnessDeadline: Int64) throws -> Quote {
+    func inspect(
+        binding: PrivateVideoBinding, freshnessDeadline: Int64, inspectionOwnerID: UUID = UUID()
+    ) throws -> Quote {
         try records.withLock { state in
             let leaseID = UUID().uuidString
             let directory = volume.directory.appendingPathComponent(leaseID, isDirectory: true)
+            let url = directory.appendingPathComponent("payload")
+            let key = AssetKey(provider: binding.provider, scope: binding.scope, assetID: binding.assetID)
+            var record = Record(
+                binding: binding,
+                inspectionOwnerID: inspectionOwnerID,
+                leaseID: leaseID,
+                url: url,
+                owner: .init(resources: [key])
+            )
+            state[leaseID] = record // Prequote ownership exists before any allocation or measurement.
             do {
                 try FileManager.default.createDirectory(
                     at: directory, withIntermediateDirectories: false, attributes: [.posixPermissions: 0o700]
                 )
-                let url = directory.appendingPathComponent("payload")
                 var attributes: [FileAttributeKey: Any] = [.posixPermissions: 0o600]
                 #if os(iOS)
                     attributes[.protectionKey] = FileProtectionType.complete
@@ -81,11 +96,11 @@ final class PrivateVideoFiles: Sendable {
                 guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: attributes) else {
                     throw SuwopError("動画の保存先を用意できません。")
                 }
-                let key = AssetKey(provider: binding.provider, scope: binding.scope, assetID: binding.assetID)
-                let owner = PrivateMediaAllocation.Owner(resources: [key])
                 let measured = try ledger.register(
-                    owner: owner, files: [.init(id: leaseID, url: url)], measure: measure
+                    owner: record.owner, files: [.init(id: leaseID, url: url)], measure: measure
                 )
+                record.registered = true
+                state[leaseID] = record
                 let quote = Quote(
                     binding: binding,
                     leaseID: leaseID,
@@ -93,36 +108,57 @@ final class PrivateVideoFiles: Sendable {
                     deadline: freshnessDeadline,
                     volume: measured
                 )
-                state[leaseID] = Record(quote: quote, url: url, owner: owner)
+                record.quote = quote
+                state[leaseID] = record
                 return quote
             } catch {
-                try? FileManager.default.removeItem(at: directory)
+                // Retain the exact identity even when initial cleanup succeeds: the owner can
+                // acknowledge that cleanup explicitly. Failed unlink retains its ledger claim too.
+                try releaseRecord(record)
+                record.registered = false
+                record.quote = nil
+                state[leaseID] = record
                 throw error
+            }
+        }
+    }
+
+    /// Exact prequote cleanup; no quote-absence inference, path guessing or foreign-owner release.
+    func releaseInspection(binding: PrivateVideoBinding, inspectionOwnerID: UUID) throws {
+        try records.withLock { state in
+            let selected = state.filter { $0.value.inspectionOwnerID == inspectionOwnerID }
+            guard !selected.isEmpty, selected.values.allSatisfy({ $0.binding == binding }) else {
+                throw CancellationError()
+            }
+            for (id, record) in selected {
+                try releaseRecord(record)
+                state.removeValue(forKey: id)
             }
         }
     }
 
     func quote(binding: PrivateVideoBinding, facts: ImmichLockedVideoStorageFacts) throws -> Quote {
         try records.withLock { state in
-            guard let record = state[facts.leaseID], record.quote.binding == binding,
-                  record.quote.nonce == facts.measurementNonce,
-                  record.quote.deadline == facts.deadlineUnixMilliseconds else { throw CancellationError() }
-            return record.quote
+            guard let record = state[facts.leaseID], record.binding == binding,
+                  record.quote?.nonce == facts.measurementNonce,
+                  record.quote?.deadline == facts.deadlineUnixMilliseconds else { throw CancellationError() }
+            guard let quote = record.quote else { throw CancellationError() }
+            return quote
         }
     }
 
     func otherUnallocated(excluding leaseID: String) throws -> Int64 {
         try records.withLock { state in
             let owner = state[leaseID]?.owner ?? PrivateMediaAllocation.Owner(resources: [])
-            let volumeID = try state[leaseID]?.quote.volume.volumeIdentifier ?? volume.measure().volumeIdentifier
+            let volumeID = try state[leaseID]?.quote?.volume.volumeIdentifier ?? volume.measure().volumeIdentifier
             return try ledger.otherUnallocated(volumeID: volumeID, excluding: owner)
         }
     }
 
     func commit(quote: Quote, budget: PrivateVideoAllocation.Budget) throws {
         try records.withLock { state in
-            guard let record = state[quote.leaseID], record.quote.binding == quote.binding,
-                  record.quote.nonce == quote.nonce, now() < quote.deadline,
+            guard let record = state[quote.leaseID], record.binding == quote.binding,
+                  record.quote?.nonce == quote.nonce, now() < quote.deadline,
                   quote.volume.allocationUnitBytes == budget.unit else { throw CancellationError() }
             try ledger.admit(
                 owner: record.owner,
@@ -149,8 +185,8 @@ final class PrivateVideoFiles: Sendable {
 
     private func appendAuthorized(_ bytes: Data, quote: Quote, deadline: Int64? = nil) throws {
         try records.withLock { state in
-            guard let record = state[quote.leaseID], record.quote.binding == quote.binding,
-                  record.quote.nonce == quote.nonce, deadline.map({ now() < $0 }) ?? true
+            guard let record = state[quote.leaseID], record.binding == quote.binding,
+                  record.quote?.nonce == quote.nonce, deadline.map({ now() < $0 }) ?? true
             else {
                 throw CancellationError()
             }
@@ -160,8 +196,8 @@ final class PrivateVideoFiles: Sendable {
 
     func finish(quote: Quote) throws -> URL {
         try records.withLock { state in
-            guard let record = state[quote.leaseID], record.quote.binding == quote.binding,
-                  record.quote.nonce == quote.nonce else { throw CancellationError() }
+            guard let record = state[quote.leaseID], record.binding == quote.binding,
+                  record.quote?.nonce == quote.nonce else { throw CancellationError() }
             return try ledger.finish(owner: record.owner, fileID: quote.leaseID)
         }
     }
@@ -173,6 +209,10 @@ final class PrivateVideoFiles: Sendable {
             let written: Int64
             let finished: Bool
             let failed: Bool
+        }
+
+        func inspectionFilesForTesting(ownerID: UUID) -> [URL] {
+            records.withLock { $0.values.filter { $0.inspectionOwnerID == ownerID }.map(\.url) }
         }
 
         func stateForTesting(leaseID: String) -> TestState? {
@@ -193,14 +233,23 @@ final class PrivateVideoFiles: Sendable {
 
     func release(binding: PrivateVideoBinding, leaseID: String) throws {
         try records.withLock { state in
-            guard let record = state[leaseID], record.quote.binding == binding else { return }
-            try ledger.release(owner: record.owner) {
-                let directory = record.url.deletingLastPathComponent()
-                if FileManager.default.fileExists(atPath: directory.path) {
-                    try FileManager.default.removeItem(at: directory)
-                }
-            }
+            guard let record = state[leaseID], record.binding == binding else { return }
+            try releaseRecord(record)
             state.removeValue(forKey: leaseID)
+        }
+    }
+
+    private func releaseRecord(_ record: Record) throws {
+        let directory = record.url.deletingLastPathComponent()
+        let unlink: @Sendable () throws -> Void = {
+            if FileManager.default.fileExists(atPath: directory.path) {
+                try FileManager.default.removeItem(at: directory)
+            }
+        }
+        if record.registered {
+            try ledger.release(owner: record.owner, unlink: unlink)
+        } else {
+            try unlink()
         }
     }
 

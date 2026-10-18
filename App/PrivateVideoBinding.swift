@@ -47,3 +47,35 @@ struct PrivateVideoBinding: Sendable, Equatable {
         }
     }
 }
+
+/// Exact native lifetime spanning prequote work, actual consumers and failed cleanup.
+/// The shared registry captures this owner once; workers never JOIN their own registry cleanup.
+@MainActor final class PrivateVideoConsumerOwner {
+    let id = UUID()
+    let binding: PrivateVideoBinding
+    let epoch: UUID
+    var handle: PrivateMediaConsumerRegistry.Handle?
+    var quotes: [String: PrivateVideoFiles.Quote] = [:]
+    var inspectionNeedsCleanup = false
+    var retired = false
+    var teardownScheduled = false
+    var released = false
+    var cleanup: PrivateMediaConsumerRegistry.Cleanup?
+
+    init(binding: PrivateVideoBinding, epoch: UUID) {
+        self.binding = binding
+        self.epoch = epoch
+    }
+}
+
+struct PrivateVideoCompletedConsumer {
+    let binding: PrivateVideoBinding
+    let leaseIDs: Set<String>
+    let handle: PrivateMediaConsumerRegistry.Handle
+}
+
+@MainActor struct PrivateVideoOwnedOperation {
+    let binding: PrivateVideoBinding
+    let owner: PrivateVideoConsumerOwner
+    let completion: PrivateVideoOperationCompletion
+}

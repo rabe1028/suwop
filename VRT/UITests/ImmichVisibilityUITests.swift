@@ -408,7 +408,10 @@ extension ImmichVisibilityUITests {
             format: "identifier BEGINSWITH %@", "selectedImmichConfiguration-"
         )).firstMatch
         for _ in 0 ..< 4 {
-            if configuration.exists, app.frame.contains(configuration.frame), inspect.isHittable {
+            let configurationVisible = configuration.exists && !configuration.frame.isEmpty
+                && app.frame.contains(configuration.frame)
+            let inspectVisible = inspect.exists && !inspect.frame.isEmpty && app.frame.contains(inspect.frame)
+            if configurationVisible, inspectVisible, inspect.isHittable {
                 break
             }
             app.collectionViews.firstMatch.swipeUp()

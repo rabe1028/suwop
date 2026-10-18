@@ -136,6 +136,9 @@ struct ImmichLockedPhotosView: View {
             Section {
                 Text("このアプリで保護した表示元は含めません。写真を表示し、動画をこの画面で再生できます。共有・編集・転送はできません。")
                     .font(.caption).foregroundStyle(.secondary)
+                ImmichLockedLiveControls(
+                    session: session, selection: session.liveSelection, view: view, sceneID: sceneID
+                )
                 if let video = view.video, let manager = session.videoAccess {
                     ImmichLockedVideoSurface(access: video, manager: manager, playback: session.videoPlayer)
                         .id(video.stagedID)
@@ -173,6 +176,14 @@ struct ImmichLockedPhotosView: View {
                             Button("写真を表示") { session.requestImage(entryID: entry.id, sceneID: sceneID) }
                                 .buttonStyle(.borderless)
                                 .accessibilityIdentifier("immichLockedPreview-\(entry.id)")
+                            ImmichLockedLiveAction(
+                                selection: session.liveSelection,
+                                discovery: entry.liveDiscovery,
+                                key: entry.asset.key,
+                                entryID: entry.id,
+                                sceneID: sceneID,
+                                busy: session.busy
+                            )
                         }
                     }.padding(.vertical, 4)
                 }

@@ -57,6 +57,7 @@ fn model(raw: &Value) -> Result<Model, String> {
         Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
     model.immich_locked.entries.push(ImmichLockedEntry {
         can_play_video: false,
+        live_discovery: crate::immich_locked::live::ImmichLockedLiveDiscovery::Unsupported,
         id: ID.into(),
         visibility_action: crate::immich_visibility::locked_action(asset.key.clone()),
         asset,

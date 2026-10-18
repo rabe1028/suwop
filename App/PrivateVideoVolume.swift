@@ -4,12 +4,12 @@ import SuwopShell
 
 /// A measurement of the actual private-file volume, never a filesystem reservation.
 struct PrivateVideoVolume: Sendable {
-    enum CapacityClass: Sendable {
+    enum CapacityClass: Sendable, Equatable {
         case importantUsage
         case available
     }
 
-    struct Measurement: Sendable {
+    struct Measurement: Sendable, Equatable {
         let availableBytes: Int64
         let allocationUnitBytes: Int64
         let capacityClass: CapacityClass

@@ -32,6 +32,10 @@ import SuwopShell
         injectedFiles.map(Result.success) ?? PrivateVideoFiles.shared
     }
 
+    let consumerRegistry: PrivateMediaConsumerRegistry
+    var consumerOwners: [UUID: PrivateVideoConsumerOwner] = [:]
+    var consumerQuoteOwners: [String: UUID] = [:]
+    var completedConsumer: PrivateVideoCompletedConsumer?
     var runtime: RustRuntime?
     var ownerSceneID: String?
     var expectedRequestID: String?
@@ -62,7 +66,7 @@ import SuwopShell
     var teardownTask: Task<Void, Never>?
     var observedPending: ImmichLockedVideoPending?
     var revokedBinding: PrivateVideoBinding?
-    var operations: [UUID: (binding: PrivateVideoBinding, completion: PrivateVideoOperationCompletion)] = [:]
+    var operations: [UUID: PrivateVideoOwnedOperation] = [:]
     var failedReleases: [String: PrivateVideoBinding] = [:]
     var retiredOwners: [String: PrivateVideoBinding] = [:]
     var cancelOtherMedia: (@MainActor () -> Task<Void, Error>?)?
@@ -101,8 +105,9 @@ import SuwopShell
         }
     #endif
 
-    init(files: PrivateVideoFiles? = nil) {
+    init(files: PrivateVideoFiles? = nil, consumerRegistry: PrivateMediaConsumerRegistry = .shared) {
         injectedFiles = files
+        self.consumerRegistry = consumerRegistry
     }
 
     func configure(runtime: RustRuntime) {
@@ -138,12 +143,20 @@ import SuwopShell
             currentAccess = nil
             return
         }
-        if let pending = view.videoPending {
-            observedPending = pending
-        }
         currentGrantID = view.grantID
         currentGeneration = view.generation
         displayLeaseID = view.leaseID
+        let projected = view.videoPending.map(PrivateVideoBinding.init) ?? view.video
+            .map { PrivateVideoBinding($0.pending) }
+        retireConsumers(consumerOwners.values.filter { !$0.retired && $0.binding != projected })
+        if let pending = view.videoPending, pending.requestID == expectedRequestID {
+            observedPending = pending
+            do { _ = try consumer(pending) } catch {
+                invalidate()
+                currentAccess = nil
+                return
+            }
+        }
         if let old = currentAccess, old.stagedID != view.video?.stagedID {
             let consumer = shieldPlayer?(PrivateVideoBinding(old.pending), old.stagedID)
             let prior = teardownTask
@@ -190,58 +203,36 @@ import SuwopShell
         observedPending = nil
         // Rotating the epoch above already invalidates every old effect and previously returned Attachment.
         revokedBinding = nil
-        let consumer = shieldPlayer?(nil, nil)
-        for acquisition in acquisitions.values {
-            acquisition.cancel()
-        }
-        for task in acquisitionExpiryTasks.values {
-            task.cancel()
-        }
-        acquisitions.removeAll()
-        acquisitionContracts.removeAll()
-        initialAcquisitionLeases.removeAll()
-        acquisitionAnchors.removeAll()
-        acquisitionExpiryTasks.removeAll()
-        readTask?.cancel()
-        prepareTask?.cancel()
-        let old = quotes
-        stages.removeAll()
-        quotes.removeAll()
-        let read = readTask
-        let prepare = prepareTask
-        let previous = teardownTask
-        for (id, quote) in old {
-            retiredOwners[id] = quote.binding
-        }
-        teardownTask = Task {
-            await previous?.value
-            await consumer?.value
-            _ = await read?.result
-            _ = await prepare?.result
-            for (id, quote) in old {
-                try? releaseFile(binding: quote.binding, leaseID: id)
-                if retiredOwners[id] == quote.binding {
-                    retiredOwners.removeValue(forKey: id)
-                }
-            }
-        }
+        retireConsumers(Array(consumerOwners.values))
     }
 
     func inspect(_ pending: ImmichLockedVideoPending) async throws -> ImmichLockedVideoStorageFacts {
-        let operation = beginOperation(pending)
+        let operation = try beginOperation(pending)
         defer { finishOperation(operation) }
         let captured = epoch
         await teardownTask?.value
+        guard !consumerOwners.values.contains(where: { $0.retired && !$0.released }) else {
+            throw PrivateMediaConsumerRegistry.Failure.cleanupUnconfirmed
+        }
         if let other = cancelOtherMedia?() {
-            _ = await other.result
+            try await other.value
         }
         try await validate(pending, epoch: captured)
         let files = try files.get()
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         // Feasibility freshness only; it never limits or renews Rust's acquisition authorization.
         let acquisitionAnchor = ContinuousClock.now
-        let quote = try files.inspect(binding: PrivateVideoBinding(pending), freshnessDeadline: now + 10000)
+        let owner = try operationOwner(operation)
+        owner.inspectionNeedsCleanup = true
+        let quote = try files.inspect(
+            binding: owner.binding, freshnessDeadline: now + 10000, inspectionOwnerID: owner.id
+        )
+        owner.inspectionNeedsCleanup = false
+        owner.quotes[quote.leaseID] = quote
+        consumerQuoteOwners[quote.leaseID] = owner.id
         do {
+            guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+            try consumerRegistry.updatePhase(.active, owner: handle)
             try await validate(pending, epoch: captured)
             quotes[quote.leaseID] = quote
             acquisitionAnchors[quote.leaseID] = acquisitionAnchor
@@ -261,7 +252,7 @@ import SuwopShell
     }
 
     func read(_ ticket: ImmichLockedVideoTicket) async throws -> ImmichLockedVideoResult {
-        let operation = beginOperation(ticket.pending)
+        let operation = try beginOperation(ticket.pending)
         defer { finishOperation(operation) }
         let captured = epoch
         await teardownTask?.value
@@ -331,7 +322,7 @@ import SuwopShell
 
 extension ImmichLockedVideoNativeAccess {
     func prepare(_ ticket: ImmichLockedVideoTicket, stagedID: String) async throws -> ImmichLockedVideoPrepared {
-        let operation = beginOperation(ticket.pending)
+        let operation = try beginOperation(ticket.pending)
         defer { finishOperation(operation) }
         let captured = epoch
         try await validate(ticket.pending, epoch: captured)
@@ -408,32 +399,33 @@ extension ImmichLockedVideoNativeAccess {
 extension ImmichLockedVideoNativeAccess {
     func release(_ pending: ImmichLockedVideoPending, leaseID: String) async throws {
         let binding = PrivateVideoBinding(pending)
-        guard quotes[leaseID]?.binding == binding else { return }
-        retireAcquisition(leaseID)
-        let consumer = shieldPlayer?(binding, leaseID)
-        await consumer?.value
-        if readBinding == binding, readLeaseID == leaseID {
-            readTask?.cancel()
-            _ = await readTask?.result
-        }
-        if prepareBinding == binding, prepareLeaseID == leaseID {
-            prepareTask?.cancel()
-            _ = await prepareTask?.result
-        }
-        if let stage = stages[leaseID], stage.quote.binding != binding {
+        if let ownerID = consumerQuoteOwners[leaseID], let owner = consumerOwners[ownerID] {
+            guard owner.binding == binding else { throw CancellationError() }
+            try await retireConsumer(owner)
             return
         }
-        if stages[leaseID] != nil {
-            stages.removeValue(forKey: leaseID)
+        // Only a retained actual cleanup receipt can establish an already completed exact release.
+        if completedConsumer?.binding == binding, completedConsumer?.leaseIDs.contains(leaseID) == true {
+            return
         }
-        try releaseFile(binding: binding, leaseID: leaseID)
-        if quotes[leaseID]?.binding == binding {
-            quotes.removeValue(forKey: leaseID)
-        }
+        throw PrivateMediaConsumerRegistry.Failure.unknownOwner
     }
 
     func joinCleanup() async {
+        let owners = consumerOwners.values.filter(\.retired)
         await teardownTask?.value
+        // Preserve the legacy void waiter's actual worker JOIN even if the bounded registry caller timed out.
+        // Only an explicit typed registry result can acknowledge cleanup to a provider-write barrier.
+        for owner in owners {
+            _ = await owner.cleanup?.joinedWork.result
+            if !owner.released, let handle = owner.handle {
+                do {
+                    _ = try await consumerRegistry.retireAndJoinWithoutRetry(
+                        owner: handle, deadline: .now.advanced(by: .seconds(5))
+                    )
+                } catch {} // A failed unlink is retained, never implicitly retried.
+            }
+        }
     }
 }
 
@@ -443,10 +435,12 @@ extension ImmichLockedVideoNativeAccess {
         _ pending: ImmichLockedVideoPending, epoch captured: UUID, revision: String? = nil
     ) async throws -> ImmichLockedView {
         let binding = PrivateVideoBinding(pending)
-        guard revokedBinding != binding, let runtime, active, ownerSceneID == pending.sceneID,
+        guard consumerCurrent(binding, epoch: captured), revokedBinding != binding, let runtime, active,
+              ownerSceneID == pending.sceneID,
               expectedRequestID == pending.requestID, epoch == captured else { throw CancellationError() }
         let view = try await runtime.snapshot().view.immichLockedView
-        guard revokedBinding != binding, active, epoch == captured, ownerSceneID == pending.sceneID,
+        guard consumerCurrent(binding, epoch: captured), revokedBinding != binding, active, epoch == captured,
+              ownerSceneID == pending.sceneID,
               expectedRequestID == pending.requestID, view.state == .open,
               view.grantID == pending.grantID, view.sceneID == pending.sceneID,
               view.generation == pending.generation, let live = view.videoPending,
@@ -464,6 +458,8 @@ extension ImmichLockedVideoNativeAccess {
         previousLeaseID: Int64,
         lease: ImmichLockedVideoAcquisitionLease
     ) async throws -> ImmichLockedVideoAcquisitionRenewed {
+        let operation = try beginOperation(ticket.pending)
+        defer { finishOperation(operation) }
         let captured = epoch
         let view = try await validate(ticket.pending, epoch: captured, revision: ticket.expectedRevision)
         let stagedID = ticket.storage.leaseID
@@ -494,6 +490,8 @@ extension ImmichLockedVideoNativeAccess {
     func scheduleAcquisitionExpiry(
         _ pending: ImmichLockedVideoPending, lease: ImmichLockedVideoAcquisitionLease
     ) async throws {
+        let operation = try beginOperation(pending)
+        defer { finishOperation(operation) }
         let captured = epoch
         let view = try await validate(pending, epoch: captured)
         guard let live = view.videoAcquisition, PrivateVideoBinding(live.pending) == PrivateVideoBinding(pending),

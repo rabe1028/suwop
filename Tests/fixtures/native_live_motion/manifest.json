@@ -1,0 +1,48 @@
+{
+  "fixtureVersion": 1,
+  "provenance": "Entirely synthetic moving red region over checker pixels; exact run1 ImageIO/AVAssetWriter outputs copied without regeneration; no audio, third-party or personal media.",
+  "files": [
+    {
+      "path": "media/synthetic-still.jpg",
+      "bytes": 2776,
+      "sha1": "a1cd75fd8b8c0c78fab5c142b8f4a469d3a39790",
+      "sha256": "8577910866489014441a2f02ec312276cd26909d35675086d6dc9dc2f73e211b"
+    },
+    {
+      "path": "media/synthetic-motion.mov",
+      "bytes": 9155,
+      "sha1": "8a57f235ba17410788337a5dfaa976ff710ca117",
+      "sha256": "b1d9ac4b175ee67551a549146b1655d3113d200521b17520b448960e3ced514b"
+    }
+  ],
+  "expectedContentIdentifier": "A762B1E3-9D24-4B70-AD53-FA1642C8039E",
+  "expectedStillImageTimeSeconds": 1.5,
+  "expectedStillImageTimeDurationSeconds": 0.08333333333333333,
+  "dimensions": {
+    "width": 96,
+    "height": 96
+  },
+  "video": {
+    "requestedCodec": "H.264/avc1",
+    "frameCount": 48,
+    "framesPerSecond": 12,
+    "durationSeconds": 4,
+    "audioTrackCount": 0
+  },
+  "temporalValidation": {
+    "orderedExactTimestampsVerified": true,
+    "decodedSampleIndices": [
+      0,
+      12,
+      18,
+      24,
+      36
+    ],
+    "stillVsTimedMeanRGBDifference": 3.8463903356481484
+  },
+  "toolVersionsFile": "evidence/tool-versions.txt",
+  "historicalNativeValidation": "evidence/native-validation.json",
+  "generationRun": "evidence/generation-run.json",
+  "byteIdenticalRegenerationGuaranteed": false,
+  "acceptanceScope": "Actual synthetic fixture metadata and decoded temporal pixels only. API relation, PhotoKit materialization, PHLivePhotoView rendered motion, protected lifetime, physical playback and iCloud acceptance remain separate."
+}

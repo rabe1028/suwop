@@ -77,6 +77,47 @@ pub enum ShellOperation {
     ReleaseOrdinarySelectedImages {
         generation: u64,
     },
+    InspectImmichLockedLiveStorage {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        #[serde(rename = "quoteDeadlineUnixMilliseconds")]
+        quote_deadline_unix_milliseconds: u64,
+    },
+    ReadImmichLockedLiveMember {
+        read: Box<crate::immich_locked::live::ImmichLockedLiveRead>,
+    },
+    PrepareImmichLockedLive {
+        ticket: Box<crate::immich_locked::live::ImmichLockedLiveTicket>,
+        originals: [crate::immich_locked::live::ImmichLockedLiveOriginal; 2],
+    },
+    RenewImmichLockedLiveAcquisition {
+        ticket: crate::immich_locked::live::ImmichLockedLiveTicket,
+        #[serde(rename = "previousLeaseID")]
+        previous_lease_id: u64,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
+    ScheduleImmichLockedLiveAcquisitionExpiry {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
+    PublishImmichLockedLive {
+        ticket: Box<crate::immich_locked::live::ImmichLockedLiveTicket>,
+        publication: crate::immich_locked::live::ImmichLockedLivePublication,
+    },
+    ReleaseImmichLockedLive {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        #[serde(rename = "pairLeaseID")]
+        pair_lease_id: Option<String>,
+    },
+    ReleaseImmichLockedLives {
+        generation: u64,
+    },
+    CapturePrivateMediaKey {
+        key: crate::domain::AssetKey,
+    },
+    QuiesceImmichLockedLive {
+        key: crate::domain::AssetKey,
+        pending: Option<crate::immich_locked::live::ImmichLockedLivePending>,
+    },
     InspectImmichLockedVideoStorage {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
     },
@@ -466,6 +507,43 @@ pub enum Event {
         staged_id: String,
         approved: bool,
     },
+    RequestImmichLockedLive {
+        #[serde(rename = "planID")]
+        plan_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+    },
+    StopImmichLockedLive {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    ExpireImmichLockedLiveAcquisition {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveCompleted {
+        completion: Box<crate::immich_locked::live::Completion>,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveHeartbeat {
+        completion: Box<crate::immich_locked::live::HeartbeatCompletion>,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveRenewed {
+        completion: Box<crate::immich_locked::live::RenewalCompletion>,
+    },
     RequestImmichLockedVideo {
         #[serde(rename = "entryID")]
         entry_id: String,
@@ -562,6 +640,7 @@ pub enum Event {
         lease_id: u64,
         result: Option<std::time::Instant>,
         video: Option<crate::immich_locked::video::VideoHeartbeat>,
+        live: Option<Box<crate::immich_locked::live::HeartbeatCompletion>>,
     },
     #[serde(skip)]
     ImmichLockedImageRead {
@@ -771,6 +850,10 @@ pub enum Event {
     },
     AppleChanged,
     #[serde(skip)]
+    PrivateMediaKeyCaptured {
+        completion: crate::private_media_capture::Completion,
+    },
+    #[serde(skip)]
     ImmichVisibilityPrepared {
         result: Result<crate::immich_visibility::PreparedVisibility, String>,
     },
@@ -794,6 +877,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub private_media_capture: crate::private_media_capture::State,
     pub immich_live_resources: crate::immich_live_resources::LiveResourcesModel,
     pub ordinary_selected: crate::ordinary_selected::OrdinarySelectedModel,
     pub immich_archive: crate::immich_archive::ImmichArchiveModel,
@@ -856,6 +940,10 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        let event = match crate::private_media_capture::intercept(event, model) {
+            Ok(event) => event,
+            Err(command) => return *command,
+        };
         if let Some(command) = crate::immich_live_resources::update(&event, model) {
             return command;
         }
@@ -885,7 +973,8 @@ impl crux_core::App for Suwop {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Event::OrdinarySelectedRefreshFinished {
             result,
@@ -902,25 +991,29 @@ impl crux_core::App for Suwop {
                     refresh_id,
                     &origin,
                 ))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_archive::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_locked::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         let cleanup = if crate::immich_locked::invalidates(&event) {
             crate::immich_locked::close(model)
@@ -933,6 +1026,7 @@ impl crux_core::App for Suwop {
             .and(library)
             .and(crate::ordinary_selected::reconcile_current(model))
             .and(crate::immich_locked::video::reconcile(model))
+            .and(crate::immich_locked::live::reconcile(model))
     }
     fn view(&self, model: &Model) -> ViewModel {
         Self::library_view(model)

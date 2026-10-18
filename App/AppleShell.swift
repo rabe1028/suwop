@@ -23,6 +23,7 @@ import SuwopShell
     let protectedAccess = ProtectedNativeAccess()
     let immichLockedAccess = ImmichLockedNativeAccess()
     let immichLockedVideoAccess = ImmichLockedVideoNativeAccess()
+    let immichLockedLiveAccess = ImmichLockedLiveNativeAccess()
     var immichVisibilityConfirmationCurrent: (@MainActor (ImmichVisibilityPrompt) async throws -> Bool)?
     var immichLockedTimerEffect: (@MainActor (ImmichLockedTimer) -> Void)?
     #if SUWOP_VRT
@@ -38,6 +39,7 @@ import SuwopShell
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
+        immichLockedLiveAccess.invalidate()
         presentationEpoch.invalidate()
         imageEditing.invalidateForContentChange()
         playback.invalidateForContentChange()
@@ -50,6 +52,7 @@ import SuwopShell
     func invalidateImmichLockedPresentations() {
         immichLockedAccess.invalidate()
         immichLockedVideoAccess.invalidate()
+        immichLockedLiveAccess.invalidate()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
     }
@@ -58,6 +61,7 @@ import SuwopShell
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
+        immichLockedLiveAccess.invalidate()
         presentationEpoch.invalidateProtection()
         imageEditing.invalidateForProtection()
         playback.invalidateForProtection()
@@ -160,7 +164,10 @@ extension AppleShell {
              "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
              "prepareImmichLockedVideo", "releaseImmichLockedVideo", "releaseImmichLockedVideos",
              "renewImmichLockedVideoAcquisition", "scheduleImmichLockedVideoAcquisitionExpiry",
-             "quiesceImmichLockedVideo",
+             "quiesceImmichLockedVideo", "inspectImmichLockedLiveStorage", "readImmichLockedLiveMember",
+             "prepareImmichLockedLive", "renewImmichLockedLiveAcquisition", "scheduleImmichLockedLiveAcquisitionExpiry",
+             "publishImmichLockedLive", "releaseImmichLockedLive", "releaseImmichLockedLives",
+             "quiesceImmichLockedLive", "capturePrivateMediaKey",
              "readOrdinarySelectedImage", "publishOrdinarySelectedImage",
              "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages":
             return try await appStateEffect(operation.type, data: data, context: context)
@@ -398,7 +405,7 @@ private extension AppleShell {
         if ["readState", "persist"].contains(type) {
             return try await stateEffect(type, data: data)
         }
-        if type.contains("ImmichLocked") {
+        if type == "capturePrivateMediaKey" || type.contains("ImmichLocked") {
             return try await immichLockedEffect(type, data: data, http: http)
         }
         return try await protectedEffect(type, data: data)

@@ -21,6 +21,7 @@ final class LockedSessionABI {
     var nativeReads = 0
     var routes: [String] = []
     var effectReply: ((ShellOperation) throws -> JSONValue?)?
+    var effectError: ((ShellOperation) -> String?)?
     var httpReply: ((HttpRequest) throws -> HttpResponse?)?
 
     init() throws {
@@ -36,9 +37,12 @@ final class LockedSessionABI {
         try bridge.call(0, input: .object(body)).decode([EffectRequest].self)
     }
 
-    func resolve(_ request: EffectRequest, value: JSONValue) throws -> [EffectRequest] {
+    func resolve(_ request: EffectRequest, value: JSONValue, error: String? = nil) throws -> [EffectRequest] {
         try bridge.call(1, input: .object([
-            "id": .number(Double(request.id)), "response": .object(["value": value, "error": .null]),
+            "id": .number(Double(request.id)), "response": .object([
+                "value": value,
+                "error": error.map(JSONValue.string) ?? .null,
+            ]),
         ])).decode([EffectRequest].self)
     }
 
@@ -47,7 +51,7 @@ final class LockedSessionABI {
         while !requests.isEmpty {
             let request = requests.removeFirst()
             let operation = try #require(request.effect["Io"])
-            requests += try resolve(request, value: reply(operation))
+            requests += try resolve(request, value: reply(operation), error: effectError?(operation))
         }
     }
 

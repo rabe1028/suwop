@@ -13,6 +13,7 @@ import SuwopShell
     private(set) var model: LibraryModel?
     private var saved: SavedLibrary
     private(set) var safeEffectTrace: [String] = []
+    private(set) var liveQuiescenceRequests = 0
     private(set) var issuedOriginals = 0
     private(set) var videoReadFailure: String?
     var videoInspectionBarrier: (@MainActor (ImmichLockedVideoPending) async -> Void)?
@@ -104,6 +105,7 @@ import SuwopShell
         if ImmichLockedVideoEffects.types.contains(operation.type) {
             return try await videoEffect(operation, context: context)
         }
+        observeLiveQuiescence(operation.type)
         switch operation.type {
         case "readState": return try .from(saved)
         case "persist":
@@ -115,6 +117,12 @@ import SuwopShell
                 provider: .apple, scope: saved.appleScope, assets: [], access: .full
             ))
         default: return try await shell.execute(operation, context: context)
+        }
+    }
+
+    private func observeLiveQuiescence(_ type: String) {
+        if type == "quiesceImmichLockedLive" {
+            liveQuiescenceRequests += 1
         }
     }
 
@@ -235,13 +243,13 @@ import SuwopShell
         timerBarrier.releaseAll()
     }
 
-    func settle(_ condition: () -> Bool) async throws {
+    func settle(stage: String = "unspecified", _ condition: () -> Bool) async throws {
         for _ in 0 ..< 500 {
             if condition() {
                 return
             }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw SuwopError("Private VIDEO fixture did not settle")
+        throw SuwopError("Private VIDEO fixture did not settle: \(stage)")
     }
 }

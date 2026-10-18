@@ -105,6 +105,10 @@ test-infra:
 private-video-mac-test:
 	bash scripts/private-video-mac-test.sh
 
+.PHONY: private-live-mac-test
+private-live-mac-test:
+	bash scripts/private-live-mac-test.sh
+
 .PHONY: vrt-ci-host vrt-ci-ui
 vrt-ci-host:
 	bash scripts/vrt.sh --ci-lane host-snapshots

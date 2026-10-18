@@ -2,10 +2,16 @@ import SuwopShell
 
 extension AppleShell {
     func immichLockedEffect(_ type: String, data: JSONValue, http: HTTPExecutor) async throws -> JSONValue {
+        if ImmichLockedLiveEffects.types.contains(type) {
+            return try await ImmichLockedLiveEffects.execute(type, data: data, access: immichLockedLiveAccess)
+        }
         if ImmichLockedVideoEffects.types.contains(type) {
             return try await ImmichLockedVideoEffects.execute(type, data: data, access: immichLockedVideoAccess)
         }
         switch type {
+        case "capturePrivateMediaKey":
+            try immichLockedLiveAccess.consumers.captureForSelectedWrite(key: data["key"].decode(AssetKey.self))
+            return .null
         case "readImmichLockedImage": return try await .from(immichLockedAccess.read(
                 data["ticket"].decode(ImmichLockedImageTicket.self), http: http
             ))

@@ -915,11 +915,13 @@ public struct ImmichLockedEntry: Codable, Sendable {
     public var asset: StoredAsset
     public var canPlayVideo: Bool
     public var id: String
+    public var liveDiscovery: ImmichLockedLiveDiscovery
     public var visibilityAction: ImmichVisibilityActionHint
-    public init(asset: StoredAsset, canPlayVideo: Bool = false, id: String, visibilityAction: ImmichVisibilityActionHint) {
+    public init(asset: StoredAsset, canPlayVideo: Bool = false, id: String, liveDiscovery: ImmichLockedLiveDiscovery, visibilityAction: ImmichVisibilityActionHint) {
         self.asset = asset
         self.canPlayVideo = canPlayVideo
         self.id = id
+        self.liveDiscovery = liveDiscovery
         self.visibilityAction = visibilityAction
     }
 }
@@ -968,6 +970,205 @@ public struct ImmichLockedImageTicket: Codable, Sendable {
         self.request = request
         self.requestID = requestID
         self.sceneID = sceneID
+    }
+}
+
+public struct ImmichLockedLiveAcquisitionState: Codable, Sendable {
+    public var acknowledgedLeaseID: Int64
+    public var initialLease: ImmichLockedVideoAcquisitionLease
+    public var lease: ImmichLockedVideoAcquisitionLease
+    public var pairLeaseID: String
+    public var pending: ImmichLockedLivePending
+    public init(acknowledgedLeaseID: Int64, initialLease: ImmichLockedVideoAcquisitionLease, lease: ImmichLockedVideoAcquisitionLease, pairLeaseID: String, pending: ImmichLockedLivePending) {
+        self.acknowledgedLeaseID = acknowledgedLeaseID
+        self.initialLease = initialLease
+        self.lease = lease
+        self.pairLeaseID = pairLeaseID
+        self.pending = pending
+    }
+}
+
+public enum ImmichLockedLiveDiscovery: String, Codable, CaseIterable, Sendable {
+    case `unknown`
+    case `observedLinked`
+    case `observedUnlinked`
+    case `unsupported`
+}
+
+public struct ImmichLockedLiveMember: Codable, Sendable {
+    public var commitmentMode: ImmichLockedVideoCommitmentMode
+    public var expectedBytes: Int64?
+    public var expectedRevision: String
+    public var expectedSha1: String
+    public var initialClaimBytes: Int64
+    public var key: AssetKey
+    public var maxReceivedBytes: Int64
+    public var role: ImmichLockedLiveRole
+    public init(commitmentMode: ImmichLockedVideoCommitmentMode, expectedBytes: Int64? = nil, expectedRevision: String, expectedSha1: String, initialClaimBytes: Int64, key: AssetKey, maxReceivedBytes: Int64, role: ImmichLockedLiveRole) {
+        self.commitmentMode = commitmentMode
+        self.expectedBytes = expectedBytes
+        self.expectedRevision = expectedRevision
+        self.expectedSha1 = expectedSha1
+        self.initialClaimBytes = initialClaimBytes
+        self.key = key
+        self.maxReceivedBytes = maxReceivedBytes
+        self.role = role
+    }
+}
+
+public struct ImmichLockedLiveOriginal: Codable, Sendable {
+    public var acquisitionLeaseID: Int64
+    public var pairLeaseID: String
+    public var requestID: String
+    public var role: ImmichLockedLiveRole
+    public var sha1: String
+    public var signature: FileSignature
+    public init(acquisitionLeaseID: Int64, pairLeaseID: String, requestID: String, role: ImmichLockedLiveRole, sha1: String, signature: FileSignature) {
+        self.acquisitionLeaseID = acquisitionLeaseID
+        self.pairLeaseID = pairLeaseID
+        self.requestID = requestID
+        self.role = role
+        self.sha1 = sha1
+        self.signature = signature
+    }
+}
+
+public struct ImmichLockedLivePending: Codable, Sendable {
+    public var generation: Int64
+    public var grantID: String
+    public var motionKey: AssetKey
+    public var parentKey: AssetKey
+    public var phase: ImmichLockedLivePhase
+    public var planID: String
+    public var requestID: String
+    public var sceneID: String
+    public init(generation: Int64, grantID: String, motionKey: AssetKey, parentKey: AssetKey, phase: ImmichLockedLivePhase, planID: String, requestID: String, sceneID: String) {
+        self.generation = generation
+        self.grantID = grantID
+        self.motionKey = motionKey
+        self.parentKey = parentKey
+        self.phase = phase
+        self.planID = planID
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public enum ImmichLockedLivePhase: String, Codable, CaseIterable, Sendable {
+    case `checking`
+    case `acquiring`
+    case `preparing`
+    case `publishing`
+}
+
+public struct ImmichLockedLivePrepared: Codable, Sendable {
+    public var acquisitionLeaseID: Int64
+    public var pairLeaseID: String
+    public var preparedID: String
+    public var requestID: String
+    public init(acquisitionLeaseID: Int64, pairLeaseID: String, preparedID: String, requestID: String) {
+        self.acquisitionLeaseID = acquisitionLeaseID
+        self.pairLeaseID = pairLeaseID
+        self.preparedID = preparedID
+        self.requestID = requestID
+    }
+}
+
+public struct ImmichLockedLivePublication: Codable, Sendable {
+    public var expectedAcquisitionLeaseID: Int64
+    public var pairLeaseID: String
+    public var pending: ImmichLockedLivePending
+    public var preparedID: String
+    public var publicationID: String
+    public init(expectedAcquisitionLeaseID: Int64, pairLeaseID: String, pending: ImmichLockedLivePending, preparedID: String, publicationID: String) {
+        self.expectedAcquisitionLeaseID = expectedAcquisitionLeaseID
+        self.pairLeaseID = pairLeaseID
+        self.pending = pending
+        self.preparedID = preparedID
+        self.publicationID = publicationID
+    }
+}
+
+public struct ImmichLockedLiveRead: Codable, Sendable {
+    public var request: HttpRequest
+    public var role: ImmichLockedLiveRole
+    public var ticket: ImmichLockedLiveTicket
+    public init(request: HttpRequest, role: ImmichLockedLiveRole, ticket: ImmichLockedLiveTicket) {
+        self.request = request
+        self.role = role
+        self.ticket = ticket
+    }
+}
+
+public struct ImmichLockedLiveReleased: Codable, Sendable {
+    public var pairLeaseID: String?
+    public var pending: ImmichLockedLivePending
+    public init(pairLeaseID: String? = nil, pending: ImmichLockedLivePending) {
+        self.pairLeaseID = pairLeaseID
+        self.pending = pending
+    }
+}
+
+public struct ImmichLockedLiveRenewed: Codable, Sendable {
+    public var leaseID: Int64
+    public var pairLeaseID: String
+    public var previousLeaseID: Int64
+    public var requestID: String
+    public init(leaseID: Int64, pairLeaseID: String, previousLeaseID: Int64, requestID: String) {
+        self.leaseID = leaseID
+        self.pairLeaseID = pairLeaseID
+        self.previousLeaseID = previousLeaseID
+        self.requestID = requestID
+    }
+}
+
+public struct ImmichLockedLiveRepresentation: Codable, Sendable {
+    public var maximumBytes: Int64
+    public var name: String
+    public init(maximumBytes: Int64, name: String) {
+        self.maximumBytes = maximumBytes
+        self.name = name
+    }
+}
+
+public enum ImmichLockedLiveRole: String, Codable, CaseIterable, Sendable {
+    case `parent`
+    case `motion`
+}
+
+public struct ImmichLockedLiveStorageFacts: Codable, Sendable {
+    public var representations: [ImmichLockedLiveRepresentation]
+    public var storage: ImmichLockedVideoStorageFacts
+    public init(representations: [ImmichLockedLiveRepresentation] = [], storage: ImmichLockedVideoStorageFacts) {
+        self.representations = representations
+        self.storage = storage
+    }
+}
+
+public struct ImmichLockedLiveTicket: Codable, Sendable {
+    public var acquisitionLease: ImmichLockedVideoAcquisitionLease
+    public var displayLeaseID: Int64
+    public var initialAcquisitionLease: ImmichLockedVideoAcquisitionLease
+    public var members: [ImmichLockedLiveMember]
+    public var minimumRemainingBytes: Int64
+    public var pairDiskCeilingBytes: Int64
+    public var pending: ImmichLockedLivePending
+    public var representationReservationBytes: Int64
+    public var representations: [ImmichLockedLiveRepresentation]
+    public var storage: ImmichLockedVideoStorageFacts
+    public var totalMaxReceivedBytes: Int64
+    public init(acquisitionLease: ImmichLockedVideoAcquisitionLease, displayLeaseID: Int64, initialAcquisitionLease: ImmichLockedVideoAcquisitionLease, members: [ImmichLockedLiveMember] = [], minimumRemainingBytes: Int64, pairDiskCeilingBytes: Int64, pending: ImmichLockedLivePending, representationReservationBytes: Int64, representations: [ImmichLockedLiveRepresentation] = [], storage: ImmichLockedVideoStorageFacts, totalMaxReceivedBytes: Int64) {
+        self.acquisitionLease = acquisitionLease
+        self.displayLeaseID = displayLeaseID
+        self.initialAcquisitionLease = initialAcquisitionLease
+        self.members = members
+        self.minimumRemainingBytes = minimumRemainingBytes
+        self.pairDiskCeilingBytes = pairDiskCeilingBytes
+        self.pending = pending
+        self.representationReservationBytes = representationReservationBytes
+        self.representations = representations
+        self.storage = storage
+        self.totalMaxReceivedBytes = totalMaxReceivedBytes
     }
 }
 
@@ -1145,19 +1346,25 @@ public struct ImmichLockedView: Codable, Sendable {
     public var grantID: String?
     public var image: ImmichLockedImageAccess?
     public var leaseID: Int64
+    public var live: ImmichLockedLivePublication?
+    public var liveAcquisition: ImmichLockedLiveAcquisitionState?
+    public var livePending: ImmichLockedLivePending?
     public var remoteLockConfirmed: Bool?
     public var sceneID: String?
     public var state: ImmichLockedState
     public var video: ImmichLockedVideoAccess?
     public var videoAcquisition: ImmichLockedVideoAcquisitionState?
     public var videoPending: ImmichLockedVideoPending?
-    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState, video: ImmichLockedVideoAccess? = nil, videoAcquisition: ImmichLockedVideoAcquisitionState? = nil, videoPending: ImmichLockedVideoPending? = nil) {
+    public init(entries: [ImmichLockedEntry]? = [], error: String? = nil, generation: Int64, grantID: String? = nil, image: ImmichLockedImageAccess? = nil, leaseID: Int64, live: ImmichLockedLivePublication? = nil, liveAcquisition: ImmichLockedLiveAcquisitionState? = nil, livePending: ImmichLockedLivePending? = nil, remoteLockConfirmed: Bool? = nil, sceneID: String? = nil, state: ImmichLockedState, video: ImmichLockedVideoAccess? = nil, videoAcquisition: ImmichLockedVideoAcquisitionState? = nil, videoPending: ImmichLockedVideoPending? = nil) {
         self.entries = entries
         self.error = error
         self.generation = generation
         self.grantID = grantID
         self.image = image
         self.leaseID = leaseID
+        self.live = live
+        self.liveAcquisition = liveAcquisition
+        self.livePending = livePending
         self.remoteLockConfirmed = remoteLockConfirmed
         self.sceneID = sceneID
         self.state = state

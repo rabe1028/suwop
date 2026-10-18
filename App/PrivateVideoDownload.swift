@@ -3,7 +3,7 @@ import os
 import SuwopShell
 
 /// One serial delegate owns each bounded stream. Completion acknowledges cancellation before release.
-final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
+final class PrivateMediaDownload: NSObject, URLSessionDataDelegate, Sendable {
     struct Output: Sendable {
         let url: URL
         let sha1: String
@@ -24,6 +24,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
         var hashing: FileHashRequest?
         #if SUWOP_VRT
             var hashBarrier: (@MainActor @Sendable (URL) async -> Void)?
+            var hashDeliveryBarrier: (@MainActor @Sendable (Int64) async -> Void)?
         #endif
         var cancelled = false
         var failure: (any Error)?
@@ -34,20 +35,18 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
     }
 
     private let state = OSAllocatedUnfairLock(initialState: State())
-    private let files: PrivateVideoFiles
-    private let quote: PrivateVideoFiles.Quote
+    private let sink: PrivateMediaDownloadSink
     private let framing: PrivateVideoResponse
-    private let acquisition: PrivateVideoAcquisition
+    private let acquisition: PrivateMediaAcquisition
 
     init(
-        files: PrivateVideoFiles,
-        quote: PrivateVideoFiles.Quote,
-        ticket: ImmichLockedVideoTicket,
-        acquisition: PrivateVideoAcquisition
+        sink: PrivateMediaDownloadSink,
+        expectedBytes: Int64?,
+        maximumBytes: Int64,
+        acquisition: PrivateMediaAcquisition
     ) {
-        self.files = files
-        self.quote = quote
-        framing = PrivateVideoResponse(expectedBytes: ticket.expectedBytes, maximumBytes: ticket.maxReceivedBytes)
+        self.sink = sink
+        framing = PrivateVideoResponse(expectedBytes: expectedBytes, maximumBytes: maximumBytes)
         self.acquisition = acquisition
     }
 
@@ -96,35 +95,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                     }
                 }
             }
-            try Task.checkCancellation()
-            try acquisition.authorized {}
-            #if SUWOP_VRT
-                let barrier = state.withLock { $0.hashBarrier }
-            #endif
-            let worker = Task.detached(priority: .utility) {
-                #if SUWOP_VRT
-                    await barrier?(received.url)
-                #endif
-                try Task.checkCancellation()
-                return try hashing.read(received.url)
-            }
-            // Await Rust's streamed read even after cancellation before the caller may unlink this lease.
-            let hash = try await withTaskCancellationHandler {
-                try await worker.value
-            } onCancel: {
-                hashing.cancel()
-                worker.cancel()
-            }
-            try Task.checkCancellation()
-            guard hash.signature.bytes == received.bytes else { throw CancellationError() }
-            let completedLeaseID = try acquisition.completedLeaseID()
-            return Output(
-                url: received.url,
-                sha1: hash.sha1,
-                signature: hash.signature,
-                mimeType: received.mimeType,
-                acquisitionLeaseID: completedLeaseID
-            )
+            return try await hash(received, using: hashing)
         } onCancel: {
             self.acquisition.cancel()
             self.cancel()
@@ -132,9 +103,55 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
         }
     }
 
+    private func hash(_ received: Received, using hashing: FileHashRequest) async throws -> Output {
+        try Task.checkCancellation()
+        try acquisition.authorized {}
+        #if SUWOP_VRT
+            let barrier = state.withLock { $0.hashBarrier }
+            let deliveryBarrier = state.withLock { $0.hashDeliveryBarrier }
+        #endif
+        let worker = Task.detached(priority: .utility) {
+            #if SUWOP_VRT
+                await barrier?(received.url)
+            #endif
+            try Task.checkCancellation()
+            let hash = try hashing.read(received.url)
+            try Task.checkCancellation()
+            guard hash.signature.bytes == received.bytes else { throw CancellationError() }
+            // Capture the completion lease IN the worker, before asynchronous result delivery.
+            // A later renewal must not relabel an already completed original.
+            let completedLeaseID = try self.acquisition.completedLeaseID()
+            return Output(
+                url: received.url,
+                sha1: hash.sha1,
+                signature: hash.signature,
+                mimeType: received.mimeType,
+                acquisitionLeaseID: completedLeaseID
+            )
+        }
+        // Await Rust's streamed read even after cancellation before the caller may unlink this lease.
+        let completed = try await withTaskCancellationHandler {
+            try await worker.value
+        } onCancel: {
+            hashing.cancel()
+            worker.cancel()
+        }
+        try Task.checkCancellation()
+        #if SUWOP_VRT
+            await deliveryBarrier?(completed.acquisitionLeaseID)
+        #endif
+        try Task.checkCancellation()
+        try acquisition.authorized {} // Current validity check never changes the captured completion ID.
+        return completed
+    }
+
     #if SUWOP_VRT
         func setHashBarrier(_ barrier: (@MainActor @Sendable (URL) async -> Void)?) {
             state.withLock { $0.hashBarrier = barrier }
+        }
+
+        func setHashDeliveryBarrier(_ barrier: (@MainActor @Sendable (Int64) async -> Void)?) {
+            state.withLock { $0.hashDeliveryBarrier = barrier }
         }
     #endif
 
@@ -190,7 +207,7 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 // Avoid a full-original accumulator even when Foundation provides a large callback.
                 for offset in stride(from: 0, to: data.count, by: 65536) {
                     let chunk = data.subdata(in: offset ..< min(offset + 65536, data.count))
-                    try files.append(chunk, quote: quote, acquisition: acquisition)
+                    try sink.append(chunk, acquisition)
                 }
                 value.received = next
                 return false
@@ -215,11 +232,39 @@ final class PrivateVideoDownload: NSObject, URLSessionDataDelegate, Sendable {
                 }
                 guard value.accepted, !value.cancelled else { throw CancellationError() }
                 try framing.validateEnd(received: value.received, declared: value.declared)
-                let url = try acquisition.authorized { try files.finish(quote: quote) }
+                let url = try acquisition.authorized { try sink.finish(acquisition) }
                 continuation.resume(returning: Received(url: url, bytes: value.received, mimeType: value.mimeType))
             } catch {
                 continuation.resume(throwing: error)
             }
         }
+    }
+}
+
+/// Native file sink only; it carries neither a route, credential nor presentation authority.
+struct PrivateMediaDownloadSink: Sendable {
+    let append: @Sendable (Data, PrivateMediaAcquisition) throws -> Void
+    let finish: @Sendable (PrivateMediaAcquisition) throws -> URL
+}
+
+/// VIDEO retains its existing initializer, output and cancellation/JOIN implementation.
+typealias PrivateVideoDownload = PrivateMediaDownload
+
+extension PrivateMediaDownload {
+    convenience init(
+        files: PrivateVideoFiles,
+        quote: PrivateVideoFiles.Quote,
+        ticket: ImmichLockedVideoTicket,
+        acquisition: PrivateVideoAcquisition
+    ) {
+        self.init(
+            sink: PrivateMediaDownloadSink(
+                append: { try files.append($0, quote: quote, acquisition: $1) },
+                finish: { _ in try files.finish(quote: quote) }
+            ),
+            expectedBytes: ticket.expectedBytes,
+            maximumBytes: ticket.maxReceivedBytes,
+            acquisition: acquisition
+        )
     }
 }

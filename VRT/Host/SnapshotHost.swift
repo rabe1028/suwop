@@ -4,7 +4,9 @@ import SwiftUI
 @main @MainActor struct SnapshotHost: App {
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--private-video-fixture") {
+            if CommandLine.arguments.contains("--private-live-fixture") {
+                InteractivePrivateLiveHost()
+            } else if CommandLine.arguments.contains("--private-video-fixture") {
                 InteractivePrivateVideoHost()
             } else if CommandLine.arguments.contains("--semantic-fixture") {
                 InteractiveSemanticHost()

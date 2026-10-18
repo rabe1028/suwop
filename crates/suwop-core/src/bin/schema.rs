@@ -9,6 +9,12 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    immich_locked_live_storage_facts: suwop_core::immich_locked::live::ImmichLockedLiveStorageFacts,
+    immich_locked_live_read: suwop_core::immich_locked::live::ImmichLockedLiveRead,
+    immich_locked_live_original: suwop_core::immich_locked::live::ImmichLockedLiveOriginal,
+    immich_locked_live_prepared: suwop_core::immich_locked::live::ImmichLockedLivePrepared,
+    immich_locked_live_renewed: suwop_core::immich_locked::live::ImmichLockedLiveRenewed,
+    immich_locked_live_released: suwop_core::immich_locked::live::ImmichLockedLiveReleased,
     immich_locked_video_acquisition_renewed:
         suwop_core::immich_locked::video::ImmichLockedVideoAcquisitionRenewed,
     immich_locked_video_ticket: suwop_core::immich_locked::video::ImmichLockedVideoTicket,

@@ -1,0 +1,63 @@
+{
+  "decodedFrameCount": 48,
+  "durationSeconds": 4,
+  "files": [
+    {
+      "bytes": 2776,
+      "name": "synthetic-still.jpg",
+      "sha1": "a1cd75fd8b8c0c78fab5c142b8f4a469d3a39790",
+      "sha256": "8577910866489014441a2f02ec312276cd26909d35675086d6dc9dc2f73e211b"
+    },
+    {
+      "bytes": 9155,
+      "name": "synthetic-motion.mov",
+      "sha1": "8a57f235ba17410788337a5dfaa976ff710ca117",
+      "sha256": "b1d9ac4b175ee67551a549146b1655d3113d200521b17520b448960e3ced514b"
+    }
+  ],
+  "fixtureOnlyValidation": true,
+  "matchingEmbeddedIdentifier": "A762B1E3-9D24-4B70-AD53-FA1642C8039E",
+  "orderedExactTimestampsVerified": true,
+  "samples": [
+    {
+      "decodedRGBASHA256": "f10576af154293a3dc3f643e72fc5f4b083854a1bc58b43e5c29cac13d642176",
+      "frameIndex": 0,
+      "presentationSeconds": 0,
+      "redCentreX": 15
+    },
+    {
+      "decodedRGBASHA256": "777310c1b2ce9a5291a6b87d97170e1fb18c71d38dc7c961c0221d7222e99588",
+      "frameIndex": 12,
+      "presentationSeconds": 1,
+      "redCentreX": 63
+    },
+    {
+      "decodedRGBASHA256": "62d9971d9f8899e929d031f0a81f90ed8cf9c687c3dd6692de94aad3d813f70f",
+      "frameIndex": 18,
+      "presentationSeconds": 1.5,
+      "redCentreX": 71
+    },
+    {
+      "decodedRGBASHA256": "31156f307903c419787ce0ab43883872718fda33a22e986d52dde54a01519040",
+      "frameIndex": 24,
+      "presentationSeconds": 2,
+      "redCentreX": 47
+    },
+    {
+      "decodedRGBASHA256": "38ef08bffe65a7f00bb1d736408203a330a26a77041de10ac95448f95dd27b6a",
+      "frameIndex": 36,
+      "presentationSeconds": 3,
+      "redCentreX": 31
+    }
+  ],
+  "scope": "Synthetic fixture metadata and decoded temporal pixels only; NOT PHLivePhotoView motion acceptance",
+  "stillVsTimedMeanRGBDifference": 3.8463903356481484,
+  "timedMetadata": {
+    "dataType": "com.apple.metadata.datatype.int8",
+    "durationSeconds": 0.08333333333333333,
+    "startSeconds": 1.5,
+    "value": 0
+  },
+  "videoHeight": 96,
+  "videoWidth": 96
+}
