@@ -9,20 +9,21 @@ import SuwopShell
     #if SUWOP_VRT
         private(set) var latestInspectionForTesting: String?
         private(set) var completedInspectionsForTesting: Set<String> = []
+        private(set) var retirementWaitersForTesting: Set<String> = []
     #endif
     private var epoch = UUID()
     private var task: Task<Void, Never>?
     private var runtime: RustRuntime?
     private var current: (@MainActor (String) -> ImmichLockedView?)?
     private var inspect: (@MainActor ([String: JSONValue]) async throws -> Void)?
-    private var begin: (@MainActor () -> Void)?
+    private var begin: (@MainActor (String) -> Task<Void, Never>?)?
     private var request: (@MainActor (String, String, CGSize) -> Void)?
 
     func configure(
         runtime: RustRuntime,
         current: @escaping @MainActor (String) -> ImmichLockedView?,
         inspect: @escaping @MainActor ([String: JSONValue]) async throws -> Void,
-        begin: @escaping @MainActor () -> Void,
+        begin: @escaping @MainActor (String) -> Task<Void, Never>?,
         request: @escaping @MainActor (String, String, CGSize) -> Void
     ) {
         self.runtime = runtime
@@ -38,7 +39,8 @@ import SuwopShell
               targetSize.width.isFinite, targetSize.height.isFinite,
               targetSize.width > 0, targetSize.height > 0 else { return }
         cancel()
-        begin?() // Synchronous old-media shielding. New original I/O still requires the manager JOIN barrier.
+        // Shield synchronously, then drain exact old Rust ownership even if this selection is cancelled.
+        let retirement = begin?(sceneID)
         pending = true
         error = nil
         let captured = epoch, requestID = UUID().uuidString
@@ -50,6 +52,7 @@ import SuwopShell
             defer {
                 #if SUWOP_VRT
                     completedInspectionsForTesting.insert(requestID)
+                    retirementWaitersForTesting.remove(requestID)
                 #endif
                 if epoch == captured {
                     pending = false
@@ -57,6 +60,14 @@ import SuwopShell
                 }
             }
             do {
+                #if SUWOP_VRT
+                    if retirement != nil {
+                        retirementWaitersForTesting.insert(requestID)
+                    }
+                #endif
+                await retirement?.value
+                try Task.checkCancellation()
+                guard epoch == captured else { throw CancellationError() }
                 try await inspect([
                     "type": .string("inspectImmichLiveResources"), "parentKey": .from(key),
                     "requestID": .string(requestID), "grantID": .string(grant), "sceneID": .string(sceneID),

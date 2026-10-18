@@ -32,6 +32,7 @@ struct ImmichLockedTimer: Sendable {
     private var expectedImageID: String?
     private var expectedVideoID: String?
     private var expectedLiveID: String?
+    private var liveSelectionRetirement: (id: UUID, task: Task<Void, Never>)?
     private var revision: UInt64 = 0
     private var coreBusy = false
     private var pendingRefresh: (id: UUID, grantID: String)?
@@ -427,6 +428,50 @@ extension ImmichLockedLibrarySession {
 }
 
 extension ImmichLockedLibrarySession {
+    /// Inspection has no replacement-media transition. Retire Rust ownership before forgetting its IDs.
+    /// This task belongs to the session, not the cancellable selection; rapid reselection shares its JOIN.
+    private func retireLiveSelection(sceneID: String) -> Task<Void, Never>? {
+        guard ownerSceneID == sceneID, let shell else { return nil }
+        var stops: [[String: JSONValue]] = []
+        if let id = expectedLiveID {
+            stops.append([
+                "type": .string("stopImmichLockedLive"), "sceneID": .string(sceneID), "requestID": .string(id),
+            ])
+        }
+        if let id = expectedVideoID {
+            stops.append([
+                "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+            ])
+        }
+        expectedLiveID = nil
+        expectedVideoID = nil
+        expectedImageID = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        projection?.image = nil
+        shell.immichLockedLiveAccess.invalidate()
+        shell.immichLockedVideoAccess.invalidate()
+        shell.immichLockedAccess.invalidate()
+        let prior = liveSelectionRetirement?.task
+        guard !stops.isEmpty else { return prior }
+        let id = UUID(), context = shell.beginWorkflow()
+        let task = Task { @MainActor [self] in
+            defer {
+                if liveSelectionRetirement?.id == id {
+                    liveSelectionRetirement = nil
+                }
+            }
+            await prior?.value
+            for stop in stops {
+                await run(stop, context: context)
+            }
+        }
+        liveSelectionRetirement = (id, task)
+        return task
+    }
+
     private func configureLiveSelection(runtime: RustRuntime, shell: AppleShell) {
         liveSelection.configure(
             runtime: runtime,
@@ -435,19 +480,7 @@ extension ImmichLockedLibrarySession {
                 guard let self, let shell else { throw CancellationError() }
                 await run(event, context: shell.beginWorkflow())
             },
-            begin: { [weak self, weak shell] in
-                self?.expectedVideoID = nil
-                self?.expectedImageID = nil
-                self?.expectedLiveID = nil
-                self?.projection?.video = nil
-                self?.projection?.videoPending = nil
-                self?.projection?.image = nil
-                self?.projection?.live = nil
-                self?.projection?.livePending = nil
-                shell?.immichLockedVideoAccess.invalidate()
-                shell?.immichLockedAccess.invalidate()
-                shell?.immichLockedLiveAccess.invalidate()
-            },
+            begin: { [weak self] sceneID in self?.retireLiveSelection(sceneID: sceneID) },
             request: { [weak self] planID, sceneID, size in
                 self?.requestLive(planID: planID, sceneID: sceneID, targetSize: size)
             }

@@ -223,6 +223,23 @@ targets:
       base:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-video.tests
+  SuwopPrivateLiveMacHost:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources: [NativeAcceptance/PrivateLiveHost]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-live.host
+    info:
+      path: Generated/PrivateLiveMacHost-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop Live Acceptance
+        NSPrincipalClass: NSApplication
+        LSUIElement: false
+        NSHighResolutionCapable: true
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
   SuwopPrivateLiveMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -268,6 +285,7 @@ targets:
       - path: Tests/fixtures/native_live_motion/media/synthetic-motion.mov
         buildPhase: resources
     dependencies:
+      - target: SuwopPrivateLiveMacHost
       - package: SuwopShell
         product: SuwopShell
       - sdk: Photos.framework
@@ -275,6 +293,10 @@ targets:
       - sdk: ImageIO.framework
     settings:
       base:
+        # XcodeGen resolves this name into the unit bundle's TestTargetID.
+        TEST_TARGET_NAME: SuwopPrivateLiveMacHost
+        TEST_HOST: '$(BUILT_PRODUCTS_DIR)/SuwopPrivateLiveMacHost.app/Contents/MacOS/SuwopPrivateLiveMacHost'
+        BUNDLE_LOADER: '$(TEST_HOST)'
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.private-live.tests
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT'
@@ -326,6 +348,7 @@ schemes:
   SuwopPrivateLiveMac:
     build:
       targets:
+        SuwopPrivateLiveMacHost: all
         SuwopPrivateLiveMacTests: [test]
     test:
       gatherCoverageData: false

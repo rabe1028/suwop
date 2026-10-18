@@ -6,7 +6,6 @@ import SwiftUI
     import UIKit
 #else
     import AppKit
-    import XCTest
 #endif
 
 /// Only this exact owned native window is registered or closed by component tests.
@@ -17,8 +16,6 @@ import SwiftUI
         private var hosted: UIHostingController<AnyView>?
     #else
         let window: NSWindow
-        private let previousActivationPolicy: NSApplication.ActivationPolicy
-        private var restoredActivationPolicy = false
         private var hosted: NSHostingView<AnyView>?
     #endif
     let sceneID: String
@@ -33,13 +30,13 @@ import SwiftUI
             window.makeKeyAndVisible()
         #else
             _ = NSApplication.shared
-            previousActivationPolicy = NSApp.activationPolicy()
-            // Unhosted XCTest starts prohibited: activation/key ownership cannot otherwise become true.
-            // Only this test process changes policy, and close restores its exact prior value.
-            guard NSApp.setActivationPolicy(.regular) else {
-                throw SuwopError("Native Live test application could not activate")
+            let hostMatches = Bundle.main.bundleIdentifier == "jp.rabe1028.suwop.private-live.host"
+                && Bundle.main.bundleURL.pathExtension == "app"
+            print("LIVE_NATIVE hostReady identity=\(hostMatches) running=\(NSApp.isRunning) "
+                + "regular=\(NSApp.activationPolicy() == .regular)")
+            guard hostMatches, NSApp.isRunning, NSApp.activationPolicy() == .regular else {
+                throw SuwopError("Native Live tests require their running regular application host")
             }
-            NSApp.activate()
             window = NSWindow(
                 contentRect: CGRect(x: 100, y: 100, width: 640, height: 480),
                 styleMask: [.titled, .closable, .resizable],
@@ -53,7 +50,6 @@ import SwiftUI
 
     func waitForActiveOwner() async throws {
         #if os(macOS)
-            NSApp.activate()
             window.makeKeyAndOrderFront(nil)
             for _ in 0 ..< 500 {
                 if NSApp.isActive, window.isKeyWindow, window.isVisible, !window.isMiniaturized {
@@ -155,11 +151,6 @@ import SwiftUI
             window.isHidden = true
         #else
             window.close()
-            if !restoredActivationPolicy {
-                restoredActivationPolicy = true
-                XCTAssertTrue(NSApp.setActivationPolicy(previousActivationPolicy))
-                XCTAssertEqual(NSApp.activationPolicy(), previousActivationPolicy)
-            }
         #endif
     }
 

@@ -13,26 +13,8 @@ xcodebuild -clonedSourcePackagesDirPath "$ROOT/DerivedData/SourcePackages" -proj
   -test-timeouts-enabled YES -maximum-test-execution-time-allowance 180 CODE_SIGNING_ALLOWED=NO test || status=$?
 SUMMARY="${RESULT%.xcresult}-summary.json"
 xcrun xcresulttool get test-results summary --path "$RESULT" --compact > "$SUMMARY"
-uv run --no-project python - "$SUMMARY" <<'PYTHON'
-import json
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as source:
-    summary = json.load(source)
-passed = summary.get("passedTests")
-valid = (
-    summary.get("result") == "Passed"
-    and type(passed) is int
-    and passed >= 8
-    and type(summary.get("totalTestCount")) is int
-    and summary.get("totalTestCount") == passed
-    and all(
-        type(summary.get(key)) is int and summary[key] == 0
-        for key in ("failedTests", "skippedTests", "expectedFailures")
-    )
-)
-if not valid:
-    raise SystemExit("Live macOS acceptance requires at least 8 actual passes and zero failures/skips")
-print(f"Live macOS xcresult: {passed} passed, zero failures/skips")
-PYTHON
+TESTS="${RESULT%.xcresult}-tests.json"
+AUDIT="${RESULT%.xcresult}-audit.json"
+xcrun xcresulttool get test-results tests --path "$RESULT" --compact > "$TESTS"
+uv run --no-project python -B scripts/private_live_mac_results.py "$SUMMARY" "$TESTS" "$AUDIT"
 exit "$status"
