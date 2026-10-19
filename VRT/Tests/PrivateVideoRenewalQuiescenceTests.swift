@@ -17,16 +17,17 @@ final class PrivateVideoRenewalQuiescenceTests: XCTestCase {
             manager.preparationBarrier = { _ in await withCheckedContinuation { held = $0 } }
             fixture.shell.immichVisibilityConfirmationEffect = { _, _ in true }
             try fixture.play()
-            try await fixture.settle { held != nil }
+            try await fixture.settle(stage: "held-production-preparation") { held != nil }
             let state = try XCTUnwrap(model.immichLocked.projection?.videoAcquisition)
             let controller = try XCTUnwrap(manager.acquisitionForTesting(stagedID: state.stagedID))
             let original = try XCTUnwrap(file)
             try await ContinuousClock().sleep(until: ContinuousClock.now.advanced(by: .milliseconds(100)))
             try fixture.checkCurrentVideoAcquisition()
-            try await fixture.settle { manager.currentAcquisitionLeaseID == 2 }
+            try await fixture.settle(stage: "genuine-renewal-cas") { manager.currentAcquisitionLeaseID == 2 }
             let writes = fixture.persistedWrites
             model.immichLocked.visibility.prepare(key: state.pending.key, to: .archive, sceneID: state.pending.sceneID)
-            try await fixture.settle { (try? controller.completedLeaseID()) == nil }
+            try await fixture
+                .settle(stage: "quiesce-controller-terminal") { (try? controller.completedLeaseID()) == nil }
             XCTAssertTrue(FileManager.default.fileExists(atPath: original.path))
             XCTAssertEqual(fixture.persistedWrites, writes, "No intent may precede Quiesce JOIN")
             XCTAssertEqual(fixture.server.mutationAttempts, 0)
@@ -34,8 +35,11 @@ final class PrivateVideoRenewalQuiescenceTests: XCTestCase {
             let gate = held
             held = nil
             gate?.resume()
-            try await fixture.settle { fixture.server.mutationAttempts == 1 && !model.immichLocked.visibility.busy }
+            try await fixture.settle(stage: "post-join-live-barrier-and-selected-write") {
+                fixture.server.mutationAttempts == 1 && !model.immichLocked.visibility.busy
+            }
             XCTAssertFalse(FileManager.default.fileExists(atPath: original.path))
+            XCTAssertEqual(fixture.liveQuiescenceRequests, 1)
             XCTAssertEqual(fixture.server.mutations, 1)
             XCTAssertEqual(fixture.server.record["visibility"].string, "archive")
             XCTAssertNil(model.immichLocked.projection?.video)

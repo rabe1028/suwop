@@ -82,6 +82,7 @@ struct ImmichLockedPhotosView: View {
 
     private var locked: some View {
         Form {
+            cleanupNotice
             Section("接続中の Immich アカウントで認証") {
                 if let address = session.serverAddress {
                     Text("認証先: \(address)")
@@ -133,9 +134,13 @@ struct ImmichLockedPhotosView: View {
 
     private func opened(_ view: ImmichLockedView) -> some View {
         List {
+            cleanupNotice
             Section {
                 Text("このアプリで保護した表示元は含めません。写真を表示し、動画をこの画面で再生できます。共有・編集・転送はできません。")
                     .font(.caption).foregroundStyle(.secondary)
+                ImmichLockedLiveControls(
+                    session: session, selection: session.liveSelection, view: view, sceneID: sceneID
+                )
                 if let video = view.video, let manager = session.videoAccess {
                     ImmichLockedVideoSurface(access: video, manager: manager, playback: session.videoPlayer)
                         .id(video.stagedID)
@@ -173,6 +178,14 @@ struct ImmichLockedPhotosView: View {
                             Button("写真を表示") { session.requestImage(entryID: entry.id, sceneID: sceneID) }
                                 .buttonStyle(.borderless)
                                 .accessibilityIdentifier("immichLockedPreview-\(entry.id)")
+                            ImmichLockedLiveAction(
+                                selection: session.liveSelection,
+                                discovery: entry.liveDiscovery,
+                                key: entry.asset.key,
+                                entryID: entry.id,
+                                sceneID: sceneID,
+                                busy: session.busy
+                            )
                         }
                     }.padding(.vertical, 4)
                 }
@@ -182,6 +195,24 @@ struct ImmichLockedPhotosView: View {
                 Text(error).foregroundStyle(.red)
             }
         }.accessibilityIdentifier("immichLockedContentList")
+    }
+
+    private var cleanupNotice: some View {
+        ForEach(Array(session.privateMediaCleanup.enumerated()), id: \.offset) { index, recovery in
+            Section {
+                Text(recovery.state == .joining ? "表示用ファイルの解放を確認しています" : "表示用ファイルの解放を確認できませんでした")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .accessibilityIdentifier("privateMediaCleanupStatus-\(index)")
+                if recovery.state == .needsAttention, recovery.recoveryID != nil {
+                    Button("解放を再確認") { session.retryPrivateMediaCleanup(recovery) }
+                        .buttonStyle(.borderless)
+                        .accessibilityIdentifier("retryPrivateMediaCleanup-\(index)")
+                } else if recovery.state == .quarantined {
+                    Text("解放を確認できないため、この状態を保持しています。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+        }
     }
 
     private func submit() {

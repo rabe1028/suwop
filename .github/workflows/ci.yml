@@ -189,6 +189,16 @@ jobs:
         run: make sharing-test
       - name: Verify private VIDEO playback and exact owner cleanup on macOS
         run: make private-video-mac-test
+      - name: Verify protected Live playback and exact owner cleanup on macOS
+        run: make private-live-mac-test
+      - name: Preserve protected Live macOS playback evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: private-live-macos-${{ github.sha }}
+          path: DerivedData/PrivateLiveMac/TestResults/
+          if-no-files-found: warn
+          retention-days: 14
 
   simulator:
     runs-on: macos-26
@@ -198,7 +208,7 @@ jobs:
       fail-fast: false
       matrix:
         suite: [vrt-ci-host, vrt-ci-ui, apple-native-test]
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.suite == 'vrt-ci-ui' && 65 || 60 }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       CARGO_BUILD_JOBS: '2'

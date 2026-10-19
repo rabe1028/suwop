@@ -1,4 +1,6 @@
 //! Dedicated ephemeral password session. Never installed in the ordinary API-key session.
+pub mod live;
+mod resource_policy;
 pub mod video;
 mod write_contract;
 use crate::{
@@ -41,6 +43,9 @@ pub enum ImmichLockedState {
 pub struct ImmichLockedEntry {
     #[serde(default)]
     pub can_play_video: bool,
+    /// Cached observation for presentation only; fresh pair proof remains mandatory.
+    #[serde(default)]
+    pub live_discovery: live::ImmichLockedLiveDiscovery,
     pub visibility_action: crate::immich_visibility::ImmichVisibilityActionHint,
     pub id: String,
     pub asset: StoredAsset,
@@ -113,6 +118,12 @@ pub struct ImmichLockedView {
     pub video_acquisition: Option<video::ImmichLockedVideoAcquisitionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub video: Option<video::ImmichLockedVideoAccess>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_pending: Option<live::ImmichLockedLivePending>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live_acquisition: Option<live::ImmichLockedLiveAcquisitionState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<live::ImmichLockedLivePublication>,
 }
 #[derive(Clone)]
 pub struct DedicatedSession {
@@ -146,6 +157,7 @@ pub struct OpenedSession {
 #[derive(Default)]
 pub struct ImmichLockedModel {
     video: video::VideoModel,
+    live: live::LiveModel,
     refresh_id: u64,
     refresh_busy: bool,
     pub generation: Arc<AtomicU64>,
@@ -425,6 +437,9 @@ pub fn view(model: &Model) -> ImmichLockedView {
         video_pending: video::projection(model).0,
         video_acquisition: video::acquisition_projection(model),
         video: video::projection(model).1,
+        live_pending: live::projection(model).0,
+        live_acquisition: live::acquisition_projection(model),
+        live: live::projection(model).1,
     }
 }
 fn release(staged_id: String) -> Command<crate::app::Effect, Event> {
@@ -436,7 +451,8 @@ fn release(staged_id: String) -> Command<crate::app::Effect, Event> {
 /// Local revocation is synchronous; cleanup never restores capabilities.
 pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
     let had_video = model.immich_locked.video.has_work();
-    let video_cleanup = video::stop(model);
+    let had_live = live::has_work(model);
+    let video_cleanup = video::stop(model).and(live::stop(model));
     if model.immich_locked.refresh_busy {
         model.busy = false;
         model.immich_locked.refresh_busy = false;
@@ -474,6 +490,17 @@ pub fn close(model: &mut Model) -> Command<crate::app::Effect, Event> {
             let _: Result<Value, _> = io(
                 &ctx,
                 ShellOperation::ReleaseImmichLockedVideos {
+                    retry_cleanup: false,
+                    generation: revoked_generation.saturating_sub(1),
+                },
+            )
+            .await;
+        }
+        if had_live {
+            let _: Result<Value, _> = io(
+                &ctx,
+                ShellOperation::ReleaseImmichLockedLives {
+                    retry_cleanup: false,
                     generation: revoked_generation.saturating_sub(1),
                 },
             )
@@ -653,7 +680,8 @@ async fn locked_inventory(
         .await?;
         let assets: Vec<Asset> =
             serde_json::from_value(page["assets"]["items"].clone()).map_err(|_| ERROR)?;
-        for mut asset in assets {
+        let items = page["assets"]["items"].as_array().ok_or(ERROR)?;
+        for (mut asset, raw) in assets.into_iter().zip(items) {
             crate::immich::valid_id(&asset.id).map_err(|_| ERROR)?;
             if asset.owner_id != session.ordinary.user_id
                 || asset.is_trashed
@@ -668,6 +696,7 @@ async fn locked_inventory(
             let record = asset.record(&session.ordinary.scope, None, None);
             entries.push(ImmichLockedEntry {
                 can_play_video: false,
+                live_discovery: live::discovery_hint(&record, raw.get("livePhotoVideoId")),
                 visibility_action: crate::immich_visibility::hint(&record, true),
                 id: asset.id.clone(),
                 asset: record,
@@ -887,18 +916,34 @@ fn refresh_inventory(
         });
     })
 }
+fn pending_refresh(model: &Model, refresh_id: u64) -> bool {
+    model.immich_locked.refresh_id == refresh_id && model.immich_locked.refresh_busy
+}
+/// The completion must still belong to the active refresh and protected session.
+/// Capture cancellation uses the same authority as accepting the refreshed inventory.
+pub(crate) fn refresh_completion_is_current(
+    model: &Model,
+    generation: u64,
+    refresh_id: u64,
+) -> bool {
+    pending_refresh(model, refresh_id)
+        && epoch(&model.immich_locked) == generation
+        && current(model)
+}
 fn refreshed_inventory(
     model: &mut Model,
     generation: u64,
     refresh_id: u64,
     result: Result<(Vec<ImmichLockedEntry>, std::time::Instant), String>,
 ) -> Command<crate::app::Effect, Event> {
-    if model.immich_locked.refresh_id != refresh_id || !model.immich_locked.refresh_busy {
+    if !pending_refresh(model, refresh_id) {
         return Command::done();
     }
+    let accepted = refresh_completion_is_current(model, generation, refresh_id);
+    // A matching obsolete completion still releases its own pending refresh flags.
     model.immich_locked.refresh_busy = false;
     model.busy = false;
-    if epoch(&model.immich_locked) != generation || !current(model) {
+    if !accepted {
         return Command::done();
     }
     if let Ok((entries, deadline)) = result {
@@ -912,8 +957,16 @@ fn refreshed_inventory(
     }
 }
 pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Effect, Event>> {
-    if let Some(command) = video::update(event.clone(), model) {
+    if let Some(command) = live::update(&event, model) {
         return Some(command);
+    }
+    let live_cleanup = if matches!(event, Event::RequestImmichLockedVideo { .. }) {
+        live::stop(model)
+    } else {
+        Command::done()
+    };
+    if let Some(command) = video::update(event.clone(), model) {
+        return Some(live_cleanup.and(command));
     }
     Some(match event {
         Event::RefreshImmichLocked { grant_id, scene_id } => {
@@ -969,13 +1022,14 @@ pub fn update(event: Event, model: &mut Model) -> Option<Command<crate::app::Eff
             lease_id,
             result,
             video,
-        } => checked(model, &grant_id, generation, lease_id, result, video),
+            live,
+        } => checked(model, &grant_id, generation, lease_id, result, video, live),
         Event::RequestImmichLockedImage {
             entry_id,
             grant_id,
             request_id,
         } => {
-            let cleanup = video::stop(model);
+            let cleanup = video::stop(model).and(live::stop(model));
             cleanup.and(request_image(model, entry_id, grant_id, request_id))
         }
         Event::ImmichLockedImageRead { ticket, result } => image_read(model, ticket, result),
@@ -1157,6 +1211,7 @@ fn check_session(
     };
     let shared = model.immich_locked.generation.clone();
     let video_binding = video::heartbeat(model);
+    let live_binding = live::heartbeat(model);
     let pending = model.immich_locked.pending.clone();
     let selected_proof = pending
         .as_ref()
@@ -1174,12 +1229,18 @@ fn check_session(
         }
         .await
         .ok();
+        let live = if let Some(binding) = live_binding {
+            Some(live::check_heartbeat(&ctx, binding).await)
+        } else {
+            None
+        };
         ctx.send_event(Event::ImmichLockedChecked {
             grant_id,
             generation,
             lease_id,
             result,
             video: video_binding,
+            live: live.map(Box::new),
         });
     })
 }
@@ -1190,6 +1251,7 @@ fn checked(
     lease_id: u64,
     result: Option<std::time::Instant>,
     video: Option<video::VideoHeartbeat>,
+    live: Option<Box<live::HeartbeatCompletion>>,
 ) -> Command<crate::app::Effect, Event> {
     if !matching_lease(model, grant_id, generation, lease_id) {
         Command::done()
@@ -1197,7 +1259,9 @@ fn checked(
         close(model)
     } else if let Some(lease) = result {
         let renewed = video::renew(model, video, lease);
-        timers(model, lease).and(renewed)
+        timers(model, lease)
+            .and(renewed)
+            .and(live::checked(model, live.map(|completion| *completion)))
     } else {
         model.immich_locked.error = Some(ERROR.into());
         close(model)
@@ -1367,6 +1431,99 @@ mod tests {
         model.immich_locked.lease_deadline = Some(std::time::Instant::now());
         model
     }
+    fn pending_refresh_model() -> Model {
+        let mut model = open_model();
+        model.immich_locked.lease_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
+        model.immich_locked.refresh_id = 7;
+        model.immich_locked.refresh_busy = true;
+        model.busy = true;
+        model
+    }
+    #[test]
+    fn refresh_completion_requires_pending_identity_generation_and_current_session() {
+        for invalid in 0..7 {
+            let mut model = pending_refresh_model();
+            match invalid {
+                0 => model.immich_locked.refresh_id += 1,
+                1 => model.immich_locked.refresh_busy = false,
+                2 => {
+                    model.immich_locked.generation.store(1, Ordering::SeqCst);
+                }
+                3 => model.immich_locked.lease_deadline = Some(std::time::Instant::now()),
+                4 => model.immich_locked.active_scene = Some("another-scene".into()),
+                5 => model.session = None,
+                _ => {}
+            }
+            assert_eq!(refresh_completion_is_current(&model, 0, 7), invalid == 6);
+            let mut command = refreshed_inventory(&mut model, 0, 7, Err("refresh failed".into()));
+            assert_eq!(command.effects().count(), 0);
+            // Preserve the reducer's pending-flag cleanup even when the matching
+            // completion cannot publish inventory (expired/foreign generation/session).
+            assert_eq!(model.busy, invalid < 2);
+            assert!(!model.immich_locked.refresh_busy || invalid == 0);
+            assert_eq!(model.immich_locked.error.is_some(), invalid == 6);
+        }
+    }
+    #[test]
+    fn current_refresh_completion_still_cancels_an_exact_capture() -> Result<(), String> {
+        use crux_core::App;
+        let mut model = pending_refresh_model();
+        model.ready = true;
+        model.state.schema_version = 8;
+        model.busy = false;
+        model.immich_locked.refresh_busy = false;
+        model.immich_locked.scene_id = Some("scene".into());
+        model.immich_locked.active_scene = Some("scene".into());
+        model
+            .immich_locked
+            .session
+            .as_mut()
+            .ok_or("session")?
+            .write_contract =
+            write_contract::LockedVisibilityWriteContract::parse(&serde_json::json!({
+                "major":3,"minor":3,"patch":3,"prerelease":null
+            }));
+        let mut capture = crate::app::Suwop.update(
+            Event::PrepareImmichVisibility {
+                key: crate::domain::AssetKey {
+                    provider: crate::domain::Provider::Immich,
+                    scope: "scope".into(),
+                    asset_id: "33333333-3333-4333-8333-333333333333".into(),
+                },
+                to: crate::immich_visibility::ImmichVisibility::Locked,
+                operation_id: "44444444-4444-4444-8444-444444444444".into(),
+                grant_id: "grant".into(),
+                scene_id: "scene".into(),
+            },
+            &mut model,
+        );
+        let effects: Vec<_> = capture.effects().collect();
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(&effects[0], crate::app::Effect::Io(r)
+            if matches!(r.operation, ShellOperation::CapturePrivateMediaKey { .. })));
+        // Seed a pending current completion at the interception boundary. The public
+        // busy guard normally serializes refresh and capture admission.
+        model.immich_locked.refresh_busy = true;
+        let mut cancelled = crate::app::Suwop.update(
+            Event::ImmichLockedRefreshed {
+                generation: 0,
+                refresh_id: 7,
+                result: Err("refresh failed".into()),
+            },
+            &mut model,
+        );
+        let cleanup: Vec<_> = cancelled.effects().collect();
+        assert_eq!(cleanup.len(), 1);
+        assert!(matches!(&cleanup[0], crate::app::Effect::Io(r)
+        if matches!(r.operation, ShellOperation::DrainCapturedPrivateMedia {
+            cancel_before_capture: true, retry_cleanup: false, ..
+        })));
+        assert!(!model.busy);
+        assert!(!model.immich_locked.refresh_busy);
+        assert!(model.immich_locked.error.is_some());
+        Ok(())
+    }
     #[test]
     fn expired_display_lease_cannot_be_renewed_by_delayed_refresh_response() {
         let mut model = open_model();
@@ -1377,6 +1534,7 @@ mod tests {
                 lease_id: 0,
                 result: Some(std::time::Instant::now() + std::time::Duration::from_secs(30)),
                 video: None,
+                live: None,
             },
             &mut model,
         );
@@ -1744,6 +1902,7 @@ pub(crate) fn publish_visibility_entry(
     if facts.visibility == crate::immich_visibility::ImmichVisibility::Locked {
         model.immich_locked.entries.push(ImmichLockedEntry {
             can_play_video: false,
+            live_discovery: live::discovery_hint(&facts.asset, Some(&Value::Null)),
             id: key.asset_id.clone(),
             visibility_action: crate::immich_visibility::hint(&facts.asset, true),
             asset: facts.asset,
@@ -1808,6 +1967,10 @@ pub(crate) fn publish_selected_observation(
         }
         model.immich_locked.entries.push(ImmichLockedEntry {
             can_play_video: false,
+            live_discovery: live::selected_discovery_hint(
+                &projection.facts.asset,
+                projection.facts.observation.configuration,
+            ),
             id: key.asset_id.clone(),
             asset: projection.facts.asset,
             visibility_action: hint,
@@ -1909,6 +2072,7 @@ mod keyed_visibility_invalidation_tests {
         let mut model = Model::default();
         model.immich_locked.entries.push(ImmichLockedEntry {
             can_play_video: false,
+            live_discovery: live::ImmichLockedLiveDiscovery::Unknown,
             id: key.asset_id.clone(),
             visibility_action: crate::immich_visibility::locked_action(key.clone()),
             asset,

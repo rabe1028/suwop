@@ -12,6 +12,10 @@ final class ImmichLockedPhotosUITests: XCTestCase {
         submit(app)
         let preview = app.buttons["immichLockedPreview-33333333-3333-4333-8333-333333333333"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
+        XCTAssertFalse(
+            app.buttons["immichLockedLiveCheck-33333333-3333-4333-8333-333333333333"].exists,
+            "An explicitly unlinked still must not offer Live check/play"
+        )
         XCTAssertTrue(app.staticTexts["PRIVATE-LOCKED.JPG"].exists)
         XCTAssertFalse(app.staticTexts["APP-PROTECTED-MUST-NOT-APPEAR.JPG"].exists)
         XCTAssertFalse(app.buttons["immichLockedPreview-66666666-6666-4666-8666-666666666666"].exists)

@@ -65,6 +65,7 @@ pub(super) fn exercise(agent: &ureq::Agent, fixture: &Fixture, root: &Path) -> R
         Event::StopImmichLockedVideo {
             scene_id: SCENE.into(),
             request_id,
+            retry_cleanup: true,
         },
     )?;
     assert_eq!(host.stage_count(), 0);

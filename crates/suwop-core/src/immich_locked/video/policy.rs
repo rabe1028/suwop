@@ -1,6 +1,6 @@
-use super::{Deserialize, ERROR, Serialize, Value};
 /// App headroom, not an OS requirement or a maximum movie size.
-pub const PRIVATE_VIDEO_HEADROOM_BYTES: u64 = 256 * 1024 * 1024;
+pub(super) use super::super::resource_policy::PRIVATE_MEDIA_HEADROOM_BYTES as PRIVATE_VIDEO_HEADROOM_BYTES;
+use super::{Deserialize, ERROR, Serialize, Value};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum ImmichLockedVideoCapacityClass {

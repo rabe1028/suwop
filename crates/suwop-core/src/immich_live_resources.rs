@@ -222,7 +222,7 @@ fn uuid(value: &str) -> bool {
             }
         })
 }
-fn fact(
+pub(crate) fn fact(
     raw: &Value,
     key: &AssetKey,
     owner: &str,
@@ -264,7 +264,7 @@ fn fact(
         visibility,
     })
 }
-fn child(raw: &Value) -> Result<&str, String> {
+pub(crate) fn child(raw: &Value) -> Result<&str, String> {
     raw.get("livePhotoVideoId")
         .and_then(Value::as_str)
         .filter(|id| uuid(id))

@@ -105,8 +105,15 @@ impl Shell {
         self.drain(c, c.process_event(event))
     }
     fn drain(&mut self, c: &Core<Suwop>, mut effects: Vec<Effect>) -> Result<(), String> {
+        let before_capture = (self.confirms, self.writes, self.persists);
         while !effects.is_empty() {
             let Effect::Io(mut effect) = effects.remove(0);
+            if matches!(
+                &effect.operation,
+                ShellOperation::CapturePrivateMediaKey { .. }
+            ) {
+                assert_eq!((self.confirms, self.writes, self.persists), before_capture);
+            }
             let result = self.respond(c, &effect.operation);
             effects.extend(
                 c.resolve(
@@ -129,6 +136,21 @@ impl Shell {
     }
     fn respond(&mut self, c: &Core<Suwop>, op: &ShellOperation) -> Result<Value, String> {
         match op {
+            ShellOperation::CapturePrivateMediaKey { key: selected, .. } => {
+                assert_eq!(selected, &key());
+                // Synthetic no-consumer capture only; not native JOIN evidence.
+                Ok(Value::Null)
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
+            }
+            ShellOperation::QuiesceImmichLockedLive { pending, .. } => {
+                if pending.is_some() {
+                    return Err("unexpected native pair in ordinary fixture".into());
+                }
+                // Synthetic no-consumer ACK; not native JOIN acceptance.
+                Ok(Value::Null)
+            }
             ShellOperation::ConfirmImmichArchive { prompt } => {
                 self.confirms += 1;
                 assert_eq!(prompt.from, ImmichArchiveDestination::Timeline);

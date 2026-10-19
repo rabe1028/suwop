@@ -655,7 +655,32 @@ struct ArchiveShell<'a> {
 }
 impl ArchiveShell<'_> {
     fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
+        let capture_key = match &event {
+            Event::PrepareImmichArchive { key, .. } => Some(key.clone()),
+            _ => None,
+        };
+        let before_capture = (self.confirmations, self.writes);
+        let disk_before_capture = capture_key
+            .as_ref()
+            .map(|_| std::fs::read(self.directory.join("state.json")))
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let mut effects = core.process_event(event);
+        if let Some(selected) = capture_key {
+            for effect in &effects {
+                let Effect::Io(request) = effect;
+                assert!(
+                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key, .. } if key == &selected)
+                );
+            }
+            assert_eq!((self.confirmations, self.writes), before_capture);
+        }
+        if let Some(before) = disk_before_capture {
+            assert_eq!(
+                std::fs::read(self.directory.join("state.json")).map_err(|e| e.to_string())?,
+                before
+            );
+        }
         while !effects.is_empty() {
             let Effect::Io(mut effect) = effects.remove(0);
             let result = self.respond(core, &effect.operation);
@@ -717,6 +742,22 @@ impl ArchiveShell<'_> {
                 let response = execute(self.agent, request);
                 self.diagnostics.observe(request, &response);
                 response
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                // Explicit synthetic no-consumer receipt; not native JOIN acceptance.
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
+            }
+            ShellOperation::CapturePrivateMediaKey { .. } => {
+                // The actual Prepare key/order is checked at the dispatch boundary.
+                // This server fixture has no native consumers; unit is not JOIN evidence.
+                Ok(Value::Null)
+            }
+            ShellOperation::QuiesceImmichLockedLive { pending, .. } => {
+                if pending.is_some() {
+                    return Err("unexpected native pair in ordinary fixture".into());
+                }
+                // Synthetic no-consumer ACK; not native JOIN acceptance.
+                Ok(Value::Null)
             }
             ShellOperation::ConfirmImmichArchive { prompt } => {
                 self.confirmations += 1;

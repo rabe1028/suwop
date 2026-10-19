@@ -13,18 +13,18 @@ enum PrivateMediaAllocation {
         let url: URL
     }
 
-    struct Limit: Sendable {
+    struct Limit: Sendable, Equatable {
         let fileID: String
         let maximum: Int64
         let mode: ImmichLockedVideoCommitmentMode
     }
 
-    struct Reservation: Sendable {
+    struct Reservation: Sendable, Equatable {
         let id: UUID
         let bytes: Int64
     }
 
-    struct Contract: Sendable {
+    struct Contract: Sendable, Equatable {
         let totalReceived: Int64
         let diskCeiling: Int64
         let headroom: Int64
@@ -32,7 +32,7 @@ enum PrivateMediaAllocation {
     }
 
     struct FileState: Sendable {
-        let file: File
+        var file: File
         var physicalID = ""
         var limit: Limit?
         var claimedThrough: Int64 = 0
@@ -61,4 +61,9 @@ enum PrivateMediaAllocation {
     static func capacityError() -> SuwopError {
         SuwopError("動画を取得する空き容量が不足しています。")
     }
+}
+
+/// Local presentation container suffixes, selected from actual native content, never server names or MIME.
+enum PrivateMediaFileSuffix: String, Sendable {
+    case jpeg = "jpg", heic, heif, quickTime = "mov", mpeg4 = "mp4"
 }

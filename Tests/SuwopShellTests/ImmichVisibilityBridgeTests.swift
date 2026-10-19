@@ -17,7 +17,9 @@ private final class VisibilityABI {
     var detailFault = DetailFault.none
     private(set) var detailReads = 0
     private(set) var writeOrder: [String] = []
-    private var quiescenceAcknowledged = false
+    private var videoJoinAcknowledged = false
+    private var liveJoinAcknowledged = false
+    var failLiveJoin = false
 
     init(saved: SavedLibrary? = nil, visibility: String = "timeline") throws {
         driver = try LockedSessionABI()
@@ -32,6 +34,15 @@ private final class VisibilityABI {
             guard let self else { return nil }
             let data = operation.data ?? .null
             switch operation.type {
+            case "drainCapturedPrivateMedia":
+                #expect(try data["retryCleanup"].decode(Bool.self) == false)
+                #expect(try data["captureID"].decode(String.self).isEmpty == false)
+                return .object(["captureID": data["captureID"], "cancelledBeforeCapture": .bool(false)])
+            case "capturePrivateMediaKey":
+                #expect(try data["key"].decode(AssetKey.self) == key)
+                #expect(puts == 0)
+                writeOrder.append("capture")
+                return .null
             case "confirmImmichVisibility":
                 try confirmations.append(data["prompt"].decode(ImmichVisibilityPrompt.self))
                 writeOrder.append("confirm")
@@ -41,8 +52,17 @@ private final class VisibilityABI {
                 #expect(try data["pending"].decode(ImmichLockedVideoPending?.self) == nil)
                 #expect(!driver.saved.immichVisibilityOperations.contains { $0.key == key && $0.outcome == .unknown })
                 #expect(puts == 0)
-                quiescenceAcknowledged = true
-                writeOrder.append("quiesce")
+                videoJoinAcknowledged = true
+                writeOrder.append("quiesce-video")
+                return .null
+            case "quiesceImmichLockedLive":
+                #expect(try data["key"].decode(AssetKey.self) == key)
+                #expect(try data["pending"].decode(ImmichLockedLivePending?.self) == nil)
+                #expect(videoJoinAcknowledged, "Locked writes must complete VIDEO JOIN first")
+                #expect(!driver.saved.immichVisibilityOperations.contains { $0.key == key && $0.outcome == .unknown })
+                #expect(puts == 0)
+                liveJoinAcknowledged = !failLiveJoin
+                writeOrder.append("quiesce-live")
                 return .null
             case "persist":
                 let saved = try data.decode(SavedLibrary.self)
@@ -50,18 +70,26 @@ private final class VisibilityABI {
                 if saved.immichVisibilityOperations.contains(where: {
                     $0.key == key && $0.outcome == .unknown && !existingIDs.contains($0.id)
                 }) {
-                    #expect(quiescenceAcknowledged, "The unit ACK must precede durable intent")
+                    #expect(
+                        videoJoinAcknowledged && liveJoinAcknowledged,
+                        "Both exact JOIN ACKs must precede durable intent"
+                    )
                     writeOrder.append("intent")
                 }
                 return nil // The shared driver still performs the actual durable-state replacement.
             default: return nil
             }
         }
+        driver.effectError = { [weak self] operation in
+            operation.type == "quiesceImmichLockedLive" && self?.failLiveJoin == true
+                ? "Exact Live JOIN failed" : nil
+        }
         driver.httpReply = { [weak self] request in try self?.http(request) }
     }
 
     func prepare(_ to: ImmichVisibility, id: String = "55555555-5555-4555-8555-555555555555") throws {
-        quiescenceAcknowledged = false
+        videoJoinAcknowledged = false
+        liveJoinAcknowledged = false
         try driver.drain(driver.event([
             "type": .string("prepareImmichVisibility"), "key": .from(key), "to": .string(to.rawValue),
             "operationID": .string(id), "grantID": .string(driver.grant), "sceneID": .string(driver.scene),
@@ -83,7 +111,7 @@ private final class VisibilityABI {
                 $0.key == key && $0.to.rawValue == destination && $0.outcome == .unknown && !$0.witnessDigest.isEmpty
             }
             #expect(durableBeforePUT)
-            #expect(quiescenceAcknowledged)
+            #expect(videoJoinAcknowledged && liveJoinAcknowledged)
             writeOrder.append("put")
             puts += 1
             visibility = destination
@@ -150,7 +178,7 @@ private final class VisibilityABI {
     #expect(prompt.removesAllAlbumMembership && prompt.noAutomaticAlbumRestore)
     #expect(prompt.grantID == driver.grant && prompt.sceneID == driver.scene)
     #expect(fixture.puts == 1 && fixture.durableBeforePUT)
-    #expect(fixture.writeOrder == ["confirm", "quiesce", "intent", "put"])
+    #expect(fixture.writeOrder == ["capture", "confirm", "quiesce-video", "quiesce-live", "intent", "put"])
     #expect(driver.saved.immichVisibilityOperations.first?.outcome == .applied)
     #expect(try !driver.view().ordinaryContentKeys.contains(fixture.key))
     try driver.drain(driver.event(["type": .string("closeImmichLocked")]))
@@ -253,4 +281,16 @@ private final class VisibilityABI {
             #expect(fixture.confirmations.isEmpty && fixture.puts == 0 && fixture.driver.writes == 0)
         }
     }
+}
+
+@Test func visibilityABIFailedLiveJoinAfterVideoJoinStartsNoIntentOrPUT() throws {
+    let fixture = try VisibilityABI()
+    try fixture.driver.ready()
+    try fixture.driver.open()
+    fixture.failLiveJoin = true
+    try fixture.prepare(.locked)
+    #expect(fixture.confirmations.count == 1 && fixture.puts == 0)
+    #expect(fixture.driver.writes == 0 && fixture.driver.saved.immichVisibilityOperations.isEmpty)
+    #expect(fixture.visibility == "timeline")
+    #expect(fixture.writeOrder == ["capture", "confirm", "quiesce-video", "quiesce-live"])
 }

@@ -9,6 +9,8 @@ import Network
     private(set) var servedContentTypes: [String?] = []
     private let listener: NWListener
     private let bytes: Data
+    var memberBytes: [String: Data] = [:]
+    private var selectedBytes: [UUID: Data] = [:]
     private let queue = DispatchQueue(label: "Suwop.PrivateVideoFixture")
     private var connections: [UUID: NWConnection] = [:]
     private(set) var requests = 0
@@ -106,6 +108,15 @@ import Network
                         owner.close(connection, id: id)
                         return
                     }
+                    if !owner.memberBytes.isEmpty {
+                        let asset = decoded.components(separatedBy: " ").dropFirst().first?
+                            .components(separatedBy: "/").dropFirst(3).first
+                        guard let asset, let bytes = owner.memberBytes[asset] else {
+                            owner.close(connection, id: id)
+                            return
+                        }
+                        owner.selectedBytes[id] = bytes
+                    }
                     owner.requests += 1
                     if owner.holdResponse {
                         owner.pending.append((connection, id))
@@ -122,6 +133,7 @@ import Network
     }
 
     private func respond(_ connection: NWConnection, id: UUID) {
+        let bytes = selectedBytes[id] ?? bytes
         var body = bytes
         var status = 200
         var length: String? = String(bytes.count)
@@ -186,5 +198,6 @@ import Network
         pacedTasks.removeValue(forKey: id)?.cancel()
         connection.cancel()
         connections.removeValue(forKey: id)
+        selectedBytes.removeValue(forKey: id)
     }
 }

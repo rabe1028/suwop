@@ -3,27 +3,35 @@ import Foundation
 import SuwopShell
 
 extension ImmichLockedVideoNativeAccess {
-    func release(generation: Int64) async throws {
-        let revoked = quotes.filter { $0.value.binding.generation <= generation }
-        for (id, quote) in revoked {
-            retireAcquisition(id)
-            let consumer = shieldPlayer?(quote.binding, id)
-            await consumer?.value
-            if readBinding == quote.binding, readLeaseID == id {
-                readTask?.cancel()
-                _ = await readTask?.result
-            }
-            if prepareBinding == quote.binding, prepareLeaseID == id {
-                prepareTask?.cancel()
-                _ = await prepareTask?.result
-            }
-            if stages[id] != nil {
-                stages.removeValue(forKey: id)
-            }
-            try releaseFile(binding: quote.binding, leaseID: id)
-            if quotes[id]?.binding == quote.binding {
-                quotes.removeValue(forKey: id)
-            }
+    /// Synchronous full-binding retirement, not a key-wide cancellation or quote-absence ACK.
+    func retireCapturedPending(
+        _ pending: ImmichLockedVideoPending,
+        deadline: ContinuousClock.Instant,
+        retryCleanup: Bool
+    ) throws -> Task<Void, Error> {
+        let binding = PrivateVideoBinding(pending)
+        if !capturedPendingRetirements.contains(binding) {
+            guard capturedPendingRetirements.count < 64
+            else { throw PrivateMediaConsumerRegistry.Failure.captureCapacity }
+            capturedPendingRetirements.append(binding)
+        }
+        guard let owner = consumerOwners.values.first(where: { $0.binding == binding }) else {
+            // All effect lifetimes register before first await. A future queued Inspect
+            // is rejected by the exact tombstone before registration or original I/O.
+            return Task {}
+        }
+        guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        let join = try consumerRegistry.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+        return Task { @MainActor in try await join(deadline) }
+    }
+
+    func release(generation: Int64, retryCleanup: Bool = false) async throws {
+        let selected = consumerOwners.values.filter { $0.binding.generation <= generation }
+        for owner in selected {
+            _ = captureConsumerCleanup(owner)
+        }
+        for owner in selected {
+            try await retireConsumer(owner, retryCleanup: retryCleanup)
         }
     }
 
@@ -32,7 +40,8 @@ extension ImmichLockedVideoNativeAccess {
         try await validate(access.pending, epoch: captured)
         guard let runtime else { throw CancellationError() }
         let view = try await runtime.snapshot().view.immichLockedView
-        guard revokedBinding != PrivateVideoBinding(access.pending),
+        guard consumerCurrent(PrivateVideoBinding(access.pending), epoch: captured),
+              revokedBinding != PrivateVideoBinding(access.pending),
               let current = view.video, current.stagedID == access.stagedID,
               PrivateVideoBinding(current.pending) == PrivateVideoBinding(access.pending),
               let stage = stages[access.stagedID], stage.quote.binding == PrivateVideoBinding(access.pending),
@@ -46,7 +55,8 @@ extension ImmichLockedVideoNativeAccess {
 
     func attach(_ attachment: Attachment, ownerCurrent: () -> Bool, action: () -> Void) throws {
         let access = attachment.access
-        guard revokedBinding != PrivateVideoBinding(access.pending),
+        guard consumerCurrent(PrivateVideoBinding(access.pending), epoch: attachment.epoch),
+              revokedBinding != PrivateVideoBinding(access.pending),
               active, attachment.epoch == epoch, ownerSceneID == access.pending.sceneID,
               expectedRequestID == access.pending.requestID, currentGrantID == access.pending.grantID,
               currentGeneration == access.pending.generation,
@@ -61,45 +71,99 @@ extension ImmichLockedVideoNativeAccess {
 }
 
 extension ImmichLockedVideoNativeAccess {
-    /// This is a cleanup barrier, never authorization to write or to begin another native read.
+    /// Process-wide selected-key cleanup, never permission to write or start another read.
     func quiesce(key: AssetKey, pending: ImmichLockedVideoPending?) async throws {
         guard pending == nil || pending?.key == key else { throw CancellationError() }
-        let selected = operations.values.filter { $0.binding.matches(key) }
-        let owned = quotes.filter { $0.value.binding.matches(key) }
-        let bindings = bindingsToQuiesce(key: key, pending: pending)
-        // Only one request can be current in this epoch. Older identities already fail epoch/request validation.
-        if let binding = bindings.first(where: {
-            $0.requestID == expectedRequestID && $0.sceneID == ownerSceneID
-                && $0.grantID == currentGrantID && $0.generation == currentGeneration
-        }) {
-            revokedBinding = binding
+        let local = consumerOwners.values.filter { $0.binding.matches(key) }
+        let required = local.compactMap(\.handle)
+        var missingPending = false
+        if let pending {
+            let binding = PrivateVideoBinding(pending)
+            let known = local.contains { $0.binding == binding }
+                || completedConsumer?.binding == binding
+            missingPending = !known
+            if !known, expectedRequestID == binding.requestID, ownerSceneID == binding.sceneID {
+                revokedBinding = binding // Even an unknown supplied owner cannot bootstrap queued Inspect later.
+            }
         }
-        // Retire only captured owners before suspension, including quote-only controller bootstrap authority.
-        for (id, quote) in owned where quotes[id]?.binding == quote.binding {
-            retireAcquisition(id)
+        _ = try await consumerRegistry.quiesce(
+            key: key, requiring: required, deadline: .now.advanced(by: .seconds(5))
+        )
+        guard !missingPending else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        try Task.checkCancellation()
+    }
+
+    func consumer(_ pending: ImmichLockedVideoPending) throws -> PrivateVideoConsumerOwner {
+        let binding = PrivateVideoBinding(pending)
+        guard !capturedPendingRetirements.contains(binding),
+              active, ownerSceneID == pending.sceneID, expectedRequestID == pending.requestID,
+              revokedBinding != binding else { throw CancellationError() }
+        if let owner = consumerOwners.values.first(where: { $0.binding == binding && $0.epoch == epoch }) {
+            guard !owner.retired else { throw CancellationError() }
+            return owner
         }
-        // Capture before suspending. Later unrelated or replacement requests must not be cancelled or unlinked.
-        let prior = teardownTask
-        let read = readBinding?.matches(key) == true ? readTask : nil
-        let prepare = prepareBinding?.matches(key) == true ? prepareTask : nil
+        let owner = PrivateVideoConsumerOwner(binding: binding, epoch: epoch)
+        owner.handle = try consumerRegistry.register(
+            ownerID: owner.id,
+            resources: [pending.key],
+            revokeAndCaptureCleanup: { [self, owner] in captureConsumerCleanup(owner) }
+        )
+        consumerOwners[owner.id] = owner
+        return owner
+    }
+
+    func consumerCurrent(_ binding: PrivateVideoBinding, epoch captured: UUID) -> Bool {
+        consumerOwners.values.contains { $0.binding == binding && $0.epoch == captured && !$0.retired }
+    }
+
+    func beginOperation(_ pending: ImmichLockedVideoPending) throws -> UUID {
+        let owner = try consumer(pending)
+        let id = UUID()
+        operations[id] = PrivateVideoOwnedOperation(
+            binding: PrivateVideoBinding(pending), owner: owner, completion: PrivateVideoOperationCompletion()
+        )
+        return id
+    }
+
+    func operationOwner(_ id: UUID) throws -> PrivateVideoConsumerOwner {
+        guard let owner = operations[id]?.owner, !owner.retired else { throw CancellationError() }
+        return owner
+    }
+
+    func finishOperation(_ id: UUID) {
+        guard let operation = operations.removeValue(forKey: id) else { return }
+        operation.completion.finish() // All deferred operation cleanup precedes this completion.
+        let owner = operation.owner
+        if !owner.retired, owner.quotes.isEmpty, !operations.values.contains(where: { $0.owner === owner }) {
+            retireConsumers([owner])
+        }
+    }
+
+    /// Called synchronously by registry capture or local invalidation. Never waits for global teardown.
+    func captureConsumerCleanup(_ owner: PrivateVideoConsumerOwner) -> PrivateMediaConsumerRegistry.Cleanup {
+        if let captured = owner.cleanup {
+            return captured
+        }
+        owner.retired = true
+        if owner.epoch == epoch, expectedRequestID == owner.binding.requestID {
+            revokedBinding = owner.binding
+        }
+        let owned = owner.quotes
+        let selectedOperations = operations.values.filter { $0.owner === owner }.map(\.completion)
+        let read = readLeaseID.map { owned[$0] != nil } == true ? readTask : nil
+        let prepare = prepareLeaseID.map { owned[$0] != nil } == true ? prepareTask : nil
         read?.cancel()
         prepare?.cancel()
-        let consumers = shieldSelected(key: key, owned: owned)
-        await prior?.value
-        for consumer in consumers {
-            await consumer.value
-        }
-        _ = await read?.result
-        _ = await prepare?.result
-        for operation in selected {
-            await operation.completion.wait()
-        }
-        let retired = failedReleases.filter { $0.value.matches(key) && bindings.contains($0.value) }
-        for (id, binding) in retired {
-            try releaseFile(binding: binding, leaseID: id)
+        var consumers = owned.compactMap { id, quote in shieldPlayer?(quote.binding, id) }
+        if let access = currentAccess, consumerQuoteOwners[access.stagedID] == owner.id {
+            if let stopped = shieldPlayer?(owner.binding, access.stagedID) {
+                consumers.append(stopped)
+            }
+            currentAccess = nil
         }
         for (id, quote) in owned {
-            try releaseFile(binding: quote.binding, leaseID: id)
+            retireAcquisition(id)
+            retiredOwners[id] = quote.binding
             if stages[id]?.quote.binding == quote.binding {
                 stages.removeValue(forKey: id)
             }
@@ -107,43 +171,83 @@ extension ImmichLockedVideoNativeAccess {
                 quotes.removeValue(forKey: id)
             }
         }
-        try Task.checkCancellation()
+        let cleanup = PrivateMediaConsumerRegistry.Cleanup(
+            joinedWork: Task {
+                for consumer in consumers {
+                    await consumer.value
+                }
+                _ = await read?.result
+                _ = await prepare?.result
+                for operation in selectedOperations {
+                    await operation.wait()
+                }
+            },
+            unlink: { [weak self, weak owner] in
+                guard let self, let owner else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+                try unlinkConsumer(owner, captured: owned)
+            }
+        )
+        owner.cleanup = cleanup
+        return cleanup
     }
 
-    func bindingsToQuiesce(key: AssetKey, pending: ImmichLockedVideoPending?) -> [PrivateVideoBinding] {
-        var bindings = operations.values.filter { $0.binding.matches(key) }.map(\.binding)
-            + quotes.values.filter { $0.binding.matches(key) }.map(\.binding)
-            + retiredOwners.values.filter { $0.matches(key) } + failedReleases.values.filter { $0.matches(key) }
-        if let pending {
-            bindings.append(PrivateVideoBinding(pending))
+    func retireConsumers(_ owners: [PrivateVideoConsumerOwner]) {
+        let pending = owners.filter { !$0.teardownScheduled }
+        guard !pending.isEmpty else { return }
+        for owner in pending {
+            owner.teardownScheduled = true
+            _ = captureConsumerCleanup(owner)
         }
-        if let observedPending, observedPending.key == key {
-            bindings.append(PrivateVideoBinding(observedPending))
-        }
-        if let access = currentAccess, access.pending.key == key {
-            bindings.append(PrivateVideoBinding(access.pending))
-        }
-        return bindings
-    }
-
-    func shieldSelected(key: AssetKey, owned: [String: PrivateVideoFiles.Quote]) -> [Task<Void, Never>] {
-        var consumers = owned.compactMap { id, quote in shieldPlayer?(quote.binding, id) }
-        if let access = currentAccess, access.pending.key == key {
-            if let consumer = shieldPlayer?(PrivateVideoBinding(access.pending), access.stagedID) {
-                consumers.append(consumer)
+        let previous = teardownTask
+        teardownTask = Task {
+            await previous?.value
+            for owner in pending where !owner.released {
+                guard let handle = owner.handle else { continue }
+                do {
+                    _ = try await consumerRegistry.retireAndJoinWithoutRetry(
+                        owner: handle, deadline: .now.advanced(by: .seconds(5))
+                    )
+                } catch {} // Exact failed ownership remains registered; never retry implicitly.
             }
         }
-        return consumers
     }
 
-    func beginOperation(_ pending: ImmichLockedVideoPending) -> UUID {
-        let id = UUID()
-        operations[id] = (PrivateVideoBinding(pending), PrivateVideoOperationCompletion())
-        return id
+    func retireConsumer(_ owner: PrivateVideoConsumerOwner, retryCleanup: Bool = false) async throws {
+        if owner.released {
+            return
+        } // Exact retained success, never a quote-absence inference.
+        guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        let join = try consumerRegistry.captureOwnerForCleanup(owner: handle, retryCleanup: retryCleanup)
+        try await join(.now.advanced(by: .seconds(5)))
     }
 
-    func finishOperation(_ id: UUID) {
-        operations.removeValue(forKey: id)?.completion.finish()
+    private func unlinkConsumer(
+        _ owner: PrivateVideoConsumerOwner,
+        captured: [String: PrivateVideoFiles.Quote]
+    ) throws {
+        guard let handle = owner.handle else { throw PrivateMediaConsumerRegistry.Failure.unknownOwner }
+        if owner.inspectionNeedsCleanup {
+            try files.get().releaseInspection(binding: owner.binding, inspectionOwnerID: owner.id)
+            owner.inspectionNeedsCleanup = false
+        }
+        for (id, quote) in captured {
+            try releaseFile(binding: quote.binding, leaseID: id)
+            if consumerQuoteOwners[id] == owner.id {
+                consumerQuoteOwners.removeValue(forKey: id)
+            }
+            if retiredOwners[id] == quote.binding {
+                retiredOwners.removeValue(forKey: id)
+            }
+        }
+        owner.released = true
+        completedConsumer = PrivateVideoCompletedConsumer(
+            binding: owner.binding,
+            leaseIDs: Set(captured.keys),
+            handle: handle
+        )
+        if consumerOwners[owner.id] === owner {
+            consumerOwners.removeValue(forKey: owner.id)
+        }
     }
 
     func releaseFile(binding: PrivateVideoBinding, leaseID: String) throws {

@@ -1,0 +1,41 @@
+{
+  "generationRun": "native-live-motion-fixture-20261017-1",
+  "observedAtUTC": "2026-10-17T00:51:26.470130+00:00",
+  "terminalExitCode": 0,
+  "elapsedSeconds": 9.05,
+  "wholeSourceBefore": "9a7f0bf2f76c9fc91eee69fc2c49ee55bb44ba18ed8e23e0474ba1debfb1435b",
+  "wholeSourceAfter": "9a7f0bf2f76c9fc91eee69fc2c49ee55bb44ba18ed8e23e0474ba1debfb1435b",
+  "sourceSnapshotSHA256": {
+    "Generate.swift": "881cf8a82303efb9770e1b5a8c38623780636cd21c7493487cb2285d0f0d2aa6",
+    "Pattern.swift": "066fd66d1c7ff6257afd8e3534d38c0fe634c6aa93bad9e351dacf95b8277dee",
+    "README.md": "87efed595007a240266d078966b7b80fa1e4f9ea11de42181c9f271e11f155d8",
+    "Verify.swift": "84faebd3a52c03c6012751dd8c2bfd20008d51dce032c70a215f1051dfaba47d",
+    "reproduce.py": "5cb033a99721afb64b72d7abc0beb2752f9efc52177448d553fea0e333f3b8cf"
+  },
+  "steps": {
+    "compile-generator": {
+      "exitCode": 0,
+      "elapsedSeconds": 0.751376291969791,
+      "termination": null
+    },
+    "compile-verifier": {
+      "exitCode": 0,
+      "elapsedSeconds": 6.671360541018657,
+      "termination": null
+    },
+    "generate": {
+      "exitCode": 0,
+      "elapsedSeconds": 0.55061758402735,
+      "termination": null
+    },
+    "verify": {
+      "exitCode": 0,
+      "elapsedSeconds": 0.4879965839209035,
+      "termination": null
+    }
+  },
+  "originalValidationSHA256": "a09597433e092733540bc0cb880de5ccf293ac32f7628745ad5b542d8b18e071",
+  "retainedRuntimeReceipt": "/tmp/suwop-native-live-motion-runtime-receipt-20261017-1.json",
+  "retainedRuntimeReceiptSHA256": "472c6d52a51d862ac8a2926139bb2d59a26f7b83ad4f72db3d081ee4439f914c",
+  "scope": "Actual compile/generate/independent fixture validation; no PhotoKit request, surface or playback acceptance"
+}

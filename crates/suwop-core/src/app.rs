@@ -77,6 +77,71 @@ pub enum ShellOperation {
     ReleaseOrdinarySelectedImages {
         generation: u64,
     },
+    InspectImmichLockedLiveStorage {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        #[serde(rename = "quoteDeadlineUnixMilliseconds")]
+        quote_deadline_unix_milliseconds: u64,
+    },
+    ReadImmichLockedLiveMember {
+        read: Box<crate::immich_locked::live::ImmichLockedLiveRead>,
+    },
+    PrepareImmichLockedLive {
+        ticket: Box<crate::immich_locked::live::ImmichLockedLiveTicket>,
+        originals: [crate::immich_locked::live::ImmichLockedLiveOriginal; 2],
+    },
+    RenewImmichLockedLiveAcquisition {
+        ticket: crate::immich_locked::live::ImmichLockedLiveTicket,
+        #[serde(rename = "previousLeaseID")]
+        previous_lease_id: u64,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
+    ScheduleImmichLockedLiveAcquisitionExpiry {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        lease: crate::immich_locked::video::ImmichLockedVideoAcquisitionLease,
+    },
+    PublishImmichLockedLive {
+        ticket: Box<crate::immich_locked::live::ImmichLockedLiveTicket>,
+        publication: crate::immich_locked::live::ImmichLockedLivePublication,
+    },
+    ReleaseImmichLockedLive {
+        pending: crate::immich_locked::live::ImmichLockedLivePending,
+        #[serde(rename = "pairLeaseID")]
+        pair_lease_id: Option<String>,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+    },
+    ReleaseImmichLockedLives {
+        generation: u64,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+    },
+    CapturePrivateMediaKey {
+        key: crate::domain::AssetKey,
+        #[serde(rename = "captureID")]
+        capture_id: String,
+        #[serde(rename = "livePending")]
+        live_pending: Vec<crate::immich_locked::live::ImmichLockedLivePending>,
+        #[serde(rename = "videoPending")]
+        video_pending: Vec<crate::immich_locked::video::ImmichLockedVideoPending>,
+    },
+    /// Cleanup only: drains the immutable process-wide owner snapshot, not a fresh key selection.
+    DrainCapturedPrivateMedia {
+        #[serde(rename = "captureID")]
+        capture_id: String,
+        #[serde(rename = "cancelBeforeCapture")]
+        cancel_before_capture: bool,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+        key: crate::domain::AssetKey,
+        #[serde(rename = "livePending")]
+        live_pending: Vec<crate::immich_locked::live::ImmichLockedLivePending>,
+        #[serde(rename = "videoPending")]
+        video_pending: Vec<crate::immich_locked::video::ImmichLockedVideoPending>,
+    },
+    QuiesceImmichLockedLive {
+        key: crate::domain::AssetKey,
+        pending: Option<crate::immich_locked::live::ImmichLockedLivePending>,
+    },
     InspectImmichLockedVideoStorage {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
     },
@@ -102,13 +167,22 @@ pub enum ShellOperation {
         key: crate::domain::AssetKey,
         pending: Option<crate::immich_locked::video::ImmichLockedVideoPending>,
     },
+    RetireImmichLockedVideoPending {
+        pending: crate::immich_locked::video::ImmichLockedVideoPending,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+    },
     ReleaseImmichLockedVideo {
         pending: crate::immich_locked::video::ImmichLockedVideoPending,
         #[serde(rename = "leaseID")]
         lease_id: String,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
     },
     ReleaseImmichLockedVideos {
         generation: u64,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
     },
     ReadImmichLockedImage {
         ticket: crate::immich_locked::ImmichLockedImageTicket,
@@ -466,6 +540,55 @@ pub enum Event {
         staged_id: String,
         approved: bool,
     },
+    RequestImmichLockedLive {
+        #[serde(rename = "planID")]
+        plan_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+    },
+    RetryPrivateMediaCleanup {
+        #[serde(rename = "recoveryID")]
+        recovery_id: String,
+        #[serde(rename = "expectedAttempt")]
+        expected_attempt: u64,
+    },
+    #[serde(skip)]
+    PrivateMediaVideoCleanupCompleted {
+        completion: crate::immich_locked::video::CleanupCompletion,
+    },
+    StopImmichLockedLive {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(default, rename = "retryCleanup")]
+        retry_cleanup: bool,
+    },
+    ExpireImmichLockedLiveAcquisition {
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        generation: u64,
+        #[serde(rename = "leaseID")]
+        lease_id: u64,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveCompleted {
+        completion: Box<crate::immich_locked::live::Completion>,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveHeartbeat {
+        completion: Box<crate::immich_locked::live::HeartbeatCompletion>,
+    },
+    #[serde(skip)]
+    ImmichLockedLiveRenewed {
+        completion: Box<crate::immich_locked::live::RenewalCompletion>,
+    },
     RequestImmichLockedVideo {
         #[serde(rename = "entryID")]
         entry_id: String,
@@ -499,6 +622,8 @@ pub enum Event {
         scene_id: String,
         #[serde(rename = "requestID")]
         request_id: String,
+        #[serde(default, rename = "retryCleanup")]
+        retry_cleanup: bool,
     },
     #[serde(skip)]
     ImmichLockedVideoPlanned {
@@ -562,6 +687,7 @@ pub enum Event {
         lease_id: u64,
         result: Option<std::time::Instant>,
         video: Option<crate::immich_locked::video::VideoHeartbeat>,
+        live: Option<Box<crate::immich_locked::live::HeartbeatCompletion>>,
     },
     #[serde(skip)]
     ImmichLockedImageRead {
@@ -771,6 +897,10 @@ pub enum Event {
     },
     AppleChanged,
     #[serde(skip)]
+    PrivateMediaKeyCaptured {
+        completion: crate::private_media_capture::Completion,
+    },
+    #[serde(skip)]
     ImmichVisibilityPrepared {
         result: Result<crate::immich_visibility::PreparedVisibility, String>,
     },
@@ -794,6 +924,7 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub private_media_capture: crate::private_media_capture::State,
     pub immich_live_resources: crate::immich_live_resources::LiveResourcesModel,
     pub ordinary_selected: crate::ordinary_selected::OrdinarySelectedModel,
     pub immich_archive: crate::immich_archive::ImmichArchiveModel,
@@ -816,6 +947,7 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub private_media_cleanup: Vec<crate::private_media_cleanup::PrivateMediaCleanupView>,
     pub immich_live_resources: Option<crate::immich_live_resources::ImmichLiveResourcesView>,
     pub ordinary_selected_presentation: Vec<crate::ordinary_selected::OrdinarySelectedPresentation>,
     pub ordinary_selected_pending: Vec<crate::ordinary_selected::OrdinarySelectedImageRequest>,
@@ -856,6 +988,27 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Event::RetryPrivateMediaCleanup {
+            recovery_id,
+            expected_attempt,
+        } = &event
+        {
+            return crate::private_media_cleanup::retry(model, recovery_id, *expected_attempt);
+        }
+        let (event, cleanup) = match crate::private_media_capture::intercept(event, model) {
+            Ok(result) => result,
+            Err(command) => return *command,
+        };
+        // The original event is reduced synchronously. Only cleanup work is asynchronous;
+        // an old cancellation/Finished event must never be re-enqueued behind new work.
+        cleanup.and(Self::update_after_capture(event, model))
+    }
+    fn view(&self, model: &Model) -> ViewModel {
+        Self::library_view(model)
+    }
+}
+impl Suwop {
+    fn update_after_capture(event: Event, model: &mut Model) -> Command<Effect, Event> {
         if let Some(command) = crate::immich_live_resources::update(&event, model) {
             return command;
         }
@@ -885,7 +1038,8 @@ impl crux_core::App for Suwop {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Event::OrdinarySelectedRefreshFinished {
             result,
@@ -902,25 +1056,29 @@ impl crux_core::App for Suwop {
                     refresh_id,
                     &origin,
                 ))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_archive::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_visibility::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         if let Some(command) = crate::immich_locked::update(event.clone(), model) {
             return selected_cleanup
                 .and(command)
                 .and(crate::ordinary_selected::reconcile_current(model))
-                .and(crate::immich_locked::video::reconcile(model));
+                .and(crate::immich_locked::video::reconcile(model))
+                .and(crate::immich_locked::live::reconcile(model));
         }
         let cleanup = if crate::immich_locked::invalidates(&event) {
             crate::immich_locked::close(model)
@@ -933,12 +1091,8 @@ impl crux_core::App for Suwop {
             .and(library)
             .and(crate::ordinary_selected::reconcile_current(model))
             .and(crate::immich_locked::video::reconcile(model))
+            .and(crate::immich_locked::live::reconcile(model))
     }
-    fn view(&self, model: &Model) -> ViewModel {
-        Self::library_view(model)
-    }
-}
-impl Suwop {
     fn update_library(event: Event, model: &mut Model) -> Command<Effect, Event> {
         if model.immich_visibility.persistence_uncertain
             && matches!(
@@ -1091,6 +1245,7 @@ impl Suwop {
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
         ViewModel {
+            private_media_cleanup: crate::private_media_cleanup::projection(model),
             ordinary_selected_presentation: crate::ordinary_selected::presentations(model),
             ordinary_selected_images: crate::ordinary_selected::images(model),
             ordinary_selected_pending: crate::ordinary_selected::pending(model),
@@ -1104,14 +1259,7 @@ impl Suwop {
             immich_live_resources: crate::immich_live_resources::view(model),
             immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
-            apple_visibility_hide_keys: if model.ready
-                && !model.busy
-                && !model.protection.membership_uncertain
-            {
-                crate::apple_visibility::hide_keys(&crate::protection::ordinary_state(model))
-            } else {
-                vec![]
-            },
+            apple_visibility_hide_keys: apple_visibility_hide_keys(model),
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
@@ -1162,6 +1310,13 @@ impl Suwop {
             can_transfer,
             move_blockers,
         }
+    }
+}
+fn apple_visibility_hide_keys(model: &Model) -> Vec<crate::domain::AssetKey> {
+    if model.ready && !model.busy && !model.protection.membership_uncertain {
+        crate::apple_visibility::hide_keys(&crate::protection::ordinary_state(model))
+    } else {
+        vec![]
     }
 }
 fn public_move_blockers(

@@ -496,6 +496,15 @@ fn authority(
     if model.immich_archive.scene_id.as_deref() != Some(scene) || !allowed(model, &key) {
         return None;
     }
+    unowned_capture_authority(model, scene, key, to, id)
+}
+fn unowned_capture_authority(
+    model: &Model,
+    scene: &str,
+    key: AssetKey,
+    to: ImmichArchiveDestination,
+    id: String,
+) -> Option<VisibilityAuthority> {
     let session = model.session.clone()?;
     let url = format!("{}/assets/{}", session.endpoint, key.asset_id);
     let permit = ImmichArchiveAuthorization {
@@ -561,6 +570,35 @@ pub(crate) fn update(
         _ => None,
     }
 }
+pub(crate) fn capture_authority(
+    model: &Model,
+    key: &AssetKey,
+    to: ImmichArchiveDestination,
+    id: &str,
+    scene: &str,
+    reserved: bool,
+) -> Option<VisibilityAuthority> {
+    if model.busy
+        || !durable_state_available(model)
+        || crate::immich_visibility::fences(&model.state, key)
+        || crate::apple_visibility::valid_operation_id(id).is_err()
+        || model.state.immich_visibility_operations.iter().any(|o| {
+            o.id == id
+                || (o.key == *key
+                    && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
+                    && o.observation.is_none())
+        })
+        || model.immich_visibility.used_ids.contains(id) != reserved
+        || !allowed(model, key)
+        || model.session.is_none()
+        || !model.immich_archive.active_scenes.contains(scene)
+        || model.immich_archive.working
+    {
+        return None;
+    }
+    unowned_capture_authority(model, scene, key.clone(), to, id.into())
+}
+
 fn begin(
     model: &mut Model,
     key: AssetKey,
@@ -568,22 +606,12 @@ fn begin(
     id: String,
     scene: &str,
 ) -> Command<crate::app::Effect, Event> {
-    if model.busy || !durable_state_available(model) {
+    if !crate::private_media_capture::consume_resume(model, &id, &key) {
         return Command::done();
     }
-    if crate::immich_visibility::fences(&model.state, &key)
-        || crate::apple_visibility::valid_operation_id(&id).is_err()
-        || model.state.immich_visibility_operations.iter().any(|o| {
-            o.id == id
-                || (o.key == key
-                    && o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
-                    && o.observation.is_none())
-        })
-        || !model.immich_visibility.used_ids.insert(id.clone())
+    if capture_authority(model, &key, to, &id, scene, true).is_none()
+        || !acquire_owner(model, scene)
     {
-        return Command::done();
-    }
-    if !allowed(model, &key) || !acquire_owner(model, scene) {
         return Command::done();
     }
     let Some(capability) = authority(model, scene, key.clone(), to, id.clone()) else {

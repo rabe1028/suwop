@@ -41,7 +41,7 @@ import SuwopShell
     private var phase: ProtectionScenePhase = .background
     private var currentView: (@MainActor () async throws -> ImmichLockedView)?
     private var readTask: Task<Void, Error>?
-    var beforeRead: (@MainActor () async -> Void)?
+    var beforeRead: (@MainActor () async throws -> Void)?
     private var activeReadID: String?
     private var readingGeneration: Int64?
     private var latestReadID: String?
@@ -104,7 +104,7 @@ import SuwopShell
             previous.cancel()
             _ = try? await previous.value
         }
-        await beforeRead?()
+        try await beforeRead?()
         try await validate(binding)
         guard epoch == captured, latestReadID == ticket.requestID else { throw CancellationError() }
         let raster = RasterRead()

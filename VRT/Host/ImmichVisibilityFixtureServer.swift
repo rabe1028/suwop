@@ -9,6 +9,7 @@ import SuwopShell
     enum SourceKind { case image, live, video, stacked, unknownStack }
     private var sessions: [String: Bool] = [:]
     private(set) var record: JSONValue
+    var allowLiveDiscovery = false
     var additionalRecords: [String: JSONValue] = [:]
     private(set) var albumMembers: [String: Set<String>]
     private(set) var routes: [String] = []
@@ -109,6 +110,12 @@ import SuwopShell
         }
         if path == "search/metadata", request.method == "POST" {
             let requested = try request.body["filter"]["visibility"]["in"].decode([String].self)
+            if isLiveDiscovery(request, elevated: elevated, requested: requested) {
+                let parents = ([record] + Array(additionalRecords.values)).filter {
+                    $0["type"].string == "IMAGE" && $0["livePhotoVideoId"].string != nil
+                }
+                return response(.object(["assets": .object(["items": .array(parents), "nextCursor": .null])]))
+            }
             guard elevated ? requested == ["locked"] : requested == ["timeline", "archive"] else {
                 throw SuwopError("C2 listing did not keep ordinary and locked visibility separate")
             }
@@ -130,6 +137,12 @@ import SuwopShell
             return response(.array(albums(forAsset: path.contains("assetId="))))
         }
         throw SuwopError("Unexpected C2 protocol route")
+    }
+
+    private func isLiveDiscovery(_ request: HttpRequest, elevated: Bool, requested: [String]) -> Bool {
+        allowLiveDiscovery && elevated && requested == ["timeline", "archive", "hidden", "locked"]
+            && request.body["filter"]["type"]["eq"].string == "IMAGE"
+            && (try? request.body["filter"]["isMotion"]["eq"].decode(Bool.self)) == true
     }
 
     private func assetMetadata(_ request: HttpRequest, path: String, elevated: Bool) throws -> HttpResponse? {

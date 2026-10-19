@@ -667,43 +667,7 @@ pub(crate) fn update(
             grant_id,
             scene_id,
         } => Some(begin(model, key, to, operation_id, &grant_id, &scene_id)),
-        Event::ImmichVisibilityPrepared { result } => {
-            let prepared = match result {
-                Ok(prepared) => prepared,
-                Err(message) => {
-                    preparation_failed(model, message);
-                    return Some(Command::done());
-                }
-            };
-            let mut prepared = prepared;
-            if prepared.capability.valid().is_err() {
-                abandon_prepared(model);
-                return Some(Command::done());
-            }
-            let previous = model
-                .ordinary_generation
-                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            if prepared.capability.advance_own_fence(previous).is_err() {
-                abandon_prepared(model);
-                return Some(Command::done());
-            }
-            model
-                .immich_visibility
-                .denied
-                .insert(prepared.operation.key.clone());
-            crate::immich_locked::remove_visibility_entry(model, &prepared.operation.key);
-            let pending =
-                if prepared.operation.kind == ImmichVisibilityOperationKind::LockedTransition {
-                    crate::immich_locked::video::quiesce_visibility(model, &prepared.operation.key)
-                } else {
-                    None
-                };
-            let before = model.state.clone();
-            Some(Command::new(move |ctx| async move {
-                let result = apply_quiesced(&ctx, before, prepared, pending).await;
-                ctx.send_event(Event::ImmichVisibilityFinished { result });
-            }))
-        }
+        Event::ImmichVisibilityPrepared { result } => Some(prepared(model, result)),
         Event::InspectImmichVisibility {
             record_id,
             grant_id,
@@ -754,6 +718,55 @@ pub(crate) fn update(
     }
 }
 
+fn prepared(
+    model: &mut Model,
+    result: Result<PreparedVisibility, String>,
+) -> crux_core::Command<crate::app::Effect, crate::app::Event> {
+    use crate::app::Event;
+    use crux_core::Command;
+    let prepared = match result {
+        Ok(prepared) => prepared,
+        Err(message) => {
+            preparation_failed(model, message);
+            return Command::done();
+        }
+    };
+    let mut prepared = prepared;
+    if prepared.capability.valid().is_err() {
+        abandon_prepared(model);
+        return Command::done();
+    }
+    let previous = model
+        .ordinary_generation
+        .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    if prepared.capability.advance_own_fence(previous).is_err() {
+        abandon_prepared(model);
+        return Command::done();
+    }
+    model
+        .immich_visibility
+        .denied
+        .insert(prepared.operation.key.clone());
+    crate::immich_locked::remove_visibility_entry(model, &prepared.operation.key);
+    let (pending, video_cleanup) =
+        if prepared.operation.kind == ImmichVisibilityOperationKind::LockedTransition {
+            crate::immich_locked::video::quiesce_visibility(model, &prepared.operation.key)
+        } else {
+            (None, Command::done())
+        };
+    // A nonlocked motion may still be consumed by a locked P/M pair.
+    // Ordinary and PIN writes both require this exact physical-key JOIN.
+    let (live_pending, live_cleanup) =
+        crate::immich_locked::live::quiesce_visibility(model, &prepared.operation.key);
+    let before = model.state.clone();
+    video_cleanup
+        .and(live_cleanup)
+        .and(Command::new(move |ctx| async move {
+            let result = apply_quiesced(&ctx, before, prepared, pending, live_pending).await;
+            ctx.send_event(Event::ImmichVisibilityFinished { result });
+        }))
+}
+
 fn preparation_failed(model: &mut Model, message: String) {
     model.busy = false;
     if model.immich_archive.working {
@@ -763,6 +776,47 @@ fn preparation_failed(model: &mut Model, message: String) {
     }
     model.immich_archive.working = false;
     model.immich_archive.active_operation = None;
+}
+
+pub(crate) fn capture_authority(
+    model: &Model,
+    key: &AssetKey,
+    operation_id: &str,
+    grant_id: &str,
+    scene_id: &str,
+    reserved: bool,
+) -> Option<crate::immich_archive::VisibilityAuthority> {
+    if model.busy
+        || !model.ready
+        || model.state.schema_version != 8
+        || model.immich_visibility.persistence_uncertain
+        || model.protection.membership_uncertain
+    {
+        return None;
+    }
+    let capability = crate::immich_locked::visibility_session(model, grant_id, scene_id)?;
+    if !crate::immich_locked::write_supported(model)
+        || key.scope != capability.scope()
+        || key.provider != crate::domain::Provider::Immich
+        || model.state.protected_entries.iter().any(|e| e.key == *key)
+        || model.protection.denied.contains(key)
+        || model.state.immich_visibility_operations.iter().any(|o| {
+            o.key == *key
+                && (o.selected_observation.is_some()
+                    || o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
+                        && o.observation.is_none())
+        })
+        || crate::apple_visibility::valid_operation_id(operation_id).is_err()
+        || model
+            .state
+            .immich_visibility_operations
+            .iter()
+            .any(|o| o.id == operation_id)
+        || model.immich_visibility.used_ids.contains(operation_id) != reserved
+    {
+        return None;
+    }
+    Some(capability.into())
 }
 
 fn begin(
@@ -776,12 +830,10 @@ fn begin(
     use crate::app::Event;
     use crux_core::Command;
 
-    if model.busy
-        || !model.ready
-        || model.state.schema_version != 8
-        || model.immich_visibility.persistence_uncertain
-        || model.protection.membership_uncertain
-    {
+    if !crate::private_media_capture::consume_resume(model, &operation_id, &key) {
+        return Command::done();
+    }
+    if capture_authority(model, &key, &operation_id, grant_id, scene_id, true).is_none() {
         return Command::done();
     }
     model
@@ -792,31 +844,6 @@ fn begin(
     else {
         return Command::done();
     };
-    if !crate::immich_locked::write_supported(model)
-        || key.scope != capability.scope()
-        || key.provider != crate::domain::Provider::Immich
-        || model.state.protected_entries.iter().any(|e| e.key == key)
-        || model.protection.denied.contains(&key)
-        || model.state.immich_visibility_operations.iter().any(|o| {
-            o.key == key
-                && (o.selected_observation.is_some()
-                    || o.outcome == crate::apple_visibility::VisibilityOutcome::Unknown
-                        && o.observation.is_none())
-        })
-        || crate::apple_visibility::valid_operation_id(&operation_id).is_err()
-        || model
-            .state
-            .immich_visibility_operations
-            .iter()
-            .any(|o| o.id == operation_id)
-        || !model
-            .immich_visibility
-            .used_ids
-            .insert(operation_id.clone())
-    {
-        model.immich_visibility.message = Some(SAFE_ERROR.into());
-        return Command::done();
-    }
     model.busy = true;
     Command::new(move |ctx| async move {
         let result = prepare(&ctx, capability.into(), key, to, operation_id).await;

@@ -57,6 +57,7 @@ fn model(raw: &Value) -> Result<Model, String> {
         Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
     model.immich_locked.entries.push(ImmichLockedEntry {
         can_play_video: false,
+        live_discovery: crate::immich_locked::live::ImmichLockedLiveDiscovery::Unsupported,
         id: ID.into(),
         visibility_action: crate::immich_visibility::locked_action(asset.key.clone()),
         asset,
@@ -174,7 +175,20 @@ impl Shell {
                     json!({"acquisitionLeaseID":ticket.acquisition_lease.lease_id,"requestID":REQUEST,"stagedID":LEASE}),
                 )
             }
-            ShellOperation::ReleaseImmichLockedVideo { pending, lease_id } => {
+            ShellOperation::RetireImmichLockedVideoPending {
+                pending,
+                retry_cleanup,
+            } => {
+                assert_eq!(pending.request_id, REQUEST);
+                assert!(
+                    !retry_cleanup,
+                    "This fixture's automatic pending retirement cannot retry"
+                );
+                Ok(Value::Null)
+            }
+            ShellOperation::ReleaseImmichLockedVideo {
+                pending, lease_id, ..
+            } => {
                 assert_eq!(pending.request_id, REQUEST);
                 self.releases.push(lease_id.clone());
                 Ok(Value::Null)
@@ -261,6 +275,7 @@ fn complete_known_and_absent_size_video_requires_hidden_prepare_and_final_rust_a
             Event::StopImmichLockedVideo {
                 scene_id: SCENE.into(),
                 request_id: REQUEST.into(),
+                retry_cleanup: true,
             },
         )?;
         assert!(c.view().immich_locked_view.video.is_none());
@@ -460,12 +475,14 @@ fn visibility_quiescence_is_exact_key_and_captures_request_without_a_quote() -> 
         .clone();
     let mut other = key.clone();
     other.scope.push_str("/another-account");
-    assert!(quiesce_visibility(&mut model, &other).is_none());
+    assert!(quiesce_visibility(&mut model, &other).0.is_none());
     assert!(model.immich_locked.video.access.is_some());
     assert!(model.immich_locked.video.lease.is_some());
     model.immich_locked.video.access = None;
     model.immich_locked.video.lease = None;
-    let captured = quiesce_visibility(&mut model, &key).ok_or("captured request")?;
+    let captured = quiesce_visibility(&mut model, &key)
+        .0
+        .ok_or("captured request")?;
     assert_eq!(captured.request_id, REQUEST);
     assert!(model.immich_locked.video.pending.is_none());
     assert!(model.immich_locked.video.binding.is_none());
@@ -489,5 +506,136 @@ fn inspect_stop_for_key_revokes_only_selected_video_projection() -> Result<(), S
     let _ = stop_for_key(&mut model, &key);
     assert!(model.immich_locked.video.access.is_none());
     assert!(model.immich_locked.video.pending.is_none());
+    Ok(())
+}
+
+#[test]
+fn ordinary_stop_retains_failed_cleanup_and_only_locator_attempt_can_retry() -> Result<(), String> {
+    let raw = raw();
+    let core = core(&raw)?;
+    let mut shell = Shell::new(raw);
+    shell.run(&core, request())?;
+    let stop = Event::StopImmichLockedVideo {
+        scene_id: SCENE.into(),
+        request_id: REQUEST.into(),
+        retry_cleanup: true,
+    };
+    let mut effects = core.process_event(stop.clone());
+    assert!(core.view().immich_locked_view.video.is_none());
+    assert!(core.view().immich_locked_view.video_pending.is_none());
+    let Effect::Io(mut effect) = effects.pop().ok_or("release effect")?;
+    assert!(matches!(
+        &effect.operation,
+        ShellOperation::ReleaseImmichLockedVideo {
+            retry_cleanup: false,
+            ..
+        }
+    ));
+    let next = core
+        .resolve(
+            &mut effect,
+            ShellResponse {
+                value: None,
+                error: Some("unlink failed".into()),
+            },
+        )
+        .map_err(|_| "failed response")?;
+    shell.drain(&core, next)?;
+    let row = core
+        .view()
+        .private_media_cleanup
+        .into_iter()
+        .next()
+        .ok_or("failed row")?;
+    assert!(core.process_event(stop).is_empty());
+    let retry = Event::RetryPrivateMediaCleanup {
+        recovery_id: row.recovery_id.ok_or("locator")?,
+        expected_attempt: row.expected_attempt,
+    };
+    let pending = core.process_event(retry.clone());
+    assert!(core.process_event(retry.clone()).is_empty());
+    let Effect::Io(effect) = pending.first().ok_or("retry effect")?;
+    assert!(
+        matches!(&effect.operation, ShellOperation::ReleaseImmichLockedVideo { retry_cleanup:true, pending,.. } if pending.request_id==REQUEST)
+    );
+    shell.drain(&core, pending)?;
+    assert!(core.view().private_media_cleanup.is_empty());
+    assert!(core.process_event(retry).is_empty());
+    assert_eq!(shell.reads, 1, "Cleanup never reissues original reads");
+    Ok(())
+}
+#[test]
+fn prequote_stop_has_an_exact_pending_cleanup_and_late_quote_cannot_restart_it()
+-> Result<(), String> {
+    let raw = raw();
+    let core = core(&raw)?;
+    let mut shell = Shell::new(raw);
+    let held = renewal_cases::pause(&core, &mut shell, core.process_event(request()), |op| {
+        matches!(op, ShellOperation::InspectImmichLockedVideoStorage { .. })
+    })?;
+    let effects = core.process_event(Event::StopImmichLockedVideo {
+        scene_id: SCENE.into(),
+        request_id: REQUEST.into(),
+        retry_cleanup: true,
+    });
+    let Effect::Io(mut operation) = effects.into_iter().next().ok_or("pending cleanup")?;
+    assert!(
+        matches!(&operation.operation, ShellOperation::RetireImmichLockedVideoPending {pending,retry_cleanup:false} if pending.request_id==REQUEST)
+    );
+    shell.drain(
+        &core,
+        core.resolve(
+            &mut operation,
+            ShellResponse {
+                value: None,
+                error: Some("unknown JOIN".into()),
+            },
+        )
+        .map_err(|_| "response")?,
+    )?;
+    let before = core.view().private_media_cleanup;
+    assert_eq!(before.len(), 1);
+    shell.drain(&core, vec![held])?;
+    assert_eq!(shell.reads, 0);
+    let after = core.view().private_media_cleanup;
+    assert_eq!(after.len(), 1);
+    assert_eq!(before[0].recovery_id, after[0].recovery_id);
+    assert_eq!(before[0].expected_attempt, after[0].expected_attempt);
+    assert_eq!(
+        after[0].state,
+        crate::private_media_cleanup::PrivateMediaCleanupState::NeedsAttention
+    );
+    Ok(())
+}
+
+#[test]
+fn bounded_retired_capacity_blocks_new_admission_without_evicting_any_owner() -> Result<(), String>
+{
+    let mut state = model(&raw())?;
+    let mut pending = ImmichLockedVideoPending {
+        request_id: REQUEST.into(),
+        entry_id: ID.into(),
+        grant_id: GRANT.into(),
+        scene_id: SCENE.into(),
+        generation: 0,
+        key: state.immich_locked.entries[0].asset.key.clone(),
+        phase: ImmichLockedVideoPhase::Checking,
+    };
+    for n in 0..cleanup::CAPACITY - 1 {
+        pending.request_id = format!("{n:08x}-4444-4444-8444-444444444444");
+        let mut command = cleanup::retire(&mut state, pending.clone(), None, false);
+        assert_eq!(command.effects().count(), 1);
+    }
+    let count = state.immich_locked.video.retired.len();
+    let mut blocked = acquisition::request(
+        &mut state,
+        ID.into(),
+        GRANT.into(),
+        SCENE.into(),
+        REQUEST.into(),
+    );
+    assert_eq!(blocked.effects().count(), 0);
+    assert_eq!(state.immich_locked.video.retired.len(), count);
+    assert!(state.immich_locked.video.pending.is_none());
     Ok(())
 }

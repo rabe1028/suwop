@@ -246,7 +246,25 @@ impl LiveVisibilityShell<'_> {
                 }),
             )?;
         }
-        self.drain(core, core.process_event(event))?;
+        let capture_key = match &event {
+            Event::PrepareImmichVisibility { key, .. } => Some(key.clone()),
+            _ => None,
+        };
+        let before_capture = (self.confirmations, self.writes, self.persists);
+        let effects = core.process_event(event);
+        if let Some(selected) = capture_key {
+            for effect in &effects {
+                let Effect::Io(request) = effect;
+                assert!(
+                    matches!(&request.operation, ShellOperation::CapturePrivateMediaKey { key, .. } if key == &selected)
+                );
+            }
+            assert_eq!(
+                (self.confirmations, self.writes, self.persists),
+                before_capture
+            );
+        }
+        self.drain(core, effects)?;
         if let Some(id) = prepare_id
             && !journal(self.directory)?
                 .immich_visibility_operations
@@ -399,6 +417,23 @@ impl LiveVisibilityShell<'_> {
             .map_err(|_| "scan encode".into()),
             ShellOperation::AppleAlbums { scope } => {
                 Ok(json!({"provider":"apple","scope":scope,"albums":[],"access":"full"}))
+            }
+            ShellOperation::DrainCapturedPrivateMedia { capture_id, .. } => {
+                // Explicit synthetic no-consumer receipt; not native JOIN acceptance.
+                Ok(json!({"captureID":capture_id,"cancelledBeforeCapture":false}))
+            }
+            ShellOperation::CapturePrivateMediaKey { .. } => {
+                // The actual Prepare key/order is checked at the dispatch boundary.
+                // This server fixture has no native consumers; unit is not JOIN evidence.
+                Ok(Value::Null)
+            }
+            ShellOperation::QuiesceImmichLockedLive { pending, .. } => {
+                // This real-server fixture has no native paired consumers. This
+                // unit ACK is not evidence of process-wide native JOIN.
+                if pending.is_some() {
+                    return Err("unexpected paired owner in server fixture".into());
+                }
+                Ok(Value::Null)
             }
             ShellOperation::QuiesceImmichLockedVideo { .. }
             | ShellOperation::ReleaseImmichLockedImage { .. }

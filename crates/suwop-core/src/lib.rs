@@ -24,3 +24,7 @@ pub mod immich_archive;
 pub mod ordinary_selected;
 
 pub mod immich_live_resources;
+
+mod private_media_capture;
+
+mod private_media_cleanup;

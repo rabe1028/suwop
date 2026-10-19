@@ -218,95 +218,133 @@ impl Runtime<'_> {
         Ok("写真ライブラリを接続してください。".into())
     }
 
-    async fn execute(&mut self, event: Event) -> Result<String, String> {
+    async fn disconnect(&mut self) -> Result<String, String> {
+        let old = self.state.clone();
+        self.state.trash = None;
+        self.state.albums.retain(|s| s.provider != Provider::Immich);
+        self.state.connection = None;
+        self.state
+            .snapshots
+            .retain(|s| s.provider != Provider::Immich);
+        if let Err(e) = self.persist().await {
+            self.state = old;
+            return Err(e);
+        }
+        self.session = None;
+        if let Some(connection) = old.connection {
+            let _: Result<Value, _> = io(
+                self.ctx,
+                ShellOperation::RemoveCredential {
+                    account: connection.credential_id,
+                },
+            )
+            .await;
+        }
+        Ok("接続を解除しました。転送履歴は保持しています。".into())
+    }
+
+    /// Select one directly awaited operation future, rather than one generator containing
+    /// every operation's inline state. No task/executor or effect is started at dispatch.
+    fn execute(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
         match event {
-            Event::Initialize { scope } => self.initialize(scope).await,
-            _ if self.state.schema_version != 8 => {
+            Event::Initialize { scope } => Box::pin(async move { self.initialize(scope).await }),
+            _ if self.state.schema_version != 8 => Box::pin(async move {
                 Err("ローカル記録が利用できません。転送は無効です。".into())
+            }),
+            Event::HideApple { keys, id } => {
+                Box::pin(async move { self.hide_apple(&keys, &id).await })
             }
-            Event::HideApple { keys, id } => self.hide_apple(&keys, &id).await,
-            Event::UnhideApple { record_id, id } => self.unhide_apple(&record_id, &id).await,
+            Event::UnhideApple { record_id, id } => {
+                Box::pin(async move { self.unhide_apple(&record_id, &id).await })
+            }
             Event::InspectAppleVisibility { record_id } => {
-                self.inspect_visibility_record(&record_id).await
+                Box::pin(async move { self.inspect_visibility_record(&record_id).await })
             }
-            Event::Refresh { permission, now } => {
+            Event::Refresh { permission, now } => Box::pin(async move {
                 self.refresh(permission, now).await?;
                 Ok("一覧を更新しました。".into())
-            }
+            }),
             Event::Configure {
                 address,
                 key,
                 allow_http,
                 id,
                 now,
-            } => self.configure(&address, &key, allow_http, id, now).await,
-            Event::Disconnect => {
-                let old = self.state.clone();
-                self.state.trash = None;
-                self.state.albums.retain(|s| s.provider != Provider::Immich);
-                self.state.connection = None;
-                self.state
-                    .snapshots
-                    .retain(|s| s.provider != Provider::Immich);
-                if let Err(e) = self.persist().await {
-                    self.state = old;
-                    return Err(e);
-                }
-                self.session = None;
-                if let Some(connection) = old.connection {
-                    let _: Result<Value, _> = io(
-                        self.ctx,
-                        ShellOperation::RemoveCredential {
-                            account: connection.credential_id,
-                        },
-                    )
-                    .await;
-                }
-                Ok("接続を解除しました。転送履歴は保持しています。".into())
+            } => Box::pin(async move { self.configure(&address, &key, allow_http, id, now).await }),
+            Event::Disconnect => Box::pin(async move { self.disconnect().await }),
+            Event::Index { id } => Box::pin(async move { self.index(&id).await }),
+            Event::ForgetUploadRecord { key } => {
+                Box::pin(async move { self.forget_upload_record(&key).await })
             }
-            Event::Index { id } => self.index(&id).await,
-            Event::ForgetUploadRecord { key } => self.forget_upload_record(&key).await,
             Event::ForgetUploadIntent { scope, token } => {
-                self.forget_upload_intent(&scope, &token).await
+                Box::pin(async move { self.forget_upload_intent(&scope, &token).await })
             }
-            Event::SetFavorite { keys, value } => self.favorite(&keys, value).await,
-            Event::SetMetadata { keys, input } => self.change_metadata(&keys, &input).await,
-            Event::EditImage { key, id } => self.edit_image(&key, &id).await,
+            Event::SetFavorite { keys, value } => {
+                Box::pin(async move { self.favorite(&keys, value).await })
+            }
+            Event::SetMetadata { keys, input } => {
+                Box::pin(async move { self.change_metadata(&keys, &input).await })
+            }
+            Event::EditImage { key, id } => {
+                Box::pin(async move { self.edit_image(&key, &id).await })
+            }
             Event::CopyPhotoEdits { key, options, id } => {
-                self.copy_photo_edits(&key, options, &id).await
+                Box::pin(async move { self.copy_photo_edits(&key, options, &id).await })
             }
-            Event::PastePhotoEdits { keys, id } => self.paste_photo_edits(&keys, &id).await,
-            Event::PasteSelectedPhotoEdits { anchors, id } => {
+            Event::PastePhotoEdits { keys, id } => {
+                Box::pin(async move { self.paste_photo_edits(&keys, &id).await })
+            }
+            Event::PasteSelectedPhotoEdits { anchors, id } => Box::pin(async move {
                 let keys = self.selected_paste_keys(&anchors)?;
                 self.paste_photo_edits(&keys, &id).await
+            }),
+            Event::ResolveEditPaste { key, id } => {
+                Box::pin(async move { self.resolve_edit_paste(&key, &id).await })
             }
-            Event::ResolveEditPaste { key, id } => self.resolve_edit_paste(&key, &id).await,
-            Event::RevertImage { key, id } => self.revert_image(&key, &id).await,
-            Event::Share { keys, id } => self.share(&keys, &id).await,
-            Event::ShareCurrentImage { key, id } => self.share_current_image(&key, &id).await,
-            Event::Play { keys, id } => self.play(&keys, &id).await,
-            Event::RefreshAlbums => self.refresh_albums().await,
-            Event::RefreshTrash { now } => self.refresh_trash(now).await,
-            Event::TrashApple { keys, id } => self.trash_apple(&keys, &id).await,
-            Event::ResolveAppleTrash { id } => self.resolve_apple_trash(&id).await,
-            Event::ChangeTrash { keys, action, id } => self.change_trash(&keys, action, &id).await,
-            Event::ResolveTrash { id } => self.resolve_trash(&id).await,
-            Event::CreateAlbum { provider, title } => self.create_album(provider, &title).await,
-            Event::EditAlbum { key, edit } => self.edit_album(&key, &edit).await,
+            Event::RevertImage { key, id } => {
+                Box::pin(async move { self.revert_image(&key, &id).await })
+            }
+            Event::Share { keys, id } => Box::pin(async move { self.share(&keys, &id).await }),
+            Event::ShareCurrentImage { key, id } => {
+                Box::pin(async move { self.share_current_image(&key, &id).await })
+            }
+            Event::Play { keys, id } => Box::pin(async move { self.play(&keys, &id).await }),
+            Event::RefreshAlbums => Box::pin(async move { self.refresh_albums().await }),
+            Event::RefreshTrash { now } => Box::pin(async move { self.refresh_trash(now).await }),
+            Event::TrashApple { keys, id } => {
+                Box::pin(async move { self.trash_apple(&keys, &id).await })
+            }
+            Event::ResolveAppleTrash { id } => {
+                Box::pin(async move { self.resolve_apple_trash(&id).await })
+            }
+            Event::ChangeTrash { keys, action, id } => {
+                Box::pin(async move { self.change_trash(&keys, action, &id).await })
+            }
+            Event::ResolveTrash { id } => Box::pin(async move { self.resolve_trash(&id).await }),
+            Event::CreateAlbum { provider, title } => {
+                Box::pin(async move { self.create_album(provider, &title).await })
+            }
+            Event::EditAlbum { key, edit } => {
+                Box::pin(async move { self.edit_album(&key, &edit).await })
+            }
             Event::Copy {
                 keys,
                 intent,
                 id,
                 now,
-            } => {
+            } => Box::pin(async move {
                 self.copy(&keys, intent, &id, now).await?;
                 Ok("コピーを検証しました。元データは残っています。".into())
-            }
-            Event::CompleteMove { id, workspace } => {
+            }),
+            Event::CompleteMove { id, workspace } => Box::pin(async move {
                 self.complete_move(&id, &workspace).await?;
                 Ok("移動が完了しました。転送元のゴミ箱を確認してください。".into())
-            }
-            _ => Err("不正な操作です。".into()),
+            }),
+            _ => Box::pin(async move { Err("不正な操作です。".into()) }),
         }
     }
     fn preserve_original_fingerprints(&self, fresh: &mut [StoredAsset]) {

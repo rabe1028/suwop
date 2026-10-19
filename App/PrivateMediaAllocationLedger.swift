@@ -9,6 +9,17 @@ final class PrivateMediaAllocationLedger: Sendable {
     static let shared = PrivateMediaAllocationLedger()
     private let consumers = OSAllocatedUnfairLock(initialState: [UUID: PrivateMediaAllocation.Consumer]())
 
+    #if SUWOP_VRT
+        private let afterRenameForTesting: (@Sendable (URL) throws -> Void)?
+        init() {
+            afterRenameForTesting = nil
+        }
+
+        init(testingAfterRename: @escaping @Sendable (URL) throws -> Void) {
+            afterRenameForTesting = testingAfterRename
+        }
+    #endif
+
     func register(
         owner: PrivateMediaAllocation.Owner,
         files: [PrivateMediaAllocation.File],
@@ -152,6 +163,60 @@ final class PrivateMediaAllocationLedger: Sendable {
         }
     }
 
+    /// Validate the current owned completed inode before any native metadata parser opens it.
+    func finishedFile(owner: PrivateMediaAllocation.Owner, fileID: String) throws -> URL {
+        try consumers.withLock { state in
+            guard let current = state[owner.id], current.owner == owner, !current.failed,
+                  let file = current.files[fileID], file.finished, !file.failed else { throw CancellationError() }
+            try validateOwnedFile(file, consumer: current, state: state)
+            var actual = stat()
+            guard lstat(file.file.url.path, &actual) == 0, actual.st_size == file.written else {
+                throw CancellationError()
+            }
+            return file.file.url
+        }
+    }
+
+    /// A metadata-only same-inode transition. No byte/claim/counter/reservation is released or copied.
+    func renameFinished(
+        owner: PrivateMediaAllocation.Owner, fileID: String, suffix: PrivateMediaFileSuffix
+    ) throws -> URL {
+        try consumers.withLock { state in
+            guard var current = state[owner.id], current.owner == owner, !current.failed,
+                  var file = current.files[fileID], file.finished, !file.failed,
+                  fileID.range(of: "^[A-Za-z0-9_-]+$", options: .regularExpression) != nil
+            else { throw CancellationError() }
+            try validateOwnedFile(file, consumer: current, state: state)
+            let source = file.file.url
+            let destination = source.deletingLastPathComponent().appendingPathComponent(fileID + "." + suffix.rawValue)
+            if source.standardizedFileURL == destination.standardizedFileURL {
+                return source
+            }
+            do {
+                try renameNoReplace(source, destination: destination, physicalID: file.physicalID, bytes: file.written)
+                // After a successful syscall, cleanup/accounting must address the new path even if validation fails.
+                file.file = .init(id: fileID, url: destination)
+                #if SUWOP_VRT
+                    try afterRenameForTesting?(destination)
+                #endif
+                try validateOwnedFile(file, consumer: current, state: state)
+                var after = stat()
+                guard lstat(destination.path, &after) == 0, after.st_size == file.written else {
+                    throw CancellationError()
+                }
+            } catch {
+                file.failed = true
+                current.failed = true
+                current.files[fileID] = file
+                state[owner.id] = current
+                throw error
+            }
+            current.files[fileID] = file
+            state[owner.id] = current
+            return destination
+        }
+    }
+
     /// Transfer one declared envelope into one actual owned file without a gap or a second charge.
     /// The file must already exist; its metadata allocation is reflected in the fresh measurement.
     func materializeReservation(
@@ -193,6 +258,12 @@ final class PrivateMediaAllocationLedger: Sendable {
             return state[owner.id]?.files[fileID]
         }
     }
+
+    #if SUWOP_VRT
+        func consumerForTesting(owner: PrivateMediaAllocation.Owner) -> PrivateMediaAllocation.Consumer? {
+            consumers.withLock { $0[owner.id]?.owner == owner ? $0[owner.id] : nil }
+        }
+    #endif
 
     /// Passive ownership index for future member-wide quiescence; it supplies no JOIN/authority receipt.
     func owners(containing key: AssetKey) -> [PrivateMediaAllocation.Owner] {
@@ -274,6 +345,27 @@ private extension PrivateMediaAllocationLedger {
         guard try validateFile(file.file, volume: consumer.volume, state: others) == file.physicalID else {
             throw CancellationError()
         }
+    }
+
+    func renameNoReplace(_ source: URL, destination: URL, physicalID: String, bytes: Int64) throws {
+        let parent = source.deletingLastPathComponent()
+        guard parent.standardizedFileURL == destination.deletingLastPathComponent().standardizedFileURL else {
+            throw CancellationError()
+        }
+        let directory = open(parent.path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+        guard directory >= 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
+        defer { close(directory) }
+        var before = stat()
+        guard fstatat(directory, source.lastPathComponent, &before, AT_SYMLINK_NOFOLLOW) == 0,
+              before.st_mode & S_IFMT == S_IFREG,
+              physicalID == "\(before.st_dev):\(before.st_ino)", before.st_size == bytes
+        else {
+            throw CancellationError()
+        }
+        // RENAME_EXCL provides atomic no-replace semantics; no check-then-overwrite race or copy fallback.
+        guard renameatx_np(
+            directory, source.lastPathComponent, directory, destination.lastPathComponent, UInt32(RENAME_EXCL)
+        ) == 0 else { throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO) }
     }
 
     func allocated(_ url: URL) throws -> Int64 {

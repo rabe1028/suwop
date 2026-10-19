@@ -12,6 +12,12 @@ public struct SuwopError: Error, LocalizedError, Sendable {
     }
 }
 
+#if DEBUG
+    public enum JSONDecodeDiagnostic {
+        @TaskLocal public static var failure: (@Sendable (Data, String, any Error, [String]) -> Void)?
+    }
+#endif
+
 public enum JSONValue: Codable, Sendable {
     case object([String: JSONValue])
     case array([JSONValue])
@@ -68,7 +74,15 @@ public enum JSONValue: Codable, Sendable {
     }
 
     public func decode<T: Decodable>(_ type: T.Type) throws -> T {
-        try Wire.decoder().decode(type, from: Wire.encoder().encode(self))
+        let data = try Wire.encoder().encode(self)
+        do {
+            return try Wire.decoder().decode(type, from: data)
+        } catch {
+            #if DEBUG
+                JSONDecodeDiagnostic.failure?(data, String(reflecting: type), error, Thread.callStackSymbols)
+            #endif
+            throw error
+        }
     }
 }
 

@@ -632,7 +632,9 @@ fn selected_quiescence_terminalizes_successor_and_discards_held_publication_befo
             acquisition_lease_id: 1,
         }
     ));
-    let captured = quiesce_visibility(&mut model, &initial.pending.key).ok_or("captured")?;
+    let captured = quiesce_visibility(&mut model, &initial.pending.key)
+        .0
+        .ok_or("captured")?;
     assert_eq!(captured.request_id, initial.pending.request_id);
     assert!(
         binding.current_capability().is_err(),

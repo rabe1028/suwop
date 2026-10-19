@@ -150,6 +150,7 @@ fn stopped_video_still_requires_barrier_and_failed_join_never_persists_or_writes
         Event::StopImmichLockedVideo {
             scene_id: SCENE.into(),
             request_id: NEXT.into(),
+            retry_cleanup: true,
         },
     )?;
     let before = shell.persist_calls;
@@ -191,10 +192,14 @@ fn pause_before(
     mut effects: Vec<Effect>,
     target: fn(&ShellOperation) -> bool,
 ) -> Result<Effect, String> {
+    let mut held = None;
     while !effects.is_empty() {
         let Effect::Io(mut effect) = effects.remove(0);
         if target(&effect.operation) {
-            return Ok(Effect::Io(effect));
+            if held.replace(Effect::Io(effect)).is_some() {
+                return Err("duplicate held effect".into());
+            }
+            continue; // Retain and drive sibling cleanup effects instead of silently dropping them.
         }
         let value = shell.respond(&effect.operation)?;
         effects.extend(
@@ -208,7 +213,49 @@ fn pause_before(
             .map_err(|_| "pause resolution")?,
         );
     }
-    Err("expected held effect".into())
+    held.ok_or_else(|| "expected held effect".into())
+}
+
+fn pause_video_quote(
+    core: &Core<Suwop>,
+    shell: &mut Shell,
+    request_id: &str,
+) -> Result<Effect, String> {
+    pause_before(
+        core,
+        shell,
+        core.process_event(Event::RequestImmichLockedVideo {
+            entry_id: ASSET.into(),
+            grant_id: GRANT.into(),
+            scene_id: SCENE.into(),
+            request_id: request_id.into(),
+        }),
+        |op| matches!(op, ShellOperation::InspectImmichLockedVideoStorage { .. }),
+    )
+}
+
+fn resolve_and_drain(
+    core: &Core<Suwop>,
+    shell: &mut Shell,
+    effect: Effect,
+    result: Result<Value, String>,
+    error: &str,
+) -> Result<(), String> {
+    let Effect::Io(mut effect) = effect;
+    let response = match result {
+        Ok(value) => ShellResponse {
+            value: Some(value),
+            error: None,
+        },
+        Err(error) => ShellResponse {
+            value: None,
+            error: Some(error),
+        },
+    };
+    shell.drain(
+        core,
+        core.resolve(&mut effect, response).map_err(|_| error)?,
+    )
 }
 
 #[test]
@@ -222,17 +269,7 @@ fn confirmed_video_change_captures_preinspect_pending_and_late_quote_cannot_star
         |op| matches!(op, ShellOperation::ConfirmImmichVisibility { .. }),
     )?;
     let request_id = "77777777-7777-4777-8777-777777777777";
-    let quote = pause_before(
-        &core,
-        &mut shell,
-        core.process_event(Event::RequestImmichLockedVideo {
-            entry_id: ASSET.into(),
-            grant_id: GRANT.into(),
-            scene_id: SCENE.into(),
-            request_id: request_id.into(),
-        }),
-        |op| matches!(op, ShellOperation::InspectImmichLockedVideoStorage { .. }),
-    )?;
+    let quote = pause_video_quote(&core, &mut shell, request_id)?;
     let Effect::Io(mut confirmation) = confirmation;
     let confirmed = shell.respond(&confirmation.operation)?;
     let effects = core
@@ -247,7 +284,7 @@ fn confirmed_video_change_captures_preinspect_pending_and_late_quote_cannot_star
     let barrier = pause_before(&core, &mut shell, effects, |op| {
         matches!(op, ShellOperation::QuiesceImmichLockedVideo { .. })
     })?;
-    let Effect::Io(mut barrier) = barrier;
+    let Effect::Io(barrier) = barrier;
     let ShellOperation::QuiesceImmichLockedVideo {
         pending: Some(pending),
         ..
@@ -256,40 +293,69 @@ fn confirmed_video_change_captures_preinspect_pending_and_late_quote_cannot_star
         return Err("pending barrier".into());
     };
     assert_eq!(pending.request_id, request_id);
+    let issued = pending.clone();
     assert_eq!(
         pending.phase,
         suwop_core::immich_locked::video::ImmichLockedVideoPhase::Checking
     );
     assert!(core.view().immich_locked_view.video_pending.is_none());
     let value = shell.respond(&barrier.operation)?;
-    shell.drain(
+    resolve_and_drain(
         &core,
-        core.resolve(
-            &mut barrier,
-            ShellResponse {
-                value: Some(value),
-                error: None,
-            },
-        )
-        .map_err(|_| "pending barrier ack")?,
+        &mut shell,
+        Effect::Io(barrier),
+        Ok(value),
+        "pending barrier ack",
     )?;
     assert_eq!(shell.writes, 2);
-    let Effect::Io(mut quote) = quote;
+    assert_eq!(
+        shell.video_pending_retirements,
+        vec![issued.clone()],
+        "The original exact pending was sealed and JOINed exactly once"
+    );
+    assert_eq!(
+        shell
+            .quiescence_pending
+            .iter()
+            .filter(|p| p.as_ref() == Some(&issued))
+            .count(),
+        1,
+        "Selected-key quiescence includes that same prequote binding"
+    );
+    assert!(
+        core.view().private_media_cleanup.is_empty(),
+        "Original pending JOIN completed before late metadata delivery"
+    );
+    let retirements = shell.video_pending_retirements.clone();
+    let releases = shell.releases.clone();
+    let reads = shell.video_reads.clone();
+    let barriers = shell.quiescence_pending.clone();
+    let Effect::Io(quote) = quote;
     let value = shell.respond(&quote.operation)?;
-    shell.drain(
+    resolve_and_drain(
         &core,
-        core.resolve(
-            &mut quote,
-            ShellResponse {
-                value: Some(value),
-                error: None,
-            },
-        )
-        .map_err(|_| "late quote")?,
+        &mut shell,
+        Effect::Io(quote),
+        Ok(value),
+        "late quote",
     )?;
     assert!(core.view().immich_locked_view.video_pending.is_none());
     assert!(core.view().immich_locked_view.video.is_none());
-    assert!(shell.releases.iter().any(|id| id == request_id));
+    assert_eq!(
+        shell.video_pending_retirements, retirements,
+        "A delayed quote cannot issue a second cleanup"
+    );
+    assert_eq!(
+        shell.releases, releases,
+        "No fresh Release or retry authority comes from metadata delivery"
+    );
+    assert_eq!(shell.quiescence_pending, barriers);
+    assert_eq!(
+        shell.video_reads, reads,
+        "The canceled request cannot start an original read"
+    );
+    assert!(!shell.video_reads.iter().any(|p| p.request_id == request_id));
+    assert!(core.view().private_media_cleanup.is_empty());
     Ok(())
 }
 
@@ -406,6 +472,141 @@ fn externally_unlocked_video_unknown_is_observed_without_settling_outcome_or_gra
             .as_ref()
             .ok_or("rows")?
             .is_empty()
+    );
+    Ok(())
+}
+
+#[test]
+fn published_video_is_retired_and_exact_cleanup_retained_when_preflight_is_refused()
+-> Result<(), String> {
+    for fault in ["declined", "offline", "network"] {
+        let (core, mut shell) = lock_and_play()?;
+        let writes = shell.writes;
+        let persists = shell.persist_calls;
+        let releases = shell.releases.len();
+        let drains = shell.capture_drains.len();
+        let confirmations = shell.confirmations;
+        if fault == "network" {
+            shell.asset_transport_failure = Some(());
+        } else if fault == "declined" {
+            shell.confirmed = false;
+        } else {
+            shell.facts_patch = Some(json!({"type":"VIDEO","isOffline":true}));
+        }
+        shell.run(
+            &core,
+            prepare(
+                "99999999-9999-4999-8999-999999999999",
+                ImmichVisibility::Timeline,
+            ),
+        )?;
+        assert!(core.view().immich_locked_view.video.is_none());
+        assert!(core.view().immich_locked_view.video_pending.is_none());
+        assert_eq!(
+            shell.releases.len(),
+            releases,
+            "No parallel Release may acquire a retry token"
+        );
+        assert_eq!(shell.capture_drains.len(), drains + 1);
+        assert_eq!((shell.writes, shell.persist_calls), (writes, persists));
+        if fault == "declined" {
+            assert_eq!(shell.confirmations, confirmations + 1);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn retired_video_is_in_cancel_before_capture_context_and_old_locator_cannot_retry_it()
+-> Result<(), String> {
+    let (core, mut shell) = lock_and_play()?;
+    let pending = core
+        .view()
+        .immich_locked_view
+        .video
+        .ok_or("published video")?
+        .pending;
+    let effects = core.process_event(Event::StopImmichLockedVideo {
+        scene_id: SCENE.into(),
+        request_id: NEXT.into(),
+        retry_cleanup: true,
+    });
+    let Effect::Io(release) = effects.into_iter().next().ok_or("initial release")?;
+    resolve_and_drain(
+        &core,
+        &mut shell,
+        Effect::Io(release),
+        Err("unlink failure".into()),
+        "release response",
+    )?;
+    let old = core
+        .view()
+        .private_media_cleanup
+        .into_iter()
+        .next()
+        .ok_or("normal cleanup")?;
+    let old_id = old.recovery_id.ok_or("normal locator")?;
+    let capture = core.process_event(prepare(NEXT, ImmichVisibility::Timeline));
+    let Effect::Io(capture) = capture.into_iter().next().ok_or("capture first")?;
+    assert!(
+        matches!(&capture.operation, ShellOperation::CapturePrivateMediaKey { video_pending,.. } if video_pending==&vec![pending.clone()])
+    );
+    assert!(
+        core.process_event(Event::RetryPrivateMediaCleanup {
+            recovery_id: old_id.clone(),
+            expected_attempt: old.expected_attempt
+        })
+        .is_empty(),
+        "A previously visible normal locator cannot bypass selected-capture ownership"
+    );
+    let close = core.process_event(Event::CloseImmichLocked);
+    let held = pause_before(&core, &mut shell, close, |op| {
+        matches!(op, ShellOperation::DrainCapturedPrivateMedia { .. })
+    })?;
+    let Effect::Io(drain) = held;
+    assert!(
+        matches!(&drain.operation, ShellOperation::DrainCapturedPrivateMedia {cancel_before_capture:true,video_pending,..} if video_pending==&vec![pending])
+    );
+    resolve_and_drain(
+        &core,
+        &mut shell,
+        Effect::Io(drain),
+        Err("old worker still held".into()),
+        "drain failure",
+    )?;
+    let row = core
+        .view()
+        .private_media_cleanup
+        .into_iter()
+        .next()
+        .ok_or("capture quarantine")?;
+    assert_ne!(row.recovery_id.as_deref(), Some(old_id.as_str()));
+    resolve_and_drain(
+        &core,
+        &mut shell,
+        Effect::Io(capture),
+        Ok(Value::Null),
+        "late capture ack",
+    )?;
+    assert_eq!(
+        core.view().private_media_cleanup.len(),
+        1,
+        "Late Capture ACK cannot clear failed exact-pending JOIN"
+    );
+    let writes = shell.writes;
+    let persisted = shell.persist_calls;
+    shell.run(
+        &core,
+        Event::RetryPrivateMediaCleanup {
+            recovery_id: row.recovery_id.ok_or("capture locator")?,
+            expected_attempt: row.expected_attempt,
+        },
+    )?;
+    assert!(core.view().private_media_cleanup.is_empty());
+    assert_eq!(
+        (shell.writes, shell.persist_calls),
+        (writes, persisted),
+        "Recovery does not revive a canceled write"
     );
     Ok(())
 }

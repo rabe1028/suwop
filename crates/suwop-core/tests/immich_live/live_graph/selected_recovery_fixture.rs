@@ -10,6 +10,9 @@ pub(in super::super) struct Fixture {
     albums: Vec<String>,
 }
 impl Fixture {
+    pub fn setup_private_live(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
+        Self::setup_with_prefix(agent, directory, "private-live-read")
+    }
     pub fn setup_live_plan(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
         Self::setup_with_prefix(agent, directory, "live-resource-plan")
     }

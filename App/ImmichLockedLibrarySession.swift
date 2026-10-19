@@ -16,6 +16,7 @@ struct ImmichLockedTimer: Sendable {
 @MainActor final class ImmichLockedLibrarySession: ObservableObject {
     let visibility = ImmichVisibilityPresentation()
     let videoPlayer = ImmichLockedVideoPlayer()
+    let liveSelection = ImmichLockedLiveSelection()
     @Published private(set) var serverAddress: String?
     @Published private(set) var projection: ImmichLockedView?
     @Published private(set) var shielded = true
@@ -23,6 +24,7 @@ struct ImmichLockedTimer: Sendable {
     @Published private(set) var error: String?
     @Published private(set) var connecting = false
     @Published private(set) var busy = false
+    @Published private(set) var privateMediaCleanup: [PrivateMediaCleanupView] = []
     private var runtime: RustRuntime?
     private var shell: AppleShell?
     private var publish: (@MainActor (RuntimeSnapshot) -> Void)?
@@ -30,12 +32,15 @@ struct ImmichLockedTimer: Sendable {
     private var expectedGrantID: String?
     private var expectedImageID: String?
     private var expectedVideoID: String?
+    private var expectedLiveID: String?
+    private var liveSelectionRetirement: (id: UUID, task: Task<Void, Never>)?
     private var revision: UInt64 = 0
     private var coreBusy = false
     private var pendingRefresh: (id: UUID, grantID: String)?
     private var expiryTask: Task<Void, Never>?
     private var checkTask: Task<Void, Never>?
     #if SUWOP_VRT
+        private(set) var drainedLiveInspectionsForTesting: Set<String> = []
         var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue)?
         var timerEffect: (@MainActor (ImmichLockedTimer) async throws -> Void)?
         var refreshCompleted: (@MainActor (String) -> Void)?
@@ -76,6 +81,15 @@ struct ImmichLockedTimer: Sendable {
                 "generation": .number(Double(pending.generation)), "leaseID": .number(Double(leaseID)),
             ])
         }
+        configureLiveSelection(runtime: runtime, shell: shell)
+        shell.configureLiveMedia(runtime: runtime)
+        shell.immichLockedLiveAccess.acquisitionExpired = { [weak self] pending, leaseID in
+            self?.send([
+                "type": .string("expireImmichLockedLiveAcquisition"),
+                "sceneID": .string(pending.sceneID), "requestID": .string(pending.requestID),
+                "generation": .number(Double(pending.generation)), "leaseID": .number(Double(leaseID)),
+            ])
+        }
     }
 
     func view(for sceneID: String) -> ImmichLockedView? {
@@ -100,6 +114,7 @@ struct ImmichLockedTimer: Sendable {
         error = nil
         shell.immichLockedAccess.activate(sceneID: sceneID)
         shell.immichLockedVideoAccess.activate(sceneID: sceneID)
+        shell.immichLockedLiveAccess.activate(sceneID: sceneID)
         let context = shell.beginWorkflow()
         Task {
             await run([
@@ -132,6 +147,7 @@ struct ImmichLockedTimer: Sendable {
         guard ownerSceneID == sceneID, let shell else { return }
         shell.immichLockedAccess.sceneChanged(sceneID: sceneID, phase: phase)
         shell.immichLockedVideoAccess.sceneChanged(sceneID: sceneID, phase: phase)
+        shell.immichLockedLiveAccess.sceneChanged(sceneID: sceneID, phase: phase)
         if phase != .active {
             shield()
             expectedGrantID = nil
@@ -169,40 +185,15 @@ struct ImmichLockedTimer: Sendable {
         }
     }
 
-    var videoAccess: ImmichLockedVideoNativeAccess? {
-        shell?.immichLockedVideoAccess
-    }
-
-    func requestVideo(entryID: String, sceneID: String) {
-        guard !busy, let view = view(for: sceneID), let grant = view.grantID, let shell else { return }
-        let id = UUID().uuidString
-        expectedVideoID = id
-        expectedImageID = nil
-        projection?.image = nil
-        projection?.video = nil
-        shell.immichLockedAccess.invalidate()
-        shell.immichLockedVideoAccess.expect(requestID: id)
-        send([
-            "type": .string("requestImmichLockedVideo"), "entryID": .string(entryID),
-            "grantID": .string(grant), "sceneID": .string(sceneID), "requestID": .string(id),
-        ])
-    }
-
-    func stopVideo(sceneID: String) {
-        guard let id = expectedVideoID else { return }
-        expectedVideoID = nil
-        projection?.video = nil
-        projection?.videoPending = nil
-        shell?.immichLockedVideoAccess.invalidate()
-        send([
-            "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
-        ])
-    }
-
     func requestImage(entryID: String, sceneID: String) {
         guard let view = view(for: sceneID), let grant = view.grantID else { return }
+        liveSelection.cancel()
         let id = UUID().uuidString
         expectedImageID = id
+        expectedLiveID = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        shell?.immichLockedLiveAccess.invalidate()
         expectedVideoID = nil
         projection?.video = nil
         projection?.videoPending = nil
@@ -225,6 +216,7 @@ struct ImmichLockedTimer: Sendable {
     func receive(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= revision else { return }
         revision = snapshot.revision
+        privateMediaCleanup = snapshot.view.privateMediaCleanup
         coreBusy = snapshot.view.busy
         busy = coreBusy || pendingRefresh != nil
         let address = snapshot.view.state.connection?.address
@@ -235,6 +227,12 @@ struct ImmichLockedTimer: Sendable {
         }
         if fresh.videoPending?.requestID != expectedVideoID {
             fresh.videoPending = nil
+        }
+        if fresh.live?.pending.requestID != expectedLiveID {
+            fresh.live = nil
+        }
+        if fresh.livePending?.requestID != expectedLiveID {
+            fresh.livePending = nil
         }
         if fresh.image?.requestID != expectedImageID {
             fresh.image = nil
@@ -251,6 +249,7 @@ struct ImmichLockedTimer: Sendable {
         projection = fresh.state == .open && !mayRender ? nil : fresh
         shielded = !mayRender
         shell?.immichLockedVideoAccess.receive(fresh)
+        shell?.immichLockedLiveAccess.receive(fresh)
         error = fresh.error
         visibility.receive(snapshot, sceneID: mayRender ? ownerSceneID : nil)
         if mayRender, let ownerSceneID {
@@ -259,6 +258,7 @@ struct ImmichLockedTimer: Sendable {
     }
 
     private func shield(preservePending: Bool = false) {
+        liveSelection.cancel()
         pendingRefresh = nil
         busy = coreBusy
         visibility.clear(preservePending: preservePending)
@@ -268,46 +268,10 @@ struct ImmichLockedTimer: Sendable {
         projection = nil
         expectedImageID = nil
         expectedVideoID = nil
+        expectedLiveID = nil
         expiryTask?.cancel()
         checkTask?.cancel()
         shell?.invalidateImmichLockedPresentations()
-    }
-
-    private func schedule(_ timer: ImmichLockedTimer) {
-        guard expectedGrantID == timer.grantID, projection?.generation == timer.generation,
-              projection?.leaseID == timer.leaseID else { return }
-        if timer.expiry {
-            shell?.immichLockedVideoAccess.deadline(
-                grantID: timer.grantID,
-                generation: timer.generation,
-                leaseID: timer.leaseID,
-                milliseconds: timer.deadlineUnixMilliseconds
-            )
-        }
-        let remaining = max(0, timer.deadlineUnixMilliseconds - Int64(Date().timeIntervalSince1970 * 1000))
-        let delay = min(timer.milliseconds, remaining)
-        let task = Task { [weak self] in
-            do {
-                #if SUWOP_VRT
-                    if let effect = self?.timerEffect {
-                        try await effect(timer)
-                    } else {
-                        try await Task.sleep(for: .milliseconds(delay))
-                    }
-                #else
-                    try await Task.sleep(for: .milliseconds(delay))
-                #endif
-                try Task.checkCancellation()
-                await self?.fire(timer)
-            } catch { return }
-        }
-        if timer.expiry {
-            expiryTask?.cancel()
-            expiryTask = task
-        } else {
-            checkTask?.cancel()
-            checkTask = task
-        }
     }
 
     private func fire(_ timer: ImmichLockedTimer) async {
@@ -370,6 +334,11 @@ struct ImmichLockedTimer: Sendable {
                 requests += try await runtime.resolve(id: request.id, value: value, error: failure)
                 await synchronize()
             }
+            #if SUWOP_VRT
+                if event["type"]?.string == "inspectImmichLiveResources", let id = event["requestID"]?.string {
+                    drainedLiveInspectionsForTesting.insert(id)
+                }
+            #endif
         } catch { self.error = "ロックされた写真の確認を完了できませんでした。" }
     }
 
@@ -377,5 +346,213 @@ struct ImmichLockedTimer: Sendable {
         guard let runtime, let snapshot = try? await runtime.snapshot() else { return }
         publish?(snapshot)
         receive(snapshot)
+    }
+}
+
+/// Live request APIs remain separate from future drawable surface controls.
+extension ImmichLockedLibrarySession {
+    func requestLive(planID: String, sceneID: String, targetSize: CGSize) {
+        guard !busy, let view = view(for: sceneID), let grant = view.grantID, let shell else { return }
+        guard targetSize.width.isFinite, targetSize.height.isFinite,
+              targetSize.width > 0, targetSize.height > 0 else { return }
+        let id = UUID().uuidString
+        // Shield immediately; retained owners/tasks are joined by cancelOtherMedia before new I/O.
+        shell.immichLockedVideoAccess.invalidate()
+        shell.immichLockedAccess.invalidate()
+        do {
+            try shell.immichLockedLiveAccess.expect(requestID: id, targetSize: targetSize)
+        } catch { return }
+        expectedLiveID = id
+        expectedImageID = nil
+        expectedVideoID = nil
+        projection?.image = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        send([
+            "type": .string("requestImmichLockedLive"), "planID": .string(planID),
+            "grantID": .string(grant), "sceneID": .string(sceneID), "requestID": .string(id),
+        ])
+    }
+
+    func stopLive(sceneID: String) {
+        guard ownerSceneID == sceneID else { return }
+        liveSelection.cancel()
+        guard let id = expectedLiveID else { return }
+        expectedLiveID = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        shell?.immichLockedLiveAccess.invalidate()
+        send([
+            "type": .string("stopImmichLockedLive"),
+            "sceneID": .string(sceneID),
+            "requestID": .string(id),
+            "retryCleanup": .bool(true),
+        ])
+    }
+}
+
+extension ImmichLockedLibrarySession {
+    var liveAccess: ImmichLockedLiveNativeAccess? {
+        shell?.immichLockedLiveAccess
+    }
+
+    var videoAccess: ImmichLockedVideoNativeAccess? {
+        shell?.immichLockedVideoAccess
+    }
+
+    func requestVideo(entryID: String, sceneID: String) {
+        guard !busy, let view = view(for: sceneID), let grant = view.grantID, let shell else { return }
+        liveSelection.cancel()
+        let id = UUID().uuidString
+        expectedVideoID = id
+        expectedLiveID = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        shell.immichLockedLiveAccess.invalidate()
+        expectedImageID = nil
+        projection?.image = nil
+        projection?.video = nil
+        shell.immichLockedAccess.invalidate()
+        shell.immichLockedVideoAccess.expect(requestID: id)
+        send([
+            "type": .string("requestImmichLockedVideo"), "entryID": .string(entryID),
+            "grantID": .string(grant), "sceneID": .string(sceneID), "requestID": .string(id),
+        ])
+    }
+
+    func stopVideo(sceneID: String) {
+        guard let id = expectedVideoID else { return }
+        expectedVideoID = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        shell?.immichLockedVideoAccess.invalidate()
+        send([
+            "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+            "retryCleanup": .bool(true),
+        ])
+    }
+}
+
+extension ImmichLockedLibrarySession {
+    /// Inspection has no replacement-media transition. Retire Rust ownership before forgetting its IDs.
+    /// This task belongs to the session, not the cancellable selection; rapid reselection shares its JOIN.
+    private func retireLiveSelection(sceneID: String) -> Task<Void, Never>? {
+        guard ownerSceneID == sceneID, let shell else { return nil }
+        var stops: [[String: JSONValue]] = []
+        if let id = expectedLiveID {
+            stops.append([
+                "type": .string("stopImmichLockedLive"), "sceneID": .string(sceneID), "requestID": .string(id),
+                "retryCleanup": .bool(false),
+            ])
+        }
+        if let id = expectedVideoID {
+            stops.append([
+                "type": .string("stopImmichLockedVideo"), "sceneID": .string(sceneID), "requestID": .string(id),
+                "retryCleanup": .bool(false),
+            ])
+        }
+        expectedLiveID = nil
+        expectedVideoID = nil
+        expectedImageID = nil
+        projection?.live = nil
+        projection?.livePending = nil
+        projection?.video = nil
+        projection?.videoPending = nil
+        projection?.image = nil
+        shell.immichLockedLiveAccess.invalidate()
+        shell.immichLockedVideoAccess.invalidate()
+        shell.immichLockedAccess.invalidate()
+        let prior = liveSelectionRetirement?.task
+        guard !stops.isEmpty else { return prior }
+        let id = UUID(), context = shell.beginWorkflow()
+        let task = Task { @MainActor [self] in
+            defer {
+                if liveSelectionRetirement?.id == id {
+                    liveSelectionRetirement = nil
+                }
+            }
+            await prior?.value
+            for stop in stops {
+                await run(stop, context: context)
+            }
+        }
+        liveSelectionRetirement = (id, task)
+        return task
+    }
+
+    private func configureLiveSelection(runtime: RustRuntime, shell: AppleShell) {
+        liveSelection.configure(
+            runtime: runtime,
+            current: { [weak self] in self?.view(for: $0) },
+            inspect: { [weak self, weak shell] event in
+                guard let self, let shell else { throw CancellationError() }
+                await run(event, context: shell.beginWorkflow())
+            },
+            begin: { [weak self] sceneID in self?.retireLiveSelection(sceneID: sceneID) },
+            request: { [weak self] planID, sceneID, size in
+                self?.requestLive(planID: planID, sceneID: sceneID, targetSize: size)
+            }
+        )
+    }
+}
+
+extension ImmichLockedLibrarySession {
+    private func schedule(_ timer: ImmichLockedTimer) {
+        guard expectedGrantID == timer.grantID, projection?.generation == timer.generation,
+              projection?.leaseID == timer.leaseID else { return }
+        if timer.expiry {
+            shell?.immichLockedLiveAccess.deadline(
+                grantID: timer.grantID,
+                generation: timer.generation,
+                leaseID: timer.leaseID,
+                milliseconds: timer.deadlineUnixMilliseconds
+            )
+            shell?.immichLockedVideoAccess.deadline(
+                grantID: timer.grantID,
+                generation: timer.generation,
+                leaseID: timer.leaseID,
+                milliseconds: timer.deadlineUnixMilliseconds
+            )
+        }
+        let remaining = max(0, timer.deadlineUnixMilliseconds - Int64(Date().timeIntervalSince1970 * 1000))
+        let delay = min(timer.milliseconds, remaining)
+        let task = Task { [weak self] in
+            do {
+                #if SUWOP_VRT
+                    if let effect = self?.timerEffect {
+                        try await effect(timer)
+                    } else {
+                        try await Task.sleep(for: .milliseconds(delay))
+                    }
+                #else
+                    try await Task.sleep(for: .milliseconds(delay))
+                #endif
+                try Task.checkCancellation()
+                await self?.fire(timer)
+            } catch { return }
+        }
+        if timer.expiry {
+            expiryTask?.cancel()
+            expiryTask = task
+        } else {
+            checkTask?.cancel()
+            checkTask = task
+        }
+    }
+}
+
+extension ImmichLockedLibrarySession {
+    func retryPrivateMediaCleanup(_ recovery: PrivateMediaCleanupView) {
+        guard recovery.state == .needsAttention, let id = recovery.recoveryID,
+              let attempt = Int64(exactly: Double(recovery.expectedAttempt)), attempt == recovery.expectedAttempt,
+              privateMediaCleanup
+              .contains(where: { $0.recoveryID == id && $0.expectedAttempt == attempt && $0.state == .needsAttention })
+        else { return }
+        send([
+            "type": .string("retryPrivateMediaCleanup"), "recoveryID": .string(id),
+            "expectedAttempt": .number(Double(attempt)),
+        ])
     }
 }

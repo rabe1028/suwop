@@ -17,6 +17,8 @@ import Testing
     var saved: SavedLibrary
     var elevated = false
     var inspecting = false
+    enum InventoryForward { case linked, unlinked, missing, malformed }
+    var inventoryForward = InventoryForward.linked
     var wrongMotionOwner = false
     var drift = false
     var parentReads = 0
@@ -144,8 +146,8 @@ import Testing
         let body: JSONValue
         switch path {
         case "search/metadata":
-            let items: [JSONValue] = ordinary ? [] : inspecting
-                ? [asset(id: "malformed", additional: true), asset(id: other, additional: true)] : [asset(id: parent)]
+            let items: [JSONValue] = try ordinary ? [] : inspecting
+                ? [asset(id: "malformed", additional: true), asset(id: other, additional: true)] : [inventoryAsset()]
             body = .object(["assets": .object(["items": .array(items), "nextCursor": .null])])
         case "assets/\(parent)": parentReads += 1
             body = asset(id: parent, changed: drift && parentReads > 1)
@@ -153,6 +155,17 @@ import Testing
         default: throw SuwopError("Unexpected metadata ABI route")
         }
         return HttpResponse(body: body, status: 200)
+    }
+
+    private func inventoryAsset() throws -> JSONValue {
+        var fields = try asset(id: parent).decode([String: JSONValue].self)
+        switch inventoryForward {
+        case .linked: break
+        case .unlinked: fields["livePhotoVideoId"] = .null
+        case .missing: fields.removeValue(forKey: "livePhotoVideoId")
+        case .malformed: fields["livePhotoVideoId"] = .string(parent)
+        }
+        return .object(fields)
     }
 
     private func asset(id: String, additional: Bool = false, changed: Bool = false) -> JSONValue {
@@ -240,5 +253,47 @@ import Testing
     #expect(try await driver.inspect(sceneID: foreign).isEmpty)
     #expect(driver.routes.isEmpty)
     #expect(try await driver.runtime.view().immichLiveResources == nil)
+    driver.assertReadOnly()
+}
+
+@Test @MainActor func liveDiscoveryAffordanceTraversesABIWithoutGrantingMediaRead() async throws {
+    let cases: [(LiveResourcesABI.InventoryForward, ImmichLockedLiveDiscovery)] = [
+        (.linked, .observedLinked), (.unlinked, .observedUnlinked),
+        (.missing, .unknown), (.malformed, .unsupported),
+    ]
+    for (field, expected) in cases {
+        let driver = try LiveResourcesABI()
+        driver.inventoryForward = field
+        try await driver.ready()
+        let effects = driver.effects
+        let entry = try #require(await driver.runtime.view().immichLockedView.entries?.first)
+        #expect(entry.liveDiscovery == expected)
+        #expect(driver.effects == effects, "Projecting an affordance must execute no effect")
+        if expected == .unknown {
+            // Missing cached forward metadata must not hide a real pair: explicit fresh discovery still works.
+            try await driver.drain(driver.inspect())
+            let plan = try #require(await driver.runtime.view().immichLiveResources?.plan)
+            #expect(plan.readTargets.map(\.role) == [.parent, .motion])
+            #expect(plan.readTargets.map(\.key.assetID) == [driver.parent, driver.motion])
+            #expect(driver.routes == [
+                "GET auth/status", "GET assets/\(driver.parent)", "GET assets/\(driver.motion)",
+                "POST search/metadata", "GET assets/\(driver.parent)", "GET assets/\(driver.motion)",
+                "GET auth/status",
+            ])
+        }
+        driver.assertReadOnly()
+    }
+}
+
+@Test @MainActor func explicitLockedRefreshUpdatesLiveDiscoveryFromNewInventoryObservation() async throws {
+    let driver = try LiveResourcesABI()
+    driver.inventoryForward = .missing
+    try await driver.ready()
+    #expect(try await driver.runtime.view().immichLockedView.entries?.first?.liveDiscovery == .unknown)
+    driver.inventoryForward = .linked
+    try await driver.drain(driver.send([
+        "type": .string("refreshImmichLocked"), "grantID": .string(driver.grant), "sceneID": .string(driver.scene),
+    ]))
+    #expect(try await driver.runtime.view().immichLockedView.entries?.first?.liveDiscovery == .observedLinked)
     driver.assertReadOnly()
 }

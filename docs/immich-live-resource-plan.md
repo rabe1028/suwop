@@ -2,6 +2,8 @@
 
 This increment observes the selected Live Photo's parent and motion metadata through the dedicated Immich session. It is groundwork for paired playback and explicit visibility changes; it does not grant original-byte access or mutate either resource.
 
+The source-bound validation and pending statements below preserve the metadata increment's earlier checkpoints. That increment subsequently merged as [PR #40](https://github.com/rabe1028/suwop/pull/40), main `cdcbe039c653f1088a338c5efccbb829e4ba2479`; the shared-ledger base [PR #41](https://github.com/rabe1028/suwop/pull/41) merged as `418fd4d000414a836c36499361763814ba4a2dd8`. For the later paired protected-read/playback candidate and its separately scoped evidence, see [Private Live read](immich-private-live.md). Earlier pending statements are historical checkpoints, not the current merge state; their tests do not become acceptance for later paired changes.
+
 ## Contract
 
 `InspectImmichLiveResources` carries the parent key and exact request, grant, and scene IDs. Rust requires a current dedicated session, ordinary/protected-content generations, and admission for both resources. The selected parent must be an owned IMAGE with an explicit motion relation; the motion must be an owned VIDEO with an explicit null forward relation. Both require exact IDs, checksums, nonempty opaque revisions, explicit unstacked state, and no offline/trash state.
