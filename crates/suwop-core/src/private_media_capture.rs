@@ -4,7 +4,7 @@ use crate::{
     app::{Effect, Event, Model, ShellOperation, io},
     domain::AssetKey,
     immich_archive::VisibilityAuthority,
-    immich_locked::{live, video},
+    immich_locked::{self, live, video},
     protection::ProtectionScenePhase,
 };
 use crux_core::Command;
@@ -119,7 +119,7 @@ struct DrainReceipt {
     capture_id: String,
     cancelled_before_capture: bool,
 }
-fn cancellation(event: &Event, scene: &str) -> bool {
+fn cancellation(event: &Event, scene: &str, model: &Model) -> bool {
     match event {
         Event::Disconnect
         | Event::Configure { .. }
@@ -129,8 +129,12 @@ fn cancellation(event: &Event, scene: &str) -> bool {
         | Event::ProtectedReconciled { .. }
         | Event::OrdinarySelectedRefreshFinished { .. }
         | Event::ImmichVisibilityPrepared { .. }
-        | Event::ImmichVisibilityFinished { .. }
-        | Event::ImmichLockedRefreshed { .. } => true,
+        | Event::ImmichVisibilityFinished { .. } => true,
+        Event::ImmichLockedRefreshed {
+            generation,
+            refresh_id,
+            ..
+        } => immich_locked::refresh_completion_is_current(model, *generation, *refresh_id),
         Event::CloseImmichArchive { scene_id } => scene_id == scene,
         Event::ImmichLockedSceneChanged { scene_id, phase }
         | Event::ImmichArchiveSceneChanged { scene_id, phase } => {
@@ -276,7 +280,7 @@ pub(crate) fn intercept(event: Event, model: &mut Model) -> InterceptResult {
         .private_media_capture
         .records
         .iter()
-        .position(|r| r.event.is_some() && cancellation(&event, &r.scene))
+        .position(|r| r.event.is_some() && cancellation(&event, &r.scene, model))
     {
         let cleanup = cancel(model, index);
         return Ok((event, cleanup));

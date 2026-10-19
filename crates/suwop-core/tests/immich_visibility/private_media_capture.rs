@@ -614,3 +614,84 @@ fn cleanup_retry_wire_requires_camel_case_locator_and_exact_attempt() -> Result<
     }
     Ok(())
 }
+
+#[test]
+fn old_refresh_completion_cannot_cancel_a_new_capture_after_close_and_reopen() -> Result<(), String>
+{
+    let (c, mut shell) = setup()?;
+    let mut effects = c.process_event(refresh());
+    let mut old = None;
+    while let Some(effect) = effects.pop() {
+        let Effect::Io(mut request) = effect;
+        let value = shell.respond(&request.operation)?;
+        if matches!(&request.operation, ShellOperation::Http(r) if r.url.ends_with("/search/metadata"))
+        {
+            old = Some((request, value));
+            break;
+        }
+        effects.extend(
+            c.resolve(
+                &mut request,
+                ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+            )
+            .map_err(|_| "refresh resolve")?,
+        );
+    }
+    shell.run(&c, Event::CloseImmichLocked)?;
+    shell.run(&c, open(NEXT))?;
+    let capture = c.process_event(Event::PrepareImmichVisibility {
+        key: key(),
+        to: ImmichVisibility::Locked,
+        operation_id: OP.into(),
+        grant_id: NEXT.into(),
+        scene_id: SCENE.into(),
+    });
+    assert_eq!(capture.len(), 1);
+    assert!(c.view().busy);
+    let drains = shell.capture_drains.len();
+    let (mut old, value) = old.ok_or("held refresh inventory")?;
+    let late = c
+        .resolve(
+            &mut old,
+            ShellResponse {
+                value: Some(value),
+                error: None,
+            },
+        )
+        .map_err(|_| "late refresh resolve")?;
+    shell.drain(&c, late)?;
+    assert!(
+        c.view().busy,
+        "An obsolete refresh must not revoke the new capture's busy ownership"
+    );
+    assert_eq!(c.view().immich_locked_view.grant_id.as_deref(), Some(NEXT));
+    assert_eq!(
+        shell.capture_drains.len(),
+        drains,
+        "Stale refresh must issue no captured drain"
+    );
+    assert_eq!(
+        (shell.confirmations, shell.persist_calls, shell.writes),
+        (0, 0, 0)
+    );
+    let next = resolve_capture(
+        &c,
+        capture,
+        ShellResponse {
+            value: Some(Value::Null),
+            error: None,
+        },
+    )?;
+    shell.drain(&c, next)?;
+    assert!(!c.view().busy);
+    assert_eq!(shell.capture_drains.len(), drains + 1);
+    assert_eq!(
+        (shell.confirmations, shell.writes),
+        (1, 1),
+        "The intact current capture can complete normally"
+    );
+    Ok(())
+}

@@ -916,18 +916,34 @@ fn refresh_inventory(
         });
     })
 }
+fn pending_refresh(model: &Model, refresh_id: u64) -> bool {
+    model.immich_locked.refresh_id == refresh_id && model.immich_locked.refresh_busy
+}
+/// The completion must still belong to the active refresh and protected session.
+/// Capture cancellation uses the same authority as accepting the refreshed inventory.
+pub(crate) fn refresh_completion_is_current(
+    model: &Model,
+    generation: u64,
+    refresh_id: u64,
+) -> bool {
+    pending_refresh(model, refresh_id)
+        && epoch(&model.immich_locked) == generation
+        && current(model)
+}
 fn refreshed_inventory(
     model: &mut Model,
     generation: u64,
     refresh_id: u64,
     result: Result<(Vec<ImmichLockedEntry>, std::time::Instant), String>,
 ) -> Command<crate::app::Effect, Event> {
-    if model.immich_locked.refresh_id != refresh_id || !model.immich_locked.refresh_busy {
+    if !pending_refresh(model, refresh_id) {
         return Command::done();
     }
+    let accepted = refresh_completion_is_current(model, generation, refresh_id);
+    // A matching obsolete completion still releases its own pending refresh flags.
     model.immich_locked.refresh_busy = false;
     model.busy = false;
-    if epoch(&model.immich_locked) != generation || !current(model) {
+    if !accepted {
         return Command::done();
     }
     if let Ok((entries, deadline)) = result {
@@ -1414,6 +1430,99 @@ mod tests {
             Some(std::time::Instant::now() + std::time::Duration::from_mins(15));
         model.immich_locked.lease_deadline = Some(std::time::Instant::now());
         model
+    }
+    fn pending_refresh_model() -> Model {
+        let mut model = open_model();
+        model.immich_locked.lease_deadline =
+            Some(std::time::Instant::now() + std::time::Duration::from_secs(30));
+        model.immich_locked.refresh_id = 7;
+        model.immich_locked.refresh_busy = true;
+        model.busy = true;
+        model
+    }
+    #[test]
+    fn refresh_completion_requires_pending_identity_generation_and_current_session() {
+        for invalid in 0..7 {
+            let mut model = pending_refresh_model();
+            match invalid {
+                0 => model.immich_locked.refresh_id += 1,
+                1 => model.immich_locked.refresh_busy = false,
+                2 => {
+                    model.immich_locked.generation.store(1, Ordering::SeqCst);
+                }
+                3 => model.immich_locked.lease_deadline = Some(std::time::Instant::now()),
+                4 => model.immich_locked.active_scene = Some("another-scene".into()),
+                5 => model.session = None,
+                _ => {}
+            }
+            assert_eq!(refresh_completion_is_current(&model, 0, 7), invalid == 6);
+            let mut command = refreshed_inventory(&mut model, 0, 7, Err("refresh failed".into()));
+            assert_eq!(command.effects().count(), 0);
+            // Preserve the reducer's pending-flag cleanup even when the matching
+            // completion cannot publish inventory (expired/foreign generation/session).
+            assert_eq!(model.busy, invalid < 2);
+            assert!(!model.immich_locked.refresh_busy || invalid == 0);
+            assert_eq!(model.immich_locked.error.is_some(), invalid == 6);
+        }
+    }
+    #[test]
+    fn current_refresh_completion_still_cancels_an_exact_capture() -> Result<(), String> {
+        use crux_core::App;
+        let mut model = pending_refresh_model();
+        model.ready = true;
+        model.state.schema_version = 8;
+        model.busy = false;
+        model.immich_locked.refresh_busy = false;
+        model.immich_locked.scene_id = Some("scene".into());
+        model.immich_locked.active_scene = Some("scene".into());
+        model
+            .immich_locked
+            .session
+            .as_mut()
+            .ok_or("session")?
+            .write_contract =
+            write_contract::LockedVisibilityWriteContract::parse(&serde_json::json!({
+                "major":3,"minor":3,"patch":3,"prerelease":null
+            }));
+        let mut capture = crate::app::Suwop.update(
+            Event::PrepareImmichVisibility {
+                key: crate::domain::AssetKey {
+                    provider: crate::domain::Provider::Immich,
+                    scope: "scope".into(),
+                    asset_id: "33333333-3333-4333-8333-333333333333".into(),
+                },
+                to: crate::immich_visibility::ImmichVisibility::Locked,
+                operation_id: "44444444-4444-4444-8444-444444444444".into(),
+                grant_id: "grant".into(),
+                scene_id: "scene".into(),
+            },
+            &mut model,
+        );
+        let effects: Vec<_> = capture.effects().collect();
+        assert_eq!(effects.len(), 1);
+        assert!(matches!(&effects[0], crate::app::Effect::Io(r)
+            if matches!(r.operation, ShellOperation::CapturePrivateMediaKey { .. })));
+        // Seed a pending current completion at the interception boundary. The public
+        // busy guard normally serializes refresh and capture admission.
+        model.immich_locked.refresh_busy = true;
+        let mut cancelled = crate::app::Suwop.update(
+            Event::ImmichLockedRefreshed {
+                generation: 0,
+                refresh_id: 7,
+                result: Err("refresh failed".into()),
+            },
+            &mut model,
+        );
+        let cleanup: Vec<_> = cancelled.effects().collect();
+        assert_eq!(cleanup.len(), 1);
+        assert!(matches!(&cleanup[0], crate::app::Effect::Io(r)
+        if matches!(r.operation, ShellOperation::DrainCapturedPrivateMedia {
+            cancel_before_capture: true, retry_cleanup: false, ..
+        })));
+        assert!(!model.busy);
+        assert!(!model.immich_locked.refresh_busy);
+        assert!(model.immich_locked.error.is_some());
+        Ok(())
     }
     #[test]
     fn expired_display_lease_cannot_be_renewed_by_delayed_refresh_response() {
