@@ -15,7 +15,11 @@ import XCTest
         XCTAssertEqual(probe.peak, 8)
         XCTAssertEqual(Set(replies.map(\.id)), Set(0 ..< 8))
         XCTAssertEqual(replies.filter { $0.failure == "cancelled" }.count, 1)
-        XCTAssertEqual(replies.filter { $0.value == .null }.count, 7)
+        let succeeded = replies.filter {
+            guard case .null? = $0.value else { return false }
+            return $0.failure == nil
+        }
+        XCTAssertEqual(succeeded.count, 7)
     }
 }
 
