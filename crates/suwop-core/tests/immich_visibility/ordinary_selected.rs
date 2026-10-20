@@ -662,6 +662,7 @@ fn readonly_and_operational_same_hash_sources_can_both_be_selected_without_grant
     shell.run(
         &c,
         Event::Progress {
+            session: None,
             state: changed,
             status: "fixture change".into(),
         },
@@ -1104,6 +1105,7 @@ fn canonical_protection_and_revision_progress_revoke_only_current_read_authority
         shell.run(
             &c,
             Event::Progress {
+                session: None,
                 state: changed,
                 status: "fixture update".into(),
             },
@@ -1149,6 +1151,7 @@ fn held_scan_metadata_cannot_admit_after_new_canonical_b_membership() -> Result<
     shell.run(
         &c,
         Event::Progress {
+            session: None,
             state: protected,
             status: "fixture protection".into(),
         },
@@ -1228,6 +1231,7 @@ fn already_issued_refresh_persist_conflict_is_not_published_as_current_or_claime
     shell.run(
         &c,
         Event::Progress {
+            session: None,
             state: changed,
             status: "trusted internal protection update".into(),
         },

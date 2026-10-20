@@ -25,6 +25,7 @@ actor HTTPExecutor {
     private let session: URLSession
     init() {
         let config = URLSessionConfiguration.ephemeral
+        config.httpMaximumConnectionsPerHost = 32
         config.urlCache = nil
         config.httpCookieStorage = nil
         config.httpShouldSetCookies = false

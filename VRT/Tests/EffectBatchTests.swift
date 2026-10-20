@@ -4,7 +4,7 @@ import XCTest
 
 @MainActor final class EffectBatchTests: XCTestCase {
     func testIndependentRequestsOverlapAndFailuresKeepTheirIDs() async throws {
-        let requests = try (0 ..< 8).map { index in
+        let requests = try (0 ..< 32).map { index in
             try JSONValue.object([
                 "id": .number(Double(index)),
                 "effect": .object(["Io": .object(["type": .string("http")])]),
@@ -12,14 +12,14 @@ import XCTest
         }
         let probe = ConcurrentEffectProbe()
         let replies = await EffectBatch.execute(requests, context: nil, execute: probe.execute)
-        XCTAssertEqual(probe.peak, 8)
-        XCTAssertEqual(Set(replies.map(\.id)), Set(0 ..< 8))
+        XCTAssertEqual(probe.peak, 32)
+        XCTAssertEqual(Set(replies.map(\.id)), Set(0 ..< 32))
         XCTAssertEqual(replies.filter { $0.failure == "cancelled" }.count, 1)
         let succeeded = replies.filter {
             guard case .null? = $0.value else { return false }
             return $0.failure == nil
         }
-        XCTAssertEqual(succeeded.count, 7)
+        XCTAssertEqual(succeeded.count, 31)
     }
 }
 

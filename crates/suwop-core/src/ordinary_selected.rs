@@ -242,7 +242,13 @@ impl RefreshOrigin {
         session.map(|s| (s.endpoint.clone(), s.scope.clone(), s.user_id.clone()))
     }
     fn accepts(&self, model: &crate::app::Model, result: &crate::workflow::Outcome) -> bool {
-        if self.session != Self::identity(model.session.as_ref())
+        // A refresh may publish its authenticated session with a Limited subset
+        // before completion. The refresh id/generation still fence stale work;
+        // initial connections must additionally match the configured endpoint below.
+        let current = Self::identity(model.session.as_ref());
+        let published_initial =
+            self.session.is_none() && current == Self::identity(result.session.as_ref());
+        if (self.session != current && !published_initial)
             || self.connection
                 != model
                     .state

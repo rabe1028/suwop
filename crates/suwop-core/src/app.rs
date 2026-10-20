@@ -918,6 +918,7 @@ pub enum Event {
     #[serde(skip)]
     Progress {
         state: SavedLibrary,
+        session: Option<Session>,
         status: String,
     },
     #[serde(skip)]
@@ -1169,11 +1170,18 @@ impl Suwop {
                 model.fetch_status = Some(status);
                 Command::done()
             }
-            Event::Progress { mut state, status } => {
+            Event::Progress {
+                mut state,
+                session,
+                status,
+            } => {
                 if model.changed_during_work {
                     invalidate_apple(&mut state);
                 }
                 model.state = state;
+                if let Some(session) = session {
+                    model.session = Some(session);
+                }
                 model.status = status;
                 crate::protection::reconcile(model)
             }

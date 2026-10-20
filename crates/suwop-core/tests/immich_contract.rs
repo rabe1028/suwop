@@ -70,6 +70,7 @@ fn scan_with_peak(
         now: 10.0,
     });
     let mut peak = 0;
+    let mut saw_partial = false;
     while !effects.is_empty() {
         peak = peak.max(effects.len());
         let Effect::Io(mut request) = effects.remove(0);
@@ -109,8 +110,43 @@ fn scan_with_peak(
             )
             .map_err(|e| e.to_string())?,
         );
+        saw_partial |= assert_partial_preview(&core.view());
+    }
+    if seen
+        .iter()
+        .filter(|r| r.url.contains("asset-files?"))
+        .count()
+        > 32
+    {
+        assert!(
+            saw_partial,
+            "must publish before all detail requests resolve"
+        );
     }
     Ok((seen, core.view(), peak))
+}
+fn assert_partial_preview(view: &suwop_core::app::ViewModel) -> bool {
+    if let Some(snapshot) = view
+        .state
+        .snapshots
+        .iter()
+        .find(|s| s.provider == Provider::Immich && s.access == ScanAccess::Limited)
+    {
+        assert!(
+            view.busy,
+            "partial publication must not finish the workflow"
+        );
+        assert!(!snapshot.completely_indexed());
+        assert!(!view.can_transfer);
+        assert!(!view.photos.is_empty(), "verified subset must be visible");
+        assert!(
+            view.preview_choices
+                .values()
+                .any(|choices| !choices.is_empty())
+        );
+        return true;
+    }
+    false
 }
 #[test]
 fn endpoint_and_redirect_validation_preserve_proxy_prefix() -> Result<(), String> {
@@ -300,7 +336,7 @@ fn unexpected_locked_search_members_are_excluded_without_losing_timeline_or_arch
 
 #[test]
 fn hydration_is_bounded_parallel_and_publishes_every_asset() -> Result<(), String> {
-    let items: Vec<_> = (1..=19)
+    let items: Vec<_> = (1..=65)
         .map(|n| {
             let mut item = asset_json();
             item["id"] = json!(format!("{n:08}-1111-4111-8111-111111111111"));
@@ -315,15 +351,15 @@ fn hydration_is_bounded_parallel_and_publishes_every_asset() -> Result<(), Strin
         },
         vec![json!({"assets":{"items":items,"nextCursor":null}})],
     )?;
-    assert_eq!(peak, 8, "requests must overlap without unbounded fan-out");
+    assert_eq!(peak, 32, "requests must overlap without unbounded fan-out");
     assert!(view.error.is_none(), "{:?}", view.error);
     assert!(!view.busy);
-    assert_eq!(view.state.snapshots[1].assets.len(), 19);
+    assert_eq!(view.state.snapshots[1].assets.len(), 65);
     assert_eq!(
         seen.iter()
             .filter(|r| r.url.contains("asset-files?"))
             .count(),
-        19
+        65
     );
     assert!(!view.status.contains("取得中"));
     Ok(())

@@ -473,6 +473,7 @@ impl Runtime<'_> {
     fn progress(&self, status: &str) {
         self.ctx.send_event(Event::Progress {
             state: self.state.clone(),
+            session: None,
             status: status.into(),
         });
     }
@@ -595,9 +596,9 @@ impl Runtime<'_> {
                     self.ctx.send_event(Event::FetchProgress {
                         status: format!("Immich の詳細を取得中: 0 / {total} 件"),
                     });
-                    // Bound both native requests and temporary hydration data. Publication
-                    // remains atomic: incomplete metadata never authorizes deletion.
-                    for (index, batch) in assets.chunks(8).enumerate() {
+                    // Bound native requests; publish verified subsets as Limited so
+                    // incomplete enumeration never authorizes a Move.
+                    for (index, batch) in assets.chunks(32).enumerate() {
                         self.check_content_generation(&[])?;
                         let results = futures::future::join_all(
                             batch
@@ -613,10 +614,29 @@ impl Runtime<'_> {
                                 }
                             }
                         }
+                        // Publish the first batch promptly, then amortize full-view work.
+                        // The canonical workflow state stays private until completion.
+                        if index == 0 || (index + 1) % 16 == 0 {
+                            self.check_content_generation(&[])?;
+                            let mut partial = self.state.clone();
+                            partial.snapshots.retain(|s| s.provider != Provider::Immich);
+                            partial.snapshots.push(LibrarySnapshot {
+                                provider: Provider::Immich,
+                                scope: session.scope.clone(),
+                                assets: records.clone(),
+                                access: ScanAccess::Limited,
+                                scanned_at: Some(now),
+                            });
+                            self.ctx.send_event(Event::Progress {
+                                state: partial,
+                                session: Some(session.clone()),
+                                status: "取得済みの写真を表示しています。".into(),
+                            });
+                        }
                         self.ctx.send_event(Event::FetchProgress {
                             status: format!(
                                 "Immich の詳細を取得中: {} / {total} 件",
-                                ((index + 1) * 8).min(total)
+                                ((index + 1) * 32).min(total)
                             ),
                         });
                     }

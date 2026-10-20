@@ -465,7 +465,7 @@ private extension LibraryModel {
         var requests = initial
         while !requests.isEmpty {
             let count = requests.first?.effect["Io"]?.type == "http"
-                ? min(8, requests.prefix { $0.effect["Io"]?.type == "http" }.count) : 1
+                ? min(32, requests.prefix { $0.effect["Io"]?.type == "http" }.count) : 1
             let batch = Array(requests.prefix(count))
             requests.removeFirst(count)
             let replies = await EffectBatch.execute(batch, context: context, execute: executeEffect)
