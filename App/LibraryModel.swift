@@ -395,13 +395,13 @@ import SwiftUI
     }
 }
 
-private extension LibraryModel {
-    func readView() async throws {
+extension LibraryModel {
+    private func readView() async throws {
         guard let runtime else { return }
         try await publish(runtime.snapshot())
     }
 
-    private func publish(_ snapshot: RuntimeSnapshot) {
+    func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
         publishedRevision = snapshot.revision
         let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])

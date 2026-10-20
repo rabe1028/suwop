@@ -852,6 +852,9 @@ pub enum Event {
         key: crate::albums::AlbumKey,
         edit: crate::albums::AlbumEdit,
     },
+    BrowseAlbumCandidates {
+        key: Option<crate::albums::AlbumKey>,
+    },
     Browse {
         options: crate::browser::BrowserOptions,
     },
@@ -935,6 +938,7 @@ pub struct Model {
     /// Observation-only token shared with in-flight workflows; never persisted.
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
+    pub album_candidate_key: Option<crate::albums::AlbumKey>,
     pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
     pub session: Option<Session>,
@@ -1143,6 +1147,10 @@ impl Suwop {
                 model.error = choose_preview(model, &anchor, key).err();
                 Command::done()
             }
+            Event::BrowseAlbumCandidates { key } => {
+                model.album_candidate_key = key;
+                Command::done()
+            }
             Event::Browse { options } => {
                 model.browser = options;
                 Command::done()
@@ -1311,7 +1319,12 @@ impl Suwop {
                     crate::media::kind(p).map(|kind| (crate::browser::photo_id(p), kind))
                 })
                 .collect(),
-            albums: crate::albums::views(&public.albums, &photos, &public.snapshots),
+            albums: crate::albums::views_for_picker(
+                &public.albums,
+                &photos,
+                &public.snapshots,
+                model.album_candidate_key.as_ref(),
+            ),
             browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
             pending_apple_count: public
@@ -1547,6 +1560,7 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
                 | Event::Progress { .. }
                 | Event::Finished { .. }
                 | Event::Browse { .. }
+                | Event::BrowseAlbumCandidates { .. }
                 | Event::ChoosePreview { .. }
         )
 }

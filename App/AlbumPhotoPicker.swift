@@ -53,7 +53,20 @@ struct AlbumPhotoPicker: View {
                     }
                 }.padding(.horizontal)
             }.navigationTitle("写真を追加")
+                .onAppear { model.browseAlbumCandidates(key) }
+                .onDisappear { model.browseAlbumCandidates(nil) }
                 .onChange(of: candidates.map(\.key)) { _, keys in selected.formIntersection(Set(keys)) }
+        }
+    }
+}
+
+extension LibraryModel {
+    func browseAlbumCandidates(_ key: AlbumKey?) {
+        guard let runtime else { return }
+        Task {
+            do { try await publish(runtime.browseAlbumCandidates(key)) } catch {
+                errorMessage = error.localizedDescription
+            }
         }
     }
 }

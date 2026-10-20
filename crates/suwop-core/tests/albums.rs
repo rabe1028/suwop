@@ -608,3 +608,76 @@ fn pending_apple_delete_still_fences_target_album_members_and_owner_changes() ->
     assert_eq!(core.view().state.pending_apple_trash.len(), 1);
     Ok(())
 }
+
+#[test]
+fn gallery_materializes_candidates_only_for_the_open_album() -> Result<(), String> {
+    use crux_core::App;
+    let mut state = fixture_state();
+    let template = state.snapshots[0].assets[0].clone();
+    state.snapshots[0].assets = (0..1_000)
+        .map(|index| {
+            let mut asset = template.clone();
+            asset.key.asset_id = index.to_string();
+            asset
+        })
+        .collect();
+    state.albums[0].albums = (0..100)
+        .map(|index| {
+            let mut item = album();
+            item.key.album_id = index.to_string();
+            item
+        })
+        .collect();
+    let key = state.albums[0].albums[0].key.clone();
+    let mut model = Model {
+        state,
+        ready: true,
+        ..Model::default()
+    };
+    let view = Suwop.view(&model);
+    assert!(view.albums.iter().all(|a| a.candidates.is_empty()));
+    let baseline = serde_json::to_vec(&view).map_err(|e| e.to_string())?.len();
+    let _ = Suwop.update(
+        Event::BrowseAlbumCandidates {
+            key: Some(key.clone()),
+        },
+        &mut model,
+    );
+    let view = Suwop.view(&model);
+    assert_eq!(
+        view.albums
+            .iter()
+            .map(|a| a.candidates.len())
+            .sum::<usize>(),
+        1_000
+    );
+    assert_eq!(
+        view.albums
+            .iter()
+            .find(|a| a.album.key == key)
+            .map(|a| a.candidates.len()),
+        Some(1_000)
+    );
+    // Adding 99 unopened albums must not multiply the candidate payload.
+    assert!(serde_json::to_vec(&view).map_err(|e| e.to_string())?.len() < baseline + 300_000);
+    model.state.snapshots[0].assets[0].apple_visibility =
+        suwop_core::domain::AppleVisibility::Hidden;
+    assert_eq!(
+        Suwop
+            .view(&model)
+            .albums
+            .iter()
+            .map(|a| a.candidates.len())
+            .sum::<usize>(),
+        999
+    );
+    let _ = Suwop.update(Event::BrowseAlbumCandidates { key: None }, &mut model);
+    assert!(
+        Suwop
+            .view(&model)
+            .albums
+            .iter()
+            .all(|a| a.candidates.is_empty())
+    );
+    Ok(())
+}

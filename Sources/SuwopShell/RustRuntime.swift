@@ -64,6 +64,11 @@ public actor RustRuntime {
         return try snapshot()
     }
 
+    public func browseAlbumCandidates(_ key: AlbumKey?) throws -> RuntimeSnapshot {
+        _ = try update(.object(["type": .string("browseAlbumCandidates"), "key": key.map(JSONValue.from) ?? .null]))
+        return try snapshot()
+    }
+
     public func choosePreview(anchor: AssetKey, key: AssetKey) throws -> RuntimeSnapshot {
         try Task.checkCancellation()
         _ = try update(.object(["type": .string("choosePreview"), "anchor": .from(anchor), "key": .from(key)]))

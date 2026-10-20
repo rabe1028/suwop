@@ -1383,6 +1383,7 @@ pub fn invalidates(event: &Event) -> bool {
     !matches!(
         event,
         Event::Browse { .. }
+            | Event::BrowseAlbumCandidates { .. }
             | Event::ChoosePreview { .. }
             | Event::BeginProtectedAccess { .. }
             | Event::LockProtectedAccess

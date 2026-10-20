@@ -153,6 +153,17 @@ pub fn views(
     photos: &[UnifiedPhoto],
     libraries: &[LibrarySnapshot],
 ) -> Vec<AlbumView> {
+    views_for_picker(snapshots, photos, libraries, None)
+}
+
+/// Candidate inventories are materialized only for the currently open picker.
+#[must_use]
+pub fn views_for_picker(
+    snapshots: &[AlbumSnapshot],
+    photos: &[UnifiedPhoto],
+    libraries: &[LibrarySnapshot],
+    picker: Option<&AlbumKey>,
+) -> Vec<AlbumView> {
     let current: BTreeSet<_> = libraries
         .iter()
         .filter(|s| s.access != ScanAccess::Unavailable)
@@ -169,7 +180,10 @@ pub fn views(
                     photo_ids.push(crate::browser::photo_id(photo));
                 }
                 for asset in &photo.assets {
-                    if asset.key.provider == album.key.provider
+                    if picker == Some(&album.key)
+                        && album.permissions.add
+                        && snapshot.access == ScanAccess::Full
+                        && asset.key.provider == album.key.provider
                         && asset.key.scope == album.key.scope
                         && current.contains(&asset.key)
                         && !members.contains(&asset.key)
