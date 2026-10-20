@@ -778,3 +778,16 @@ fn hide_eligibility_requires_current_full_snapshot_and_unknown_fences_block_exac
         vec![facts("two").key]
     );
 }
+
+#[test]
+fn large_catalog_hide_eligibility_preserves_hidden_and_duplicate_exclusions() {
+    let mut state = state();
+    state.snapshots[0].assets = (0..10_000).map(|id| asset(&id.to_string())).collect();
+    state.snapshots[0].assets[0].apple_visibility = AppleVisibility::Hidden;
+    let duplicate = state.snapshots[0].assets[1].clone();
+    state.snapshots[0].assets.push(duplicate);
+    let keys = suwop_core::apple_visibility::hide_keys(&state);
+    assert_eq!(keys.len(), 9_998);
+    assert!(!keys.contains(&facts("0").key));
+    assert!(!keys.contains(&facts("1").key));
+}

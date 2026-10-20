@@ -9,7 +9,7 @@ use crux_core::{
 use serde_json::{Value, json};
 use sha1::Digest;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::{CStr, CString, c_char},
     io::Read,
     sync::{
@@ -18,12 +18,17 @@ use std::{
     },
 };
 use suwop_core::{
-    app::Suwop,
     domain::{AppleFacts, FileSignature, StoredAsset, describe_apple, hex},
     workflow::HashResult,
 };
 
-type Runtime = Bridge<Suwop, JsonFfiFormat>;
+mod input_limits;
+mod projection;
+struct Runtime {
+    bridge: Bridge<projection::ProjectionApp, JsonFfiFormat>,
+    query: projection::Query,
+    bulk_replies: BTreeSet<u32>,
+}
 static CORES: OnceLock<Mutex<BTreeMap<u64, Runtime>>> = OnceLock::new();
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 type Cancellations = BTreeMap<u64, Arc<AtomicBool>>;
@@ -65,7 +70,18 @@ pub extern "C" fn suwop_new() -> u64 {
         return 0;
     };
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    registry.insert(id, Bridge::new(Core::new()));
+    let query = Arc::default();
+    registry.insert(
+        id,
+        Runtime {
+            bridge: Bridge::new(Core::new_with(
+                projection::ProjectionApp(Arc::clone(&query)),
+                suwop_core::app::Model::default(),
+            )),
+            query,
+            bulk_replies: BTreeSet::new(),
+        },
+    );
     id
 }
 #[unsafe(no_mangle)]
@@ -89,14 +105,12 @@ pub unsafe extern "C" fn suwop_call(handle: u64, action: u32, input: *const c_ch
                 .to_str()
                 .map_err(|_| "Invalid UTF-8".to_owned())?
         };
-        if text.len() > 16 * 1024 * 1024 {
-            return Err("Bridge input exceeds 16 MiB".into());
-        }
+        input_limits::admit_envelope(action, text.len())?;
         execute(handle, action, text)
     });
     let envelope = match result {
         Ok(Ok(value)) => json!({"value":value}),
-        Ok(Err(error)) => json!({"error":error}),
+        Ok(Err(error)) => json!({"inputRejected": error == input_limits::ERROR, "error":error}),
         Err(_) => {
             json!({"error":"Rust bridge failed. No operation will be retried automatically."})
         }
@@ -171,8 +185,10 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             return color_plan(input);
         }
         15 => {
+            let value: Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            input_limits::admit_catalog(&value, input.len())?;
             return suwop_local_store::dispatch(
-                serde_json::from_str(input).map_err(|e| e.to_string())?,
+                serde_json::from_value(value).map_err(|e| e.to_string())?,
             );
         }
         _ => {}
@@ -180,10 +196,11 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
     execute_core(handle, action, input)
 }
 fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> {
-    let registry = cores()
+    let mut registry = cores()
         .lock()
         .map_err(|_| "Rust bridge lock failed".to_owned())?;
-    let bridge = registry.get(&handle).ok_or("Invalid core handle")?;
+    let runtime = registry.get_mut(&handle).ok_or("Invalid core handle")?;
+    let bridge = &runtime.bridge;
     let mut output = Vec::new();
     match action {
         0 => bridge
@@ -196,6 +213,7 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> 
                 response: Value,
             }
             let response: Response = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            input_limits::admit_reply(&runtime.bulk_replies, response.id, input.len())?;
             bridge
                 .resolve(
                     crux_core::bridge::EffectId(response.id),
@@ -203,11 +221,23 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> 
                     &mut output,
                 )
                 .map_err(|e| e.to_string())?;
+            runtime.bulk_replies.remove(&response.id);
         }
         2 => bridge.view(&mut output).map_err(|e| e.to_string())?,
+        16 => {
+            let keys = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            *runtime.query.lock().map_err(|e| e.to_string())? = Some(keys);
+            let result = bridge.view(&mut output);
+            *runtime.query.lock().map_err(|e| e.to_string())? = None;
+            result.map_err(|e| e.to_string())?;
+        }
         _ => return Err("Unknown bridge action".into()),
     }
-    serde_json::from_slice(&output).map_err(|e| e.to_string())
+    let value: Value = serde_json::from_slice(&output).map_err(|e| e.to_string())?;
+    if action == 0 || action == 1 {
+        input_limits::remember_replies(&mut runtime.bulk_replies, &value);
+    }
+    Ok(value)
 }
 
 fn color_plan(input: &str) -> Result<Value, String> {

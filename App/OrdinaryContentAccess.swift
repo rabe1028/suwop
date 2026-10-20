@@ -21,12 +21,10 @@ import SuwopShell
         case .destinationReadback, .visibilityReconciliation, .selectedPresentationMetadata: false
         }
         guard requiresPublishedKey || expectedRevision?.isEmpty == false else { throw CancellationError() }
-        let view = try await runtime.snapshot().view
+        let revision = try await runtime.ordinaryContentRevision(
+            keys: keys, expectedRevision: expectedRevision, requiresPublishedKey: requiresPublishedKey
+        )
         try context.requireCurrent(sourceKeys: keys)
-        guard expectedRevision == nil || expectedRevision == view.privateContentRevision,
-              !keys.isEmpty,
-              !requiresPublishedKey || keys.allSatisfy(view.ordinaryContentKeys.contains)
-        else { throw CancellationError() }
-        return view.privateContentRevision
+        return revision
     }
 }

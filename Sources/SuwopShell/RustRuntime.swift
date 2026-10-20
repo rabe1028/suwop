@@ -20,12 +20,37 @@ public actor RustRuntime {
     public func resolve(id: UInt32, value: JSONValue?, error: String?) throws -> [EffectRequest] {
         defer { revision &+= 1 }
         let response: JSONValue = .object(["value": value ?? .null, "error": error.map(JSONValue.string) ?? .null])
-        return try bridge.call(1, input: .object(["id": .number(Double(id)), "response": response]))
-            .decode([EffectRequest].self)
+        do {
+            return try bridge.call(1, input: .object(["id": .number(Double(id)), "response": response]))
+                .decode([EffectRequest].self)
+        } catch let rejected as BridgeInputRejected {
+            // The oversized value never reached the reducer. Complete that exact
+            // pending effect with failure so Rust can clear busy and retain its
+            // normal uncertainty/cleanup rules. Never repeat the native operation.
+            let failure: JSONValue = .object(["value": .null, "error": .string(rejected.message)])
+            return try bridge.call(1, input: .object(["id": .number(Double(id)), "response": failure]))
+                .decode([EffectRequest].self)
+        }
     }
 
     public func view() throws -> ViewModel {
-        try bridge.call(2).decode(ViewModel.self)
+        try bridge.callDecoded(2, as: ViewModel.self)
+    }
+
+    /// Query current Rust authority without serializing every photo for each thumbnail.
+    public func ordinaryContentRevision(
+        keys: [AssetKey],
+        expectedRevision: String?,
+        requiresPublishedKey: Bool
+    ) throws -> String {
+        let projection = try bridge.call(16, input: .from(keys))
+        let allowed = try projection["keys"].decode([AssetKey].self)
+        guard let current = projection["revision"].string,
+              !keys.isEmpty,
+              expectedRevision == nil || expectedRevision == current,
+              !requiresPublishedKey || keys.allSatisfy(allowed.contains)
+        else { throw CancellationError() }
+        return current
     }
 
     public func snapshot() throws -> RuntimeSnapshot {

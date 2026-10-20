@@ -565,3 +565,34 @@ fn visibility_journal_fence_redacts_nested_state_and_stale_error_without_hiding_
     assert_eq!(serde_json::to_value(&model.state)?, before);
     Ok(())
 }
+
+#[test]
+fn compact_content_authority_matches_gallery_and_reads_fresh_generation() {
+    for visibility in [
+        AppleVisibility::Visible,
+        AppleVisibility::Hidden,
+        AppleVisibility::Unknown,
+    ] {
+        let mut model = model(state(visibility));
+        let key = asset(Provider::Apple, visibility).key;
+        for access in [ScanAccess::Full, ScanAccess::Unavailable] {
+            model.state.snapshots[0].access = access;
+            let full = Suwop.view(&model);
+            let (keys, revision) =
+                Suwop::ordinary_content_projection(&model, std::slice::from_ref(&key));
+            assert_eq!(
+                keys.contains(&key),
+                full.ordinary_content_keys.contains(&key)
+            );
+            assert_eq!(revision, full.private_content_revision);
+            // Generation can change inside effect work without a native event revision.
+            model
+                .ordinary_generation
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            assert_ne!(
+                Suwop::ordinary_content_projection(&model, std::slice::from_ref(&key)).1,
+                revision
+            );
+        }
+    }
+}

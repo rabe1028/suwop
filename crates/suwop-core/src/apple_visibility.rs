@@ -305,6 +305,7 @@ pub fn validate_apply(
 #[must_use]
 pub fn hide_keys(state: &crate::app::SavedLibrary) -> Vec<AssetKey> {
     use crate::domain::ScanAccess;
+    let access = crate::privacy::ContentAccess::new(state);
     let mut ids = BTreeSet::new();
     if state
         .apple_visibility_operations
@@ -330,7 +331,7 @@ pub fn hide_keys(state: &crate::app::SavedLibrary) -> Vec<AssetKey> {
         })
         .flat_map(|s| &s.assets)
         .filter(|a| {
-            state.apple_content_visible(&a.key)
+            access.visible(&a.key)
                 && !state.pending_edit_pastes.iter().any(|p| p.key == a.key)
                 && !state
                     .pending_trash

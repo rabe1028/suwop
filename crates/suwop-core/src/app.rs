@@ -1008,6 +1008,27 @@ impl crux_core::App for Suwop {
     }
 }
 impl Suwop {
+    /// Fresh authority for native reads, without building the full gallery view.
+    #[must_use]
+    pub fn ordinary_content_projection(
+        model: &Model,
+        requested: &[crate::domain::AssetKey],
+    ) -> (Vec<crate::domain::AssetKey>, String) {
+        let public = crate::privacy::PublishedLibrary::from_canonical(
+            &crate::protection::ordinary_state(model),
+        );
+        let (keys, revision) = ordinary_projection(model, &public);
+        let keys: std::collections::BTreeSet<_> = keys.into_iter().collect();
+        (
+            requested
+                .iter()
+                .filter(|key| keys.contains(*key))
+                .cloned()
+                .collect(),
+            revision,
+        )
+    }
+
     fn update_after_capture(event: Event, model: &mut Model) -> Command<Effect, Event> {
         if let Some(command) = crate::immich_live_resources::update(&event, model) {
             return command;

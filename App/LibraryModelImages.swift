@@ -51,11 +51,9 @@ extension LibraryModel {
         guard let shell, let context else {
             #if SUWOP_VRT
                 if let runtime {
-                    let fresh = try await runtime.snapshot().view
-                    guard fresh.ordinaryContentKeys.contains(key),
-                          revision == nil || revision == fresh.privateContentRevision
-                    else { throw CancellationError() }
-                    return fresh.privateContentRevision
+                    return try await runtime.ordinaryContentRevision(
+                        keys: [key], expectedRevision: revision, requiresPublishedKey: true
+                    )
                 }
                 // Static visual fixtures explicitly provide their own raster map.
                 guard snapshotImages[key] != nil else { throw CancellationError() }

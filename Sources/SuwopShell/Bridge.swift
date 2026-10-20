@@ -12,6 +12,14 @@ public struct SuwopError: Error, LocalizedError, Sendable {
     }
 }
 
+/// Rust rejected the input budget before consuming the pending effect ID.
+public struct BridgeInputRejected: Error, LocalizedError, Sendable {
+    public let message: String
+    public var errorDescription: String? {
+        message
+    }
+}
+
 #if DEBUG
     public enum JSONDecodeDiagnostic {
         @TaskLocal public static var failure: (@Sendable (Data, String, any Error, [String]) -> Void)?
@@ -114,22 +122,44 @@ public final class CoreBridge {
         try Self.invoke(handle: handle, action: action, input: input)
     }
 
+    /// Decode large views directly instead of materializing and re-encoding JSONValue.
+    public func callDecoded<Value: Decodable>(_ action: UInt32, as type: Value.Type) throws -> Value {
+        let output = try Self.invokeData(handle: handle, action: action, input: .null)
+        return try Wire.decoder().decode(BridgeEnvelope<Value>.self, from: output).value
+    }
+
     public static func utility(_ action: UInt32, input: JSONValue) throws -> JSONValue {
         try invoke(handle: 0, action: action, input: input)
     }
 
     private static func invoke(handle: UInt64, action: UInt32, input: JSONValue) throws -> JSONValue {
+        let output = try invokeData(handle: handle, action: action, input: input)
+        return try Wire.decoder().decode(BridgeEnvelope<JSONValue>.self, from: output).value
+    }
+
+    private static func invokeData(handle: UInt64, action: UInt32, input: JSONValue) throws -> Data {
         let data = try Wire.encoder().encode(input)
         guard let text = String(data: data, encoding: .utf8) else { throw SuwopError("JSON を生成できません。") }
         let pointer = text.withCString { suwop_call(handle, action, $0) }
         guard let pointer else { throw SuwopError("Rust コアから応答がありません。") }
         defer { suwop_free(pointer) }
-        let output = Data(String(cString: pointer).utf8)
-        let envelope = try Wire.decoder().decode(JSONValue.self, from: output)
-        if let error = envelope["error"].string {
+        return Data(String(cString: pointer).utf8)
+    }
+}
+
+private struct BridgeEnvelope<Value: Decodable>: Decodable {
+    let value: Value
+    private enum CodingKeys: String, CodingKey { case value, error, inputRejected }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let error = try container.decodeIfPresent(String.self, forKey: .error) {
+            if try container.decodeIfPresent(Bool.self, forKey: .inputRejected) == true {
+                throw BridgeInputRejected(message: error)
+            }
             throw SuwopError(error)
         }
-        return envelope["value"]
+        value = try container.decode(Value.self, forKey: .value)
     }
 }
 
