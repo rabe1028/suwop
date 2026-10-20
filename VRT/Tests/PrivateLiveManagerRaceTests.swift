@@ -42,11 +42,19 @@ final class PrivateLiveManagerRaceTests: XCTestCase {
     @MainActor func testCandidateScheduleBeforeRenewCannotInstallSuccessorOrReanchorInitialLease() async throws {
         try await withFixture { fixture, _ in
             let read = PrivateLiveManagerHold()
-            defer { read.release() }
+            let scheduled = PrivateLiveManagerHold()
+            defer { read.release()
+                scheduled.release()
+            }
             var sawRead = false
             var scheduledOld: Int64?
             var applied: Int64?
             fixture.before = { operation in
+                // Deliver the candidate Schedule before allowing the native Renew.
+                // Independent effect tasks otherwise make this ordering incidental.
+                if operation.type == "renewImmichLockedLiveAcquisition" {
+                    await scheduled.wait()
+                }
                 if operation.type == "scheduleImmichLockedLiveAcquisitionExpiry" {
                     let lease = try (operation.data ?? .null)["lease"].decode(ImmichLockedVideoAcquisitionLease.self)
                     if lease.leaseID == 1 {
@@ -62,9 +70,10 @@ final class PrivateLiveManagerRaceTests: XCTestCase {
                 let manager = fixture.shell.immichLockedLiveAccess
                 if operation.type == "scheduleImmichLockedLiveAcquisitionExpiry" {
                     let lease = try (operation.data ?? .null)["lease"].decode(ImmichLockedVideoAcquisitionLease.self)
-                    if lease.leaseID == 2 {
+                    if lease.leaseID == 2, scheduledOld == nil {
                         let owner = try XCTUnwrap(manager.owners.values.first { !$0.retired })
                         scheduledOld = try XCTUnwrap(owner.acquisition).completedLeaseID()
+                        scheduled.release()
                     }
                 } else if operation.type == "renewImmichLockedLiveAcquisition" {
                     applied = try response.decode(ImmichLockedLiveRenewed.self).leaseID
