@@ -248,7 +248,8 @@ struct GalleryView: View {
             }
             if model.isBusy {
                 HStack { ProgressView().controlSize(.small)
-                    Text(model.status).font(.caption).lineLimit(2)
+                    LibraryProgressText(progress: model.progress, fallback: model.view?.status ?? "")
+                        .font(.caption).lineLimit(2)
                     Button("停止") { model.stop() }
                 }
             }

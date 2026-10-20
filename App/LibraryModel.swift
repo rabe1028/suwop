@@ -5,7 +5,8 @@ import SwiftUI
 
 @MainActor final class LibraryModel: ObservableObject {
     @Published private(set) var view: ViewModel?
-    @Published private var fetchProgress: String?
+    let progress = LibraryProgress()
+    private var operationKeyIndex: Set<AssetKey> = []
     private var effectViewVersion: String?
     @Published var errorMessage: String?
     @Published var showSettings = false
@@ -72,6 +73,7 @@ import SwiftUI
 
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage], semanticSearch: SemanticSearchModel? = nil) {
             view = snapshotView
+            operationKeyIndex = Set(snapshotView.ordinaryContentKeys)
             snapshotImages = images
             self.semanticSearch = semanticSearch
             started = true
@@ -193,7 +195,7 @@ import SwiftUI
     }
 
     func operationKeys(_ photo: UnifiedPhoto) -> [AssetKey] {
-        photo.assets.map(\.key).filter { view?.ordinaryContentKeys.contains($0) == true }
+        photo.assets.map(\.key).filter { operationKeyIndex.contains($0) }
     }
 
     func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
@@ -312,7 +314,7 @@ import SwiftUI
     }
 
     var status: String {
-        fetchProgress ?? view?.status ?? "写真ライブラリを接続してください。"
+        progress.value ?? view?.status ?? "写真ライブラリを接続してください。"
     }
 
     var canTransfer: Bool {
@@ -400,13 +402,20 @@ import SwiftUI
 extension LibraryModel {
     private func readView() async throws {
         guard let runtime else { return }
+        let span = PerformanceTrace.begin(.snapshot)
+        defer { PerformanceTrace.end(span) }
         try await publish(runtime.snapshot())
     }
 
     func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
+        if let start = snapshot.measuredStart, let duration = snapshot.measuredDuration {
+            PerformanceTrace.measured(.snapshotRuntime, start: start, duration: duration)
+        }
+        let span = PerformanceTrace.begin(.publish)
+        defer { PerformanceTrace.end(span) }
         publishedRevision = snapshot.revision
-        fetchProgress = nil
+        progress.value = nil
         let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
         let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
         let removed = !previousKeys.isSubset(of: currentKeys)
@@ -427,9 +436,13 @@ extension LibraryModel {
                 shell?.invalidateContentPresentations()
             }
         }
-        if contentChanged || removed || view?.previewSources != snapshot.view.previewSources {
+        let replacedSource = view?.previewSources.contains { id, key in
+            snapshot.view.previewSources[id] != key
+        } ?? false
+        if contentChanged || removed || replacedSource {
             invalidateThumbnails()
         }
+        operationKeyIndex = Set(snapshot.view.ordinaryContentKeys)
         view = snapshot.view
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
@@ -462,23 +475,31 @@ private extension LibraryModel {
 
     func resolveRequests(_ initial: [EffectRequest], context: ContentPresentationContext?) async throws {
         guard let runtime, let executeEffect else { throw SuwopError("入出力が利用できません。") }
-        var requests = initial
-        while !requests.isEmpty {
-            let count = requests.first?.effect["Io"]?.type == "http"
-                ? min(32, requests.prefix { $0.effect["Io"]?.type == "http" }.count) : 1
-            let batch = Array(requests.prefix(count))
-            requests.removeFirst(count)
-            let replies = await EffectBatch.execute(batch, context: context, execute: executeEffect)
-            for reply in replies {
-                requests += try await runtime.resolve(id: reply.id, value: reply.value, error: reply.failure)
+        PerformanceTrace.startMonitoring()
+        let refreshSpan = PerformanceTrace.begin(.refresh)
+        defer {
+            PerformanceTrace.end(refreshSpan)
+            PerformanceTrace.export()
+        }
+        try await EffectBatch.drain(initial, context: context, execute: executeEffect) { [self] reply in
+            let span = PerformanceTrace.begin(.resolve)
+            let requests: [EffectRequest]
+            do {
+                requests = try await runtime.resolve(id: reply.id, value: reply.value, error: reply.failure)
+                PerformanceTrace.end(span)
+            } catch {
+                PerformanceTrace.end(span)
+                throw error
             }
             let progress = try await runtime.progress()
-            fetchProgress = progress.progress
-            if effectViewVersion != progress.version || requests.isEmpty {
+            self.progress.value = progress.progress
+            if effectViewVersion != progress.version {
                 effectViewVersion = progress.version
                 try await readView()
             }
+            return requests
         }
+        try await readView()
     }
 
     func invalidateThumbnails() {
@@ -509,30 +530,6 @@ private extension LibraryModel {
 }
 
 extension LibraryModel {
-    var pendingAppleCount: Int64 {
-        view?.pendingAppleCount ?? 0
-    }
-
-    var appleVisibilityOperations: [AppleVisibilitySummary] {
-        view?.state.appleVisibilityOperations ?? []
-    }
-
-    var appleVisibilityHideKeys: [AssetKey] {
-        view?.appleVisibilityHideKeys ?? []
-    }
-
-    var trashSnapshot: TrashSnapshot? {
-        view?.state.trash
-    }
-
-    var pendingAppleTrashOperations: [AppleTrashOperation] {
-        view?.state.pendingAppleTrash ?? []
-    }
-
-    var pendingTrashOperations: [TrashOperation] {
-        view?.state.pendingTrash ?? []
-    }
-
     func refreshTrash() {
         if isBusy {
             pendingTrashRefresh = true
@@ -581,6 +578,8 @@ extension LibraryModel {
 
 extension LibraryModel {
     func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
+        let span = PerformanceTrace.begin(preview ? .previewImage : .thumbnail)
+        defer { PerformanceTrace.end(span) }
         #if SUWOP_VRT
             if let thumbnailEffect {
                 return try await thumbnailEffect(key, preview)

@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, UnifiedPhoto};
 
@@ -164,6 +164,15 @@ pub fn views_for_picker(
     libraries: &[LibrarySnapshot],
     picker: Option<&AlbumKey>,
 ) -> Vec<AlbumView> {
+    let mut photo_positions: BTreeMap<&AssetKey, Vec<usize>> = BTreeMap::new();
+    for (position, photo) in photos.iter().enumerate() {
+        for asset in &photo.assets {
+            photo_positions
+                .entry(&asset.key)
+                .or_default()
+                .push(position);
+        }
+    }
     let current: BTreeSet<_> = libraries
         .iter()
         .filter(|s| s.access != ScanAccess::Unavailable)
@@ -173,25 +182,35 @@ pub fn views_for_picker(
     for snapshot in snapshots {
         for album in &snapshot.albums {
             let members: BTreeSet<_> = album.members.iter().collect();
-            let mut photo_ids = Vec::new();
+            // Preserve gallery order, including when multiple members resolve to
+            // the same unified photo. Do not scan the whole library per album.
+            let positions: BTreeSet<_> = members
+                .iter()
+                .filter_map(|key| photo_positions.get(*key))
+                .flatten()
+                .copied()
+                .collect();
+            let photo_ids = positions
+                .into_iter()
+                .map(|position| crate::browser::photo_id(&photos[position]))
+                .collect();
             let mut candidates = Vec::new();
-            for photo in photos {
-                if photo.assets.iter().any(|a| members.contains(&a.key)) {
-                    photo_ids.push(crate::browser::photo_id(photo));
-                }
-                for asset in &photo.assets {
-                    if picker == Some(&album.key)
-                        && album.permissions.add
-                        && snapshot.access == ScanAccess::Full
-                        && asset.key.provider == album.key.provider
-                        && asset.key.scope == album.key.scope
-                        && current.contains(&asset.key)
-                        && !members.contains(&asset.key)
-                    {
-                        candidates.push(AlbumCandidate {
-                            photo_id: crate::browser::photo_id(photo),
-                            key: asset.key.clone(),
-                        });
+            if picker == Some(&album.key)
+                && album.permissions.add
+                && snapshot.access == ScanAccess::Full
+            {
+                for photo in photos {
+                    for asset in &photo.assets {
+                        if asset.key.provider == album.key.provider
+                            && asset.key.scope == album.key.scope
+                            && current.contains(&asset.key)
+                            && !members.contains(&asset.key)
+                        {
+                            candidates.push(AlbumCandidate {
+                                photo_id: crate::browser::photo_id(photo),
+                                key: asset.key.clone(),
+                            });
+                        }
                     }
                 }
             }

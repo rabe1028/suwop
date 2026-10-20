@@ -3,6 +3,13 @@ import Foundation
 public struct RuntimeSnapshot: Sendable {
     public let revision: UInt64
     public let view: ViewModel
+    public var measuredStart: TimeInterval?
+    public var measuredDuration: TimeInterval?
+
+    public init(revision: UInt64, view: ViewModel) {
+        self.revision = revision
+        self.view = view
+    }
 }
 
 public struct RuntimeProgress: Decodable, Sendable {
@@ -63,7 +70,11 @@ public actor RustRuntime {
     }
 
     public func snapshot() throws -> RuntimeSnapshot {
-        try RuntimeSnapshot(revision: revision, view: view())
+        let start = ProcessInfo.processInfo.systemUptime
+        var result = try RuntimeSnapshot(revision: revision, view: view())
+        result.measuredStart = start
+        result.measuredDuration = ProcessInfo.processInfo.systemUptime - start
+        return result
     }
 
     /// Publish browser input and its resulting view in one actor turn.

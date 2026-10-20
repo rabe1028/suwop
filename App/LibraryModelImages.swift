@@ -16,6 +16,8 @@ extension LibraryModel {
     }
 
     private func ordinaryImage(_ photo: UnifiedPhoto, preview: Bool) async throws -> PlatformImage {
+        let span = PerformanceTrace.begin(preview ? .previewRequest : .thumbnailRequest)
+        defer { PerformanceTrace.end(span) }
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
         let context = shell?.beginWorkflow()
         let revision = try await validateOrdinary(key, context: context)
@@ -48,6 +50,8 @@ extension LibraryModel {
         context: ContentPresentationContext?,
         revision: String? = nil
     ) async throws -> String? {
+        let span = PerformanceTrace.begin(.imageAuthority)
+        defer { PerformanceTrace.end(span) }
         guard let shell, let context else {
             #if SUWOP_VRT
                 if let runtime {

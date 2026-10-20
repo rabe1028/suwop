@@ -21,6 +21,54 @@ import XCTest
         }
         XCTAssertEqual(succeeded.count, 31)
     }
+
+    func testDrainRefillsBeforeSlowRequestAndSerializesNativeBarrier() async throws {
+        let requests = try (0 ..< 65).map { index in
+            try JSONValue.object([
+                "id": .number(Double(index)),
+                "effect": .object(["Io": .object(["type": .string(index == 64 ? "native" : "http")])]),
+            ]).decode(EffectRequest.self)
+        }
+        let probe = RefillEffectProbe()
+        var resolved: Set<UInt32> = []
+        try await EffectBatch.drain(requests, context: nil, execute: probe.execute) { reply in
+            resolved.insert(reply.id)
+            return []
+        }
+        XCTAssertEqual(resolved.count, 65)
+        XCTAssertLessThanOrEqual(probe.peak, 32)
+        XCTAssertTrue(probe.refilledBeforeSlowFinished)
+        XCTAssertEqual(probe.activeAtNativeStart, 0)
+    }
+}
+
+@MainActor private final class RefillEffectProbe {
+    var active = 0
+    var peak = 0
+    var started = 0
+    var slowFinished = false
+    var refilledBeforeSlowFinished = false
+    var activeAtNativeStart = -1
+
+    func execute(_ operation: ShellOperation, _: ContentPresentationContext?) async throws -> JSONValue {
+        if operation.type != "http" {
+            activeAtNativeStart = active
+            return .null
+        }
+        started += 1
+        let ordinal = started
+        active += 1
+        peak = max(peak, active)
+        defer { active -= 1 }
+        if ordinal == 33 {
+            refilledBeforeSlowFinished = !slowFinished
+        }
+        try await Task.sleep(for: .milliseconds(ordinal == 1 ? 300 : 5))
+        if ordinal == 1 {
+            slowFinished = true
+        }
+        return .null
+    }
 }
 
 @MainActor private final class ConcurrentEffectProbe {

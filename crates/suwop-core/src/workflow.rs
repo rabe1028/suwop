@@ -7,6 +7,7 @@ use crate::{
     },
     immich::{Asset, Session, connect},
 };
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
@@ -598,28 +599,41 @@ impl Runtime<'_> {
                     });
                     // Bound native requests; publish verified subsets as Limited so
                     // incomplete enumeration never authorizes a Move.
-                    for (index, batch) in assets.chunks(32).enumerate() {
-                        self.check_content_generation(&[])?;
-                        let results = futures::future::join_all(
-                            batch
-                                .iter()
-                                .map(|asset| self.refresh_immich_record(session, asset, &by_id)),
-                        )
-                        .await;
-                        for result in results {
-                            if let Some((record, proof)) = result? {
-                                records.push(record);
-                                if let Some(proof) = proof {
-                                    self.ordinary_selected.push(proof);
-                                }
+                    // Do not clone the previous full remote catalog at every
+                    // publication only to discard it again. Keep failure recovery
+                    // in self.state and clone a remote-free base for partial views.
+                    let mut partial_base = self.state.clone();
+                    partial_base
+                        .snapshots
+                        .retain(|s| s.provider != Provider::Immich);
+                    let mut proofs = Vec::new();
+                    let mut completed = 0;
+                    let pending: Vec<_> = assets
+                        .iter()
+                        .map(|asset| self.refresh_immich_record(session, asset, &by_id))
+                        .collect();
+                    let mut hydration = futures::stream::iter(pending).buffer_unordered(32);
+                    let mut failure = None;
+                    while let Some(result) = hydration.next().await {
+                        let result = self.check_content_generation(&[]).and(result);
+                        let record = match result {
+                            Ok(record) => record,
+                            Err(error) => {
+                                failure = Some(error);
+                                break;
+                            }
+                        };
+                        completed += 1;
+                        if let Some((record, proof)) = record {
+                            records.push(record);
+                            if let Some(proof) = proof {
+                                proofs.push(proof);
                             }
                         }
                         // Publish the first batch promptly, then amortize full-view work.
                         // The canonical workflow state stays private until completion.
-                        if index == 0 || (index + 1) % 16 == 0 {
-                            self.check_content_generation(&[])?;
-                            let mut partial = self.state.clone();
-                            partial.snapshots.retain(|s| s.provider != Provider::Immich);
+                        if completed == 32 || completed % 512 == 0 {
+                            let mut partial = partial_base.clone();
                             partial.snapshots.push(LibrarySnapshot {
                                 provider: Provider::Immich,
                                 scope: session.scope.clone(),
@@ -633,12 +647,16 @@ impl Runtime<'_> {
                                 status: "取得済みの写真を表示しています。".into(),
                             });
                         }
-                        self.ctx.send_event(Event::FetchProgress {
-                            status: format!(
-                                "Immich の詳細を取得中: {} / {total} 件",
-                                ((index + 1) * 32).min(total)
-                            ),
-                        });
+                        if completed % 32 == 0 || completed == total {
+                            self.ctx.send_event(Event::FetchProgress {
+                                status: format!("Immich の詳細を取得中: {completed} / {total} 件"),
+                            });
+                        }
+                    }
+                    drop(hydration);
+                    self.ordinary_selected.extend(proofs);
+                    if let Some(error) = failure {
+                        return Err(error);
                     }
                     self.check_content_generation(&[])?;
                     self.replace(LibrarySnapshot {
