@@ -224,9 +224,17 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> 
             runtime.bulk_replies.remove(&response.id);
         }
         2 => bridge.view(&mut output).map_err(|e| e.to_string())?,
+        17 => {
+            *runtime.query.lock().map_err(|e| e.to_string())? =
+                Some(projection::Selection::Progress);
+            let result = bridge.view(&mut output);
+            *runtime.query.lock().map_err(|e| e.to_string())? = None;
+            result.map_err(|e| e.to_string())?;
+        }
         16 => {
             let keys = serde_json::from_str(input).map_err(|e| e.to_string())?;
-            *runtime.query.lock().map_err(|e| e.to_string())? = Some(keys);
+            *runtime.query.lock().map_err(|e| e.to_string())? =
+                Some(projection::Selection::Ordinary(keys));
             let result = bridge.view(&mut output);
             *runtime.query.lock().map_err(|e| e.to_string())? = None;
             result.map_err(|e| e.to_string())?;

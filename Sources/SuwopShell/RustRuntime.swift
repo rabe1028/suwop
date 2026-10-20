@@ -5,6 +5,11 @@ public struct RuntimeSnapshot: Sendable {
     public let view: ViewModel
 }
 
+public struct RuntimeProgress: Decodable, Sendable {
+    public let version: String
+    public let progress: String?
+}
+
 public actor RustRuntime {
     private let bridge: CoreBridge
     private var revision: UInt64 = 0
@@ -51,6 +56,10 @@ public actor RustRuntime {
               !requiresPublishedKey || keys.allSatisfy(allowed.contains)
         else { throw CancellationError() }
         return current
+    }
+
+    public func progress() throws -> RuntimeProgress {
+        try bridge.callDecoded(17, as: RuntimeProgress.self)
     }
 
     public func snapshot() throws -> RuntimeSnapshot {

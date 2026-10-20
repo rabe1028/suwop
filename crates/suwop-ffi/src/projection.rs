@@ -2,17 +2,25 @@
 use crux_core::{App, Command};
 use std::{
     collections::BTreeSet,
-    sync::{Arc, Mutex, atomic::Ordering},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 use suwop_core::{
     app::{Event, Model, Suwop, ViewModel},
     domain::AssetKey,
 };
 
-pub type Query = Arc<Mutex<Option<Vec<AssetKey>>>>;
+pub enum Selection {
+    Ordinary(Vec<AssetKey>),
+    Progress,
+}
+pub type Query = Arc<Mutex<Option<Selection>>>;
 pub struct ProjectionApp {
     query: Query,
     membership: Mutex<Option<Membership>>,
+    view_version: AtomicU64,
 }
 struct Membership {
     generation: u64,
@@ -24,6 +32,7 @@ impl ProjectionApp {
         Self {
             query,
             membership: Mutex::new(None),
+            view_version: AtomicU64::new(0),
         }
     }
 }
@@ -32,6 +41,10 @@ impl ProjectionApp {
 #[serde(untagged)]
 pub enum Projection {
     Unavailable,
+    Progress {
+        version: String,
+        progress: Option<String>,
+    },
     Library(Box<ViewModel>),
     Ordinary {
         keys: Vec<AssetKey>,
@@ -44,7 +57,11 @@ impl App for ProjectionApp {
     type Effect = <Suwop as App>::Effect;
     type ViewModel = Projection;
     fn update(&self, event: Event, model: &mut Model) -> Command<Self::Effect, Event> {
-        // Every Crux event invalidates the index, including progress/responses.
+        if matches!(event, Event::FetchProgress { .. }) {
+            return Suwop.update(event, model);
+        }
+        self.view_version.fetch_add(1, Ordering::SeqCst);
+        // Every catalog/authority event invalidates the index. Count-only progress does not.
         // A poisoned cache remains unavailable rather than granting stale reads.
         if let Ok(mut cache) = self.membership.lock() {
             *cache = None;
@@ -57,7 +74,20 @@ impl App for ProjectionApp {
             return Projection::Unavailable;
         };
         match query.as_ref() {
-            Some(keys) => {
+            Some(Selection::Progress) => Projection::Progress {
+                // Async revocation can happen without a model event.
+                version: format!(
+                    "{}:{}:{}:{}:{}:{}",
+                    self.view_version.load(Ordering::SeqCst),
+                    model.ordinary_generation.load(Ordering::SeqCst),
+                    model.apple_generation.load(Ordering::SeqCst),
+                    model.protection.generation.load(Ordering::SeqCst),
+                    model.immich_locked.generation.load(Ordering::SeqCst),
+                    model.immich_archive.generation.load(Ordering::SeqCst)
+                ),
+                progress: model.fetch_status.clone(),
+            },
+            Some(Selection::Ordinary(keys)) => {
                 let Ok(mut cache) = self.membership.lock() else {
                     return Projection::Unavailable;
                 };
@@ -103,6 +133,37 @@ mod tests {
     };
 
     #[test]
+    fn progress_does_not_invalidate_catalog_but_catalog_events_do() -> Result<(), String> {
+        let app = ProjectionApp::new(Arc::new(Mutex::new(Some(Selection::Progress))));
+        let mut model = Model::default();
+        let _ = app.update(
+            Event::FetchProgress {
+                status: "8 / 19".into(),
+            },
+            &mut model,
+        );
+        let Projection::Progress { version, progress } = app.view(&model) else {
+            return Err("progress missing".into());
+        };
+        assert_eq!(version, "0:0:0:0:0:0");
+        assert_eq!(progress.as_deref(), Some("8 / 19"));
+        let _ = app.update(Event::AppleChanged, &mut model);
+        let Projection::Progress { version, .. } = app.view(&model) else {
+            return Err("progress missing".into());
+        };
+        assert!(version.starts_with("1:"));
+        model.ordinary_generation.fetch_add(1, Ordering::SeqCst);
+        let Projection::Progress {
+            version: revoked, ..
+        } = app.view(&model)
+        else {
+            return Err("progress missing".into());
+        };
+        assert_ne!(version, revoked);
+        Ok(())
+    }
+
+    #[test]
     fn cached_membership_observes_async_revocation_and_every_model_update() -> Result<(), String> {
         let key = AssetKey {
             provider: Provider::Apple,
@@ -135,7 +196,9 @@ mod tests {
             access: ScanAccess::Full,
             scanned_at: None,
         }];
-        let app = ProjectionApp::new(Arc::new(Mutex::new(Some(vec![key.clone()]))));
+        let app = ProjectionApp::new(Arc::new(Mutex::new(Some(Selection::Ordinary(vec![
+            key.clone(),
+        ])))));
         let Projection::Ordinary { keys, revision } = app.view(&model) else {
             return Err("missing authority".into());
         };

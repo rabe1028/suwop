@@ -363,6 +363,13 @@ impl Session {
                         assets.insert(a.id.clone(), a);
                     }
                 }
+                ctx.send_event(crate::app::Event::FetchProgress {
+                    status: format!(
+                        "Immich の一覧を取得中: {} 件（{} ページ）",
+                        assets.len(),
+                        page
+                    ),
+                });
                 let field = if self.version.uses_cursor() {
                     "nextCursor"
                 } else {

@@ -5,6 +5,8 @@ import SwiftUI
 
 @MainActor final class LibraryModel: ObservableObject {
     @Published private(set) var view: ViewModel?
+    @Published private var fetchProgress: String?
+    private var effectViewVersion: String?
     @Published var errorMessage: String?
     @Published var showSettings = false
     @Published var showTransfers = false
@@ -310,7 +312,7 @@ import SwiftUI
     }
 
     var status: String {
-        view?.status ?? "写真ライブラリを接続してください。"
+        fetchProgress ?? view?.status ?? "写真ライブラリを接続してください。"
     }
 
     var canTransfer: Bool {
@@ -404,6 +406,7 @@ extension LibraryModel {
     func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
         publishedRevision = snapshot.revision
+        fetchProgress = nil
         let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
         let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
         let removed = !previousKeys.isSubset(of: currentKeys)
@@ -461,22 +464,20 @@ private extension LibraryModel {
         guard let runtime, let executeEffect else { throw SuwopError("入出力が利用できません。") }
         var requests = initial
         while !requests.isEmpty {
-            let request = requests.removeFirst()
-            guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
-            let value: JSONValue?
-            let failure: String?
-            do {
-                value = try await executeEffect(operation, context)
-                failure = nil
-            } catch is CancellationError {
-                value = nil
-                failure = "cancelled"
-            } catch {
-                value = nil
-                failure = error.localizedDescription
+            let count = requests.first?.effect["Io"]?.type == "http"
+                ? min(8, requests.prefix { $0.effect["Io"]?.type == "http" }.count) : 1
+            let batch = Array(requests.prefix(count))
+            requests.removeFirst(count)
+            let replies = await EffectBatch.execute(batch, context: context, execute: executeEffect)
+            for reply in replies {
+                requests += try await runtime.resolve(id: reply.id, value: reply.value, error: reply.failure)
             }
-            requests += try await runtime.resolve(id: request.id, value: value, error: failure)
-            try await readView()
+            let progress = try await runtime.progress()
+            fetchProgress = progress.progress
+            if effectViewVersion != progress.version || requests.isEmpty {
+                effectViewVersion = progress.version
+                try await readView()
+            }
         }
     }
 

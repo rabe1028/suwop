@@ -912,6 +912,10 @@ pub enum Event {
         result: crate::immich_visibility::VisibilityCompletion,
     },
     #[serde(skip)]
+    FetchProgress {
+        status: String,
+    },
+    #[serde(skip)]
     Progress {
         state: SavedLibrary,
         status: String,
@@ -945,6 +949,7 @@ pub struct Model {
     pub busy: bool,
     pub ready: bool,
     pub status: String,
+    pub fetch_status: Option<String>,
     pub error: Option<String>,
     pub changed_during_work: bool,
 }
@@ -992,6 +997,11 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        // Internal count-only notifications cannot change catalog or authority.
+        if let Event::FetchProgress { status } = event {
+            model.fetch_status = Some(status);
+            return Command::done();
+        }
         if let Event::RetryPrivateMediaCleanup {
             recovery_id,
             expected_attempt,
@@ -1155,6 +1165,10 @@ impl Suwop {
                 model.browser = options;
                 Command::done()
             }
+            Event::FetchProgress { status } => {
+                model.fetch_status = Some(status);
+                Command::done()
+            }
             Event::Progress { mut state, status } => {
                 if model.changed_during_work {
                     invalidate_apple(&mut state);
@@ -1178,6 +1192,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
+                model.fetch_status = None;
                 model.ready = model.state.schema_version == 8;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
@@ -1336,10 +1351,12 @@ impl Suwop {
                 .count(),
             state: public,
             busy: model.busy,
-            status: crate::privacy::public_text(
-                &crate::protection::ordinary_state(model),
-                &model.status,
-            ),
+            status: model.fetch_status.clone().unwrap_or_else(|| {
+                crate::privacy::public_text(
+                    &crate::protection::ordinary_state(model),
+                    &model.status,
+                )
+            }),
             error: model.error.as_ref().map(|error| {
                 crate::privacy::public_text(&crate::protection::ordinary_state(model), error)
             }),
@@ -1557,6 +1574,7 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
         && !matches!(
             event,
             Event::AppleChanged
+                | Event::FetchProgress { .. }
                 | Event::Progress { .. }
                 | Event::Finished { .. }
                 | Event::Browse { .. }
