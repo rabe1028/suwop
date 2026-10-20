@@ -1008,16 +1008,23 @@ impl crux_core::App for Suwop {
     }
 }
 impl Suwop {
+    /// Ordinary membership has no clock-dependent grants. Native callers still
+    /// validate their presentation context before and after every read.
+    #[must_use]
+    pub fn ordinary_content_membership(model: &Model) -> (Vec<crate::domain::AssetKey>, String) {
+        let public = crate::privacy::PublishedLibrary::from_canonical(
+            &crate::protection::ordinary_state(model),
+        );
+        ordinary_projection(model, &public)
+    }
+
     /// Fresh authority for native reads, without building the full gallery view.
     #[must_use]
     pub fn ordinary_content_projection(
         model: &Model,
         requested: &[crate::domain::AssetKey],
     ) -> (Vec<crate::domain::AssetKey>, String) {
-        let public = crate::privacy::PublishedLibrary::from_canonical(
-            &crate::protection::ordinary_state(model),
-        );
-        let (keys, revision) = ordinary_projection(model, &public);
+        let (keys, revision) = Self::ordinary_content_membership(model);
         let keys: std::collections::BTreeSet<_> = keys.into_iter().collect();
         (
             requested

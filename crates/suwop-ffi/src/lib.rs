@@ -75,7 +75,7 @@ pub extern "C" fn suwop_new() -> u64 {
         id,
         Runtime {
             bridge: Bridge::new(Core::new_with(
-                projection::ProjectionApp(Arc::clone(&query)),
+                projection::ProjectionApp::new(Arc::clone(&query)),
                 suwop_core::app::Model::default(),
             )),
             query,

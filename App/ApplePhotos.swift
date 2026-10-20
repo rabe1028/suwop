@@ -205,7 +205,7 @@ import UniformTypeIdentifiers
         let asset = try Self.fetch(key.assetID)
         let options = PHImageRequestOptions()
         options.deliveryMode = .highQualityFormat
-        options.resizeMode = .fast
+        options.resizeMode = .exact
         options.isNetworkAccessAllowed = true
         let gate = ImageRequestGate<ThumbnailPayload>(manager: imageManager)
         let payload = try await withTaskCancellationHandler {
