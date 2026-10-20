@@ -91,7 +91,13 @@ import SwiftUI
         }
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 64 * 1024 * 1024
-        observer = PhotoObserver { [weak self] in
+        observer = PhotoObserver { [weak self] assetsChanged in
+            guard assetsChanged else {
+                if self?.albumsRequested == true {
+                    self?.refreshAlbums()
+                }
+                return
+            }
             if self?.protection.ownerSceneID != nil {
                 self?.protection.close()
             }
