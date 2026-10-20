@@ -791,3 +791,24 @@ fn large_catalog_hide_eligibility_preserves_hidden_and_duplicate_exclusions() {
     assert!(!keys.contains(&facts("0").key));
     assert!(!keys.contains(&facts("1").key));
 }
+
+#[test]
+fn large_catalog_full_view_keeps_metadata_and_content_authority_consistent() {
+    use crux_core::App;
+    let mut state = state();
+    state.snapshots[0].assets = (0..10_000).map(|id| asset(&id.to_string())).collect();
+    let view = Suwop.view(&Model {
+        state,
+        ready: true,
+        ..Model::default()
+    });
+    assert_eq!(view.photos.len(), 10_000);
+    assert_eq!(view.ordinary_content_keys.len(), 10_000);
+    assert_eq!(view.metadata_targets.len(), 10_000);
+    assert!(
+        view.metadata_targets
+            .values()
+            .flatten()
+            .all(|target| target.disabled_reason.is_none())
+    );
+}

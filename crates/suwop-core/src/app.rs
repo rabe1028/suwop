@@ -1263,6 +1263,7 @@ impl Suwop {
             &operation_public.snapshots,
             &model.state.apple_scope,
         );
+        let metadata_access = crate::metadata::MetadataAccess::new(&operation_public.snapshots);
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
         ViewModel {
@@ -1288,12 +1289,7 @@ impl Suwop {
                 .collect(),
             metadata_targets: photos
                 .iter()
-                .map(|p| {
-                    (
-                        crate::browser::photo_id(p),
-                        crate::metadata::targets(p, &operation_public.snapshots),
-                    )
-                })
+                .map(|p| (crate::browser::photo_id(p), metadata_access.targets(p)))
                 .collect(),
             preview_sources: preview_choices
                 .iter()
