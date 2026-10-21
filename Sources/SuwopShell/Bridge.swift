@@ -109,6 +109,13 @@ public enum Wire {
     }
 }
 
+struct DecodedMeasurement<Value> {
+    let value: Value
+    let start: TimeInterval
+    let decodeStart: TimeInterval
+    let end: TimeInterval
+}
+
 /// Every instance is confined to its actor. Rust additionally serializes calls to its registry.
 public final class CoreBridge {
     private let handle: UInt64
@@ -124,8 +131,23 @@ public final class CoreBridge {
 
     /// Decode large views directly instead of materializing and re-encoding JSONValue.
     public func callDecoded<Value: Decodable>(_ action: UInt32, as type: Value.Type) throws -> Value {
+        try callDecodedMeasured(action, as: type).value
+    }
+
+    /// Separate synchronous Rust/FFI work from Swift JSON decoding using one monotonic clock.
+    func callDecodedMeasured<Value: Decodable>(
+        _ action: UInt32, as type: Value.Type
+    ) throws -> DecodedMeasurement<Value> {
+        let start = ProcessInfo.processInfo.systemUptime
         let output = try Self.invokeData(handle: handle, action: action, input: .null)
-        return try Wire.decoder().decode(BridgeEnvelope<Value>.self, from: output).value
+        let decodeStart = ProcessInfo.processInfo.systemUptime
+        let value = try Wire.decoder().decode(BridgeEnvelope<Value>.self, from: output).value
+        return DecodedMeasurement(
+            value: value,
+            start: start,
+            decodeStart: decodeStart,
+            end: ProcessInfo.processInfo.systemUptime
+        )
     }
 
     public static func utility(_ action: UInt32, input: JSONValue) throws -> JSONValue {

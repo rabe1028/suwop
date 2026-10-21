@@ -165,9 +165,17 @@ fn durable_state_available(model: &Model) -> bool {
 }
 #[must_use]
 pub fn actions(model: &Model) -> Vec<ImmichArchiveActionHint> {
-    let ordinary = crate::protection::ordinary_state(model);
-    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let ordinary = crate::protection::ordinary_state_view(model);
     let state = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+    actions_for_public(model, &ordinary, &state)
+}
+
+pub(crate) fn actions_for_public(
+    model: &Model,
+    ordinary: &crate::app::SavedLibrary,
+    state: &crate::privacy::PublishedLibrary,
+) -> Vec<ImmichArchiveActionHint> {
+    let access = crate::privacy::ContentAccess::new(ordinary);
     state
         .snapshots
         .iter()

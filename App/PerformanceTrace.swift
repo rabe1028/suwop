@@ -1,12 +1,13 @@
 import Foundation
 import os
+import SuwopShell
 
 /// Local Instruments signposts and optional Perfetto/Chrome trace export.
 /// Only fixed operation names, durations and counts are recorded.
 @MainActor enum PerformanceTrace {
     enum Phase: String {
         case http, nativeEffect, resolve, snapshot, publish, refresh, mainActorDelay, previewImage, thumbnail
-        case previewRequest, thumbnailRequest, imageAuthority, snapshotRuntime
+        case previewRequest, thumbnailRequest, imageAuthority, snapshotRuntime, snapshotBridge, snapshotDecode
     }
 
     struct Span {
@@ -31,6 +32,15 @@ import os
     private static var dropped = 0
     private static var monitor: Task<Void, Never>?
     private static var pendingExport: Task<Void, Never>?
+
+    static func recordSnapshot(_ snapshot: RuntimeSnapshot) {
+        guard let start = snapshot.measuredStart, let duration = snapshot.measuredDuration else { return }
+        measured(.snapshotRuntime, start: start, duration: duration)
+        if let decodeStart = snapshot.measuredDecodeStart, let end = snapshot.measuredEnd {
+            measured(.snapshotBridge, start: start, duration: decodeStart - start)
+            measured(.snapshotDecode, start: decodeStart, duration: end - decodeStart)
+        }
+    }
 
     static func measured(_ phase: Phase, start: TimeInterval, duration: TimeInterval) {
         record(phase, start: start, duration: duration)

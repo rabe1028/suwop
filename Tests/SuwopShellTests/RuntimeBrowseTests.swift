@@ -85,3 +85,16 @@ private func browserRuntime() async throws -> RustRuntime {
     let fresh = try await runtime.view()
     #expect(fresh.privateContentRevision != revision)
 }
+
+@Test func snapshotTimingsPartitionBridgeAndDecodeWithoutChangingView() async throws {
+    let runtime = try await browserRuntime()
+    let snapshot = try await runtime.snapshot()
+    let start = try #require(snapshot.measuredStart)
+    let decode = try #require(snapshot.measuredDecodeStart)
+    let end = try #require(snapshot.measuredEnd)
+    #expect(start <= decode)
+    #expect(decode <= end)
+    #expect(snapshot.measuredDuration == end - start)
+    let fresh = try await runtime.view()
+    #expect(try Wire.encoder().encode(snapshot.view) == Wire.encoder().encode(fresh))
+}

@@ -409,9 +409,7 @@ extension LibraryModel {
 
     func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
-        if let start = snapshot.measuredStart, let duration = snapshot.measuredDuration {
-            PerformanceTrace.measured(.snapshotRuntime, start: start, duration: duration)
-        }
+        PerformanceTrace.recordSnapshot(snapshot)
         let span = PerformanceTrace.begin(.publish)
         defer { PerformanceTrace.end(span) }
         publishedRevision = snapshot.revision

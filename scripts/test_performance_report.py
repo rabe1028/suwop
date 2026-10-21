@@ -45,3 +45,10 @@ class PerformanceReportTests(unittest.TestCase):
         self.assertTrue(self.report(events, "--max-preview-request-p95-ms", "1000")[0])
         events.append({"name": "previewRequest", "ph": "X", "dur": 2_000_000})
         self.assertTrue(self.report(events, "--max-preview-request-p95-ms", "1000")[0])
+
+    def test_snapshot_component_alone_does_not_satisfy_runtime_gate(self):
+        events = [{"name": "snapshotDecode", "ph": "X", "dur": 10_000}]
+        self.assertTrue(self.report(events, "--max-snapshot-runtime-p95-ms", "1000")[0])
+        events.append({"name": "snapshotRuntime", "ph": "X", "dur": 2_000_000})
+        self.assertTrue(self.report(events, "--max-snapshot-runtime-p95-ms", "1000")[0])
+        self.assertFalse(self.report(events, "--max-snapshot-runtime-p95-ms", "3000")[0])

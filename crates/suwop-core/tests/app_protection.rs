@@ -1333,3 +1333,73 @@ fn ambiguous_protection_save_disables_unrelated_archive_hint_until_validated_rec
     );
     Ok(())
 }
+
+#[test]
+fn shared_snapshot_action_hints_match_fresh_projection_with_pending_denials() -> Result<(), String>
+{
+    use crux_core::App;
+    let mut model = Model {
+        state: saved(),
+        ready: true,
+        ..Model::default()
+    };
+    model.session = Some(Session {
+        ordinary_content_guard: None,
+        ordinary_content_context: None,
+        endpoint: "https://fixture.example/api".into(),
+        key: "fixture-key".into(),
+        scope: "remote".into(),
+        user_id: "owner".into(),
+        version: Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+    });
+    let denied = asset(Provider::Immich, "remote-photo").key;
+    let baseline = Suwop.view(&model);
+    assert!(
+        baseline
+            .immich_visibility_actions
+            .iter()
+            .any(|hint| hint.key == denied)
+    );
+    assert!(
+        baseline
+            .immich_archive_actions
+            .iter()
+            .any(|hint| hint.key == denied)
+    );
+    for visibility_denial in [false, true] {
+        model.protection.denied.clear();
+        model.immich_visibility.denied.clear();
+        if visibility_denial {
+            model.immich_visibility.denied.insert(denied.clone());
+        } else {
+            model.protection.denied.insert(denied.clone());
+        }
+        let view = Suwop.view(&model);
+        assert_eq!(
+            serde_json::to_value(&view.immich_archive_actions).map_err(|e| e.to_string())?,
+            serde_json::to_value(suwop_core::immich_archive::actions(&model))
+                .map_err(|e| e.to_string())?
+        );
+        assert_eq!(
+            serde_json::to_value(&view.immich_visibility_actions).map_err(|e| e.to_string())?,
+            serde_json::to_value(suwop_core::immich_visibility::actions(&model))
+                .map_err(|e| e.to_string())?
+        );
+        assert!(
+            view.immich_archive_actions
+                .iter()
+                .all(|hint| hint.key != denied)
+        );
+        assert!(
+            view.immich_visibility_actions
+                .iter()
+                .all(|hint| hint.key != denied)
+        );
+        assert!(model.state.protected_entries.is_empty());
+    }
+    Ok(())
+}

@@ -201,9 +201,17 @@ pub fn view(model: &Model) -> ImmichVisibilityView {
 }
 #[must_use]
 pub fn actions(model: &Model) -> Vec<ImmichVisibilityActionHint> {
-    let ordinary = crate::protection::ordinary_state(model);
-    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let ordinary = crate::protection::ordinary_state_view(model);
     let public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+    actions_for_public(model, &ordinary, &public)
+}
+
+pub(crate) fn actions_for_public(
+    model: &Model,
+    ordinary: &crate::app::SavedLibrary,
+    public: &crate::privacy::PublishedLibrary,
+) -> Vec<ImmichVisibilityActionHint> {
+    let access = crate::privacy::ContentAccess::new(ordinary);
     public
         .snapshots
         .iter()

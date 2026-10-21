@@ -1028,7 +1028,7 @@ impl Suwop {
     #[must_use]
     pub fn ordinary_content_membership(model: &Model) -> (Vec<crate::domain::AssetKey>, String) {
         let public = crate::privacy::PublishedLibrary::from_canonical(
-            &crate::protection::ordinary_state(model),
+            &crate::protection::ordinary_state_view(model),
         );
         ordinary_projection(model, &public)
     }
@@ -1276,11 +1276,14 @@ impl Suwop {
     }
     fn library_view(model: &Model) -> ViewModel {
         let can_transfer = can_transfer(model);
-        let move_blockers = public_move_blockers(model, can_transfer);
-        let operation_public = crate::privacy::PublishedLibrary::from_canonical(
-            &crate::protection::ordinary_state(model),
+        let ordinary = crate::protection::ordinary_state_view(model);
+        let move_blockers = public_move_blockers(model, can_transfer, &ordinary);
+        let operation_public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+        let public = crate::ordinary_selected::public_library_from(
+            model,
+            &ordinary,
+            operation_public.clone(),
         );
-        let public = crate::ordinary_selected::public_library(model);
         let photos = catalog(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
             &public.snapshots,
@@ -1304,6 +1307,7 @@ impl Suwop {
         let metadata_access = crate::metadata::MetadataAccess::new(&operation_public.snapshots);
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
+        let (status, error) = public_messages(model, &ordinary);
         ViewModel {
             private_media_cleanup: crate::private_media_cleanup::projection(model),
             ordinary_selected_presentation: crate::ordinary_selected::presentations(model),
@@ -1313,13 +1317,21 @@ impl Suwop {
             ordinary_content_keys,
             private_content_revision,
             immich_archive_view: crate::immich_archive::view(model),
-            immich_archive_actions: crate::immich_archive::actions(model),
-            immich_visibility_actions: crate::immich_visibility::actions(model),
+            immich_archive_actions: crate::immich_archive::actions_for_public(
+                model,
+                &ordinary,
+                &operation_public,
+            ),
+            immich_visibility_actions: crate::immich_visibility::actions_for_public(
+                model,
+                &ordinary,
+                &operation_public,
+            ),
             immich_visibility_view: crate::immich_visibility::view(model),
             immich_live_resources: crate::immich_live_resources::view(model),
             immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
-            apple_visibility_hide_keys: apple_visibility_hide_keys(model),
+            apple_visibility_hide_keys: apple_visibility_hide_keys(model, &ordinary),
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
@@ -1350,33 +1362,44 @@ impl Suwop {
             ),
             browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
-            pending_apple_count: public
-                .snapshots
-                .iter()
-                .filter(|s| s.provider == Provider::Apple)
-                .flat_map(|s| &s.assets)
-                .filter(|a| !a.fingerprints_complete())
-                .count(),
+            pending_apple_count: pending_apple_count(&public),
             state: public,
             busy: model.busy,
-            status: model.fetch_status.clone().unwrap_or_else(|| {
-                crate::privacy::public_text(
-                    &crate::protection::ordinary_state(model),
-                    &model.status,
-                )
-            }),
-            error: model.error.as_ref().map(|error| {
-                crate::privacy::public_text(&crate::protection::ordinary_state(model), error)
-            }),
+            status,
+            error,
             server_version: model.session.as_ref().map(|s| s.version.description()),
             can_transfer,
             move_blockers,
         }
     }
 }
-fn apple_visibility_hide_keys(model: &Model) -> Vec<crate::domain::AssetKey> {
+fn pending_apple_count(public: &crate::privacy::PublishedLibrary) -> usize {
+    public
+        .snapshots
+        .iter()
+        .filter(|s| s.provider == Provider::Apple)
+        .flat_map(|s| &s.assets)
+        .filter(|a| !a.fingerprints_complete())
+        .count()
+}
+fn public_messages(model: &Model, ordinary: &SavedLibrary) -> (String, Option<String>) {
+    (
+        model
+            .fetch_status
+            .clone()
+            .unwrap_or_else(|| crate::privacy::public_text(ordinary, &model.status)),
+        model
+            .error
+            .as_ref()
+            .map(|error| crate::privacy::public_text(ordinary, error)),
+    )
+}
+fn apple_visibility_hide_keys(
+    model: &Model,
+    ordinary: &SavedLibrary,
+) -> Vec<crate::domain::AssetKey> {
     if model.ready && !model.busy && !model.protection.membership_uncertain {
-        crate::apple_visibility::hide_keys(&crate::protection::ordinary_state(model))
+        crate::apple_visibility::hide_keys(ordinary)
     } else {
         vec![]
     }
@@ -1384,10 +1407,10 @@ fn apple_visibility_hide_keys(model: &Model) -> Vec<crate::domain::AssetKey> {
 fn public_move_blockers(
     model: &Model,
     can_transfer: bool,
+    ordinary: &SavedLibrary,
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut move_blockers = std::collections::BTreeMap::new();
-    let ordinary = crate::protection::ordinary_state(model);
-    let content_access = crate::privacy::ContentAccess::new(&ordinary);
+    let content_access = crate::privacy::ContentAccess::new(ordinary);
     for receipt in &model.state.receipts {
         if receipt
             .source

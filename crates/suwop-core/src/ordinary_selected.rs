@@ -134,8 +134,20 @@ pub(crate) fn images(model: &crate::app::Model) -> Vec<OrdinarySelectedImageAcce
         .collect()
 }
 pub(crate) fn public_library(model: &crate::app::Model) -> crate::privacy::PublishedLibrary {
-    let ordinary = crate::protection::ordinary_state(model);
-    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let ordinary = crate::protection::ordinary_state_view(model);
+    let public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+    public_library_from(model, &ordinary, public)
+}
+
+pub(crate) fn public_library_from(
+    model: &crate::app::Model,
+    ordinary: &crate::app::SavedLibrary,
+    mut public: crate::privacy::PublishedLibrary,
+) -> crate::privacy::PublishedLibrary {
+    if model.ordinary_selected.proofs.is_empty() {
+        return public;
+    }
+    let access = crate::privacy::ContentAccess::new(ordinary);
     let allowed = model
         .ordinary_selected
         .proofs
@@ -143,7 +155,6 @@ pub(crate) fn public_library(model: &crate::app::Model) -> crate::privacy::Publi
         .filter(|p| p.current(model))
         .map(|p| p.asset.key.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let mut public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
     for proof in model
         .ordinary_selected
         .proofs

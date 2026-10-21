@@ -5,6 +5,8 @@ public struct RuntimeSnapshot: Sendable {
     public let view: ViewModel
     public var measuredStart: TimeInterval?
     public var measuredDuration: TimeInterval?
+    public var measuredDecodeStart: TimeInterval?
+    public var measuredEnd: TimeInterval?
 
     public init(revision: UInt64, view: ViewModel) {
         self.revision = revision
@@ -70,10 +72,12 @@ public actor RustRuntime {
     }
 
     public func snapshot() throws -> RuntimeSnapshot {
-        let start = ProcessInfo.processInfo.systemUptime
-        var result = try RuntimeSnapshot(revision: revision, view: view())
-        result.measuredStart = start
-        result.measuredDuration = ProcessInfo.processInfo.systemUptime - start
+        let measured = try bridge.callDecodedMeasured(2, as: ViewModel.self)
+        var result = RuntimeSnapshot(revision: revision, view: measured.value)
+        result.measuredStart = measured.start
+        result.measuredDuration = measured.end - measured.start
+        result.measuredDecodeStart = measured.decodeStart
+        result.measuredEnd = measured.end
         return result
     }
 

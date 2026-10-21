@@ -33,6 +33,7 @@ def main():
     parser.add_argument("--max-ui-delay-p95-ms", type=float)
     parser.add_argument("--max-preview-p95-ms", type=float)
     parser.add_argument("--max-preview-request-p95-ms", type=float)
+    parser.add_argument("--max-snapshot-runtime-p95-ms", type=float)
     args = parser.parse_args()
     after = summarize(args.trace)
     report = {"after": after}
@@ -40,6 +41,7 @@ def main():
         report["before"] = summarize(args.before)
     failures = []
     for name, limit in [
+        ("snapshotRuntime", args.max_snapshot_runtime_p95_ms),
         ("mainActorDelay", args.max_ui_delay_p95_ms),
         ("previewImage", args.max_preview_p95_ms),
         ("previewRequest", args.max_preview_request_p95_ms),

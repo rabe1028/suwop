@@ -39,7 +39,12 @@ before SwiftUI paints the image, so retain screenshot evidence.
 `snapshotRuntime` measures view generation and decoding inside the RustRuntime
 actor. The outer `snapshot` also includes waiting for that actor and publishing
 the view; `publish` measures the latter. Compare these nested intervals to locate
-waiting versus processing. Trace exports are written in capture order.
+waiting versus processing. `snapshotBridge` covers the synchronous Rust call and
+FFI output copy (including the Rust registry lock wait); `snapshotDecode` covers typed Swift JSON decoding. Both use the
+same monotonic clock as `snapshotRuntime`, without exporting catalog contents.
+Trace exports are written in capture order. Use
+`--max-snapshot-runtime-p95-ms` for a scenario-specific full snapshot latency gate;
+a fast component alone cannot satisfy it.
 
 ## Compare
 
