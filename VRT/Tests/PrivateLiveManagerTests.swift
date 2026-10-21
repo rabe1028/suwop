@@ -255,13 +255,16 @@ final class PrivateLiveManagerTests: XCTestCase {
             }
             XCTAssertTrue(owner.retired)
             resume()
+            // Live release fails first; only then does VIDEO inspection start and wait on the same unconfirmed JOIN.
+            // Only the inspection's own failure proves the VIDEO consumer was rejected. Finishing the Live operation
+            // after the release failure alone lets that pending inspection proceed and race fixture teardown.
+            let rejected = video
+                ? ["inspectImmichLockedVideoStorage"]
+                : ["releaseImmichLockedLive", "inspectImmichLockedVideoStorage", "readImmichLockedImage"]
             // Observe the real effect pipeline; this is not a manually invoked callback or fake ACK.
             let observer = Task { @MainActor in
                 while !Task.isCancelled {
-                    if fixture.failures.contains(where: {
-                        ["releaseImmichLockedLive", "inspectImmichLockedVideoStorage", "readImmichLockedImage"]
-                            .contains($0)
-                    }) {
+                    if fixture.failures.contains(where: rejected.contains) {
                         failed.fulfill()
                         return
                     }
@@ -269,10 +272,20 @@ final class PrivateLiveManagerTests: XCTestCase {
                 }
             }
             defer { observer.cancel() }
-            await fulfillment(of: [failed], timeout: 6)
+            // Bounds the sequential production 5 s Live JOIN deadlines (release, then VIDEO inspection).
+            await fulfillment(of: [failed], timeout: 20)
             XCTAssertEqual(fixture.transport.requests, 0)
             XCTAssertNil(model.immichLocked.projection?.video)
             XCTAssertNil(model.immichLocked.projection?.image)
+            if video {
+                // The rejected inspection registered an exact VIDEO consumer. JOIN its actual teardown while Live is
+                // still unconfirmed, so no VIDEO owner outlives this proof or is snapshotted by fixture close.
+                let access = fixture.shell.immichLockedVideoAccess
+                await access.joinCleanup()
+                XCTAssertTrue(access.consumerOwners.isEmpty)
+                XCTAssertTrue(access.consumerRegistry.owners(containing: entry.asset.key).isEmpty)
+                XCTAssertEqual(fixture.transport.requests, 0)
+            }
             XCTAssertFalse(owner.released)
             manager.finish(operation, owner: owner)
             _ = try await manager.release(pending, pairLeaseID: nil)

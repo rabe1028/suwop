@@ -237,7 +237,7 @@ import UniformTypeIdentifiers
                             }
                         #endif
                     } else {
-                        gate.finish(.failure((info?[PHImageErrorKey] as? Error) ?? SuwopError("プレビューを取得できません。")))
+                        gate.finish(.failure(PreviewLoadError.photoLibrary(info?[PHImageErrorKey] as? Error)))
                     }
                 }
                 gate.setRequest(id)

@@ -28,7 +28,8 @@ struct GalleryView: View {
     }
 
     private var selection: [UnifiedPhoto] {
-        model.photos.filter { $0.assets.contains { selectedKeys.contains($0.key) } }
+        guard !selectedKeys.isEmpty else { return [] }
+        return model.photos.filter { $0.assets.contains { selectedKeys.contains($0.key) } }
     }
 
     var body: some View {
@@ -61,8 +62,8 @@ struct GalleryView: View {
                 query = ""
             }
         }
-        .onChange(of: model.photos.map(\.id)) { _, _ in
-            selectedKeys.formIntersection(Set(model.photos.flatMap { $0.assets.map(\.key) }))
+        .onChange(of: model.photoIDs) { _, _ in
+            selectedKeys.formIntersection(model.publishedAssetKeys)
         }
         .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
         .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }

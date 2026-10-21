@@ -91,70 +91,103 @@ final class PrivateVideoUITests: XCTestCase {
     }
 
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        for direction in [true, false] {
+        var previousDeficit: CGFloat?
+        for searchUpward in [true, false] {
             for _ in 0 ..< 8 {
-                let authentication = app.collectionViews["immichLockedAuthenticationForm"]
-                let content = app.collectionViews["immichLockedContentList"]
-                let list = authentication.exists ? authentication : content
-                guard list.exists else {
-                    XCTFail("Missing exact C1 Form or content List viewport")
+                guard let (list, viewport) = gestureViewport(in: app) else { return }
+                let frame = element.exists ? element.frame : .zero
+                guard !frame.isEmpty, !frame.isNull, !frame.isInfinite else {
+                    // Lazy/unrealized rows have no geometry: bounded search sweep, reversing once.
+                    previousDeficit = nil
+                    drag(list, within: viewport, upward: searchUpward, by: viewport.height / 2)
+                    continue
+                }
+                if viewport.contains(frame), element.isHittable {
                     return
                 }
-                var viewport = list.frame.intersection(app.frame)
-                let navigation = app.navigationBars.firstMatch
-                if navigation.exists {
-                    let top = max(viewport.minY, navigation.frame.maxY)
-                    viewport = CGRect(
-                        x: viewport.minX,
-                        y: top,
-                        width: viewport.width,
-                        height: max(0, viewport.maxY - top)
+                // A full-viewport drag overshoots a slightly clipped control to the opposite edge and can
+                // scroll the playing surface out of the List. Scroll only the measured vertical clipping.
+                let deficit = max(0, viewport.minY - frame.minY) + max(0, frame.maxY - viewport.maxY)
+                guard deficit > 0, frame.height <= viewport.height else {
+                    attachGeometry(
+                        "private-video-unscrollable-control",
+                        app: app,
+                        list: list,
+                        viewport: viewport,
+                        frame: frame
                     )
-                }
-                guard viewport.width > 40, viewport.height > 60 else {
-                    let geometry =
-                        XCTAttachment(
-                            string: "list=\(list.frame), nav=\(navigation.frame), app=\(app.frame), viewport=\(viewport)"
-                        )
-                    geometry.name = "private-video-unusable-list-viewport"
-                    geometry.lifetime = .keepAlways
-                    add(geometry)
-                    XCTFail("C1 List has no usable gesture viewport")
+                    XCTFail("C1 control clipping is not resolvable by vertical List scrolling")
                     return
                 }
-                let exists = element.exists
-                let frame = exists ? element.frame : .zero
-                let visible = exists && !frame.isEmpty && viewport.contains(frame) && element.isHittable
-                if visible {
+                if let previousDeficit, deficit >= previousDeficit {
+                    attachGeometry(
+                        "private-video-nonconverging-scroll",
+                        app: app,
+                        list: list,
+                        viewport: viewport,
+                        frame: frame
+                    )
+                    XCTFail("C1 List scroll did not reduce the measured control clipping")
                     return
                 }
-                // Realized rows tell us which edge clips them. Lazy/unrealized rows use the bounded search direction.
-                let upward = scrollUp(to: frame, within: viewport, fallback: direction)
-                let start = list.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(
-                        dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (upward ? viewport.maxY - 20 : viewport.minY + 20) - list.frame.minY
-                    ))
-                let end = list.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(
-                        dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (upward ? viewport.minY + 20 : viewport.maxY - 20) - list.frame.minY
-                    ))
-                start.press(forDuration: 0.05, thenDragTo: end)
+                previousDeficit = deficit
+                let padding = min(12, (viewport.height - frame.height) / 2)
+                drag(list, within: viewport, upward: frame.maxY > viewport.maxY, by: deficit + padding)
             }
         }
         XCTFail("C1 control did not become fully visible inside its actual List viewport")
     }
 
-    @MainActor private func scrollUp(to frame: CGRect, within viewport: CGRect, fallback: Bool) -> Bool {
-        guard !frame.isEmpty, !frame.isNull, !frame.isInfinite else { return fallback }
-        if frame.minY < viewport.minY {
-            return false
+    @MainActor private func gestureViewport(in app: XCUIApplication) -> (XCUIElement, CGRect)? {
+        let authentication = app.collectionViews["immichLockedAuthenticationForm"]
+        let content = app.collectionViews["immichLockedContentList"]
+        let list = authentication.exists ? authentication : content
+        guard list.exists else {
+            XCTFail("Missing exact C1 Form or content List viewport")
+            return nil
         }
-        if frame.maxY > viewport.maxY {
-            return true
+        var viewport = list.frame.intersection(app.frame)
+        let navigation = app.navigationBars.firstMatch
+        if navigation.exists {
+            let top = max(viewport.minY, navigation.frame.maxY)
+            viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(0, viewport.maxY - top))
         }
-        return fallback
+        guard viewport.width > 40, viewport.height > 60 else {
+            attachGeometry(
+                "private-video-unusable-list-viewport",
+                app: app,
+                list: list,
+                viewport: viewport,
+                frame: .null
+            )
+            XCTFail("C1 List has no usable gesture viewport")
+            return nil
+        }
+        return (list, viewport)
+    }
+
+    /// Upward moves content up to expose lower rows. The whole drag stays inside the List viewport's leading margin,
+    /// off the player surface and controls; the slow drag held at its end leaves no deceleration overshoot.
+    @MainActor private func drag(_ list: XCUIElement, within viewport: CGRect, upward: Bool, by distance: CGFloat) {
+        let movement = min(viewport.height - 40, max(24, distance))
+        let startY = upward ? viewport.maxY - 20 : viewport.minY + 20
+        let endY = upward ? startY - movement : startY + movement
+        let origin = list.coordinate(withNormalizedOffset: .zero)
+        let x = viewport.minX + 8 - list.frame.minX
+        let start = origin.withOffset(CGVector(dx: x, dy: startY - list.frame.minY))
+        let end = origin.withOffset(CGVector(dx: x, dy: endY - list.frame.minY))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
+    @MainActor private func attachGeometry(
+        _ name: String, app: XCUIApplication, list: XCUIElement, viewport: CGRect, frame: CGRect
+    ) {
+        let geometry = XCTAttachment(
+            string: "list=\(list.frame), viewport=\(viewport), control=\(frame), app=\(app.frame)"
+        )
+        geometry.name = name
+        geometry.lifetime = .keepAlways
+        add(geometry)
     }
 
     @MainActor private func expect(_ label: String, in element: XCUIElement) {

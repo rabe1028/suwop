@@ -380,7 +380,13 @@ private struct ZoomablePhoto: View {
                 guard identifier == model.previewIdentifier(photo) else { throw CancellationError() }
                 imageIdentifier = identifier
                 image = loaded
-            } catch is CancellationError { return } catch {
+            } catch is CancellationError {
+                // Navigation cancellation is silent. A still-current request
+                // rejected by fresh authority must not leave an endless spinner.
+                if !Task.isCancelled, identifier == model.previewIdentifier(photo) {
+                    error = PreviewLoadError.accessChanged.localizedDescription
+                }
+            } catch {
                 if !Task.isCancelled {
                     self.error = error.localizedDescription
                 }

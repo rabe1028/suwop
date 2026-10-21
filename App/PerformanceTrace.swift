@@ -8,6 +8,7 @@ import SuwopShell
     enum Phase: String {
         case http, nativeEffect, resolve, snapshot, publish, refresh, mainActorDelay, previewImage, thumbnail
         case previewRequest, thumbnailRequest, imageAuthority, snapshotRuntime, snapshotBridge, snapshotDecode
+        case snapshotPrepare
     }
 
     struct Span {
@@ -35,7 +36,14 @@ import SuwopShell
 
     static func recordSnapshot(_ snapshot: RuntimeSnapshot) {
         guard let start = snapshot.measuredStart, let duration = snapshot.measuredDuration else { return }
-        measured(.snapshotRuntime, start: start, duration: duration)
+        // Include the presentation work moved off MainActor in total runtime;
+        // report it separately so it cannot disappear from the comparison.
+        measured(.snapshotRuntime, start: start, duration: max(duration, snapshot.preparationEnd - start))
+        measured(
+            .snapshotPrepare,
+            start: snapshot.preparationStart,
+            duration: snapshot.preparationEnd - snapshot.preparationStart
+        )
         if let decodeStart = snapshot.measuredDecodeStart, let end = snapshot.measuredEnd {
             measured(.snapshotBridge, start: start, duration: decodeStart - start)
             measured(.snapshotDecode, start: decodeStart, duration: end - decodeStart)

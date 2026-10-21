@@ -3,6 +3,9 @@ import Foundation
 public struct RuntimeSnapshot: Sendable {
     public let revision: UInt64
     public let view: ViewModel
+    public let presentationIndex: LibraryPresentationIndex
+    public let preparationStart: TimeInterval
+    public let preparationEnd: TimeInterval
     public var measuredStart: TimeInterval?
     public var measuredDuration: TimeInterval?
     public var measuredDecodeStart: TimeInterval?
@@ -11,6 +14,9 @@ public struct RuntimeSnapshot: Sendable {
     public init(revision: UInt64, view: ViewModel) {
         self.revision = revision
         self.view = view
+        preparationStart = ProcessInfo.processInfo.systemUptime
+        presentationIndex = LibraryPresentationIndex(view: view)
+        preparationEnd = ProcessInfo.processInfo.systemUptime
     }
 }
 
@@ -48,7 +54,13 @@ public actor RustRuntime {
     }
 
     public func view() throws -> ViewModel {
-        try bridge.callDecoded(2, as: ViewModel.self)
+        try compactView().value
+    }
+
+    /// Action 18 carries the action 2 view with one copy of each asset. It is expanded
+    /// here, on the runtime actor, so callers receive the identical `ViewModel`.
+    private func compactView() throws -> DecodedMeasurement<ViewModel> {
+        try bridge.callDecodedMeasured(18, as: CompactLibraryWire.self) { try $0.expand() }
     }
 
     /// Query current Rust authority without serializing every photo for each thumbnail.
@@ -72,7 +84,7 @@ public actor RustRuntime {
     }
 
     public func snapshot() throws -> RuntimeSnapshot {
-        let measured = try bridge.callDecodedMeasured(2, as: ViewModel.self)
+        let measured = try compactView()
         var result = RuntimeSnapshot(revision: revision, view: measured.value)
         result.measuredStart = measured.start
         result.measuredDuration = measured.end - measured.start

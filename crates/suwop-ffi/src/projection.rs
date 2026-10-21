@@ -15,6 +15,8 @@ use suwop_core::{
 pub enum Selection {
     Ordinary(Vec<AssetKey>),
     Progress,
+    /// The full library view, re-encoded with a shared asset table.
+    Compact,
 }
 pub type Query = Arc<Mutex<Option<Selection>>>;
 pub struct ProjectionApp {
@@ -46,6 +48,7 @@ pub enum Projection {
         progress: Option<String>,
     },
     Library(Box<ViewModel>),
+    Compact(Box<crate::compact::CompactLibrary>),
     Ordinary {
         keys: Vec<AssetKey>,
         revision: String,
@@ -120,6 +123,9 @@ impl App for ProjectionApp {
                     revision: entry.revision.clone(),
                 }
             }
+            Some(Selection::Compact) => Projection::Compact(Box::new(
+                crate::compact::CompactLibrary::new(Suwop.view(model)),
+            )),
             None => Projection::Library(Box::new(Suwop.view(model))),
         }
     }

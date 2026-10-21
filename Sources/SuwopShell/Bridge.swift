@@ -138,10 +138,17 @@ public final class CoreBridge {
     func callDecodedMeasured<Value: Decodable>(
         _ action: UInt32, as type: Value.Type
     ) throws -> DecodedMeasurement<Value> {
+        try callDecodedMeasured(action, as: type) { $0 }
+    }
+
+    /// `transform` runs inside the measured decode window, on the caller's actor.
+    func callDecodedMeasured<Payload: Decodable, Value>(
+        _ action: UInt32, as type: Payload.Type, transform: (Payload) throws -> Value
+    ) throws -> DecodedMeasurement<Value> {
         let start = ProcessInfo.processInfo.systemUptime
         let output = try Self.invokeData(handle: handle, action: action, input: .null)
         let decodeStart = ProcessInfo.processInfo.systemUptime
-        let value = try Wire.decoder().decode(BridgeEnvelope<Value>.self, from: output).value
+        let value = try transform(Wire.decoder().decode(BridgeEnvelope<Payload>.self, from: output).value)
         return DecodedMeasurement(
             value: value,
             start: start,
@@ -164,8 +171,21 @@ public final class CoreBridge {
         guard let text = String(data: data, encoding: .utf8) else { throw SuwopError("JSON を生成できません。") }
         let pointer = text.withCString { suwop_call(handle, action, $0) }
         guard let pointer else { throw SuwopError("Rust コアから応答がありません。") }
-        defer { suwop_free(pointer) }
-        return Data(String(cString: pointer).utf8)
+        // Rust returns a NUL-terminated CString with no interior NUL. The Data adopts
+        // that allocation without copying and returns it to Rust exactly once, when the
+        // last reference is released; JSONDecoder still validates UTF-8 itself.
+        let count = strlen(pointer)
+        guard count > 0 else {
+            suwop_free(pointer)
+            throw SuwopError("Rust コアから応答がありません。")
+        }
+        return Data(
+            bytesNoCopy: UnsafeMutableRawPointer(pointer),
+            count: count,
+            deallocator: .custom { bytes, _ in
+                suwop_free(bytes.assumingMemoryBound(to: CChar.self))
+            }
+        )
     }
 }
 

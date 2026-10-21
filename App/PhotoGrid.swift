@@ -39,7 +39,7 @@ enum TimelineGrouping: String, CaseIterable, Identifiable {
 private struct PhotoSection: Identifiable {
     var id: String
     var heading: String?
-    var photos: [UnifiedPhoto]
+    var photos: [LibraryPresentationIndex.Row]
 }
 
 struct PhotoGrid: View {
@@ -53,10 +53,10 @@ struct PhotoGrid: View {
 
     private var sections: [PhotoSection] {
         if timeline == .all {
-            return [PhotoSection(id: "all", photos: model.visiblePhotos)]
+            return [PhotoSection(id: "all", photos: model.visibleRows)]
         }
-        let grouped = Dictionary(grouping: model.visiblePhotos) {
-            timeline.date(model.displayedSource($0)?.capturedAt)
+        let grouped = Dictionary(grouping: model.visibleRows) {
+            timeline.date(model.displayedSource($0.photo)?.capturedAt)
         }
         return grouped.keys.sorted { first, second in
             switch (first, second) {
@@ -84,8 +84,8 @@ struct PhotoGrid: View {
                 ) {
                     ForEach(sections) { section in
                         Section {
-                            ForEach(section.photos) { photo in
-                                tile(photo)
+                            ForEach(section.photos) { row in
+                                tile(row.photo)
                             }
                         } header: {
                             if let heading = section.heading {

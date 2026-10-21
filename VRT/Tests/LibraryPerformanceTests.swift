@@ -5,6 +5,24 @@ import SuwopShell
 import XCTest
 
 @MainActor final class LibraryPerformanceTests: XCTestCase {
+    func testPreparedRowsFollowRustOrderAndRejectOlderPublication() throws {
+        let model = try SnapshotFixtures.model()
+        var view = try XCTUnwrap(model.view)
+        let expected = Array(view.photos.reversed().prefix(2))
+        view.browser.photoIDs = expected.map(\.id) + ["missing-photo"]
+        model.publish(RuntimeSnapshot(revision: 2, view: view))
+        XCTAssertEqual(model.visiblePhotos.map(\.id), expected.map(\.id))
+        XCTAssertEqual(model.visibleRows.map(\.id), expected.map(\.id))
+        view.browser.photoIDs = []
+        view.photos = []
+        model.publish(RuntimeSnapshot(revision: 1, view: view))
+        XCTAssertEqual(model.visibleRows.map(\.id), expected.map(\.id))
+        model.publish(RuntimeSnapshot(revision: 3, view: view))
+        XCTAssertTrue(model.visiblePhotos.isEmpty)
+        XCTAssertTrue(model.photoIDs.isEmpty)
+        XCTAssertTrue(model.publishedAssetKeys.isEmpty)
+    }
+
     func testProgressDoesNotInvalidateGalleryAndAuthorityIndexIsReplaced() throws {
         let model = try SnapshotFixtures.model()
         let photo = try XCTUnwrap(model.view?.photos.first)

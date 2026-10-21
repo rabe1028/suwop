@@ -7,6 +7,7 @@ import SwiftUI
     @Published private(set) var view: ViewModel?
     let progress = LibraryProgress()
     private var operationKeyIndex: Set<AssetKey> = []
+    private(set) var presentationIndex: LibraryPresentationIndex?
     private var effectViewVersion: String?
     @Published var errorMessage: String?
     @Published var showSettings = false
@@ -73,6 +74,7 @@ import SwiftUI
 
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage], semanticSearch: SemanticSearchModel? = nil) {
             view = snapshotView
+            presentationIndex = LibraryPresentationIndex(view: snapshotView)
             operationKeyIndex = Set(snapshotView.ordinaryContentKeys)
             snapshotImages = images
             self.semanticSearch = semanticSearch
@@ -114,22 +116,12 @@ import SwiftUI
         }
     }
 
-    var photos: [UnifiedPhoto] {
-        view?.photos ?? []
-    }
-
     var editClipboard: EditClipboard? {
         view?.state.editClipboard
     }
 
     var pendingEditPastes: [PendingEditPaste] {
         view?.state.pendingEditPastes ?? []
-    }
-
-    var visiblePhotos: [UnifiedPhoto] {
-        guard let browser = view?.browser else { return photos }
-        let byID = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return browser.photoIDs.compactMap { byID[$0] }
     }
 
     var browser: BrowserView? {
@@ -412,10 +404,19 @@ extension LibraryModel {
         PerformanceTrace.recordSnapshot(snapshot)
         let span = PerformanceTrace.begin(.publish)
         defer { PerformanceTrace.end(span) }
+        // Best-effort background retirement: keep a copy until every session
+        // receives the new snapshot. Other owners may still release on MainActor.
+        let retiredView = view
+        let retiredIndex = presentationIndex
+        defer {
+            Task.detached(priority: .utility) {
+                withExtendedLifetime((retiredView, retiredIndex)) {}
+            }
+        }
         publishedRevision = snapshot.revision
         progress.value = nil
-        let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
-        let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
+        let previousKeys = presentationIndex?.assetKeys ?? []
+        let currentKeys = snapshot.presentationIndex.assetKeys
         let removed = !previousKeys.isSubset(of: currentKeys)
         let contentChanged = view != nil && view?.privateContentRevision != snapshot.view.privateContentRevision
         if contentChanged {
@@ -424,7 +425,7 @@ extension LibraryModel {
         if removed {
             let removedKeys = previousKeys.subtracting(currentKeys)
             let priorReadOnly = Set(view?.ordinarySelectedPresentation.map(\.key) ?? [])
-            let priorOperations = Set(view?.ordinaryContentKeys ?? [])
+            let priorOperations = operationKeyIndex
             let isolatedProofLoss = !contentChanged &&
                 view?.ordinarySelectedGeneration == snapshot.view.ordinarySelectedGeneration &&
                 removedKeys.isSubset(of: priorReadOnly) && removedKeys.isDisjoint(with: priorOperations)
@@ -440,7 +441,8 @@ extension LibraryModel {
         if contentChanged || removed || replacedSource {
             invalidateThumbnails()
         }
-        operationKeyIndex = Set(snapshot.view.ordinaryContentKeys)
+        operationKeyIndex = snapshot.presentationIndex.operationKeys
+        presentationIndex = snapshot.presentationIndex
         view = snapshot.view
         protection.receive(snapshot)
         immichLocked.receive(snapshot)

@@ -101,9 +101,21 @@ actor HTTPExecutor {
     }
 
     func thumbnail(_ operation: HttpRequest) async throws -> Data {
-        let (bytes, response) = try await BoundedHTTPData.load(urlRequest(operation), session: session, limit: 8 << 20)
-        guard try (200 ..< 300).contains(statusCode(response)) else { throw SuwopError("プレビューを取得できません。") }
-        return bytes
+        do {
+            let (bytes, response) = try await BoundedHTTPData.load(
+                urlRequest(operation),
+                session: session,
+                limit: 8 << 20
+            )
+            let status = try statusCode(response)
+            guard (200 ..< 300).contains(status) else { throw PreviewLoadError.http(status) }
+            return bytes
+        } catch let error as URLError {
+            if error.code == .cancelled {
+                throw CancellationError()
+            }
+            throw PreviewLoadError.network(error.code)
+        }
     }
 
     private func urlRequest(_ operation: HttpRequest) throws -> URLRequest {

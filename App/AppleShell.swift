@@ -526,7 +526,7 @@ extension AppleShell {
             return image
         }
         guard let connection else {
-            throw SuwopError("プレビューを取得できません。")
+            throw PreviewLoadError.missingConnection
         }
         let credential = try Credentials.read(connection.credentialID)
         let input: JSONValue = try .object([
@@ -540,7 +540,7 @@ extension AppleShell {
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         let bytes = try await http.thumbnail(request)
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
-        guard let image = PlatformImage(data: bytes) else { throw SuwopError("プレビューを表示できません。") }
+        guard let image = PlatformImage(data: bytes) else { throw PreviewLoadError.invalidImage }
         return image
     }
 }

@@ -22,6 +22,7 @@ use suwop_core::{
     workflow::HashResult,
 };
 
+mod compact;
 mod input_limits;
 mod projection;
 #[cfg(test)]
@@ -254,9 +255,12 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String
             runtime.bulk_replies.remove(&response.id);
         }
         2 => bridge.view(&mut output).map_err(|e| e.to_string())?,
-        17 => {
-            *runtime.query.lock().map_err(|e| e.to_string())? =
-                Some(projection::Selection::Progress);
+        17 | 18 => {
+            *runtime.query.lock().map_err(|e| e.to_string())? = Some(if action == 17 {
+                projection::Selection::Progress
+            } else {
+                projection::Selection::Compact
+            });
             let result = bridge.view(&mut output);
             *runtime.query.lock().map_err(|e| e.to_string())? = None;
             result.map_err(|e| e.to_string())?;
