@@ -17,19 +17,28 @@ import XCTest
             return true
         }
         guard discover(element, in: app, menu: menu, viewport: viewport) else { return false }
-        // Late discovery gets its own bounded alignment budget. No action is retried.
-        for _ in 0 ..< 6 {
+        // Native menu pans can consume part of a drag before scrolling. Allow
+        // bounded continued alignment only while the clipping deficit decreases.
+        // No menu action is retried and full containment remains required.
+        for _ in 0 ..< 12 {
             if visible() {
                 return true
             }
             let before = element.frame
+            guard before.height <= viewport.height, before.width <= viewport.width else { return false }
             guard menu.exists, step(element, in: app, viewport: viewport, searchDownward: false) else { return false }
             if visible() {
                 return true
             }
-            guard element.exists, !element.frame.isEmpty, element.frame != before else { return false }
+            guard element.exists, !element.frame.isEmpty,
+                  clippingDeficit(element.frame, in: viewport) < clippingDeficit(before, in: viewport)
+            else { return false }
         }
         return visible()
+    }
+
+    private static func clippingDeficit(_ target: CGRect, in viewport: CGRect) -> CGFloat {
+        max(0, viewport.minY - target.minY) + max(0, target.maxY - viewport.maxY)
     }
 
     private static func hasGeometry(_ element: XCUIElement) -> Bool {
@@ -80,12 +89,16 @@ import XCTest
             downward = searchDownward
             distance = viewport.height / 3
         }
-        let movement = min(viewport.height / 3, max(24, distance + 12))
+        let padding = target.isEmpty ? 12 : min(12, max(0, (viewport.height - target.height) / 2))
+        let movement = min(viewport.height * 2 / 3, max(24, distance + padding))
         let origin = app.coordinate(withNormalizedOffset: .zero)
-        let start = origin.withOffset(CGVector(dx: viewport.midX, dy: viewport.midY))
+        // Start opposite the scroll direction so the whole sweep stays inside
+        // the clipping viewport instead of limiting every pan to half its height.
+        let startY = downward ? viewport.minY + viewport.height / 6 : viewport.maxY - viewport.height / 6
+        let start = origin.withOffset(CGVector(dx: viewport.midX, dy: startY))
         let end = origin.withOffset(CGVector(
             dx: viewport.midX,
-            dy: viewport.midY + (downward ? movement : -movement)
+            dy: startY + (downward ? movement : -movement)
         ))
         start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         return true
