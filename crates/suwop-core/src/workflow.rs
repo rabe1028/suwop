@@ -22,6 +22,8 @@ mod media;
 mod metadata;
 mod reversion;
 mod sharing;
+mod status;
+pub(crate) use status::initial_status;
 mod trash;
 mod trash_fence;
 mod upload_intents;

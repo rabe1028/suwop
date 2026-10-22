@@ -64,7 +64,10 @@ final class PrivateLiveUITests: XCTestCase {
         XCTAssertEqual(check.label, "Live Photoを確認して再生")
         check.tap()
         let surface = app.descendants(matching: .any)["immichLockedLivePlayer"].firstMatch
-        XCTAssertTrue(surface.waitForExistence(timeout: 15))
+        // The lazy List inserts playback above the selected asset. Materialize
+        // that row before asserting its native surface, especially at AX3.
+        guard reveal(surface, in: app) else { return }
+        XCTAssertTrue(surface.exists)
         let stop = app.buttons["stopImmichLockedLive"]
         guard reveal(stop, in: app) else { return }
         XCTAssertTrue(stop.isHittable)

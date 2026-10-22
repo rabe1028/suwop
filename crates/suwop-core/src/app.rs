@@ -1220,7 +1220,7 @@ impl Suwop {
         model.busy = true;
         model.error = None;
         model.changed_during_work = false;
-        model.status = "処理中…".into();
+        model.status = crate::workflow::initial_status(&event).into();
         let origin = crate::ordinary_selected::RefreshOrigin::capture(model);
         let state = model.state.clone();
         let session = model.session.clone();

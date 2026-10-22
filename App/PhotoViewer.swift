@@ -62,6 +62,19 @@ struct PhotoViewer: View {
                     withAnimation { chrome.toggle() }
                 }
                 .id(photo.id)
+                .overlay(alignment: .bottom) {
+                    if model.isBusy {
+                        GeometryReader { geometry in
+                            VStack {
+                                Spacer(minLength: 0)
+                                PhotoOperationStatus(model: model)
+                                    .frame(maxHeight: max(0, geometry.size.height - 24))
+                                    .padding(12)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                }
                 if chrome {
                     if model.selectedPresentation(photo) != nil {
                         Text("表示のみ — この表示元の共有・編集・再生・転送はできません。")
@@ -185,12 +198,6 @@ struct PhotoViewer: View {
                 model.choosePreview(photo, key: chosen) { cursor.point(to: $0, in: photo) }
             }
             .disabled(model.isBusy)
-            if model.isBusy {
-                HStack {
-                    ProgressView(model.status).font(.caption)
-                    Button("停止") { model.stop() }
-                }
-            }
             if model.selectedPresentation(photo) == nil, Set(model.operationKeys(photo).map(\.provider)).count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }

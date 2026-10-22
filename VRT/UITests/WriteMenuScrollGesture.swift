@@ -26,7 +26,8 @@ import XCTest
             }
             let before = element.frame
             guard before.height <= viewport.height, before.width <= viewport.width else { return false }
-            guard menu.exists, step(element, in: app, viewport: viewport, searchDownward: false) else { return false }
+            guard menu.exists,
+                  step(element, in: app, menu: menu, viewport: viewport, searchDownward: false) else { return false }
             if visible() {
                 return true
             }
@@ -55,7 +56,8 @@ import XCTest
                 }
                 guard menu.exists else { return false }
                 let before = menu.buttons.allElementsBoundByIndex.map(\.frame)
-                guard step(element, in: app, viewport: viewport, searchDownward: downward) else { return false }
+                guard step(element, in: app, menu: menu, viewport: viewport, searchDownward: downward)
+                else { return false }
                 if hasGeometry(element) {
                     return true
                 }
@@ -68,7 +70,13 @@ import XCTest
         return hasGeometry(element)
     }
 
-    static func step(_ element: XCUIElement, in app: XCUIApplication, viewport: CGRect, searchDownward: Bool) -> Bool {
+    private static func step(
+        _ element: XCUIElement,
+        in app: XCUIApplication,
+        menu: XCUIElement,
+        viewport: CGRect,
+        searchDownward: Bool
+    ) -> Bool {
         let target = element.exists ? element.frame : .zero
         let downward: Bool
         let distance: CGFloat
@@ -94,11 +102,19 @@ import XCTest
         let origin = app.coordinate(withNormalizedOffset: .zero)
         // Start opposite the scroll direction so the whole sweep stays inside
         // the clipping viewport instead of limiting every pan to half its height.
-        let startY = downward ? viewport.minY + viewport.height / 6 : viewport.maxY - viewport.height / 6
+        let preferredY = downward ? viewport.minY + viewport.height / 6 : viewport.maxY - viewport.height / 6
+        // Disabled native menu rows can swallow a pan started on their label.
+        // Start on an enabled visible row, with room for a drag in this direction.
+        // This is positioning only: no menu action is tapped or retried.
+        let starts = menu.buttons.allElementsBoundByIndex.filter(\.isEnabled).map(\.frame)
+            .filter { !$0.isEmpty && viewport.contains(CGPoint(x: viewport.midX, y: $0.midY)) }
+            .map(\.midY).filter { downward ? $0 < viewport.maxY - 44 : $0 > viewport.minY + 44 }
+        guard let startY = starts.min(by: { abs($0 - preferredY) < abs($1 - preferredY) }) else { return false }
+        let available = downward ? viewport.maxY - startY : startY - viewport.minY
         let start = origin.withOffset(CGVector(dx: viewport.midX, dy: startY))
         let end = origin.withOffset(CGVector(
             dx: viewport.midX,
-            dy: startY + (downward ? movement : -movement)
+            dy: startY + (downward ? min(movement, available) : -min(movement, available))
         ))
         start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
         return true
