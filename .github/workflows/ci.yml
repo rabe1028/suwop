@@ -42,6 +42,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Rust, script, workflow and architecture rules
@@ -81,6 +84,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Run the ${{ matrix.profile }} test suite
@@ -111,6 +117,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify old-server ordinary, read, recovery and denied PIN writes
         env:
           IMMICH_VERSION: v3.2.4
@@ -161,6 +170,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-release-${{ matrix.target }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install protobuf compiler
         run: brew install protobuf
       - name: Build one release slice
@@ -197,6 +209,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-host-tests-v2
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Swift formatting and strict lint
@@ -278,6 +293,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install XcodeGen and pinned SimSlim
         run: |
           brew install xcodegen protobuf

@@ -106,6 +106,11 @@ Changes:
   binary. `immich_live` stays separate for `make integration`.
   `scripts/check-architecture.py` rejects a suite file not declared in
   `suite/main.rs`, so a new test file cannot silently stop running.
+- Only `main` saves Rust caches. On 2026-10-22 the repository held 11.0 GB
+  of caches against the 10 GB limit: every PR merge ref saved its own
+  650–750 MB caches, main's Rust caches had been evicted, and PR jobs such as
+  the Apple release slices rebuilt dependencies cold (42 minutes instead of
+  about 3). PRs now restore main's caches without writing their own.
 - `make test-rust` runs tests with cargo-nextest (pinned in
   `scripts/install-tools.sh`, no retries) and doctests with `cargo test --doc`.
   `RUST_TEST_ARGS=--release` runs the release suite.
