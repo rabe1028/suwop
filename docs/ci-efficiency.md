@@ -132,7 +132,7 @@ The workflow now has five macOS jobs:
 
 | Job | Runner | Work |
 | --- | --- | --- |
-| `apple` | macos-15 | Swift lint, Rust-to-Swift bridge tests, three release slices, iOS/macOS apps, macOS sharing/private media tests |
+| `apple` | macos-15 | Rust-to-Swift bridge tests, three release slices, iOS/macOS apps, macOS sharing/private media tests |
 | `apple-products` | macos-26 | Rust simulator library and VRT/PhotoKit `build-for-testing`, once |
 | `simulator` ×3 | macos-26 | `vrt-ci-ui-1`, `vrt-ci-ui-2`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
 
@@ -146,11 +146,24 @@ Work moved off macOS or removed from it:
 - The three single-slice release jobs and the host-test job share one job and
   one cache. Before, they repeated runner setup in four places.
 
+- Swift lint runs on Linux (`swift-lint`) in the pinned `swift:6.2-noble`
+  image, whose `libsourcekitdInProc` the dynamic SwiftLint build loads. Do not
+  use `swiftlint-static` or a runner without SourceKit: it skips
+  `custom_rules` and `statement_position` and still exits 0. With SourceKit,
+  an injected `@unchecked Sendable` and a misplaced `else` failed on Linux
+  exactly as on macOS, and the repository passed on both.
+
 Kept on macOS deliberately:
 
-- Rust Apple slices compile C dependencies (for example bundled SQLite)
-  against the Apple SDK that `xcrun` provides. Linux runners have no licensed
-  Apple SDK, so the slices cannot be built there and handed over.
-- SwiftLint for Linux skips the SourceKit-backed `custom_rules` and
-  `statement_position` rules while still exiting 0. Moving lint would quietly
-  drop checks, so `make lint-swift` stays in the existing `apple` job.
+- `swift test`: the package imports CoreGraphics, ImageIO,
+  UniformTypeIdentifiers and LiteRT-LM's Apple binary, and its tests use
+  AVFoundation, CoreMedia and CryptoKit. None of these exist on Linux.
+- Rust Apple libraries. Six dependencies compile C (`blake3`, `lance-linalg`,
+  `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`). Zig's C compiler can
+  build them for iOS only by forcing its macOS libc headers onto iOS targets,
+  which Zig does not support. `lance-arrow` also always builds a `cdylib`,
+  and linking it for iOS needs `libSystem`/`libiconv` stubs that only
+  Apple's SDK provides; a Linux cross-build stopped there. Making it work
+  would need fake link stubs and would test libraries built by a different C
+  compiler than developers and releases use. At most it would save about
+  nine warm macOS minutes per run.

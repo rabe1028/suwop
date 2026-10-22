@@ -10,12 +10,7 @@ OS="$(uname -s)"
 ARCH="$(uname -m)"
 if [[ "$ARCH" == "aarch64" ]]; then ARCH=arm64; fi
 if [[ "$OS" == "Darwin" ]]; then
-  curl -fsSL https://github.com/realm/SwiftLint/releases/download/0.65.1/portable_swiftlint.zip -o "$TEMP/swiftlint.zip"
-  unzip -q "$TEMP/swiftlint.zip" -d "$TEMP/swiftlint"
-  install -m 755 "$TEMP/swiftlint/swiftlint" "$BIN/swiftlint"
-  curl -fsSL https://github.com/nicklockwood/SwiftFormat/releases/download/0.63.1/swiftformat.zip -o "$TEMP/swiftformat.zip"
-  unzip -q "$TEMP/swiftformat.zip" -d "$TEMP/swiftformat"
-  install -m 755 "$TEMP/swiftformat/swiftformat" "$BIN/swiftformat"
+  bash "$ROOT/scripts/install-swift-tools.sh"
   brew install xcodegen shellcheck protobuf
   PLATFORM=darwin
 else
