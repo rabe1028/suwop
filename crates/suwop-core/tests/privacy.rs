@@ -15,6 +15,7 @@ fn asset(provider: Provider, visibility: AppleVisibility) -> StoredAsset {
     StoredAsset {
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: visibility,
         key: AssetKey {
             provider,

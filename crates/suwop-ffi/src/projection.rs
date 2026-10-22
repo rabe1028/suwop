@@ -183,6 +183,7 @@ mod tests {
             apple_visibility: AppleVisibility::Visible,
             immich_visibility: None,
             immich_stack: ImmichStackState::Unknown,
+            immich_stack_membership: None,
             captured_at: None,
             modified_at: None,
             resources: vec![],

@@ -43,6 +43,7 @@ fn asset(id: &str) -> StoredAsset {
         key: facts(id).key,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: AppleVisibility::Visible,
         name: "secret.jpg".into(),
         captured_at: Some(1.0),

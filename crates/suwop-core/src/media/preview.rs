@@ -89,6 +89,9 @@ impl<'a> PreviewAccess<'a> {
                         (
                             std::cmp::Reverse(a.originals().count()),
                             a.key.provider != Provider::Apple,
+                            a.immich_stack_membership
+                                .as_ref()
+                                .is_some_and(|s| s.primary_asset_id != a.key.asset_id),
                         )
                     })
                     .map(|a| a.key.clone())

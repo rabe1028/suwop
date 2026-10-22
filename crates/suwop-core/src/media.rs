@@ -6,7 +6,7 @@ pub use preview::{PreviewAccess, PreviewChoice, selected_preview};
 
 use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ResourceRole, ScanAccess, StoredAsset, TransferBundle,
-    TransferFile, TransferReceipt, UnifiedPhoto, catalog,
+    TransferFile, TransferReceipt, UnifiedPhoto,
 };
 
 #[derive(
@@ -56,7 +56,7 @@ pub fn source(
     keys: &[AssetKey],
 ) -> Result<(AssetKey, PlaybackKind), String> {
     let requested: BTreeSet<_> = keys.iter().collect();
-    let photos = catalog(snapshots, receipts);
+    let photos = crate::display_catalog::photos(snapshots, receipts);
     let known: BTreeSet<_> = photos
         .iter()
         .flat_map(|p| p.assets.iter().map(|a| &a.key))

@@ -5,7 +5,6 @@ use serde_json::Value;
 use crate::{
     domain::{
         LibrarySnapshot, Provider, ScanAccess, TransferIntent, TransferReceipt, UnifiedPhoto,
-        catalog,
     },
     immich::{HttpRequest, Session},
 };
@@ -1284,7 +1283,7 @@ impl Suwop {
             &ordinary,
             operation_public.clone(),
         );
-        let photos = catalog(&public.snapshots, &public.receipts);
+        let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
             &public.snapshots,
             &model.state.apple_scope,
@@ -1489,7 +1488,7 @@ fn choose_preview(
     if !present(anchor) || !present(&key) {
         return Err("写真の可視性を確認してください。".into());
     }
-    let photos = catalog(&public.snapshots, &public.receipts);
+    let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
     let photo = photos
         .iter()
         .find(|p| p.assets.iter().any(|a| a.key == *anchor))
@@ -1511,7 +1510,7 @@ fn choose_preview(
     Ok(())
 }
 fn update_preview_preferences(model: &mut Model, selected: Option<crate::domain::AssetKey>) {
-    let photos = catalog(&model.state.snapshots, &model.state.receipts);
+    let photos = crate::display_catalog::photos(&model.state.snapshots, &model.state.receipts);
     model.preview_preferences.retain(|key| {
         photos
             .iter()

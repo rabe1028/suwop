@@ -1,3 +1,4 @@
+pub mod stack;
 use crate::{
     app::{Context, ShellOperation, io},
     domain::{AssetKey, PhotoResource, Provider, ResourceRole, StoredAsset, normalize_sha1},
@@ -290,7 +291,8 @@ impl Session {
     /// Metadata-only refinement for a freshly enumerated exact owned asset.
     /// Search omits stack knowledge even when it includes stacked members.
     pub(crate) async fn hydrate_stack(&self, ctx: &Context, asset: &mut Asset) {
-        if asset.stack != crate::domain::ImmichStackState::Unknown
+        if asset.stack == crate::domain::ImmichStackState::Unstacked
+            || asset.stack.membership.is_some()
             || asset.owner_id != self.user_id
             || asset.is_trashed
             || asset.visibility.as_deref() == Some("locked")
@@ -521,13 +523,8 @@ pub fn safe_name(name: &str) -> String {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Asset {
-    #[serde(
-        default,
-        deserialize_with = "stack_state",
-        serialize_with = "crate::domain::ImmichStackState::serialize_api",
-        skip_serializing_if = "crate::domain::ImmichStackState::is_unknown"
-    )]
-    pub stack: crate::domain::ImmichStackState,
+    #[serde(default, skip_serializing_if = "stack::StackInventory::is_unknown")]
+    pub stack: stack::StackInventory,
     pub id: String,
     pub owner_id: String,
     #[serde(rename = "type")]
@@ -564,31 +561,6 @@ pub struct AssetFile {
     #[serde(rename = "type")]
     pub kind: String,
     pub path: String,
-}
-impl crate::domain::ImmichStackState {
-    fn is_unknown(&self) -> bool {
-        *self == Self::Unknown
-    }
-    fn serialize_api<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        match self {
-            Self::Stacked => serde_json::json!({}).serialize(serializer),
-            _ => serializer.serialize_none(),
-        }
-    }
-}
-
-fn stack_state<'de, D: serde::Deserializer<'de>>(
-    deserializer: D,
-) -> Result<crate::domain::ImmichStackState, D::Error> {
-    use crate::domain::ImmichStackState;
-    let value = serde_json::Value::deserialize(deserializer)?;
-    Ok(if value.is_null() {
-        ImmichStackState::Unstacked
-    } else if value.is_object() {
-        ImmichStackState::Stacked
-    } else {
-        ImmichStackState::Unknown
-    })
 }
 
 impl Asset {
@@ -683,7 +655,8 @@ impl Asset {
                 Some("locked") => Some(crate::immich_visibility::ImmichVisibility::Locked),
                 _ => None,
             },
-            immich_stack: self.stack.clone(),
+            immich_stack: self.stack.state.clone(),
+            immich_stack_membership: self.stack.membership.clone(),
             apple_visibility: crate::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Immich,
@@ -835,7 +808,7 @@ mod stack_inventory_tests {
                 ctx.send_event(Event::Finished {
                     state: SavedLibrary::default(),
                     session: None,
-                    status: format!("{:?}", asset.stack),
+                    status: format!("{:?}", asset.stack.state),
                     error: None,
                     preview_to_select: None,
                 });

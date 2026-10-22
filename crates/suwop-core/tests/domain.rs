@@ -5,6 +5,7 @@ fn asset(provider: Provider, id: &str, hashes: &[&str]) -> StoredAsset {
     StoredAsset {
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: AppleVisibility::Visible,
         key: AssetKey {
             provider,

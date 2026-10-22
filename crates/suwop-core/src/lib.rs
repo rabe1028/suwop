@@ -28,3 +28,5 @@ pub mod immich_live_resources;
 mod private_media_capture;
 
 mod private_media_cleanup;
+
+pub mod display_catalog;

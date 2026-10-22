@@ -10,6 +10,7 @@ fn date_search_uses_the_display_time_zone_including_historical_daylight_saving()
         assets: vec![StoredAsset {
             immich_visibility: None,
             immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+            immich_stack_membership: None,
             apple_visibility: suwop_core::domain::AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,

@@ -1374,6 +1374,17 @@ public struct ImmichLockedView: Codable, Sendable {
     }
 }
 
+public struct ImmichStackMembership: Codable, Sendable {
+    public var assetCount: Int64
+    public var id: String
+    public var primaryAssetId: String
+    public init(assetCount: Int64, id: String, primaryAssetId: String) {
+        self.assetCount = assetCount
+        self.id = id
+        self.primaryAssetId = primaryAssetId
+    }
+}
+
 public enum ImmichStackState: String, Codable, CaseIterable, Sendable {
     case `unknown`
     case `unstacked`
@@ -2334,8 +2345,9 @@ public struct StoredAsset: Codable, Sendable {
     public var isOffline: Bool
     public var deletionBlockers: [String]
     public var immichStack: ImmichStackState
+    public var immichStackMembership: ImmichStackMembership?
     public var immichVisibility: ImmichVisibility?
-    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichVisibility: ImmichVisibility? = nil) {
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichStackMembership: ImmichStackMembership? = nil, immichVisibility: ImmichVisibility? = nil) {
         self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
@@ -2350,6 +2362,7 @@ public struct StoredAsset: Codable, Sendable {
         self.isOffline = isOffline
         self.deletionBlockers = deletionBlockers
         self.immichStack = immichStack
+        self.immichStackMembership = immichStackMembership
         self.immichVisibility = immichVisibility
     }
 }

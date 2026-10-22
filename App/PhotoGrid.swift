@@ -131,7 +131,9 @@ struct PhotoGrid: View {
             )
             .accessibilityElement(children: .ignore)
         }.buttonStyle(.plain)
-            .accessibilityLabel("\(photo.name)、\(photo.presence.title)\(photo.isFavorite ? "、お気に入り" : "")")
+            .accessibilityLabel(
+                "\(photo.name)、\(photo.presence.title)\(photo.rawFormatTitle.map { "、" + $0 } ?? "")\(photo.isFavorite ? "、お気に入り" : "")"
+            )
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
             .accessibilityAddTraits(!selectedKeys.isDisjoint(with: photo.assets.map(\.key)) ? .isSelected : [])
             .disabled(selecting && model.operationKeys(photo).isEmpty)
@@ -204,8 +206,8 @@ struct PhotoTile: View {
                     } else if photo.resources.contains(where: { $0.role == .video }) {
                         Image(systemName: "video.fill")
                     }
-                    if photo.resources.contains(where: { $0.role == .rawImage }) {
-                        Text("RAW").bold()
+                    if let format = photo.rawFormatTitle {
+                        Text(format).bold()
                     }
                     if model.selectedPresentation(photo) != nil {
                         Text("表示のみ")
