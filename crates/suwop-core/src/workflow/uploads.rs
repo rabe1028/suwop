@@ -368,6 +368,7 @@ mod selected_read_resume_tests {
                 ordinary_generation: std::sync::Arc::default(),
                 started_ordinary_generation: 0,
                 ordinary_revision: "fixture".into(),
+                session_published: true,
                 apple_generation: std::sync::Arc::default(),
                 started_generation: 0,
                 reversion_started: false,

@@ -59,6 +59,7 @@ struct ReadShell {
     drift_read: Option<Value>,
     drift_publish: Option<Value>,
     fail_publish: bool,
+    stale_authorizations: usize,
 }
 impl Default for ReadShell {
     fn default() -> Self {
@@ -84,11 +85,16 @@ impl Default for ReadShell {
             drift_read: None,
             drift_publish: None,
             fail_publish: false,
+            stale_authorizations: 0,
         }
     }
 }
 impl ReadShell {
-    fn http(&mut self, request: &suwop_core::immich::HttpRequest) -> Result<Value, String> {
+    fn http(
+        &mut self,
+        c: &Core<Suwop>,
+        request: &suwop_core::immich::HttpRequest,
+    ) -> Result<Value, String> {
         if request.headers.contains_key("Authorization")
             || request.url.ends_with("/server/features")
             || request.url.ends_with("/auth/login")
@@ -121,6 +127,10 @@ impl ReadShell {
                 auth.purpose,
                 suwop_core::immich::OrdinaryContentPurpose::SelectedPresentationMetadata
             ));
+            // Native access rejects a revision other than the current projection's.
+            if auth.expected_revision != c.view().private_content_revision {
+                self.stale_authorizations += 1;
+            }
             if let Some(status) = self.failure {
                 return Ok(json!({"status":status,"body":null}));
             }
@@ -158,7 +168,7 @@ impl ReadShell {
                 self.disk = Some(serde_json::to_value(state).map_err(|_| "encode")?);
                 Ok(Value::Null)
             }
-            ShellOperation::Http(request) => self.http(request),
+            ShellOperation::Http(request) => self.http(c, request),
             ShellOperation::ReadOrdinarySelectedImage { ticket } => {
                 Self::pending(c, ticket);
                 assert!(
@@ -303,6 +313,31 @@ fn explicit_ordinary_refresh_restores_only_current_own_still_without_pin_or_jour
     );
     let restarted = ordinary(suwop_core::workflow::migrate(shell.disk.ok_or("disk")?)?);
     assert!(restarted.view().ordinary_selected_presentation.is_empty());
+    Ok(())
+}
+#[test]
+fn first_refresh_publishes_its_session_before_authorizing_metadata() -> Result<(), String> {
+    let c = Core::new_with(
+        Suwop,
+        Model {
+            state: seed()?,
+            ready: true,
+            ..Model::default()
+        },
+    );
+    let mut shell = ReadShell::default();
+    // Hydrate the selected photo last (IDs sort before it): its metadata read
+    // is answered only after the first partial publication.
+    let extras = (0..40).map(|i| {
+        let mut extra = asset();
+        extra["id"] = json!(format!("11111111-1111-4111-8111-{i:012}"));
+        extra
+    });
+    shell.listed.splice(0..0, extras);
+    shell.refresh(&c)?;
+    assert!(shell.paths.contains(&format!("assets/{ASSET}")));
+    assert_eq!(shell.stale_authorizations, 0);
+    assert_eq!(c.view().ordinary_selected_presentation.len(), 1);
     Ok(())
 }
 #[test]
