@@ -92,7 +92,7 @@ extension LibraryModel {
         let id = previewIdentifier(photo) as NSString
         if (preview ? previews : thumbnails).object(forKey: id) == nil {
             // Join a queued look-ahead instead of fetching the same raster twice.
-            _ = try await shared(id, photo: photo, preview: preview, urgent: true).value
+            try await shared(id, photo: photo, preview: preview, urgent: true).value
             try Task.checkCancellation()
         }
         return try await validatedImage(photo, preview: preview, fetch: true)
@@ -103,10 +103,10 @@ extension LibraryModel {
         photo: UnifiedPhoto,
         preview: Bool,
         urgent: Bool
-    ) -> Task<PlatformImage, Error> {
+    ) -> Task<Void, Error> {
         (preview ? previewLoads : thumbnailLoads).load(id, urgent: urgent) { [weak self] in
             guard let self else { throw CancellationError() }
-            return try await validatedImage(photo, preview: preview, fetch: true)
+            _ = try await validatedImage(photo, preview: preview, fetch: true)
         }
     }
 

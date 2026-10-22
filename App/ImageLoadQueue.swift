@@ -1,12 +1,13 @@
 import Foundation
 
 /// Bounded, shared scheduling for ordinary derivatives. It only orders work:
-/// every load runs the caller's authority-validated fetch, and a shared result
-/// is revalidated by each presenter before display.
+/// every load runs the caller's authority-validated fetch, which stores the
+/// raster in its cache; each presenter revalidates and reads it from there.
+/// Tasks carry no image because NSImage is not Sendable.
 @MainActor final class ImageLoadQueue {
     private struct Entry {
         let token: UUID
-        let task: Task<PlatformImage, Error>
+        let task: Task<Void, Error>
     }
 
     private struct Waiter {
@@ -29,8 +30,8 @@ import Foundation
     func load(
         _ id: NSString,
         urgent: Bool,
-        fetch: @escaping @MainActor () async throws -> PlatformImage
-    ) -> Task<PlatformImage, Error> {
+        fetch: @escaping @MainActor () async throws -> Void
+    ) -> Task<Void, Error> {
         if let entry = entries[id] {
             if urgent {
                 promote(entry.token)
@@ -47,7 +48,7 @@ import Foundation
             guard await acquire(id, token: token) else { throw CancellationError() }
             defer { release() }
             try Task.checkCancellation()
-            return try await fetch()
+            try await fetch()
         }
         entries[id] = Entry(token: token, task: task)
         return task
