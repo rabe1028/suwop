@@ -15,6 +15,10 @@ check uv --version 0.11.24
 check cargo --version 1.95.0
 check ruff --version 0.17.0
 check actionlint -version 1.7.12
+if [[ "$(cargo-nextest nextest --version)" != "cargo-nextest 0.9.146"* ]]; then
+  echo "Expected cargo-nextest 0.9.146. Run make setup." >&2
+  exit 1
+fi
 if [[ "$(shellcheck --version)" != *"version: 0.11.0"* ]]; then
   echo "Expected ShellCheck 0.11.0. Run make setup." >&2
   exit 1

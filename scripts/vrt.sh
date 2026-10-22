@@ -16,8 +16,8 @@ LANE=""
 if [[ "${1:-}" == --record && $# == 1 ]]; then RECORD=1
 elif [[ "${1:-}" == --capture && $# == 1 ]]; then CAPTURE=1
 elif [[ "${1:-}" == --ci-lane && $# == 2 ]]; then
-    case "$2" in host-snapshots|ui) LANE="$2" ;; *) echo 'Unknown CI VRT lane' >&2; exit 1 ;; esac
-elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture|--ci-lane host-snapshots|ui]' >&2; exit 1
+    case "$2" in host-snapshots|ui-[1-9]) LANE="$2" ;; *) echo 'Unknown CI VRT lane' >&2; exit 1 ;; esac
+elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture|--ci-lane host-snapshots|ui-N]' >&2; exit 1
 fi
 if [[ ( "$RECORD" == 1 || "$CAPTURE" == 1 ) && -n "${CI:-}" ]]; then
     echo 'Baseline recording and incomplete-baseline capture are forbidden in CI.' >&2
@@ -99,9 +99,11 @@ if [[ -n "$LANE" ]]; then
         -test-enumeration-output-path "$ARTIFACTS/registered-raw.json"
     stage inventory uv run --no-project python scripts/vrt_lanes.py inventory \
         "$ARTIFACTS/registered-raw.json" "$ARTIFACTS/registered-tests.json"
-    if [[ "$LANE" == host-snapshots ]]; then BUNDLE=SuwopVRT
-    else BUNDLE=SuwopVRTUI; fi
-    stage compare xcodebuild "${ARGS[@]}" "-only-testing:$BUNDLE" \
+    # UI lanes are deterministic duration-balanced shards of the enumerated bundle.
+    stage select uv run --no-project python scripts/vrt_lanes.py select "$ARTIFACTS" "$LANE"
+    ONLY=()
+    while IFS= read -r selected; do ONLY+=("-only-testing:$selected"); done < "$ARTIFACTS/only-testing.txt"
+    stage compare xcodebuild "${ARGS[@]}" "${ONLY[@]}" \
         -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
 else
     stage compare xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building

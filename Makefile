@@ -43,7 +43,7 @@ test:
 	$(MAKE) test-infra
 	bash scripts/test-tools.sh
 	bash scripts/test-hooks.sh
-	env cargo test --locked --workspace --all-features
+	$(MAKE) test-rust
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	@if [ "$$(uname -s)" = Darwin ]; then \
 		bash scripts/build-rust-apple.sh --host && \
@@ -97,6 +97,14 @@ sharing-test:
 	xcodegen generate
 	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
 
+# nextest runs every test binary in parallel processes; it does not run doctests.
+# RUST_TEST_ARGS=--release runs the same suite against optimized builds.
+RUST_TEST_ARGS ?=
+.PHONY: test-rust
+test-rust:
+	env cargo nextest run --locked --workspace --all-features $(RUST_TEST_ARGS)
+	env cargo test --locked --workspace --all-features --doc $(RUST_TEST_ARGS)
+
 .PHONY: test-infra
 test-infra:
 	uv run --no-project python -B -m unittest discover -s scripts -p 'test_*.py' -v
@@ -109,9 +117,10 @@ private-video-mac-test:
 private-live-mac-test:
 	bash scripts/private-live-mac-test.sh
 
-.PHONY: vrt-ci-host vrt-ci-ui
+.PHONY: vrt-ci-host
 vrt-ci-host:
 	bash scripts/vrt.sh --ci-lane host-snapshots
 
-vrt-ci-ui:
-	bash scripts/vrt.sh --ci-lane ui
+# One of the duration-balanced UI shards, e.g. make vrt-ci-ui-2.
+vrt-ci-ui-%:
+	bash scripts/vrt.sh --ci-lane ui-$*

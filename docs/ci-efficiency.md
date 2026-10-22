@@ -79,3 +79,38 @@ Intel release jobs and universal-library assembly have been removed. All
 remaining slice revision/digest checks and existing test suites are retained.
 New cache keys start cold; the runtime benefit still needs a successful warm
 CI run. A cache hit does not remove simulator execution time.
+
+## Critical-path split (2026-10)
+
+Successful main runs 39049104153 and 39005354809 took 50–60 minutes. Two jobs
+formed the critical path:
+
+| Job | Time | Cause |
+| --- | --- | --- |
+| `simulator (vrt-ci-ui)` | 50–57m | 61 UI tests ran serially for 2,732s on one simulator |
+| `core` | 33–39m | `cargo clean` then an uncached release build (24m21s); test execution took seconds |
+
+Within the release build, `suwop-core` took about 17 minutes: Cargo built each
+of its 35 `tests/*.rs` files as a separate optimized binary, each linking the
+library and re-instantiating its generics.
+
+Changes:
+
+- UI tests run as three duration-balanced shards on separate macOS runners
+  (see [VRT CI lanes](vrt-ci-lanes.md)). The aggregate still requires the
+  shards to cover the registered UI bundle exactly once.
+- `lint`, `core (debug)` and `core (release)` run in parallel with separate
+  caches. The release job keeps its own dependency cache instead of cleaning
+  the debug build, and Linux jobs use four Cargo jobs.
+- Offline `suwop-core` integration tests are modules of one `tests/suite`
+  binary. `immich_live` stays separate for `make integration`.
+  `scripts/check-architecture.py` rejects a suite file not declared in
+  `suite/main.rs`, so a new test file cannot silently stop running.
+- `make test-rust` runs tests with cargo-nextest (pinned in
+  `scripts/install-tools.sh`, no retries) and doctests with `cargo test --doc`.
+  `RUST_TEST_ARGS=--release` runs the release suite.
+
+A local warm rebuild after touching `suwop-core` (Apple M-series,
+`CARGO_BUILD_JOBS=4`, `cargo test --no-run`) took 159s → 110s for release and
+24s → 21s for debug. Test binaries dropped from 37 to 7. These are local
+measurements; hosted CI time still needs a successful warm run on main.
