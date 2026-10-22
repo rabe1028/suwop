@@ -37,12 +37,14 @@ import Foundation
         guard let token = entries[id]?.token else { throw CancellationError() }
         let consumer = UUID()
         entries[id]?.consumers.insert(consumer)
-        defer { abandon(id, token: token, consumer: consumer) }
+        // The cancellation handler is @Sendable; pass the key as a String.
+        let key = id as String
+        defer { abandon(key, token: token, consumer: consumer) }
         try await withTaskCancellationHandler {
             try await task.value
         } onCancel: {
             Task { @MainActor [weak self] in
-                self?.abandon(id, token: token, consumer: consumer)
+                self?.abandon(key, token: token, consumer: consumer)
             }
         }
     }
@@ -99,7 +101,8 @@ import Foundation
         return task
     }
 
-    private func abandon(_ id: NSString, token: UUID, consumer: UUID) {
+    private func abandon(_ key: String, token: UUID, consumer: UUID) {
+        let id = key as NSString
         guard entries[id]?.token == token else { return }
         entries[id]?.consumers.remove(consumer)
         prune()

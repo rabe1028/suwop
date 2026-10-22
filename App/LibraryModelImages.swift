@@ -7,6 +7,13 @@ extension LibraryModel {
         return ordinarySelected.descriptor(for: key)
     }
 
+    func configureImageCaches() {
+        thumbnails.countLimit = 300
+        thumbnails.totalCostLimit = 96 * 1024 * 1024
+        previews.countLimit = 6
+        previews.totalCostLimit = 96 * 1024 * 1024
+    }
+
     func preview(_ photo: UnifiedPhoto) async throws -> PlatformImage {
         try await ordinaryImage(photo, preview: true)
     }
@@ -29,6 +36,13 @@ extension LibraryModel {
         let forward = thumbnailAnchor.map { position >= $0.position } ?? true
         thumbnailAnchor = (position, forward)
         prefetchThumbnails()
+    }
+
+    /// Progressive loads extend the grid under an unchanged viewport.
+    func prefetchAfterPublish() {
+        if thumbnailAnchor != nil {
+            prefetchThumbnails()
+        }
     }
 
     /// Loads about 100 grid rasters ahead of the viewport, in scroll order.

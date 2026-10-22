@@ -99,10 +99,7 @@ import SwiftUI
         if let runtime, let shell {
             configurePrivateSessions(runtime: runtime, shell: shell)
         }
-        thumbnails.countLimit = 300
-        thumbnails.totalCostLimit = 96 * 1024 * 1024
-        previews.countLimit = 6
-        previews.totalCostLimit = 96 * 1024 * 1024
+        configureImageCaches()
         observer = PhotoObserver { [weak self] assetsChanged in
             guard assetsChanged else {
                 if self?.albumsRequested == true {
@@ -440,10 +437,7 @@ extension LibraryModel {
         operationKeyIndex = snapshot.presentationIndex.operationKeys
         presentationIndex = snapshot.presentationIndex
         view = snapshot.view
-        if thumbnailAnchor != nil {
-            // Progressive loads extend the grid under an unchanged viewport.
-            prefetchThumbnails()
-        }
+        prefetchAfterPublish()
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
         immichArchive.receive(snapshot)
