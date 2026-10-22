@@ -81,18 +81,36 @@ if [[ -n "$LANE" ]]; then stage begin uv run --no-project python scripts/vrt_lan
 stage slim simslim on "$UDID" --profile VRT/simslim.json
 stage verify-profile simslim verify "$UDID" --profile VRT/simslim.json --json
 stage memory simslim measure "$UDID" --json
-stage rust-simulator bash scripts/build-rust-apple.sh --simulator
-stage project xcodegen generate
-ARGS=(
-    -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
-    -project Suwop.xcodeproj -scheme SuwopVRT
-    -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/VRT
-    -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
-    -testLanguage ja -testRegion JP CODE_SIGNING_ALLOWED=NO
-    "SUWOP_VRT_RECORD=$RECORD" "SUWOP_VRT_BASELINES=$PWD/VRT/Baselines"
-    "SUWOP_VRT_ARTIFACTS=$ARTIFACTS"
-)
-stage build xcodebuild "${ARGS[@]}" build-for-testing
+lane_products() {
+    # CI builds simulator products once for every lane; a local lane builds its own.
+    if [[ -z "${SUWOP_SIMULATOR_PRODUCTS:-}" ]]; then
+        SUWOP_SIMULATOR_PRODUCTS="$PWD/DerivedData/SimulatorProducts/$(basename "$ARTIFACTS")"
+        bash scripts/simulator-products.sh "$SUWOP_SIMULATOR_PRODUCTS"
+    fi
+    uv run --no-project python scripts/simulator_products.py prepare-vrt \
+        "$SUWOP_SIMULATOR_PRODUCTS" "$ARTIFACTS" > "$ARTIFACTS/xctestrun.txt"
+}
+if [[ -n "$LANE" ]]; then
+    stage products lane_products
+    ARGS=(
+        -xctestrun "$(cat "$ARTIFACTS/xctestrun.txt")"
+        -destination "platform=iOS Simulator,id=$UDID"
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+    )
+else
+    stage rust-simulator bash scripts/build-rust-apple.sh --simulator
+    stage project xcodegen generate
+    ARGS=(
+        -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
+        -project Suwop.xcodeproj -scheme SuwopVRT
+        -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/VRT
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+        -testLanguage ja -testRegion JP CODE_SIGNING_ALLOWED=NO
+        "SUWOP_VRT_RECORD=$RECORD" "SUWOP_VRT_BASELINES=$PWD/VRT/Baselines"
+        "SUWOP_VRT_ARTIFACTS=$ARTIFACTS"
+    )
+    stage build xcodebuild "${ARGS[@]}" build-for-testing
+fi
 if [[ -n "$LANE" ]]; then
     stage enumerate xcodebuild "${ARGS[@]}" test-without-building -enumerate-tests \
         -test-enumeration-style flat -test-enumeration-format json \

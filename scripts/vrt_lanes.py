@@ -17,7 +17,7 @@ from vrt_test_inventory import (
     require,
 )
 
-UI_SHARDS = 3
+UI_SHARDS = 2
 SCOPES = {
     "host-snapshots": "SuwopVRT",
     **{f"ui-{index}": "SuwopVRTUI" for index in range(1, UI_SHARDS + 1)},
@@ -28,9 +28,7 @@ STAGES = {
     "slim",
     "verify-profile",
     "memory",
-    "rust-simulator",
-    "project",
-    "build",
+    "products",
     "enumerate",
     "inventory",
     "select",

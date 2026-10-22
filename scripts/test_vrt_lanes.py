@@ -179,7 +179,9 @@ class LaneTests(unittest.TestCase):
         self.assertEqual(len(shards), lanes.UI_SHARDS)
         self.assertEqual(sorted(t for shard in shards for t in shard), registered["SuwopVRTUI"])
         self.assertTrue(all(shards))
-        self.assertEqual(shards, [lanes.selection(registered, f"ui-{i + 1}") for i in range(3)])
+        self.assertEqual(
+            shards, [lanes.selection(registered, f"ui-{i + 1}") for i in range(lanes.UI_SHARDS)]
+        )
         seconds = lanes.durations()
         loads = [sum(seconds[test] for test in shard) for shard in shards]
         self.assertLessEqual(max(loads) - min(loads), max(seconds.values()))

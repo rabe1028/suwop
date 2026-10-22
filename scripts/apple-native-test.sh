@@ -50,17 +50,32 @@ stage slim simslim on "$UDID" --profile NativeAcceptance/simslim.json
 stage profile simslim verify "$UDID" --profile NativeAcceptance/simslim.json --json
 stage photos-services simslim doctor "$UDID" --requires photos --json
 stage memory simslim measure "$UDID" --json
-stage rust-simulator bash scripts/build-rust-apple.sh --simulator
-stage project xcodegen generate
-ARGS=(
-    -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
-    -project Suwop.xcodeproj -scheme SuwopPhotoKit
-    -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/PhotoKit
-    -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
-    CODE_SIGNING_ALLOWED=NO
-)
-stage build xcodebuild "${ARGS[@]}" build-for-testing
-stage install xcrun simctl install "$UDID" DerivedData/PhotoKit/Build/Products/Debug-iphonesimulator/SuwopPhotoKitHost.app
+if [[ -n "${SUWOP_SIMULATOR_PRODUCTS:-}" ]]; then
+    # CI reuses the products built once for every simulator lane (scripts/simulator-products.sh).
+    photokit_products() {
+        uv run --no-project python scripts/simulator_products.py prepare-photokit \
+            "$SUWOP_SIMULATOR_PRODUCTS" > "$ARTIFACTS/products.txt"
+    }
+    stage products photokit_products
+    { read -r XCTESTRUN; read -r HOST_APP; } < "$ARTIFACTS/products.txt"
+    ARGS=(
+        -xctestrun "$XCTESTRUN" -destination "platform=iOS Simulator,id=$UDID"
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+    )
+else
+    stage rust-simulator bash scripts/build-rust-apple.sh --simulator
+    stage project xcodegen generate
+    ARGS=(
+        -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
+        -project Suwop.xcodeproj -scheme SuwopPhotoKit
+        -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/PhotoKit
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+        CODE_SIGNING_ALLOWED=NO
+    )
+    stage build xcodebuild "${ARGS[@]}" build-for-testing
+    HOST_APP=DerivedData/PhotoKit/Build/Products/Debug-iphonesimulator/SuwopPhotoKitHost.app
+fi
+stage install xcrun simctl install "$UDID" "$HOST_APP"
 stage permission xcrun simctl privacy "$UDID" grant photos jp.rabe1028.suwop.photokit.acceptance
 stage native xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
 stage coverage uv run --no-project python scripts/native-acceptance.py coverage "$ARTIFACTS"

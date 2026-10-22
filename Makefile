@@ -45,11 +45,14 @@ test:
 	bash scripts/test-hooks.sh
 	$(MAKE) test-rust
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
-	@if [ "$$(uname -s)" = Darwin ]; then \
-		bash scripts/build-rust-apple.sh --host && \
-		{ if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi; } && \
-		swift test -Xswiftc -warnings-as-errors; \
-	fi
+	@if [ "$$(uname -s)" = Darwin ]; then $(MAKE) test-swift; fi
+
+# The real Rust-to-Swift bridge; Apple-only.
+.PHONY: test-swift
+test-swift:
+	bash scripts/build-rust-apple.sh --host
+	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
+	swift test -Xswiftc -warnings-as-errors
 
 check: lint
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
@@ -104,6 +107,11 @@ RUST_TEST_ARGS ?=
 test-rust:
 	env cargo nextest run --locked --workspace --all-features $(RUST_TEST_ARGS)
 	env cargo test --locked --workspace --all-features --doc $(RUST_TEST_ARGS)
+
+# Simulator test products shared by CI's simulator lanes (SUWOP_SIMULATOR_PRODUCTS).
+.PHONY: simulator-products
+simulator-products:
+	bash scripts/simulator-products.sh DerivedData/SimulatorProducts/current
 
 .PHONY: test-infra
 test-infra:

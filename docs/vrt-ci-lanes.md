@@ -4,8 +4,19 @@ Local `make vrt` remains the complete host and UI run. Recording is local and
 requires explicit reviewed approval; CI never records baselines.
 
 CI runs `make vrt-ci-host` (all host tests and 50 comparisons) and
-`make vrt-ci-ui-1` … `make vrt-ci-ui-3` (UI test shards). Every lane first
-enumerates the entire unfiltered built scheme. The `select` stage then
+`make vrt-ci-ui-1` and `make vrt-ci-ui-2` (UI test shards). Lanes never build.
+The `apple-products` job runs `make simulator-products` once: the Rust
+simulator library plus `build-for-testing` for the VRT and PhotoKit schemes.
+It keeps only runtime bundles and xctestrun files, without static archives,
+objects or modules. Its manifest binds the products to the HEAD, source fingerprint and
+pinned environment. Each lane's `products` stage rejects products from any
+other source and points the xctestrun's scheme environment at this lane's
+baselines and artifacts, with recording off. Lanes then run
+`test-without-building -xctestrun`, so they need neither Rust, SwiftPM
+packages nor XcodeGen. Run locally without `SUWOP_SIMULATOR_PRODUCTS`, a lane
+builds its own products first.
+
+Every lane first enumerates the entire unfiltered built scheme. The `select` stage then
 derives the lane's method IDs: the whole host bundle, or one shard of the UI
 bundle. Shards are assigned longest-first from the measured seconds in
 `VRT/ui-test-durations.json`; a test missing from that file counts as the
@@ -14,7 +25,9 @@ exactly its selected IDs once, pass with zero skips, and retain the pinned
 device/configuration. A lane report always says `full_suite_passed: false`.
 
 UI tests dominate VRT time (61 tests took 2,732s serially in run
-39049104153), so shards run on separate macOS runners. When tests are added
+39049104153), so two shards run on separate macOS runners. The host lane runner
+then runs `make apple-native-test` with the same products. PhotoKit service
+changes therefore always follow that runner's screenshot comparisons. When tests are added
 or change cost, refresh the durations from every UI shard's `compare.log`:
 `uv run --no-project python scripts/vrt_lanes.py durations ui-*/compare.log`.
 Stale durations only affect balance, never coverage.

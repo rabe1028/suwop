@@ -96,7 +96,7 @@ library and re-instantiating its generics.
 
 Changes:
 
-- UI tests run as three duration-balanced shards on separate macOS runners
+- UI tests run as two duration-balanced shards on separate macOS runners
   (see [VRT CI lanes](vrt-ci-lanes.md)). The aggregate still requires the
   shards to cover the registered UI bundle exactly once.
 - `lint`, `core (debug)` and `core (release)` run in parallel with separate
@@ -119,3 +119,38 @@ A local warm rebuild after touching `suwop-core` (Apple M-series,
 `CARGO_BUILD_JOBS=4`, `cargo test --no-run`) took 159s → 110s for release and
 24s → 21s for debug. Test binaries dropped from 37 to 7. These are local
 measurements; hosted CI time still needs a successful warm run on main.
+
+## macOS only where Apple tooling is required
+
+macOS runners are limited to five concurrent jobs per account. PR #45 run
+39756208393 (attempt 1) shows the effect: other branches' runs held the slots,
+so its macOS jobs queued for 90–130 minutes and the run took 160 minutes.
+Ten macOS jobs per run each set up Rust, SwiftPM and Xcode, and the same Rust
+simulator library and VRT test bundle were built in every simulator lane.
+
+The workflow now has five macOS jobs:
+
+| Job | Runner | Work |
+| --- | --- | --- |
+| `apple` | macos-15 | Swift lint, Rust-to-Swift bridge tests, three release slices, iOS/macOS apps, macOS sharing/private media tests |
+| `apple-products` | macos-26 | Rust simulator library and VRT/PhotoKit `build-for-testing`, once |
+| `simulator` ×3 | macos-26 | `vrt-ci-ui-1`, `vrt-ci-ui-2`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
+
+Work moved off macOS or removed from it:
+
+- macOS no longer repeats the Rust test suite or the repository tool/hook
+  tests; Linux runs them. The Swift tests still exercise the real Rust library.
+- Simulator lanes no longer install Rust, restore Rust or SwiftPM caches
+  (2.8 GB), or run XcodeGen or Xcode builds. They download about 160 MB of
+  products and run `test-without-building -xctestrun`.
+- The three single-slice release jobs and the host-test job share one job and
+  one cache. Before, they repeated runner setup in four places.
+
+Kept on macOS deliberately:
+
+- Rust Apple slices compile C dependencies (for example bundled SQLite)
+  against the Apple SDK that `xcrun` provides. Linux runners have no licensed
+  Apple SDK, so the slices cannot be built there and handed over.
+- SwiftLint for Linux skips the SourceKit-backed `custom_rules` and
+  `statement_position` rules while still exiting 0. Moving lint would quietly
+  drop checks, so `make lint-swift` stays in the existing `apple` job.
