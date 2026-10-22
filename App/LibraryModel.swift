@@ -33,6 +33,10 @@ import SwiftUI
     private var pendingTrashRefresh = false
     private var albumsRequested = false
     let thumbnails = NSCache<NSString, PlatformImage>()
+    let previews = NSCache<NSString, PlatformImage>()
+    let thumbnailLoads = ImageLoadQueue(width: 8)
+    let previewLoads = ImageLoadQueue(width: 3)
+    var thumbnailAnchor: (position: Int, forward: Bool)?
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()
     let immichArchive = ImmichArchiveSession()
@@ -95,8 +99,7 @@ import SwiftUI
         if let runtime, let shell {
             configurePrivateSessions(runtime: runtime, shell: shell)
         }
-        thumbnails.countLimit = 300
-        thumbnails.totalCostLimit = 64 * 1024 * 1024
+        configureImageCaches()
         observer = PhotoObserver { [weak self] assetsChanged in
             guard assetsChanged else {
                 if self?.albumsRequested == true {
@@ -220,18 +223,6 @@ import SwiftUI
                 }
             }
         }
-    }
-
-    func playbackKind(_ photo: UnifiedPhoto) -> PlaybackKind? {
-        view?.media[photo.id]
-    }
-
-    func metadataTargets(_ photo: UnifiedPhoto) -> [MetadataTarget] {
-        view?.metadataTargets[photo.id] ?? []
-    }
-
-    func editingTargets(_ photo: UnifiedPhoto) -> [EditingTarget] {
-        view?.editingTargets[photo.id] ?? []
     }
 
     func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
@@ -446,6 +437,7 @@ extension LibraryModel {
         operationKeyIndex = snapshot.presentationIndex.operationKeys
         presentationIndex = snapshot.presentationIndex
         view = snapshot.view
+        prefetchAfterPublish()
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
         immichArchive.receive(snapshot)
@@ -507,6 +499,9 @@ private extension LibraryModel {
     func invalidateThumbnails() {
         thumbnailGeneration = UUID()
         thumbnails.removeAllObjects()
+        previews.removeAllObjects()
+        thumbnailLoads.cancelAll()
+        previewLoads.cancelAll()
         if errorMessage != nil {
             errorMessage = "写真へのアクセスが変わりました。処理結果を確認してください。"
         }

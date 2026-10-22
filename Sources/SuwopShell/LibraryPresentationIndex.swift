@@ -11,6 +11,7 @@ public struct LibraryPresentationIndex: Sendable {
     public let photoIDs: [String]
     public let visibleRows: [Row]
     public let visiblePhotos: [UnifiedPhoto]
+    public let visiblePositions: [String: Int]
     public let assetKeys: Set<AssetKey>
     public let operationKeys: Set<AssetKey>
 
@@ -20,6 +21,10 @@ public struct LibraryPresentationIndex: Sendable {
         let byID = Dictionary(rows.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         visibleRows = view.browser.photoIDs.compactMap { byID[$0] }
         visiblePhotos = visibleRows.map(\.photo)
+        visiblePositions = Dictionary(
+            visibleRows.enumerated().map { ($1.id, $0) },
+            uniquingKeysWith: { first, _ in first }
+        )
         assetKeys = Set(view.photos.flatMap { $0.assets.map(\.key) })
         operationKeys = Set(view.ordinaryContentKeys)
     }

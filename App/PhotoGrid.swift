@@ -108,6 +108,7 @@ struct PhotoGrid: View {
                 }
             }
         }
+        .onDisappear { model.gridDisappeared() }
     }
 
     private func tile(_ photo: UnifiedPhoto) -> some View {
@@ -131,6 +132,7 @@ struct PhotoGrid: View {
             )
             .accessibilityElement(children: .ignore)
         }.buttonStyle(.plain)
+            .onAppear { model.thumbnailAppeared(photo) }
             .accessibilityLabel(
                 "\(photo.name)、\(photo.presence.title)\(photo.rawFormatTitle.map { "、" + $0 } ?? "")\(photo.isFavorite ? "、お気に入り" : "")"
             )
