@@ -394,9 +394,11 @@ import SwiftUI
 extension LibraryModel {
     private func readView() async throws {
         guard let runtime else { return }
+        let version = try await runtime.progress().version // First: a racing change forces another read.
         let span = PerformanceTrace.begin(.snapshot)
         defer { PerformanceTrace.end(span) }
         try await publish(runtime.snapshot())
+        effectViewVersion = version
     }
 
     func publish(_ snapshot: RuntimeSnapshot) {
@@ -494,12 +496,12 @@ private extension LibraryModel {
             let progress = try await runtime.progress()
             self.progress.value = progress.progress
             if effectViewVersion != progress.version {
-                effectViewVersion = progress.version
                 try await readView()
             }
             return requests
         }
-        try await readView()
+        guard try await runtime.progress().version == effectViewVersion else { return try await readView() }
+        progress.value = nil // Count-only progress keeps the version; clear it as publish would.
     }
 
     func invalidateThumbnails() {
