@@ -15,6 +15,7 @@ struct PhotoViewer: View {
     @State private var showVisibility = false
     @State private var protectedSource: AssetKey?
     @State private var lockingSource: AssetKey?
+    @State private var prefetchOwner = UUID().uuidString
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var actionWidth: CGFloat = 44
@@ -76,7 +77,7 @@ struct PhotoViewer: View {
                     }
                 }
                 .task(id: model.previewIdentifier(photo)) {
-                    model.prefetchPreviews(pages, at: index)
+                    model.prefetchPreviews(pages, at: index, owner: prefetchOwner)
                 }
                 if chrome {
                     if model.selectedPresentation(photo) != nil {
@@ -94,7 +95,7 @@ struct PhotoViewer: View {
                 Button("非表示変更と再表示案内") { showVisibility = true }
             }
         }.background(.black).foregroundStyle(.white).preferredColorScheme(.dark)
-            .onDisappear { model.stopPreviewPrefetch() }
+            .onDisappear { model.stopPreviewPrefetch(owner: prefetchOwner) }
             .onChange(of: photo?.assets.map(\.key), initial: true) {
                 if let photo {
                     cursor.remember(photo)

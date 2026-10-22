@@ -36,7 +36,6 @@ import SwiftUI
     let previews = NSCache<NSString, PlatformImage>()
     let thumbnailLoads = ImageLoadQueue(width: 8)
     let previewLoads = ImageLoadQueue(width: 3)
-    var onScreenThumbnails: [String: UnifiedPhoto] = [:]
     var thumbnailAnchor: (position: Int, forward: Bool)?
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()

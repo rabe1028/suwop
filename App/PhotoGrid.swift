@@ -132,7 +132,6 @@ struct PhotoGrid: View {
             .accessibilityElement(children: .ignore)
         }.buttonStyle(.plain)
             .onAppear { model.thumbnailAppeared(photo) }
-            .onDisappear { model.thumbnailDisappeared(photo) }
             .accessibilityLabel(
                 "\(photo.name)、\(photo.presence.title)\(photo.rawFormatTitle.map { "、" + $0 } ?? "")\(photo.isFavorite ? "、お気に入り" : "")"
             )

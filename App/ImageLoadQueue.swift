@@ -4,10 +4,13 @@ import Foundation
 /// every load runs the caller's authority-validated fetch, which stores the
 /// raster in its cache; each presenter revalidates and reads it from there.
 /// Tasks carry no image because NSImage is not Sendable.
+///
+/// A load lives while a presenter awaits it or a look-ahead owner wants it.
 @MainActor final class ImageLoadQueue {
     private struct Entry {
         let token: UUID
         let task: Task<Void, Error>
+        var consumers: Set<UUID> = []
     }
 
     private struct Waiter {
@@ -18,6 +21,7 @@ import Foundation
 
     private let width: Int
     private var entries: [NSString: Entry] = [:]
+    private var wanted: [String: Set<NSString>] = [:]
     private var waiting: [Waiter] = []
     private var promoted: Set<UUID> = []
     private var active = 0
@@ -26,8 +30,49 @@ import Foundation
         self.width = width
     }
 
-    /// Returns the one load for `id`. Urgent requests are on screen and run before look-ahead.
-    func load(
+    /// Awaits the shared load for an on-screen presenter, ahead of look-ahead.
+    /// Cancelling the caller abandons the load once nothing else needs it.
+    func consume(_ id: NSString, fetch: @escaping @MainActor () async throws -> Void) async throws {
+        let task = start(id, urgent: true, fetch: fetch)
+        guard let token = entries[id]?.token else { throw CancellationError() }
+        let consumer = UUID()
+        entries[id]?.consumers.insert(consumer)
+        defer { abandon(id, token: token, consumer: consumer) }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.abandon(id, token: token, consumer: consumer)
+            }
+        }
+    }
+
+    /// Starts look-ahead that lives only while some owner keeps it in `want`.
+    func prefetch(_ id: NSString, fetch: @escaping @MainActor () async throws -> Void) {
+        _ = start(id, urgent: false, fetch: fetch)
+    }
+
+    /// Replaces `owner`'s look-ahead window and drops loads nobody needs.
+    func want(_ ids: Set<NSString>, owner: String) {
+        wanted[owner] = ids
+        prune()
+    }
+
+    func release(owner: String) {
+        wanted[owner] = nil
+        prune()
+    }
+
+    /// Authority changed: every queued or running load is stale.
+    func cancelAll() {
+        wanted = [:]
+        for id in entries.keys {
+            drop(id)
+        }
+        resumeOrphans()
+    }
+
+    private func start(
         _ id: NSString,
         urgent: Bool,
         fetch: @escaping @MainActor () async throws -> Void
@@ -46,7 +91,7 @@ import Foundation
             guard let self else { throw CancellationError() }
             defer { finish(id, token: token) }
             guard await acquire(id, token: token) else { throw CancellationError() }
-            defer { release() }
+            defer { releaseSlot() }
             try Task.checkCancellation()
             try await fetch()
         }
@@ -54,22 +99,33 @@ import Foundation
         return task
     }
 
-    /// Cancels every load outside `ids`, queued or running.
-    func retain(_ ids: Set<NSString>) {
-        for (id, entry) in entries where !ids.contains(id) {
-            entries[id] = nil
-            promoted.remove(entry.token)
-            entry.task.cancel()
+    private func abandon(_ id: NSString, token: UUID, consumer: UUID) {
+        guard entries[id]?.token == token else { return }
+        entries[id]?.consumers.remove(consumer)
+        prune()
+    }
+
+    private func prune() {
+        let keep = wanted.values.reduce(into: Set<NSString>()) { $0.formUnion($1) }
+        for (id, entry) in entries where entry.consumers.isEmpty && !keep.contains(id) {
+            drop(id)
         }
+        resumeOrphans()
+    }
+
+    private func drop(_ id: NSString) {
+        guard let entry = entries.removeValue(forKey: id) else { return }
+        promoted.remove(entry.token)
+        entry.task.cancel()
+    }
+
+    /// Queued loads that were dropped give up their place without running.
+    private func resumeOrphans() {
         waiting.removeAll { waiter in
-            guard !ids.contains(waiter.id) else { return false }
+            guard entries[waiter.id]?.token != waiter.token else { return false }
             waiter.slot.resume(returning: false)
             return true
         }
-    }
-
-    func cancelAll() {
-        retain([])
     }
 
     private func promote(_ token: UUID) {
@@ -96,7 +152,7 @@ import Foundation
     }
 
     /// Hands the slot directly to the next waiter so `active` never overshoots.
-    private func release() {
+    private func releaseSlot() {
         if waiting.isEmpty {
             active -= 1
         } else {

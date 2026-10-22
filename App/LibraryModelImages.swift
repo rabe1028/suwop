@@ -21,7 +21,6 @@ extension LibraryModel {
     }
 
     func thumbnailAppeared(_ photo: UnifiedPhoto) {
-        onScreenThumbnails[photo.id] = photo
         guard let position = presentationIndex?.visiblePositions[photo.id] else { return }
         // Tiles appear in batches; replan only once the viewport has moved.
         if let anchor = thumbnailAnchor, abs(position - anchor.position) < 12 {
@@ -32,11 +31,8 @@ extension LibraryModel {
         prefetchThumbnails()
     }
 
-    func thumbnailDisappeared(_ photo: UnifiedPhoto) {
-        onScreenThumbnails[photo.id] = nil
-    }
-
     /// Loads about 100 grid rasters ahead of the viewport, in scroll order.
+    /// On-screen tiles hold their own loads; this window only covers look-ahead.
     func prefetchThumbnails() {
         let rows = visibleRows
         let position = min(thumbnailAnchor?.position ?? 0, max(rows.count - 1, 0))
@@ -50,38 +46,35 @@ extension LibraryModel {
             (max(0, position - ahead) ..< min(rows.count, position + 1)).reversed()
                 + Array(min(rows.count, position + 1) ..< min(rows.count, position + 1 + behind))
         }
-        var wanted = Set(onScreenThumbnails.values.map { previewIdentifier($0) as NSString })
-        var missing: [(NSString, UnifiedPhoto)] = []
-        for photo in order.map({ rows[$0].photo }) where prefetchable(photo) {
-            let id = previewIdentifier(photo) as NSString
-            wanted.insert(id)
-            if thumbnails.object(forKey: id) == nil {
-                missing.append((id, photo))
+        let photos = order.map { rows[$0].photo }.filter(prefetchable)
+        let ids = photos.map { previewIdentifier($0) as NSString }
+        thumbnailLoads.want(Set(ids), owner: "grid")
+        for (id, photo) in zip(ids, photos) where thumbnails.object(forKey: id) == nil {
+            thumbnailLoads.prefetch(id) { [weak self] in
+                try await self?.store(photo, preview: false)
             }
-        }
-        thumbnailLoads.retain(wanted)
-        for (id, photo) in missing {
-            _ = shared(id, photo: photo, preview: false, urgent: false)
         }
     }
 
-    /// Keeps the adjacent viewer pages decoded so paging does not wait on the network.
-    func prefetchPreviews(_ pages: [UnifiedPhoto], at index: Int) {
+    /// Keeps one viewer's adjacent pages decoded so paging does not wait on the network.
+    func prefetchPreviews(_ pages: [UnifiedPhoto], at index: Int, owner: String) {
         guard pages.indices.contains(index) else {
-            previewLoads.cancelAll()
+            previewLoads.release(owner: owner)
             return
         }
         let neighbors = [index + 1, index - 1, index + 2].filter(pages.indices.contains).map { pages[$0] }
             .filter(prefetchable)
         let ids = neighbors.map { previewIdentifier($0) as NSString }
-        previewLoads.retain(Set(ids + [previewIdentifier(pages[index]) as NSString]))
+        previewLoads.want(Set(ids), owner: owner)
         for (id, photo) in zip(ids, neighbors) where previews.object(forKey: id) == nil {
-            _ = shared(id, photo: photo, preview: true, urgent: false)
+            previewLoads.prefetch(id) { [weak self] in
+                try await self?.store(photo, preview: true)
+            }
         }
     }
 
-    func stopPreviewPrefetch() {
-        previewLoads.cancelAll()
+    func stopPreviewPrefetch(owner: String) {
+        previewLoads.release(owner: owner)
     }
 
     private func prefetchable(_ photo: UnifiedPhoto) -> Bool {
@@ -92,22 +85,16 @@ extension LibraryModel {
         let id = previewIdentifier(photo) as NSString
         if (preview ? previews : thumbnails).object(forKey: id) == nil {
             // Join a queued look-ahead instead of fetching the same raster twice.
-            try await shared(id, photo: photo, preview: preview, urgent: true).value
+            try await (preview ? previewLoads : thumbnailLoads).consume(id) { [weak self] in
+                try await self?.store(photo, preview: preview)
+            }
             try Task.checkCancellation()
         }
         return try await validatedImage(photo, preview: preview, fetch: true)
     }
 
-    private func shared(
-        _ id: NSString,
-        photo: UnifiedPhoto,
-        preview: Bool,
-        urgent: Bool
-    ) -> Task<Void, Error> {
-        (preview ? previewLoads : thumbnailLoads).load(id, urgent: urgent) { [weak self] in
-            guard let self else { throw CancellationError() }
-            _ = try await validatedImage(photo, preview: preview, fetch: true)
-        }
+    private func store(_ photo: UnifiedPhoto, preview: Bool) async throws {
+        _ = try await validatedImage(photo, preview: preview, fetch: true)
     }
 
     private func validatedImage(_ photo: UnifiedPhoto, preview: Bool, fetch: Bool) async throws -> PlatformImage {
