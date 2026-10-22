@@ -38,6 +38,12 @@ extension LibraryModel {
         prefetchThumbnails()
     }
 
+    /// A hidden grid wants no look-ahead; its next tile appearance replans.
+    func gridDisappeared() {
+        thumbnailAnchor = nil
+        thumbnailLoads.release(owner: "grid")
+    }
+
     /// Progressive loads extend the grid under an unchanged viewport.
     func prefetchAfterPublish() {
         if thumbnailAnchor != nil {

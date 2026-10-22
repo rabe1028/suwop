@@ -108,6 +108,7 @@ struct PhotoGrid: View {
                 }
             }
         }
+        .onDisappear { model.gridDisappeared() }
     }
 
     private func tile(_ photo: UnifiedPhoto) -> some View {
