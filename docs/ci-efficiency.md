@@ -128,13 +128,20 @@ so its macOS jobs queued for 90–130 minutes and the run took 160 minutes.
 Ten macOS jobs per run each set up Rust, SwiftPM and Xcode, and the same Rust
 simulator library and VRT test bundle were built in every simulator lane.
 
-The workflow now has five macOS jobs:
+The workflow now has these macOS jobs:
 
 | Job | Runner | Work |
 | --- | --- | --- |
-| `apple` | macos-15 | Rust-to-Swift bridge tests, three release slices, iOS/macOS apps, macOS sharing/private media tests |
+| `apple-rust` ×3 | macos-15 | One release slice each (about 3 minutes warm) |
+| `apple` | macos-15 | Rust-to-Swift bridge tests, iOS/macOS apps from the slices, macOS sharing/private media tests |
 | `apple-products` | macos-26 | Rust simulator library and VRT/PhotoKit `build-for-testing`, once |
 | `simulator` ×3 | macos-26 | `vrt-ci-ui-1`, `vrt-ci-ui-2`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
+
+With warm caches, the slice jobs finish before the simulator lanes start, so
+at most five macOS jobs run at once for one workflow run. The slices stay in
+separate jobs because a cold slice takes about 40 minutes on macos-15. PR #45
+run 39823100151 built all three in one job; it hit the 90-minute timeout, and
+a timed-out job saves no cache, so later runs would stay cold.
 
 Work moved off macOS or removed from it:
 
@@ -143,9 +150,7 @@ Work moved off macOS or removed from it:
 - Simulator lanes no longer install Rust, restore Rust or SwiftPM caches
   (2.8 GB), or run XcodeGen or Xcode builds. They download about 160 MB of
   products and run `test-without-building -xctestrun`.
-- The three single-slice release jobs and the host-test job share one job and
-  one cache. Before, they repeated runner setup in four places.
-
+- The host-test and app-packaging jobs are one `apple` job.
 - Swift lint runs on Linux (`swift-lint`) in the pinned `swift:6.2-noble`
   image, whose `libsourcekitdInProc` the dynamic SwiftLint build loads. Do not
   use `swiftlint-static` or a runner without SourceKit: it skips
