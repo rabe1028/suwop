@@ -208,7 +208,9 @@ jobs:
       fail-fast: false
       matrix:
         suite: [vrt-ci-host, vrt-ci-ui, apple-native-test]
-    timeout-minutes: ${{ matrix.suite == 'vrt-ci-ui' && 65 || 60 }}
+    # UI preparation/build takes ~20 minutes on CI before the full interaction
+    # suite (~50 minutes); retain all cases and allow time to publish evidence.
+    timeout-minutes: ${{ matrix.suite == 'vrt-ci-ui' && 80 || 60 }}
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       CARGO_BUILD_JOBS: '2'
