@@ -15,7 +15,102 @@ extension LibraryModel {
         try await ordinaryImage(photo, preview: false)
     }
 
+    /// A grid raster already in memory, revalidated for display. Never fetches.
+    func cachedThumbnail(_ photo: UnifiedPhoto) async -> PlatformImage? {
+        try? await validatedImage(photo, preview: false, fetch: false)
+    }
+
+    func thumbnailAppeared(_ photo: UnifiedPhoto) {
+        onScreenThumbnails[photo.id] = photo
+        guard let position = presentationIndex?.visiblePositions[photo.id] else { return }
+        // Tiles appear in batches; replan only once the viewport has moved.
+        if let anchor = thumbnailAnchor, abs(position - anchor.position) < 12 {
+            return
+        }
+        let forward = thumbnailAnchor.map { position >= $0.position } ?? true
+        thumbnailAnchor = (position, forward)
+        prefetchThumbnails()
+    }
+
+    func thumbnailDisappeared(_ photo: UnifiedPhoto) {
+        onScreenThumbnails[photo.id] = nil
+    }
+
+    /// Loads about 100 grid rasters ahead of the viewport, in scroll order.
+    func prefetchThumbnails() {
+        let rows = visibleRows
+        let position = min(thumbnailAnchor?.position ?? 0, max(rows.count - 1, 0))
+        let forward = thumbnailAnchor?.forward ?? true
+        let ahead = 96
+        let behind = 24
+        let order: [Int] = if forward {
+            Array(position ..< min(rows.count, position + ahead))
+                + (max(0, position - behind) ..< position).reversed()
+        } else {
+            (max(0, position - ahead) ..< min(rows.count, position + 1)).reversed()
+                + Array(min(rows.count, position + 1) ..< min(rows.count, position + 1 + behind))
+        }
+        var wanted = Set(onScreenThumbnails.values.map { previewIdentifier($0) as NSString })
+        var missing: [(NSString, UnifiedPhoto)] = []
+        for photo in order.map({ rows[$0].photo }) where prefetchable(photo) {
+            let id = previewIdentifier(photo) as NSString
+            wanted.insert(id)
+            if thumbnails.object(forKey: id) == nil {
+                missing.append((id, photo))
+            }
+        }
+        thumbnailLoads.retain(wanted)
+        for (id, photo) in missing {
+            _ = shared(id, photo: photo, preview: false, urgent: false)
+        }
+    }
+
+    /// Keeps the adjacent viewer pages decoded so paging does not wait on the network.
+    func prefetchPreviews(_ pages: [UnifiedPhoto], at index: Int) {
+        guard pages.indices.contains(index) else {
+            previewLoads.cancelAll()
+            return
+        }
+        let neighbors = [index + 1, index - 1, index + 2].filter(pages.indices.contains).map { pages[$0] }
+            .filter(prefetchable)
+        let ids = neighbors.map { previewIdentifier($0) as NSString }
+        previewLoads.retain(Set(ids + [previewIdentifier(pages[index]) as NSString]))
+        for (id, photo) in zip(ids, neighbors) where previews.object(forKey: id) == nil {
+            _ = shared(id, photo: photo, preview: true, urgent: false)
+        }
+    }
+
+    func stopPreviewPrefetch() {
+        previewLoads.cancelAll()
+    }
+
+    private func prefetchable(_ photo: UnifiedPhoto) -> Bool {
+        view?.previewSources[photo.id] != nil && selectedPresentation(photo) == nil
+    }
+
     private func ordinaryImage(_ photo: UnifiedPhoto, preview: Bool) async throws -> PlatformImage {
+        let id = previewIdentifier(photo) as NSString
+        if (preview ? previews : thumbnails).object(forKey: id) == nil {
+            // Join a queued look-ahead instead of fetching the same raster twice.
+            _ = try await shared(id, photo: photo, preview: preview, urgent: true).value
+            try Task.checkCancellation()
+        }
+        return try await validatedImage(photo, preview: preview, fetch: true)
+    }
+
+    private func shared(
+        _ id: NSString,
+        photo: UnifiedPhoto,
+        preview: Bool,
+        urgent: Bool
+    ) -> Task<PlatformImage, Error> {
+        (preview ? previewLoads : thumbnailLoads).load(id, urgent: urgent) { [weak self] in
+            guard let self else { throw CancellationError() }
+            return try await validatedImage(photo, preview: preview, fetch: true)
+        }
+    }
+
+    private func validatedImage(_ photo: UnifiedPhoto, preview: Bool, fetch: Bool) async throws -> PlatformImage {
         let span = PerformanceTrace.begin(preview ? .previewRequest : .thumbnailRequest)
         defer { PerformanceTrace.end(span) }
         guard let key = view?.previewSources[photo.id] else { throw SuwopError("写真の保存先にアクセスできません。") }
@@ -23,26 +118,49 @@ extension LibraryModel {
         let revision = try await validateOrdinary(key, context: context)
         let generation = thumbnailGeneration
         let cacheKey = previewIdentifier(photo) as NSString
-        let image: PlatformImage = if let cached = cachedOrdinaryImage(key, cacheKey: cacheKey, preview: preview) {
-            cached
+        let cache = preview ? previews : thumbnails
+        let image: PlatformImage
+        if let cached = cachedOrdinaryImage(key, cacheKey: cacheKey, cache: cache) {
+            image = cached
         } else {
-            try await loadThumbnail(key, preview: preview)
+            guard fetch else { throw CancellationError() }
+            image = try await displayReady(loadThumbnail(key, preview: preview))
         }
         _ = try await validateOrdinary(key, context: context, revision: revision)
         try validatePreview(photo.id, key: key, generation: generation)
-        if !preview {
-            thumbnails.setObject(image, forKey: cacheKey, cost: 360 * 360 * 4)
-        }
+        cache.setObject(image, forKey: cacheKey, cost: decodedCost(image))
         return image
     }
 
-    private func cachedOrdinaryImage(_ key: AssetKey, cacheKey: NSString, preview: Bool) -> PlatformImage? {
+    private func cachedOrdinaryImage(
+        _ key: AssetKey,
+        cacheKey: NSString,
+        cache: NSCache<NSString, PlatformImage>
+    ) -> PlatformImage? {
         #if SUWOP_VRT
             if let image = snapshotImages[key] {
                 return image
             }
         #endif
-        return preview ? nil : thumbnails.object(forKey: cacheKey)
+        return cache.object(forKey: cacheKey)
+    }
+
+    /// Decodes off the main thread so a prefetched raster does not stall its first frame.
+    private func displayReady(_ image: PlatformImage) async -> PlatformImage {
+        #if os(iOS)
+            await image.byPreparingForDisplay() ?? image
+        #else
+            image
+        #endif
+    }
+
+    private func decodedCost(_ image: PlatformImage) -> Int {
+        #if os(iOS)
+            let scale = image.scale
+        #else
+            let scale: CGFloat = 1
+        #endif
+        return max(1, Int(image.size.width * image.size.height * scale * scale * 4))
     }
 
     private func validateOrdinary(
