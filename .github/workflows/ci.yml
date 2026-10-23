@@ -25,11 +25,16 @@ jobs:
       CARGO_BUILD_JOBS: '4'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate Rust toolchains from the runner image
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -45,10 +50,14 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - name: Enforce Rust, script, workflow and architecture rules
         run: make lint-common
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: lint
 
   # The pinned Swift image provides the SourceKit that SwiftLint's custom rules need.
   swift-lint:
@@ -56,12 +65,27 @@ jobs:
     container: swift:6.2-noble@sha256:d6f8f6112e9a63da0a4a151d6b93acd16699d35c0b82531ac1a245f5af210197
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install archive and build utilities
-        run: apt-get update && apt-get install -y --no-install-recommends curl unzip make
-      - name: Install pinned SwiftLint and SwiftFormat
-        run: bash scripts/install-swift-tools.sh
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: start
+      # The Swift image lacks make, and curl for mise-action; both are OS packages.
+      - name: Install make and curl
+        run: apt-get update && apt-get install -y --no-install-recommends make curl ca-certificates
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Enforce Swift formatting and strict lint
         run: make lint-swift
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: swift-lint
 
   core:
     name: core (${{ matrix.profile }})
@@ -80,11 +104,16 @@ jobs:
       CARGO_BUILD_JOBS: '4'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate Rust toolchains from the runner image
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -100,24 +129,33 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - name: Run the ${{ matrix.profile }} test suite
         env:
           TARGET: ${{ matrix.target }}
           ARGS: ${{ matrix.args }}
         run: make "$TARGET" RUST_TEST_ARGS="$ARGS"
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: core-${{ matrix.profile }}
 
   immich-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -153,6 +191,12 @@ jobs:
           path: ${{ runner.temp }}/suwop-integration-*
           if-no-files-found: warn
           retention-days: 14
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: immich-integration
 
   # macOS runs only what needs Apple SDKs, Xcode or simulators. Each kind of
   # build happens once, with one main-only cache, and is shared by artifacts.
@@ -172,11 +216,20 @@ jobs:
           - aarch64-apple-ios-sim
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -189,8 +242,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install protobuf compiler
-        run: brew install protobuf
       - name: Build one release slice
         env:
           APPLE_TARGET: ${{ matrix.target }}
@@ -202,6 +253,12 @@ jobs:
           path: Generated/RustSlices/
           if-no-files-found: error
           retention-days: 1
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: apple-rust-${{ matrix.target }}
 
   apple:
     needs: apple-rust
@@ -209,11 +266,20 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -229,8 +295,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
         run: make test-swift
@@ -256,6 +320,12 @@ jobs:
           path: DerivedData/PrivateLiveMac/TestResults/
           if-no-files-found: warn
           retention-days: 14
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: apple
 
   # Builds the VRT and PhotoKit test products once for every simulator lane.
   apple-products:
@@ -267,11 +337,20 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
+          mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -285,8 +364,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install XcodeGen
-        run: brew install xcodegen protobuf
       - uses: ./.github/actions/cache-apple-packages
       - name: Build simulator test products
         run: make simulator-products
@@ -301,6 +378,12 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 1
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: apple-products
 
   simulator:
     needs: apple-products
@@ -311,20 +394,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [vrt-ci-ui-1, vrt-ci-ui-2, vrt-ci-host]
+        suite: [vrt-ci-ui-1, vrt-ci-ui-2, vrt-ci-ui-3, vrt-ci-host]
     timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
       SUWOP_SIMULATOR_PRODUCTS: ${{ github.workspace }}/DerivedData/SimulatorProducts/ci
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Start CI resource metrics
+        uses: ./.github/actions/ci-metrics
         with:
-          version: '0.11.24'
-          enable-cache: true
-      - name: Install pinned SimSlim
-        run: make setup-vrt
+          mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Download this attempt's simulator test products
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -352,6 +442,12 @@ jobs:
             DerivedData/PhotoKitArtifacts/
           if-no-files-found: warn
           retention-days: 14
+      - name: Stop CI resource metrics
+        if: always()
+        uses: ./.github/actions/ci-metrics
+        with:
+          mode: stop
+          name: simulator-${{ matrix.suite }}
 
   # Preserve the required check name; skipped/cancelled/failed suites never pass.
   vrt:
@@ -360,11 +456,12 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Require successful screenshot, UI and unchanged PhotoKit gates
         env:
           SIMULATOR_RESULT: ${{ needs.simulator.result }}

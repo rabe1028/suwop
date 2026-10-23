@@ -498,6 +498,8 @@ extension ImmichVisibilityUITests {
         XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed)
         preview.tap()
         let raster = app.images["immichLockedRaster"]
+        // Swiping down a list still at the top dismisses the sheet; let the raster replace its spinner.
+        _ = app.descendants(matching: .any)["写真を確認しています"].waitForNonExistence(timeout: 10)
         for _ in 0 ..< 5 {
             if raster.exists, !raster.frame.isEmpty, app.frame.contains(raster.frame) {
                 break

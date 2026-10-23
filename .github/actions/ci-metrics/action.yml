@@ -1,0 +1,32 @@
+name: CI resource metrics
+description: >-
+  Sample CPU, memory, swap, disk, network and the busiest processes during a job.
+  Start it right after checkout and stop it in a final `if: always()` step.
+  `uv run --no-project python scripts/ci_metrics.py RUN_ID` reports each step.
+inputs:
+  mode:
+    description: start or stop
+    required: true
+  name:
+    description: Unique job name for the artifact (required for stop)
+    required: false
+    default: ''
+runs:
+  using: composite
+  steps:
+    - name: Start resource sampling
+      if: inputs.mode == 'start'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/sample.sh" start "$RUNNER_TEMP/ci-metrics"
+    - name: Stop resource sampling
+      if: inputs.mode == 'stop'
+      shell: bash
+      run: bash "$GITHUB_ACTION_PATH/sample.sh" stop "$RUNNER_TEMP/ci-metrics"
+    - name: Preserve resource samples
+      if: inputs.mode == 'stop'
+      uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+      with:
+        name: ci-metrics-${{ inputs.name }}-${{ github.run_attempt }}
+        path: ${{ runner.temp }}/ci-metrics/
+        if-no-files-found: warn
+        retention-days: 14

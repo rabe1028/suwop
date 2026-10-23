@@ -7,7 +7,8 @@
 - Generate Swift DTOs with `make generate-types`. Do not edit generated DTOs.
 - Run `make check` before committing. Rust changes affecting the Apple boundary
   also require `make apple-build`; Immich contract changes require `make integration`.
-- Use `make setup` for pinned lint tools and repository hooks. Preserve the
+- Use `make setup` for pinned tools (mise.toml / mise.lock) and repository hooks.
+  Add or update tools only through mise; never download or brew-install them by hand. Preserve the
   user's global hooks. Do not suppress checks to commit or merge.
 - Rust unsafe code belongs only in the documented C ABI. Swift unchecked
   Sendable requires a narrow, documented native-API invariant.
