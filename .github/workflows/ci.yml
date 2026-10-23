@@ -69,9 +69,9 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      # The Swift image has no make; it is an OS package, not a pinned tool.
-      - name: Install make
-        run: apt-get update && apt-get install -y --no-install-recommends make
+      # The Swift image lacks make, and curl for mise-action; both are OS packages.
+      - name: Install make and curl
+        run: apt-get update && apt-get install -y --no-install-recommends make curl ca-certificates
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
