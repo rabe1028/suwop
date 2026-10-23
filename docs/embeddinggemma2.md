@@ -184,6 +184,10 @@ was not significantly better than the app's `task: search query | text:` prefix.
 Japanese top-1 remains about 13 points below English on the same images. Details and
 limits are in [the evidence](evidence/vector-store-20261024/).
 
+A Core ML conversion of the upstream checkpoint was also measured as a possible
+replacement for LiteRT-LM; it is not used by the app. See
+[the feasibility spike](../experiments/coreml-conversion/README.md).
+
 ## Validation scope
 
 The following counts and archived hashes describe the **initial 2026-10-15
