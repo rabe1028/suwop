@@ -48,7 +48,7 @@ impl Store {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 4 {
+        if version > 5 {
             return Err("Unsupported local catalog version".into());
         }
         if version == 0 {
@@ -64,44 +64,21 @@ impl Store {
             tx.execute_batch(include_str!("schema.sql"))
                 .map_err(error)?;
             tx.commit().map_err(error)?;
-        } else if version == 1 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 1 {
-                tx.execute_batch(include_str!("migration-v2.sql"))
-                    .map_err(error)?;
-            }
-            tx.commit().map_err(error)?;
         }
-        if version <= 2 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 2 {
-                tx.execute_batch(include_str!("migration-v3.sql"))
-                    .map_err(error)?;
+        // Each step re-reads the version inside its own write transaction, so a
+        // concurrent opener that already migrated is not migrated twice.
+        for (from, sql) in [
+            (1, include_str!("migration-v2.sql")),
+            (2, include_str!("migration-v3.sql")),
+            (3, include_str!("migration-v4.sql")),
+            (4, include_str!("migration-v5.sql")),
+        ] {
+            if version <= from {
+                migrate(&mut db, from, sql)?;
             }
-            tx.commit().map_err(error)?;
         }
-        if version <= 3 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 3 {
-                tx.execute_batch(include_str!("migration-v4.sql"))
-                    .map_err(error)?;
-            }
-            tx.commit().map_err(error)?;
+        if (1..=4).contains(&version) {
+            reclaim_lance_files(&root.join("analysis"));
         }
         Ok(Self { root, db })
     }
@@ -160,7 +137,7 @@ impl Store {
         // A second process may have completed migration or persisted newer state.
         self.read()
     }
-    /// Metadata and the analysis outbox commit together. Never opens Lance here.
+    /// Metadata and the analysis outbox commit together. Never takes the analysis lock.
     pub fn persist(&mut self, state: &SavedLibrary) -> Result<()> {
         self.save(state, false)
     }
@@ -206,6 +183,33 @@ impl Store {
         tx.execute("DELETE FROM analysis_asset_keys WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=analysis_asset_keys.id) AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset=analysis_asset_keys.id AND j.shard IS NOT NULL)", []).map_err(error)?;
         tx.commit().map_err(error)
     }
+}
+/// Former Lance index files are unreadable derived data. Keep the directory itself:
+/// the native adapter owns its backup exclusion attribute.
+fn reclaim_lance_files(directory: &Path) {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let _ = if path.is_dir() {
+            std::fs::remove_dir_all(path)
+        } else {
+            std::fs::remove_file(path)
+        };
+    }
+}
+fn migrate(db: &mut Connection, from: i64, sql: &str) -> Result<()> {
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(error)?;
+    let current: i64 = tx
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(error)?;
+    if current == from {
+        tx.execute_batch(sql).map_err(error)?;
+    }
+    tx.commit().map_err(error)
 }
 pub(crate) fn asset_id(asset: &StoredAsset) -> Result<String> {
     Ok(digest(serde_json::to_vec(&asset.key).map_err(error)?))

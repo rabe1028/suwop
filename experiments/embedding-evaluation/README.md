@@ -5,7 +5,7 @@ Python 3.10+, `curl`. This downloads public COCO fixtures and the pinned model; 
 never reads the user's photo library. Results and photos are ignored by Git.
 
 1. From the repository root, build the host bridge:
-   `PROTOC=/path/to/protoc bash scripts/build-rust-apple.sh --host`.
+   `bash scripts/build-rust-apple.sh --host`.
 2. Create `experiments/embedding-evaluation/results/`. Download
    `http://images.cocodataset.org/annotations/annotations_trainval2017.zip` to
    `results/annotations.zip`, then run `uv run --no-project python prepare.py` from this directory.
@@ -36,7 +36,7 @@ index/manifest storage, RSS and physical footprint. Reports include elapsed time
 other workloads and debug Rust code affect performance.
 
 This harness uses the actual native adapter, image preprocessing, Rust projection
-and Lance store. It retains all 100 projected vectors only for quality evaluation;
+and vector store. It retains all 100 projected vectors only for quality evaluation;
 the app persists one at a time. It does not exercise the app's UI or prove its
 memory admission budget. Durable pause, restart and stale-source behavior have
 separate Rust/Swift tests. See `docs/embeddinggemma2.md` for limitations and results.
@@ -62,3 +62,18 @@ vectors with the Japanese versions; keep all 100 images. Run `index` there, then
 `uv run --no-project python summarize_japanese.py`. Only the 20 translated queries contribute to the
 Japanese metrics. Source captions/translation ambiguities and the small sample
 limit interpretation.
+
+Prefix, dimension and stored-precision comparison (2026-10-24): run
+`uv run --no-project python prepare.py --count 1000 --manifest manifest-1000.json
+--japanese <id-to-query.json>`, then the `raw` phase, which stores unprojected
+768-dimensional image vectors and query vectors for the app and model-card prefixes:
+
+```bash
+.build/debug/EmbeddingProbe raw 256 /absolute/model.litertlm \
+  "$PWD/results/manifest-1000.json" "$PWD/results/raw1000"
+uv run --no-project --with numpy python quantization.py results/raw1000/raw.json
+```
+
+`quantization.py` needs numpy only for this offline analysis; the app and checks do
+not. Results are in `docs/evidence/vector-store-20261024/`.
+

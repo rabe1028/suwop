@@ -4,12 +4,12 @@ The Search tab now offers **写真の内容**. Starting analysis downloads a pin
 once (387,710,976 bytes), verifies its exact size and SHA-256, then performs local
 CPU inference. PhotoKit and configured Immich sources supply previews; photo
 contents are not sent to an external embedding service. Registration commits
-metadata and durable jobs without waiting for inference or Lance indexing.
+metadata and durable jobs without waiting for inference or indexing.
 
 The default is **256 dimensions** to reduce storage, with a **1.5 GiB** inference
 admission budget. 512 dimensions and 1/2 GiB budgets are available. Both dimensions
 can coexist. Model version, preprocessing, rendition and dimensions form separate
-model identities and Lance generations. Switching dimensions does not reinterpret
+model identities and index generations. Switching dimensions does not reinterpret
 existing vectors. Rebuild retains the previous active generation until publication.
 
 ## Runtime and source semantics
@@ -49,9 +49,9 @@ in-flight scheduling; foreground entry can resume a running journal. Failed inpu
 pauses visibly rather than silently declaring a complete index; the provider API
 also supports explicit per-job exclusion with a reason.
 
-Index creation has its own default 128 MiB managed working budget, two 8 MiB caches
-and a 512-row batch limit. The worker waits for a batch (or the final remainder),
-so one-image inference does not create a Lance table per photo. Index pause/replay
+Index creation has its own default 128 MiB managed working budget and a 512-row
+batch limit. The worker waits for a batch (or the final remainder), so one-image
+inference does not create a shard per photo. Index pause/replay
 and per-generation budget APIs are independent of inference. See
 [the storage contract](local-analysis-store.md).
 
@@ -83,6 +83,9 @@ native/cache residency and is not a fixed amount.
 [Final installed-model lifecycle](evidence/embeddinggemma2-20261015/256-lifecycle-installed.json).
 
 ## Measured comparison (2026-10-15)
+
+These measurements used the former Lance index. Schema 5 stores int8 vectors in
+SQLite and searches exactly; see [the 1,000-photo evaluation](#larger-evaluation-2026-10-24).
 
 M1 Max, 64 GiB RAM. 100 deterministic public COCO val2017 photos, one corresponding
 English caption per image. Same actual adapter/preprocessing as the app; separate
@@ -170,6 +173,17 @@ builds and a single warm-filesystem run limit timing conclusions.
 [Raw JSON, resource output and fixture IDs](evidence/embeddinggemma2-20261015/)
 and [reproduction instructions](../experiments/embedding-evaluation/README.md).
 
+## Larger evaluation (2026-10-24)
+
+1,000 COCO photos with English captions and 200 Japanese translations, all searched
+against the full set. At the default 256 dimensions, exact float32 search scored
+64.6% / 88.9% / 94.9% English and 51.5% / 83.0% / 94.0% Japanese top-1/5/10; the
+schema-5 int8 vectors stayed within one point. 128 dimensions lost about 10 points
+of top-1, matching the model card. The card's `task: search result | query:` prefix
+was not significantly better than the app's `task: search query | text:` prefix.
+Japanese top-1 remains about 13 points below English on the same images. Details and
+limits are in [the evidence](evidence/vector-store-20261024/).
+
 ## Validation scope
 
 The following counts and archived hashes describe the **initial 2026-10-15
@@ -188,7 +202,7 @@ job replay, stale revisions, generation publication and current connection bindi
 the pinned simulator environment. The existing 35 baselines are byte-identical;
 only two reviewed semantic-search screens were added, without changing tolerance.
 The semantic UI fixture checks navigation, persisted pause and dimension switching;
-the actual-model harness separately validates native inference and Lance search.
+the actual-model harness separately validated native inference and the then-current Lance search.
 All five Rust release slices, XCFramework packaging and the iOS simulator/macOS
 application builds passed. Packaging was resumed after an in-flight build-script
 edit interrupted the original shell process; the compile outputs were retained.

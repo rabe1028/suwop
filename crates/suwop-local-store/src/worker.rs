@@ -25,38 +25,25 @@ pub fn wake(root: &Path) -> Result<()> {
     std::thread::Builder::new()
         .name("suwop-analysis".into())
         .spawn(move || {
-            if let Ok(runtime) = runtime() {
-                loop {
-                    if let Ok(mut store) = Store::open_existing(&path) {
-                        while matches!(runtime.block_on(store.step()), Ok(true)) {}
-                    }
-                    if receiver.recv_timeout(Duration::from_secs(2)).is_ok() {
+            loop {
+                if let Ok(mut store) = Store::open_existing(&path) {
+                    while matches!(store.step(), Ok(true)) {}
+                }
+                if receiver.recv_timeout(Duration::from_secs(2)).is_ok() {
+                    continue;
+                }
+                // A wake arriving before retirement is consumed; a later wake starts
+                // a new worker. No caller waits for an index operation under this lock.
+                if let Ok(mut workers) = registry.lock() {
+                    if receiver.try_recv().is_ok() {
                         continue;
                     }
-                    // A wake arriving before retirement is consumed; a later wake starts
-                    // a new worker. No caller waits for a Lance operation under this lock.
-                    if let Ok(mut workers) = registry.lock() {
-                        if receiver.try_recv().is_ok() {
-                            continue;
-                        }
-                        workers.remove(&path);
-                    }
-                    return;
+                    workers.remove(&path);
                 }
-            }
-            if let Ok(mut workers) = registry.lock() {
-                workers.remove(&path);
+                return;
             }
         })
         .map_err(error)?;
     workers.insert(root, sender);
     Ok(())
-}
-pub(crate) fn runtime() -> Result<tokio::runtime::Runtime> {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .max_blocking_threads(2)
-        .enable_all()
-        .build()
-        .map_err(error)
 }

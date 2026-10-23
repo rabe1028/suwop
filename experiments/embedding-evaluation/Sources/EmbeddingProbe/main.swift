@@ -5,6 +5,14 @@ struct Fixture: Codable {
     let id: String
     let file: String
     let query: String
+    let queryJa: String?
+}
+
+/// Unprojected 768-dimensional outputs; truncation and quantization are evaluated offline.
+struct RawVectors: Codable {
+    let id: String
+    let image: [Float]
+    let queries: [String: [Float]]
 }
 
 struct Vectors: Codable {
@@ -34,12 +42,49 @@ if args.count != 6 {
 guard let dimensions = UInt32(args[2]), [256, 512].contains(dimensions) else { throw SuwopError("Invalid dimensions") }
 let output = URL(fileURLWithPath: args[5], isDirectory: true)
 try FileManager.default.createDirectory(at: output, withIntermediateDirectories: true)
-let store = LocalStore(root: output.appendingPathComponent("catalog"))
+let store = try LocalStore(root: output.appendingPathComponent("catalog"))
 let spec = try await store.inferenceSpec(dimensions: dimensions)
 let fixtures = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: URL(fileURLWithPath: args[4])))
 let started = Date()
 let runtime = EmbeddingRuntime()
-if ["embed", "profile"].contains(args[1]) {
+if args[1] == "raw" {
+    try await runtime.load(path: args[3], spec: spec)
+    var vectors: [RawVectors] = []
+    for fixture in fixtures {
+        let image = try await EmbeddingImage.prepare(
+            Data(contentsOf: URL(fileURLWithPath: fixture.file)),
+            edge: Int(spec.imageEdge)
+        )
+        // The app's prefix and the model card's asymmetric search prefix.
+        var texts = try await [
+            "app_en": store.queryText(fixture.query),
+            "card_en": "task: search result | query: \(fixture.query)",
+        ]
+        if let ja = fixture.queryJa {
+            texts["app_ja"] = try await store.queryText(ja)
+            texts["card_ja"] = "task: search result | query: \(ja)"
+        }
+        var queries: [String: [Float]] = [:]
+        for (name, text) in texts {
+            queries[name] = try await runtime.embedding(Data(text.utf8), image: false)
+        }
+        try await vectors.append(RawVectors(
+            id: fixture.id,
+            image: runtime.embedding(image, image: true),
+            queries: queries
+        ))
+    }
+    try JSONEncoder().encode(vectors).write(to: output.appendingPathComponent("raw.json"))
+    let report = Report(
+        dimensions: dimensions,
+        seconds: Date().timeIntervalSince(started),
+        residentAfterLoad: 0,
+        residentAfterWork: runtime.memory().resident,
+        results: []
+    )
+    try JSONEncoder().encode(report).write(to: output.appendingPathComponent("raw-inference.json"))
+    await runtime.close()
+} else if ["embed", "profile"].contains(args[1]) {
     try await runtime.load(path: args[3], spec: spec)
     let afterLoad = runtime.memory().resident
     if args[1] == "profile" {
@@ -164,7 +209,7 @@ if ["embed", "profile"].contains(args[1]) {
             throw SuwopError("Host exceeded the configured budget after inference")
         }
         try await store.pauseInference(key: configured.modelKey)
-        let reopened = LocalStore(root: output.appendingPathComponent("catalog"))
+        let reopened = try LocalStore(root: output.appendingPathComponent("catalog"))
         guard try await reopened.inferenceStatus(key: configured.modelKey)?.state == "paused",
               try await !reopened.admitInference(key: configured.modelKey, runtime: runtime, loaded: true)
         else {

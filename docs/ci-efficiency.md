@@ -163,15 +163,13 @@ Kept on macOS deliberately:
 - `swift test`: the package imports CoreGraphics, ImageIO,
   UniformTypeIdentifiers and LiteRT-LM's Apple binary, and its tests use
   AVFoundation, CoreMedia and CryptoKit. None of these exist on Linux.
-- Rust Apple libraries. Six dependencies compile C (`blake3`, `lance-linalg`,
-  `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`). Zig's C compiler can
-  build them for iOS only by forcing its macOS libc headers onto iOS targets,
-  which Zig does not support. `lance-arrow` also always builds a `cdylib`,
-  and linking it for iOS needs `libSystem`/`libiconv` stubs that only
-  Apple's SDK provides; a Linux cross-build stopped there. Making it work
-  would need fake link stubs and would test libraries built by a different C
-  compiler than developers and releases use. At most it would save about
-  nine warm macOS minutes per run.
+- Rust Apple libraries. When this was measured, six dependencies compiled C
+  (`blake3`, `lance-linalg`, `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`)
+  and `lance-arrow` needed Apple-only link stubs, so a Linux cross-build
+  stopped. Schema 5 removed Lance; only `libsqlite3-sys` still compiles C. Zig
+  can build it for iOS only by forcing its macOS libc headers onto iOS targets,
+  which Zig does not support, and it would test a library built by a different
+  C compiler than developers and releases use. Re-measure before revisiting.
 
 ## Resource metrics (2026-10)
 

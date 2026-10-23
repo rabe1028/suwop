@@ -214,7 +214,7 @@ fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
             store.submit(&model_key, &embeddings)?;
             Value::Null
         }
-        Command::Prune => json(crate::worker::runtime()?.block_on(store.prune())?)?,
+        Command::Prune => json(store.prune()?)?,
         Command::Skip {
             model_key,
             job_id,
@@ -228,7 +228,7 @@ fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
             model_key,
             vector,
             limit,
-        } => json(crate::worker::runtime()?.block_on(store.search(&model_key, &vector, limit))?)?,
+        } => json(store.search(&model_key, &vector, limit)?)?,
         _ => return Err("Unsupported analysis command".into()),
     };
     Ok(value)
