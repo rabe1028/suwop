@@ -16,8 +16,8 @@ LANE=""
 if [[ "${1:-}" == --record && $# == 1 ]]; then RECORD=1
 elif [[ "${1:-}" == --capture && $# == 1 ]]; then CAPTURE=1
 elif [[ "${1:-}" == --ci-lane && $# == 2 ]]; then
-    case "$2" in host-snapshots|ui) LANE="$2" ;; *) echo 'Unknown CI VRT lane' >&2; exit 1 ;; esac
-elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture|--ci-lane host-snapshots|ui]' >&2; exit 1
+    case "$2" in host-snapshots|ui-[1-9]) LANE="$2" ;; *) echo 'Unknown CI VRT lane' >&2; exit 1 ;; esac
+elif [[ $# != 0 ]]; then echo 'Usage: vrt.sh [--record|--capture|--ci-lane host-snapshots|ui-N]' >&2; exit 1
 fi
 if [[ ( "$RECORD" == 1 || "$CAPTURE" == 1 ) && -n "${CI:-}" ]]; then
     echo 'Baseline recording and incomplete-baseline capture are forbidden in CI.' >&2
@@ -81,27 +81,47 @@ if [[ -n "$LANE" ]]; then stage begin uv run --no-project python scripts/vrt_lan
 stage slim simslim on "$UDID" --profile VRT/simslim.json
 stage verify-profile simslim verify "$UDID" --profile VRT/simslim.json --json
 stage memory simslim measure "$UDID" --json
-stage rust-simulator bash scripts/build-rust-apple.sh --simulator
-stage project xcodegen generate
-ARGS=(
-    -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
-    -project Suwop.xcodeproj -scheme SuwopVRT
-    -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/VRT
-    -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
-    -testLanguage ja -testRegion JP CODE_SIGNING_ALLOWED=NO
-    "SUWOP_VRT_RECORD=$RECORD" "SUWOP_VRT_BASELINES=$PWD/VRT/Baselines"
-    "SUWOP_VRT_ARTIFACTS=$ARTIFACTS"
-)
-stage build xcodebuild "${ARGS[@]}" build-for-testing
+lane_products() {
+    # CI builds simulator products once for every lane; a local lane builds its own.
+    if [[ -z "${SUWOP_SIMULATOR_PRODUCTS:-}" ]]; then
+        SUWOP_SIMULATOR_PRODUCTS="$PWD/DerivedData/SimulatorProducts/$(basename "$ARTIFACTS")"
+        bash scripts/simulator-products.sh "$SUWOP_SIMULATOR_PRODUCTS"
+    fi
+    uv run --no-project python scripts/simulator_products.py prepare-vrt \
+        "$SUWOP_SIMULATOR_PRODUCTS" "$ARTIFACTS" > "$ARTIFACTS/xctestrun.txt"
+}
+if [[ -n "$LANE" ]]; then
+    stage products lane_products
+    ARGS=(
+        -xctestrun "$(cat "$ARTIFACTS/xctestrun.txt")"
+        -destination "platform=iOS Simulator,id=$UDID"
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+    )
+else
+    stage rust-simulator bash scripts/build-rust-apple.sh --simulator
+    stage project xcodegen generate
+    ARGS=(
+        -clonedSourcePackagesDirPath "$PWD/DerivedData/SourcePackages"
+        -project Suwop.xcodeproj -scheme SuwopVRT
+        -destination "platform=iOS Simulator,id=$UDID" -derivedDataPath DerivedData/VRT
+        -parallel-testing-enabled NO -maximum-concurrent-test-simulator-destinations 1
+        -testLanguage ja -testRegion JP CODE_SIGNING_ALLOWED=NO
+        "SUWOP_VRT_RECORD=$RECORD" "SUWOP_VRT_BASELINES=$PWD/VRT/Baselines"
+        "SUWOP_VRT_ARTIFACTS=$ARTIFACTS"
+    )
+    stage build xcodebuild "${ARGS[@]}" build-for-testing
+fi
 if [[ -n "$LANE" ]]; then
     stage enumerate xcodebuild "${ARGS[@]}" test-without-building -enumerate-tests \
         -test-enumeration-style flat -test-enumeration-format json \
         -test-enumeration-output-path "$ARTIFACTS/registered-raw.json"
     stage inventory uv run --no-project python scripts/vrt_lanes.py inventory \
         "$ARTIFACTS/registered-raw.json" "$ARTIFACTS/registered-tests.json"
-    if [[ "$LANE" == host-snapshots ]]; then BUNDLE=SuwopVRT
-    else BUNDLE=SuwopVRTUI; fi
-    stage compare xcodebuild "${ARGS[@]}" "-only-testing:$BUNDLE" \
+    # UI lanes are deterministic duration-balanced shards of the enumerated bundle.
+    stage select uv run --no-project python scripts/vrt_lanes.py select "$ARTIFACTS" "$LANE"
+    ONLY=()
+    while IFS= read -r selected; do ONLY+=("-only-testing:$selected"); done < "$ARTIFACTS/only-testing.txt"
+    stage compare xcodebuild "${ARGS[@]}" "${ONLY[@]}" \
         -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building
 else
     stage compare xcodebuild "${ARGS[@]}" -resultBundlePath "$ARTIFACTS/Tests.xcresult" test-without-building

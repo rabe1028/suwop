@@ -21,5 +21,11 @@ for directory in ("App", "Sources/SuwopShell"):
         for label, pattern in FORBIDDEN.items():
             if re.search(pattern, source):
                 errors.append(f"{path.relative_to(ROOT)}: {label} must live in suwop-core")
+# Offline Rust integration tests share one binary; an undeclared module never runs.
+for suite in (ROOT / "crates").glob("*/tests/suite"):
+    declared = set(re.findall(r"^mod (\w+);", (suite / "main.rs").read_text(), re.MULTILINE))
+    for path in suite.glob("*.rs"):
+        if path.name != "main.rs" and path.stem not in declared:
+            errors.append(f"{path.relative_to(ROOT)}: declare it in {suite.name}/main.rs")
 if errors:
     raise SystemExit("\n".join(errors))

@@ -152,16 +152,66 @@ class LaneTests(unittest.TestCase):
             "stages": [[name, "1", "0"] for name in sorted(lanes.STAGES)],
             "evidence": {
                 "registered": copy.deepcopy(self.registered),
-                "executed": {bundle: self.registered[bundle][:]},
+                "executed": {bundle: lanes.selection(self.registered, scope)},
                 "screens": sorted(vrt.SCREENS if scope == "host-snapshots" else []),
             },
         }
 
+    def restricted(self, bundle, selected):
+        """Raw results containing exactly the selected cases of one bundle."""
+        tests, summary = copy.deepcopy(self.tests), copy.deepcopy(self.summary)
+
+        def keep(node):
+            if node.get("nodeType") == "Test Case":
+                parts = node["nodeIdentifierURL"].split("/")
+                return "/".join(parts[-3:]) in selected
+            node["children"] = [child for child in node.get("children", []) if keep(child)]
+            return bool(node["children"])
+
+        tests["testNodes"][0]["children"] = [
+            n for n in tests["testNodes"][0]["children"] if n["name"] == bundle and keep(n)
+        ]
+        return tests, summary
+
+    def test_ui_shards_are_a_deterministic_balanced_exact_partition(self):
+        registered = self.registered
+        shards = [lanes.selection(registered, s) for s in lanes.SCOPES if s != "host-snapshots"]
+        self.assertEqual(len(shards), lanes.UI_SHARDS)
+        self.assertEqual(sorted(t for shard in shards for t in shard), registered["SuwopVRTUI"])
+        self.assertTrue(all(shards))
+        self.assertEqual(
+            shards, [lanes.selection(registered, f"ui-{i + 1}") for i in range(lanes.UI_SHARDS)]
+        )
+        seconds = lanes.durations()
+        loads = [sum(seconds[test] for test in shard) for shard in shards]
+        self.assertLessEqual(max(loads) - min(loads), max(seconds.values()))
+        host = lanes.selection(registered, "host-snapshots")
+        self.assertEqual(host, registered["SuwopVRT"])
+        with self.assertRaises(ValueError):
+            lanes.selection(registered, "ui")
+
+    def test_unmeasured_new_ui_test_is_still_selected_exactly_once(self):
+        registered = copy.deepcopy(self.registered)
+        registered["SuwopVRTUI"] = sorted([*registered["SuwopVRTUI"], "SuwopVRTUI/New/testNew"])
+        shards = [lanes.selection(registered, s) for s in lanes.SCOPES if s != "host-snapshots"]
+        self.assertEqual(sorted(t for shard in shards for t in shard), registered["SuwopVRTUI"])
+
+    def test_ui_test_moved_between_shards_breaks_the_union(self):
+        reports = self.reports()
+        moved = reports["ui-1"]["evidence"]["executed"]["SuwopVRTUI"].pop()
+        reports["ui-2"]["evidence"]["executed"]["SuwopVRTUI"].append(moved)
+        reports["ui-2"]["evidence"]["executed"]["SuwopVRTUI"].sort()
+        with self.assertRaisesRegex(ValueError, "Wrong lane IDs"):
+            self.aggregate(list(reports.values()))
+
     def aggregate(self, reports, matrix="success"):
         return lanes.aggregate(reports, "a" * 40, "123", "1", matrix)
 
-    def test_exact_two_partial_lanes_form_union_only_with_successful_photokit_matrix(self):
-        reports = [self.report(scope) for scope in lanes.SCOPES]
+    def reports(self):
+        return {scope: self.report(scope) for scope in lanes.SCOPES}
+
+    def test_exact_partial_lanes_form_union_only_with_successful_photokit_matrix(self):
+        reports = list(self.reports().values())
         self.assertTrue(self.aggregate(reports)["passed"])
         self.assertTrue(all(report["full_suite_passed"] is False for report in reports))
         for status in ("failure", "cancelled", "skipped", ""):
@@ -169,21 +219,32 @@ class LaneTests(unittest.TestCase):
                 self.aggregate(reports, status)
 
     def test_missing_duplicate_unknown_and_legacy_full_pass_are_rejected(self):
-        host, ui = (self.report(scope) for scope in lanes.SCOPES)
-        for reports in ([host], [host, host], [host, ui, ui], [host, {"passed": True}], []):
+        lanes_ = self.reports()
+        host, ui = lanes_["host-snapshots"], lanes_["ui-1"]
+        shards = [lanes_[scope] for scope in lanes.SCOPES if scope != "host-snapshots"]
+        for reports in (
+            [host],
+            [host, host],
+            [host, *shards[:-1]],
+            [host, *shards, ui],
+            [host, *shards[:-1], ui],
+            [host, *shards[:-1], {"passed": True}],
+            [],
+        ):
             with self.assertRaises(ValueError):
                 self.aggregate(reports)
 
     def test_stale_head_run_attempt_and_source_environment_baseline_drift_fail(self):
         for field in self.bound:
-            host, ui = (self.report(scope) for scope in lanes.SCOPES)
-            ui["identity"][field] = "changed"
+            reports = self.reports()
+            reports["ui-2"]["identity"][field] = "changed"
             with self.subTest(field=field), self.assertRaises((ValueError, TypeError)):
-                self.aggregate([host, ui])
+                self.aggregate(list(reports.values()))
 
     def test_wrong_ids_with_equal_counts_dropped_new_tests_and_ui_screen_claim_fail(self):
         for mutation in ("id", "registered", "screens", "record", "partial", "status", "stage"):
-            host, ui = (self.report(scope) for scope in lanes.SCOPES)
+            reports = self.reports()
+            host, ui = reports["host-snapshots"], reports["ui-1"]
             if mutation == "id":
                 ui["evidence"]["executed"]["SuwopVRTUI"][0] += "wrong"
             elif mutation == "registered":
@@ -199,10 +260,10 @@ class LaneTests(unittest.TestCase):
                     ]
                 ] = mutation != "status"
             with self.subTest(mutation=mutation), self.assertRaises(ValueError):
-                self.aggregate([host, ui])
+                self.aggregate(list(reports.values()))
 
     def test_duplicate_failed_and_missing_stage_are_rejected(self):
-        stages = self.report("ui")["stages"]
+        stages = self.report("ui-1")["stages"]
         for values in (stages[:-1], stages + stages[:1], [["compare", "1", "65"]]):
             with self.assertRaises(ValueError):
                 lanes.validate_stages(values, final=True)
@@ -217,11 +278,8 @@ class LaneTests(unittest.TestCase):
             for scope, bundle in lanes.SCOPES.items():
                 artifacts = folder / scope / "DerivedData/VRTArtifacts/completed"
                 artifacts.mkdir(parents=True)
-                tests, summary = copy.deepcopy(self.tests), copy.deepcopy(self.summary)
-                tests["testNodes"][0]["children"] = [
-                    n for n in tests["testNodes"][0]["children"] if n["name"] == bundle
-                ]
-                count = len(self.registered[bundle])
+                tests, summary = self.restricted(bundle, lanes.selection(self.registered, scope))
+                count = len(lanes.selection(self.registered, scope))
                 summary.update(passedTests=count, totalTestCount=count)
                 summary["devicesAndConfigurations"][0]["passedTests"] = count
                 report = self.report(scope)
@@ -256,7 +314,7 @@ class LaneTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr.decode())
             self.assertTrue(lanes.read(folder / "aggregate.json")["passed"])
             # A plausible report cannot conceal stale raw result identity or a missing lane.
-            raw = folder / "ui/DerivedData/VRTArtifacts/completed/before.json"
+            raw = folder / "ui-1/DerivedData/VRTArtifacts/completed/before.json"
             lanes.write(raw, {**self.bound, "attempt": "previous"})
             result = subprocess.run(  # noqa: S603 - fixed local Python/helper, temporary fixture paths
                 command, cwd=vrt.ROOT, env=environment, capture_output=True

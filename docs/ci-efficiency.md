@@ -79,3 +79,96 @@ Intel release jobs and universal-library assembly have been removed. All
 remaining slice revision/digest checks and existing test suites are retained.
 New cache keys start cold; the runtime benefit still needs a successful warm
 CI run. A cache hit does not remove simulator execution time.
+
+## Critical-path split (2026-10)
+
+Successful main runs 39049104153 and 39005354809 took 50–60 minutes. Two jobs
+formed the critical path:
+
+| Job | Time | Cause |
+| --- | --- | --- |
+| `simulator (vrt-ci-ui)` | 50–57m | 61 UI tests ran serially for 2,732s on one simulator |
+| `core` | 33–39m | `cargo clean` then an uncached release build (24m21s); test execution took seconds |
+
+Within the release build, `suwop-core` took about 17 minutes: Cargo built each
+of its 35 `tests/*.rs` files as a separate optimized binary, each linking the
+library and re-instantiating its generics.
+
+Changes:
+
+- UI tests run as two duration-balanced shards on separate macOS runners
+  (see [VRT CI lanes](vrt-ci-lanes.md)). The aggregate still requires the
+  shards to cover the registered UI bundle exactly once.
+- `lint`, `core (debug)` and `core (release)` run in parallel with separate
+  caches. The release job keeps its own dependency cache instead of cleaning
+  the debug build, and Linux jobs use four Cargo jobs.
+- Offline `suwop-core` integration tests are modules of one `tests/suite`
+  binary. `immich_live` stays separate for `make integration`.
+  `scripts/check-architecture.py` rejects a suite file not declared in
+  `suite/main.rs`, so a new test file cannot silently stop running.
+- Only `main` saves Rust caches. On 2026-10-22 the repository held 11.0 GB
+  of caches against the 10 GB limit: every PR merge ref saved its own
+  650–750 MB caches, main's Rust caches had been evicted, and PR jobs such as
+  the Apple release slices rebuilt dependencies cold (42 minutes instead of
+  about 3). PRs now restore main's caches without writing their own.
+- `make test-rust` runs tests with cargo-nextest (pinned in
+  `scripts/install-tools.sh`, no retries) and doctests with `cargo test --doc`.
+  `RUST_TEST_ARGS=--release` runs the release suite.
+
+A local warm rebuild after touching `suwop-core` (Apple M-series,
+`CARGO_BUILD_JOBS=4`, `cargo test --no-run`) took 159s → 110s for release and
+24s → 21s for debug. Test binaries dropped from 37 to 7. These are local
+measurements; hosted CI time still needs a successful warm run on main.
+
+## macOS only where Apple tooling is required
+
+macOS runners are limited to five concurrent jobs per account. PR #45 run
+39756208393 (attempt 1) shows the effect: other branches' runs held the slots,
+so its macOS jobs queued for 90–130 minutes and the run took 160 minutes.
+Ten macOS jobs per run each set up Rust, SwiftPM and Xcode, and the same Rust
+simulator library and VRT test bundle were built in every simulator lane.
+
+The workflow now has these macOS jobs:
+
+| Job | Runner | Work |
+| --- | --- | --- |
+| `apple-rust` ×3 | macos-15 | One release slice each (about 3 minutes warm) |
+| `apple` | macos-15 | Rust-to-Swift bridge tests, iOS/macOS apps from the slices, macOS sharing/private media tests |
+| `apple-products` | macos-26 | Rust simulator library and VRT/PhotoKit `build-for-testing`, once |
+| `simulator` ×3 | macos-26 | `vrt-ci-ui-1`, `vrt-ci-ui-2`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
+
+With warm caches, the slice jobs finish before the simulator lanes start, so
+at most five macOS jobs run at once for one workflow run. The slices stay in
+separate jobs because a cold slice takes about 40 minutes on macos-15. PR #45
+run 39823100151 built all three in one job; it hit the 90-minute timeout, and
+a timed-out job saves no cache, so later runs would stay cold.
+
+Work moved off macOS or removed from it:
+
+- macOS no longer repeats the Rust test suite or the repository tool/hook
+  tests; Linux runs them. The Swift tests still exercise the real Rust library.
+- Simulator lanes no longer install Rust, restore Rust or SwiftPM caches
+  (2.8 GB), or run XcodeGen or Xcode builds. They download about 160 MB of
+  products and run `test-without-building -xctestrun`.
+- The host-test and app-packaging jobs are one `apple` job.
+- Swift lint runs on Linux (`swift-lint`) in the pinned `swift:6.2-noble`
+  image, whose `libsourcekitdInProc` the dynamic SwiftLint build loads. Do not
+  use `swiftlint-static` or a runner without SourceKit: it skips
+  `custom_rules` and `statement_position` and still exits 0. With SourceKit,
+  an injected `@unchecked Sendable` and a misplaced `else` failed on Linux
+  exactly as on macOS, and the repository passed on both.
+
+Kept on macOS deliberately:
+
+- `swift test`: the package imports CoreGraphics, ImageIO,
+  UniformTypeIdentifiers and LiteRT-LM's Apple binary, and its tests use
+  AVFoundation, CoreMedia and CryptoKit. None of these exist on Linux.
+- Rust Apple libraries. Six dependencies compile C (`blake3`, `lance-linalg`,
+  `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`). Zig's C compiler can
+  build them for iOS only by forcing its macOS libc headers onto iOS targets,
+  which Zig does not support. `lance-arrow` also always builds a `cdylib`,
+  and linking it for iOS needs `libSystem`/`libiconv` stubs that only
+  Apple's SDK provides; a Linux cross-build stopped there. Making it work
+  would need fake link stubs and would test libraries built by a different C
+  compiler than developers and releases use. At most it would save about
+  nine warm macOS minutes per run.
