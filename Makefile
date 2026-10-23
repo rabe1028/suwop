@@ -1,4 +1,5 @@
-export PATH := $(CURDIR)/.tools/bin:$(PATH)
+# Pinned tools come from mise.toml/mise.lock (`make setup`); hooks need no shell activation.
+export PATH := $(shell mise bin-paths 2>/dev/null | tr '\n' ':')$(PATH)
 export CARGO_BUILD_JOBS ?= 2
 APPLE_RUST_BUILD_ARGS ?=
 APPLE_PACKAGE_CACHE := $(CURDIR)/DerivedData/SourcePackages
@@ -10,8 +11,10 @@ export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --
 endif
 
 .PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record vrt-capture
+MISE_INSTALL = mise install --locked $$(mise ls --local --no-header 2>/dev/null | awk '{print $$1}')
+
 setup:
-	bash scripts/install-tools.sh
+	$(MISE_INSTALL)
 	bash scripts/install-hooks.sh
 
 lint-common:
@@ -79,8 +82,9 @@ apple-build: apple-core
 integration:
 	bash scripts/immich-integration-test.sh
 
+# simslim is a macOS entry in mise.toml.
 setup-vrt:
-	bash scripts/install-simslim.sh
+	$(MISE_INSTALL)
 
 vrt-capture:
 	bash scripts/vrt.sh --capture

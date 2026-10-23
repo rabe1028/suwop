@@ -14,10 +14,10 @@ Apple の静止画には切り抜き、90度回転、上下・左右の反転、
 
 ## 起動と開発
 
-必要: macOS、Xcode、Homebrew、Python 3.11 以上、rustup。Docker 統合テストには Docker が必要です。
+必要: macOS、Xcode、[mise](https://mise.jdx.dev/)、rustup。Docker 統合テストには Docker が必要です。
 
 ```sh
-make setup             # 固定バージョンの Lint ツールと Git hooks
+make setup             # mise.lock の固定ツールと Git hooks
 make apple-core        # Rust の device / Simulator / Mac XCFramework
 xcodegen generate
 open Suwop.xcodeproj
@@ -40,14 +40,14 @@ make format            # Rust / Swift / Python の整形
 make check             # 厳格な Lint、生成物差分、Rust と実 FFI のテスト
 make apple-build       # ARM64 Rust library、iOS Simulator / Mac のビルド
 make integration       # 分離した Docker Immich v3.2.4 に対する実通信テスト
-make setup-vrt         # SHA-256 検証付き simslim 0.12.2 をローカルに導入
+make setup-vrt         # mise.lock の simslim 0.12.2 を導入（make setup と同じ）
 make vrt               # 一台の軽量 Simulator で SwiftUI 23 画面の画素差分を比較
 make apple-native-test # 同じ専用 Simulator で実 PhotoKit の保存・再起動・復元を確認
 ```
 
 空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
 
-uv 0.11.24、Rust 1.95.0、SwiftLint 0.65.1、SwiftFormat 0.63.1、Ruff 0.17.0、ShellCheck 0.11.0、actionlint 1.7.12 を固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
+ツールは `mise.toml` で固定し、各プラットフォームの URL とチェックサムを `mise.lock` に記録します（uv、Ruff、ShellCheck、actionlint、protoc、cargo-nextest、SwiftLint、SwiftFormat、XcodeGen、simslim）。手動のダウンロードや Homebrew での導入はしません。Rust 1.95.0 は `rust-toolchain.toml` で固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。
 
@@ -75,6 +75,6 @@ Live Photo、編集・補助データ付き、バースト、External Library、
 Immich 3.2以降では、保存先情報または複数選択から通常のゴミ箱へ移し、コレクションの「最近削除した項目」から復元できます。
 確認前後の検証と送信前の記録保存をRustで行い、通信断後の書き込みは再送しません。[削除・復元の手順と境界](docs/trash.md) を参照してください。
 
-Python スクリプトは `uv run --no-project python` で実行します。`make setup` の前に uv を用意してください。Python 環境と Ruff の導入も uv を使い、CI は固定バージョンを自動導入します。
+Python スクリプトは `uv run --no-project python` で実行します。uv と Ruff も mise で導入し、CI は `jdx/mise-action` で同じ lockfile から導入します。
 
 Appleビルドの対応アーキテクチャはARM64のみです。macOSはApple Silicon、iOS SimulatorもApple Silicon Macを対象とし、Intel Mac用スライスは生成しません。

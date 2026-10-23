@@ -29,11 +29,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate Rust toolchains from the runner image
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -49,8 +50,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - name: Enforce Rust, script, workflow and architecture rules
         run: make lint-common
       - name: Stop CI resource metrics
@@ -70,10 +69,15 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install archive and build utilities
-        run: apt-get update && apt-get install -y --no-install-recommends curl unzip make
-      - name: Install pinned SwiftLint and SwiftFormat
-        run: bash scripts/install-swift-tools.sh
+      # The Swift image has no make; it is an OS package, not a pinned tool.
+      - name: Install make
+        run: apt-get update && apt-get install -y --no-install-recommends make
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
+        with:
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Enforce Swift formatting and strict lint
         run: make lint-swift
       - name: Stop CI resource metrics
@@ -104,11 +108,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate Rust toolchains from the runner image
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -124,8 +129,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - name: Run the ${{ matrix.profile }} test suite
         env:
           TARGET: ${{ matrix.target }}
@@ -147,11 +150,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -216,11 +220,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -233,8 +238,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install protobuf compiler
-        run: brew install protobuf
       - name: Build one release slice
         env:
           APPLE_TARGET: ${{ matrix.target }}
@@ -263,11 +266,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -283,8 +287,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install pinned quality tools
-        run: bash scripts/install-tools.sh
       - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
         run: make test-swift
@@ -331,11 +333,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
@@ -349,8 +352,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install XcodeGen
-        run: brew install xcodegen protobuf
       - uses: ./.github/actions/cache-apple-packages
       - name: Build simulator test products
         run: make simulator-products
@@ -392,13 +393,12 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
-      - name: Install pinned SimSlim
-        run: make setup-vrt
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Download this attempt's simulator test products
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
@@ -440,11 +440,12 @@ jobs:
     if: always()
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+      - name: Install pinned tools from mise.lock
+        uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
-          version: '0.11.24'
-          enable-cache: true
+          version: 2026.7.5
+          # Only main saves, like the Rust caches; PRs restore main's tools.
+          cache_save: ${{ github.ref == 'refs/heads/main' }}
       - name: Require successful screenshot, UI and unchanged PhotoKit gates
         env:
           SIMULATOR_RESULT: ${{ needs.simulator.result }}

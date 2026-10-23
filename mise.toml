@@ -1,0 +1,19 @@
+# Pinned developer and CI tools. `make setup` runs `mise install`; mise.lock
+# records each platform's download URL and checksum.
+# Rust stays pinned by rust-toolchain.toml (rustup).
+[settings]
+lockfile = true
+
+[tools]
+uv = "0.11.24"
+ruff = "0.17.0"
+actionlint = "1.7.12"
+shellcheck = "0.11.0"
+# Lance's pinned Rust crates compile protobuf schemas during the build.
+protoc = "36.2"
+"github:nextest-rs/nextest" = { version = "0.9.146", version_prefix = "cargo-nextest-" }
+swiftlint = "0.65.1"
+swiftformat = "0.63.1"
+xcodegen = { version = "2.46.0", os = ["macos"] }
+# VRT and PhotoKit simulator profiles; must match VRT/environment.json.
+"github:MobAI-App/simslim" = { version = "0.12.2", os = ["macos"] }

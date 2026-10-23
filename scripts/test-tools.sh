@@ -13,11 +13,16 @@ echo 'cargo 1.95.0'
 printf '%0128d\n' {1..2048}
 touch "$SUWOP_TOOL_PROBE"
 STUB
-for spec in 'uv 0.11.24' 'ruff 0.17.0' 'actionlint 1.7.12' 'shellcheck version: 0.11.0' 'swiftlint 0.65.1' 'swiftformat 0.63.1' 'cargo-nextest cargo-nextest 0.9.146 stub'; do
-  name="${spec%% *}"
-  version="${spec#* }"
-  printf '#!/usr/bin/env bash\necho %s\n' "$version" > "$TEMP/$name"
-done
-chmod +x "$TEMP"/{cargo,uv,ruff,actionlint,shellcheck,swiftlint,swiftformat,cargo-nextest}
+cat > "$TEMP/mise" <<'STUB'
+#!/usr/bin/env bash
+if [[ "$1" == ls ]]; then echo 'uv 0.11.24 mise.toml 0.11.24'; exit 0; fi
+exit "${SUWOP_MISE_MISSING:-0}"
+STUB
+chmod +x "$TEMP"/{cargo,mise}
 PATH="$TEMP:$PATH" bash "$ROOT/scripts/check-tools.sh"
 test -f "$SUWOP_TOOL_PROBE"
+# Missing pinned tools must fail the check.
+if SUWOP_MISE_MISSING=1 PATH="$TEMP:$PATH" bash "$ROOT/scripts/check-tools.sh" 2>/dev/null; then
+  echo "check-tools.sh accepted missing mise tools" >&2
+  exit 1
+fi
