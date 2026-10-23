@@ -12,6 +12,7 @@ mod browser_dates;
 mod browser_live;
 mod current_render_plan;
 mod current_sharing;
+mod display_catalog;
 mod domain;
 mod edit_clipboard;
 mod edit_paste_workflow;

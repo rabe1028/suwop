@@ -268,6 +268,7 @@ mod selected_read_resume_tests {
         StoredAsset {
             immich_visibility: None,
             immich_stack: crate::domain::ImmichStackState::Unknown,
+            immich_stack_membership: None,
             apple_visibility: AppleVisibility::Visible,
             key: AssetKey {
                 provider: Provider::Apple,
@@ -367,6 +368,7 @@ mod selected_read_resume_tests {
                 ordinary_generation: std::sync::Arc::default(),
                 started_ordinary_generation: 0,
                 ordinary_revision: "fixture".into(),
+                session_published: true,
                 apple_generation: std::sync::Arc::default(),
                 started_generation: 0,
                 reversion_started: false,

@@ -64,3 +64,37 @@ private func browserRuntime() async throws -> RustRuntime {
     _ = try await runtime.resolve(id: scanned.id, value: .null, error: nil)
     return runtime
 }
+
+@Test func compactOrdinaryAuthorityMatchesViewAndRejectsStaleReads() async throws {
+    let runtime = try await browserRuntime()
+    let view = try await runtime.view()
+    let key = try #require(view.ordinaryContentKeys.first)
+    let revision = try await runtime.ordinaryContentRevision(
+        keys: [key], expectedRevision: nil, requiresPublishedKey: true
+    )
+    #expect(revision == view.privateContentRevision)
+    let missing = AssetKey(provider: .apple, scope: "fixture", assetID: "missing")
+    await #expect(throws: CancellationError.self) {
+        try await runtime.ordinaryContentRevision(keys: [missing], expectedRevision: nil, requiresPublishedKey: true)
+    }
+    _ = try await runtime.update(.object(["type": .string("disconnect")]))
+    await #expect(throws: CancellationError.self) {
+        try await runtime.ordinaryContentRevision(keys: [key], expectedRevision: revision, requiresPublishedKey: true)
+    }
+    // A compact query must not change the next full view's wire shape.
+    let fresh = try await runtime.view()
+    #expect(fresh.privateContentRevision != revision)
+}
+
+@Test func snapshotTimingsPartitionBridgeAndDecodeWithoutChangingView() async throws {
+    let runtime = try await browserRuntime()
+    let snapshot = try await runtime.snapshot()
+    let start = try #require(snapshot.measuredStart)
+    let decode = try #require(snapshot.measuredDecodeStart)
+    let end = try #require(snapshot.measuredEnd)
+    #expect(start <= decode)
+    #expect(decode <= end)
+    #expect(snapshot.measuredDuration == end - start)
+    let fresh = try await runtime.view()
+    #expect(try Wire.encoder().encode(snapshot.view) == Wire.encoder().encode(fresh))
+}

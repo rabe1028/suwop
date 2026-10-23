@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt, UnifiedPhoto,
-    catalog, normalize_sha1, same_location,
+    normalize_sha1, same_location,
 };
 
 #[derive(
@@ -58,57 +58,80 @@ pub struct MetadataTarget {
 
 #[must_use]
 pub fn targets(photo: &UnifiedPhoto, snapshots: &[LibrarySnapshot]) -> Vec<MetadataTarget> {
-    let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
-    for asset in &photo.assets {
-        groups
-            .entry((asset.key.provider, &asset.key.scope))
-            .or_default()
-            .push(asset);
-    }
-    groups
-        .into_iter()
-        .map(|((provider, scope), assets)| {
-            let first = assets[0];
-            let keys: Vec<_> = assets.iter().map(|a| a.key.clone()).collect();
-            let dates_vary = assets
+    MetadataAccess::new(snapshots).targets(photo)
+}
+
+/// Index each full-access snapshot separately; never combine partial inventories.
+pub(crate) struct MetadataAccess<'a> {
+    snapshots: Vec<SnapshotKeys<'a>>,
+}
+struct SnapshotKeys<'a> {
+    snapshot: &'a LibrarySnapshot,
+    keys: BTreeSet<&'a AssetKey>,
+}
+impl<'a> MetadataAccess<'a> {
+    pub(crate) fn new(snapshots: &'a [LibrarySnapshot]) -> Self {
+        Self {
+            snapshots: snapshots
                 .iter()
-                .any(|a| a.captured_at.map(f64::to_bits) != first.captured_at.map(f64::to_bits));
-            let locations_vary = assets.iter().any(|a| !same_location(first, a));
-            let accessible = snapshots.iter().any(|s| {
-                s.provider == provider
-                    && s.scope == *scope
-                    && s.access == ScanAccess::Full
-                    && keys
-                        .iter()
-                        .all(|key| s.assets.iter().any(|a| &a.key == key))
-            });
-            MetadataTarget {
-                id: format!("{provider:?}|{scope}"),
-                provider,
-                keys,
-                captured_at: (!dates_vary).then_some(first.captured_at).flatten(),
-                dates_vary,
-                location: (!locations_vary)
-                    .then(|| {
-                        first
-                            .latitude
-                            .zip(first.longitude)
-                            .map(|(latitude, longitude)| Coordinates {
-                                latitude,
-                                longitude,
-                            })
-                    })
-                    .flatten(),
-                locations_vary,
-                can_remove_location: provider == Provider::Apple && accessible,
-                disabled_reason: (!accessible).then(|| {
-                    if provider == Provider::Apple {
+                .filter(|s| s.access == ScanAccess::Full)
+                .map(|snapshot| SnapshotKeys {
+                    snapshot,
+                    keys: snapshot.assets.iter().map(|a| &a.key).collect(),
+                })
+                .collect(),
+        }
+    }
+    pub(crate) fn targets(&self, photo: &UnifiedPhoto) -> Vec<MetadataTarget> {
+        let mut groups: BTreeMap<_, Vec<_>> = BTreeMap::new();
+        for asset in &photo.assets {
+            groups
+                .entry((asset.key.provider, &asset.key.scope))
+                .or_default()
+                .push(asset);
+        }
+        groups
+            .into_iter()
+            .map(|((provider, scope), assets)| {
+                let first = assets[0];
+                let keys: Vec<_> = assets.iter().map(|a| a.key.clone()).collect();
+                let dates_vary = assets.iter().any(|a| {
+                    a.captured_at.map(f64::to_bits) != first.captured_at.map(f64::to_bits)
+                });
+                let locations_vary = assets.iter().any(|a| !same_location(first, a));
+                let accessible = self.snapshots.iter().any(|entry| {
+                    entry.snapshot.provider == provider
+                        && entry.snapshot.scope == *scope
+                        && keys.iter().all(|key| entry.keys.contains(key))
+                });
+                MetadataTarget {
+                    id: format!("{provider:?}|{scope}"),
+                    provider,
+                    keys,
+                    captured_at: (!dates_vary).then_some(first.captured_at).flatten(),
+                    dates_vary,
+                    location: (!locations_vary)
+                        .then(|| {
+                            first
+                                .latitude
+                                .zip(first.longitude)
+                                .map(|(latitude, longitude)| Coordinates {
+                                    latitude,
+                                    longitude,
+                                })
+                        })
+                        .flatten(),
+                    locations_vary,
+                    can_remove_location: provider == Provider::Apple && accessible,
+                    disabled_reason: (!accessible).then(|| {
+                        if provider == Provider::Apple {
                 "日時・位置情報の変更には Apple Photos のフルアクセスと最新の一覧が必要です。"
             } else { "Immich の一覧を更新してアクセスを確認してください。" }.into()
-                }),
-            }
-        })
-        .collect()
+                    }),
+                }
+            })
+            .collect()
+    }
 }
 
 pub fn normalize(input: &MetadataInput) -> Result<MetadataChange, String> {
@@ -167,8 +190,9 @@ fn coordinate(input: Option<&str>, limit: f64, label: &str) -> Result<f64, Strin
     value.ok_or_else(|| format!("{label}は -{limit}〜{limit} の数値で指定してください。"))
 }
 
-/// Mutate one complete provider/scope group of one catalog photo. A caller
-/// cannot silently edit only a Live companion or one half of a RAW/JPEG pair.
+/// Mutate one complete provider/scope group of one displayed photo, the same
+/// grouping its targets were offered from. A caller cannot silently edit only a
+/// Live companion or one half of a RAW/JPEG pair.
 pub fn prepare(
     snapshots: &[LibrarySnapshot],
     receipts: &[TransferReceipt],
@@ -179,7 +203,7 @@ pub fn prepare(
     if requested.is_empty() {
         return Err("変更する写真と保存先を選択してください。".into());
     }
-    let photos = catalog(snapshots, receipts);
+    let photos = crate::display_catalog::photos(snapshots, receipts);
     let selected: Vec<_> = photos
         .iter()
         .filter(|p| p.assets.iter().any(|a| requested.contains(&a.key)))

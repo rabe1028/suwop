@@ -14,6 +14,7 @@ fn asset(provider: Provider, id: &str, fingerprint: char) -> StoredAsset {
     StoredAsset {
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,
@@ -398,4 +399,27 @@ fn date_search_and_order_follow_the_selected_copy_including_unknown_and_unavaila
     browse("2024-01-01", PhotoSort::Newest);
     assert!(core.view().browser.photo_ids.is_empty());
     Ok(())
+}
+
+#[test]
+fn unverified_display_pair_can_switch_sources_without_establishing_identity() {
+    let mut saved = state();
+    saved.snapshots[0].assets.truncate(1);
+    saved.snapshots[0].assets[0].resources[0].sha1 = None;
+    let app = core(saved.clone());
+    let view = app.view();
+    assert_eq!(view.photos.len(), 1);
+    assert_eq!(
+        view.photos[0].presence,
+        suwop_core::domain::Presence::Unverified
+    );
+    assert_eq!(catalog(&saved.snapshots, &saved.receipts).len(), 2);
+    let remote = saved.snapshots[1].assets[0].key.clone();
+    choose(&app, remote.clone());
+    let after = app.view();
+    assert_eq!(
+        after.preview_sources.get(&photo_id(&after.photos[0])),
+        Some(&remote)
+    );
+    assert!(after.state.receipts.is_empty());
 }

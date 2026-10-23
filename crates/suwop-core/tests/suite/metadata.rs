@@ -19,6 +19,7 @@ fn asset(provider: Provider) -> StoredAsset {
     StoredAsset {
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider,
@@ -718,4 +719,25 @@ fn immich_adjusted_capture_date_precedes_the_file_timestamp_and_invalid_adjustme
     let invalid: Asset = serde_json::from_value(json).map_err(|e| e.to_string())?;
     assert!(invalid.record("remote", None, None).captured_at.is_none());
     Ok(())
+}
+
+#[test]
+fn metadata_membership_does_not_join_separate_or_limited_snapshots() {
+    let first = snapshot(Provider::Apple, ScanAccess::Full);
+    let mut second = first.clone();
+    second.assets[0].key.asset_id = "second".into();
+    let split = vec![first.clone(), second.clone()];
+    let photos = catalog(&split, &[]);
+    assert_eq!(photos.len(), 1);
+    assert_eq!(photos[0].assets.len(), 2);
+    assert!(targets(&photos[0], &split)[0].disabled_reason.is_some());
+    let mut joined = first;
+    joined.assets.extend(second.assets);
+    assert!(
+        targets(&photos[0], &[joined.clone()])[0]
+            .disabled_reason
+            .is_none()
+    );
+    joined.access = ScanAccess::Limited;
+    assert!(targets(&photos[0], &[joined])[0].disabled_reason.is_some());
 }

@@ -18,16 +18,17 @@ final class PrivateVideoUITests: XCTestCase {
         XCTAssertTrue(email.waitForExistence(timeout: 15))
         expect(largeText ? "type=AX3" : "type=large", in: app.staticTexts["privateVideoUITrait"])
         XCTAssertFalse(app.buttons["immichLockedPlay-33333333-3333-4333-8333-333333333333"].exists)
-        enter("fixture@example.invalid", into: email, app: app)
-        enter("C1-ONLY-SYNTHETIC-PASSWORD", into: app.secureTextFields["immichLockedPassword"], app: app)
-        enter("135790", into: app.secureTextFields["immichLockedPIN"], app: app)
+        guard enter("fixture@example.invalid", into: email, app: app),
+              enter("C1-ONLY-SYNTHETIC-PASSWORD", into: app.secureTextFields["immichLockedPassword"], app: app),
+              enter("135790", into: app.secureTextFields["immichLockedPIN"], app: app) else { return }
         let authenticate = app.buttons["openImmichLocked"]
-        reveal(authenticate, in: app)
+        // A control that was never revealed must not be tapped: stop at the first reveal failure.
+        guard reveal(authenticate, in: app) else { return }
         XCTAssertTrue(authenticate.isEnabled)
         authenticate.tap()
         let play = app.buttons["immichLockedPlay-33333333-3333-4333-8333-333333333333"]
         XCTAssertTrue(play.waitForExistence(timeout: 15))
-        reveal(play, in: app)
+        guard reveal(play, in: app) else { return }
         play.tap()
         let surface = app.descendants(matching: .any)["immichLockedVideoPlayer"].firstMatch
         // Playback is inserted above the selected row; expose that actual List section.
@@ -42,7 +43,7 @@ final class PrivateVideoUITests: XCTestCase {
         let motion = app.staticTexts["privateVideoUIMotion"]
         expect("motion=verified", in: motion)
         let stop = app.buttons["stopImmichLockedVideo"]
-        reveal(stop, in: app)
+        guard reveal(stop, in: app) else { return }
         XCTAssertTrue(stop.isHittable)
         XCTAssertTrue(app.frame.contains(stop.frame))
         XCTAssertTrue(surface.exists)
@@ -78,83 +79,144 @@ final class PrivateVideoUITests: XCTestCase {
         XCTAssertTrue(email.waitForExistence(timeout: 10))
         XCTAssertFalse(play.exists)
         XCTAssertFalse(surface.exists)
-        reveal(authenticate, in: app)
+        guard reveal(authenticate, in: app) else { return }
         XCTAssertFalse(authenticate.isEnabled)
         expect("mutations=0", in: app.staticTexts["privateVideoUIMutations"])
     }
 
-    @MainActor private func enter(_ value: String, into field: XCUIElement, app: XCUIApplication) {
-        reveal(field, in: app)
+    @MainActor private func enter(_ value: String, into field: XCUIElement, app: XCUIApplication) -> Bool {
+        guard reveal(field, in: app) else { return false }
         XCTAssertTrue(field.waitForExistence(timeout: 10))
         field.tap()
         field.typeText(value)
+        return true
     }
 
-    @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) {
-        for direction in [true, false] {
+    /// Returns true only when the control is fully inside the measured List viewport and hittable.
+    @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        var previous: ScrollAttempt?
+        var absorbedOnce = false
+        for searchUpward in [true, false] {
             for _ in 0 ..< 8 {
-                let authentication = app.collectionViews["immichLockedAuthenticationForm"]
-                let content = app.collectionViews["immichLockedContentList"]
-                let list = authentication.exists ? authentication : content
-                guard list.exists else {
-                    XCTFail("Missing exact C1 Form or content List viewport")
-                    return
+                guard let (list, viewport) = gestureViewport(in: app) else { return false }
+                let frame = element.exists ? element.frame : .zero
+                guard !frame.isEmpty, !frame.isNull, !frame.isInfinite else {
+                    // Lazy/unrealized rows have no geometry: bounded search sweep, reversing once.
+                    previous = nil
+                    drag(list, within: viewport, upward: searchUpward, by: viewport.height / 2)
+                    continue
                 }
-                var viewport = list.frame.intersection(app.frame)
-                let navigation = app.navigationBars.firstMatch
-                if navigation.exists {
-                    let top = max(viewport.minY, navigation.frame.maxY)
-                    viewport = CGRect(
-                        x: viewport.minX,
-                        y: top,
-                        width: viewport.width,
-                        height: max(0, viewport.maxY - top)
+                if viewport.contains(frame), element.isHittable {
+                    return true
+                }
+                // A full-viewport drag overshoots a slightly clipped control to the opposite edge and can
+                // scroll the playing surface out of the List. Scroll only the measured vertical clipping.
+                let deficit = max(0, viewport.minY - frame.minY) + max(0, frame.maxY - viewport.maxY)
+                guard deficit > 0, frame.height <= viewport.height else {
+                    attachGeometry(
+                        "private-video-unscrollable-control",
+                        app: app,
+                        list: list,
+                        viewport: viewport,
+                        frame: frame
                     )
+                    XCTFail("C1 control clipping is not resolvable by vertical List scrolling")
+                    return false
                 }
-                guard viewport.width > 40, viewport.height > 60 else {
-                    let geometry =
-                        XCTAttachment(
-                            string: "list=\(list.frame), nav=\(navigation.frame), app=\(app.frame), viewport=\(viewport)"
+                let navigation = navigationFrame(in: app)
+                var allowance: CGFloat = 0
+                if let previous, deficit >= previous.deficit {
+                    // CI 39604779619: at the List top a 37pt drag only partly collapsed the expanded large
+                    // title, which snapped back on release; control and bar geometry were exactly unchanged.
+                    // Such an absorbed gesture may be followed once by one that also spans the measured bar.
+                    let absorbed = !absorbedOnce && !navigation.isEmpty
+                        && frame.equalTo(previous.frame) && navigation.equalTo(previous.navigation)
+                    guard absorbed else {
+                        attachGeometry(
+                            "private-video-nonconverging-scroll",
+                            app: app,
+                            list: list,
+                            viewport: viewport,
+                            frame: frame,
+                            detail: "previous=\(previous.frame) previousNavigation=\(previous.navigation)"
+                                + " navigation=\(navigation) absorbedOnce=\(absorbedOnce)"
                         )
-                    geometry.name = "private-video-unusable-list-viewport"
-                    geometry.lifetime = .keepAlways
-                    add(geometry)
-                    XCTFail("C1 List has no usable gesture viewport")
-                    return
+                        XCTFail("C1 List scroll did not reduce the measured control clipping")
+                        return false
+                    }
+                    absorbedOnce = true
+                    allowance = navigation.height
                 }
-                let exists = element.exists
-                let frame = exists ? element.frame : .zero
-                let visible = exists && !frame.isEmpty && viewport.contains(frame) && element.isHittable
-                if visible {
-                    return
-                }
-                // Realized rows tell us which edge clips them. Lazy/unrealized rows use the bounded search direction.
-                let upward = scrollUp(to: frame, within: viewport, fallback: direction)
-                let start = list.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(
-                        dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (upward ? viewport.maxY - 20 : viewport.minY + 20) - list.frame.minY
-                    ))
-                let end = list.coordinate(withNormalizedOffset: .zero)
-                    .withOffset(CGVector(
-                        dx: viewport.minX + 8 - list.frame.minX,
-                        dy: (upward ? viewport.minY + 20 : viewport.maxY - 20) - list.frame.minY
-                    ))
-                start.press(forDuration: 0.05, thenDragTo: end)
+                previous = ScrollAttempt(deficit: deficit, frame: frame, navigation: navigation)
+                let padding = min(12, (viewport.height - frame.height) / 2)
+                drag(list, within: viewport, upward: frame.maxY > viewport.maxY, by: deficit + padding + allowance)
             }
         }
         XCTFail("C1 control did not become fully visible inside its actual List viewport")
+        return false
     }
 
-    @MainActor private func scrollUp(to frame: CGRect, within viewport: CGRect, fallback: Bool) -> Bool {
-        guard !frame.isEmpty, !frame.isNull, !frame.isInfinite else { return fallback }
-        if frame.minY < viewport.minY {
-            return false
+    private struct ScrollAttempt {
+        let deficit: CGFloat
+        let frame: CGRect
+        let navigation: CGRect
+    }
+
+    @MainActor private func navigationFrame(in app: XCUIApplication) -> CGRect {
+        let navigation = app.navigationBars.firstMatch
+        return navigation.exists ? navigation.frame : .zero
+    }
+
+    @MainActor private func gestureViewport(in app: XCUIApplication) -> (XCUIElement, CGRect)? {
+        let authentication = app.collectionViews["immichLockedAuthenticationForm"]
+        let content = app.collectionViews["immichLockedContentList"]
+        let list = authentication.exists ? authentication : content
+        guard list.exists else {
+            XCTFail("Missing exact C1 Form or content List viewport")
+            return nil
         }
-        if frame.maxY > viewport.maxY {
-            return true
+        var viewport = list.frame.intersection(app.frame)
+        let navigation = app.navigationBars.firstMatch
+        if navigation.exists {
+            let top = max(viewport.minY, navigation.frame.maxY)
+            viewport = CGRect(x: viewport.minX, y: top, width: viewport.width, height: max(0, viewport.maxY - top))
         }
-        return fallback
+        guard viewport.width > 40, viewport.height > 60 else {
+            attachGeometry(
+                "private-video-unusable-list-viewport",
+                app: app,
+                list: list,
+                viewport: viewport,
+                frame: .null
+            )
+            XCTFail("C1 List has no usable gesture viewport")
+            return nil
+        }
+        return (list, viewport)
+    }
+
+    /// Upward moves content up to expose lower rows. The whole drag stays inside the List viewport's leading margin,
+    /// off the player surface and controls; the slow drag held at its end leaves no deceleration overshoot.
+    @MainActor private func drag(_ list: XCUIElement, within viewport: CGRect, upward: Bool, by distance: CGFloat) {
+        let movement = min(viewport.height - 40, max(24, distance))
+        let startY = upward ? viewport.maxY - 20 : viewport.minY + 20
+        let endY = upward ? startY - movement : startY + movement
+        let origin = list.coordinate(withNormalizedOffset: .zero)
+        let x = viewport.minX + 8 - list.frame.minX
+        let start = origin.withOffset(CGVector(dx: x, dy: startY - list.frame.minY))
+        let end = origin.withOffset(CGVector(dx: x, dy: endY - list.frame.minY))
+        start.press(forDuration: 0.1, thenDragTo: end, withVelocity: .slow, thenHoldForDuration: 0.2)
+    }
+
+    @MainActor private func attachGeometry(
+        _ name: String, app: XCUIApplication, list: XCUIElement, viewport: CGRect, frame: CGRect, detail: String = ""
+    ) {
+        let geometry = XCTAttachment(
+            string: "list=\(list.frame), viewport=\(viewport), control=\(frame), app=\(app.frame) \(detail)"
+        )
+        geometry.name = name
+        geometry.lifetime = .keepAlways
+        add(geometry)
     }
 
     @MainActor private func expect(_ label: String, in element: XCUIElement) {

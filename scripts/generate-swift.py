@@ -25,6 +25,7 @@ ORDER = {
         "isOffline",
         "deletionBlockers",
         "immichStack",
+        "immichStackMembership",
         "immichVisibility",
     ],
     "LibrarySnapshot": ["provider", "scope", "assets", "access", "scannedAt"],

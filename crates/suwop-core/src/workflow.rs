@@ -7,6 +7,7 @@ use crate::{
     },
     immich::{Asset, Session, connect},
 };
+use futures::StreamExt;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
@@ -21,6 +22,8 @@ mod media;
 mod metadata;
 mod reversion;
 mod sharing;
+mod status;
+pub(crate) use status::initial_status;
 mod trash;
 mod trash_fence;
 mod upload_intents;
@@ -43,6 +46,8 @@ struct Runtime<'a> {
     ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     started_ordinary_generation: u64,
     ordinary_revision: String,
+    // Only a session the model already holds may be published before Finished.
+    session_published: bool,
     // A generation comparison is a cancellation fence, not cross-thread data synchronization.
     // Capture once at workflow start; refresh must never renew an already granted read.
     apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
@@ -115,6 +120,7 @@ pub async fn run_guarded(
         ordinary_generation,
         started_ordinary_generation,
         ordinary_revision: revision.clone(),
+        session_published: session.is_some(),
         denied_content,
         apple_generation,
         started_generation,
@@ -473,6 +479,7 @@ impl Runtime<'_> {
     fn progress(&self, status: &str) {
         self.ctx.send_event(Event::Progress {
             state: self.state.clone(),
+            session: None,
             status: status.into(),
         });
     }
@@ -517,6 +524,9 @@ impl Runtime<'_> {
     async fn refresh(&mut self, permission: bool, now: f64) -> Result<(), String> {
         self.check_content_generation(&[])?;
         let mut errors = Vec::new();
+        self.ctx.send_event(Event::FetchProgress {
+            status: "Apple Photos の一覧を確認中…".into(),
+        });
         match io::<LibrarySnapshot>(
             self.ctx,
             ShellOperation::AppleScan {
@@ -569,6 +579,9 @@ impl Runtime<'_> {
         }
         self.refresh_immich(now, &mut errors).await?;
         self.check_content_generation(&[])?;
+        self.ctx.send_event(Event::FetchProgress {
+            status: "取得したカタログを保存中…".into(),
+        });
         self.refresh_persist_issued = true;
         let _: Value = io(self.ctx, ShellOperation::Persist(self.state.clone())).await?;
         self.check_content_generation(&[])?;
@@ -585,72 +598,72 @@ impl Runtime<'_> {
                 Ok(assets) => {
                     let by_id: BTreeMap<_, _> = assets.iter().map(|a| (&a.id, a)).collect();
                     let mut records = Vec::new();
-                    for asset in &assets {
-                        let key = AssetKey {
-                            provider: Provider::Immich,
-                            scope: session.scope.clone(),
-                            asset_id: asset.id.clone(),
-                        };
-                        if self
-                            .state
-                            .immich_visibility_operations
-                            .iter()
-                            .any(|o| o.key == key && o.selected_observation.is_some())
-                        {
-                            if let Some(proof) = self.selected_candidate(session, &key).await {
-                                records.push(proof.asset.clone());
-                                self.ordinary_selected.push(proof);
+                    let total = assets.len();
+                    self.ctx.send_event(Event::FetchProgress {
+                        status: format!("Immich の詳細を取得中: 0 / {total} 件"),
+                    });
+                    // Bound native requests; publish verified subsets as Limited so
+                    // incomplete enumeration never authorizes a Move.
+                    // Do not clone the previous full remote catalog at every
+                    // publication only to discard it again. Keep failure recovery
+                    // in self.state and clone a remote-free base for partial views.
+                    let mut partial_base = self.state.clone();
+                    partial_base
+                        .snapshots
+                        .retain(|s| s.provider != Provider::Immich);
+                    let mut proofs = Vec::new();
+                    let mut completed = 0;
+                    let pending: Vec<_> = assets
+                        .iter()
+                        .map(|asset| self.refresh_immich_record(session, asset, &by_id))
+                        .collect();
+                    let mut hydration = futures::stream::iter(pending).buffer_unordered(32);
+                    let mut failure = None;
+                    while let Some(result) = hydration.next().await {
+                        let result = self.check_content_generation(&[]).and(result);
+                        let record = match result {
+                            Ok(record) => record,
+                            Err(error) => {
+                                failure = Some(error);
+                                break;
                             }
-                            continue;
+                        };
+                        completed += 1;
+                        if let Some((record, proof)) = record {
+                            records.push(record);
+                            if let Some(proof) = proof {
+                                proofs.push(proof);
+                            }
                         }
-                        let tracked = self
-                            .state
-                            .immich_visibility_operations
-                            .iter()
-                            .filter(|o| o.key == key && o.observation.is_some())
-                            .collect::<Vec<_>>();
-                        if !tracked.is_empty() {
-                            let raw = self.visibility_reconciliation(session, &key).await;
-                            let verified = raw.ok().and_then(|v| {
-                                crate::immich_visibility::reconciliation_facts(
-                                    &v,
-                                    &session.scope,
-                                    &session.user_id,
-                                    &tracked,
-                                )
-                                .ok()
+                        // Publish the first batch promptly, then amortize full-view work.
+                        // The canonical workflow state stays private until completion.
+                        if completed == 32 || completed % 512 == 0 {
+                            let mut partial = partial_base.clone();
+                            partial.snapshots.push(LibrarySnapshot {
+                                provider: Provider::Immich,
+                                scope: session.scope.clone(),
+                                assets: records.clone(),
+                                access: ScanAccess::Limited,
+                                scanned_at: Some(now),
                             });
-                            if !verified.is_some_and(|f| {
-                                f.key == key
-                                    && f.visibility
-                                        != crate::immich_visibility::ImmichVisibility::Locked
-                                    && tracked.iter().all(|o| {
-                                        o.witness_digest == f.witness
-                                            && matches!(o.observation, Some(crate::immich_visibility::ImmichVisibility::Timeline | crate::immich_visibility::ImmichVisibility::Archive))
-                                    })
-                            }) {
-                                continue;
-                            }
+                            self.ctx.send_event(Event::Progress {
+                                state: partial,
+                                // A session this workflow established changes the
+                                // ordinary revision that its in-flight reads carry.
+                                session: self.session_published.then(|| session.clone()),
+                                status: "取得済みの写真を表示しています。".into(),
+                            });
                         }
-                        let files = if session.version.uses_cursor() {
-                            session.files(self.ctx, &asset.id).await.ok()
-                        } else {
-                            None
-                        };
-                        self.check_content_generation(&[])?;
-                        let mut hydrated = asset.clone();
-                        session.hydrate_stack(self.ctx, &mut hydrated).await;
-                        self.check_content_generation(&[])?;
-                        records.push(
-                            hydrated.record(
-                                &session.scope,
-                                asset
-                                    .live_photo_video_id
-                                    .as_ref()
-                                    .and_then(|id| by_id.get(id).copied()),
-                                files.as_deref(),
-                            ),
-                        );
+                        if completed % 32 == 0 || completed == total {
+                            self.ctx.send_event(Event::FetchProgress {
+                                status: format!("Immich の詳細を取得中: {completed} / {total} 件"),
+                            });
+                        }
+                    }
+                    drop(hydration);
+                    self.ordinary_selected.extend(proofs);
+                    if let Some(error) = failure {
+                        return Err(error);
                     }
                     self.check_content_generation(&[])?;
                     self.replace(LibrarySnapshot {
@@ -668,6 +681,89 @@ impl Runtime<'_> {
             }
         }
         Ok(())
+    }
+    async fn refresh_immich_record(
+        &self,
+        session: &Session,
+        asset: &Asset,
+        by_id: &BTreeMap<&String, &Asset>,
+    ) -> Result<
+        Option<(
+            StoredAsset,
+            Option<crate::ordinary_selected::VerifiedPresentation>,
+        )>,
+        String,
+    > {
+        let key = AssetKey {
+            provider: Provider::Immich,
+            scope: session.scope.clone(),
+            asset_id: asset.id.clone(),
+        };
+        if self
+            .state
+            .immich_visibility_operations
+            .iter()
+            .any(|o| o.key == key && o.selected_observation.is_some())
+        {
+            return Ok(self
+                .selected_candidate(session, &key)
+                .await
+                .map(|proof| (proof.asset.clone(), Some(proof))));
+        }
+        let tracked = self
+            .state
+            .immich_visibility_operations
+            .iter()
+            .filter(|o| o.key == key && o.observation.is_some())
+            .collect::<Vec<_>>();
+        if !tracked.is_empty() {
+            let raw = self.visibility_reconciliation(session, &key).await;
+            let verified = raw.ok().and_then(|v| {
+                crate::immich_visibility::reconciliation_facts(
+                    &v,
+                    &session.scope,
+                    &session.user_id,
+                    &tracked,
+                )
+                .ok()
+            });
+            if !verified.is_some_and(|f| {
+                f.key == key
+                    && f.visibility != crate::immich_visibility::ImmichVisibility::Locked
+                    && tracked.iter().all(|o| {
+                        o.witness_digest == f.witness
+                            && matches!(
+                                o.observation,
+                                Some(
+                                    crate::immich_visibility::ImmichVisibility::Timeline
+                                        | crate::immich_visibility::ImmichVisibility::Archive
+                                )
+                            )
+                    })
+            }) {
+                return Ok(None);
+            }
+        }
+        let files = if session.version.uses_cursor() {
+            session.files(self.ctx, &asset.id).await.ok()
+        } else {
+            None
+        };
+        self.check_content_generation(&[])?;
+        let mut hydrated = asset.clone();
+        session.hydrate_stack(self.ctx, &mut hydrated).await;
+        self.check_content_generation(&[])?;
+        Ok(Some((
+            hydrated.record(
+                &session.scope,
+                asset
+                    .live_photo_video_id
+                    .as_ref()
+                    .and_then(|id| by_id.get(id).copied()),
+                files.as_deref(),
+            ),
+            None,
+        )))
     }
     async fn selected_candidate(
         &self,

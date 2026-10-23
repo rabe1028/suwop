@@ -58,6 +58,7 @@ fn fixture_state() -> SavedLibrary {
             assets: vec![StoredAsset {
                 immich_visibility: None,
                 immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+                immich_stack_membership: None,
                 apple_visibility: suwop_core::domain::AppleVisibility::Visible,
                 key: photo_key(),
                 name: "photo.jpg".into(),
@@ -606,5 +607,211 @@ fn pending_apple_delete_still_fences_target_album_members_and_owner_changes() ->
     assert_eq!(native.writes, 0);
     assert_eq!(native.persists, 0);
     assert_eq!(core.view().state.pending_apple_trash.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn gallery_materializes_candidates_only_for_the_open_album() -> Result<(), String> {
+    use crux_core::App;
+    let mut state = fixture_state();
+    let template = state.snapshots[0].assets[0].clone();
+    state.snapshots[0].assets = (0..1_000)
+        .map(|index| {
+            let mut asset = template.clone();
+            asset.key.asset_id = index.to_string();
+            asset
+        })
+        .collect();
+    state.albums[0].albums = (0..100)
+        .map(|index| {
+            let mut item = album();
+            item.key.album_id = index.to_string();
+            item
+        })
+        .collect();
+    let key = state.albums[0].albums[0].key.clone();
+    let mut model = Model {
+        state,
+        ready: true,
+        ..Model::default()
+    };
+    let view = Suwop.view(&model);
+    assert!(view.albums.iter().all(|a| a.candidates.is_empty()));
+    let baseline = serde_json::to_vec(&view).map_err(|e| e.to_string())?.len();
+    let _ = Suwop.update(
+        Event::BrowseAlbumCandidates {
+            key: Some(key.clone()),
+        },
+        &mut model,
+    );
+    let view = Suwop.view(&model);
+    assert_eq!(
+        view.albums
+            .iter()
+            .map(|a| a.candidates.len())
+            .sum::<usize>(),
+        1_000
+    );
+    assert_eq!(
+        view.albums
+            .iter()
+            .find(|a| a.album.key == key)
+            .map(|a| a.candidates.len()),
+        Some(1_000)
+    );
+    // Adding 99 unopened albums must not multiply the candidate payload.
+    assert!(serde_json::to_vec(&view).map_err(|e| e.to_string())?.len() < baseline + 300_000);
+    model.state.snapshots[0].assets[0].apple_visibility =
+        suwop_core::domain::AppleVisibility::Hidden;
+    assert_eq!(
+        Suwop
+            .view(&model)
+            .albums
+            .iter()
+            .map(|a| a.candidates.len())
+            .sum::<usize>(),
+        999
+    );
+    let _ = Suwop.update(Event::BrowseAlbumCandidates { key: None }, &mut model);
+    assert!(
+        Suwop
+            .view(&model)
+            .albums
+            .iter()
+            .all(|a| a.candidates.is_empty())
+    );
+    Ok(())
+}
+
+#[test]
+fn indexed_album_members_preserve_gallery_order_and_candidate_authority() {
+    use crux_core::App;
+    let mut state = fixture_state();
+    let template = Suwop
+        .view(&Model {
+            state: state.clone(),
+            ready: true,
+            ..Model::default()
+        })
+        .photos[0]
+        .clone();
+    let mut photos = vec![template.clone(), template.clone(), template];
+    for (index, photo) in photos.iter_mut().enumerate() {
+        photo.assets[0].key.asset_id = index.to_string();
+    }
+    let mut second_member = photos[0].assets[0].clone();
+    second_member.key.asset_id = "extra".into();
+    photos[0].assets.push(second_member.clone());
+    state.snapshots[0].assets = photos.iter().flat_map(|p| p.assets.clone()).collect();
+    let mut missing = photo_key();
+    missing.asset_id = "absent".into();
+    state.albums[0].albums[0].members = vec![
+        photos[2].assets[0].key.clone(),
+        second_member.key.clone(),
+        photos[0].assets[0].key.clone(),
+        missing,
+    ];
+    let key = state.albums[0].albums[0].key.clone();
+    let expected = vec![
+        suwop_core::browser::photo_id(&photos[0]),
+        suwop_core::browser::photo_id(&photos[2]),
+    ];
+    for access in [
+        ScanAccess::Full,
+        ScanAccess::Limited,
+        ScanAccess::Unavailable,
+    ] {
+        state.albums[0].access = access;
+        let result = suwop_core::albums::views_for_picker(
+            &state.albums,
+            &photos,
+            &state.snapshots,
+            Some(&key),
+        );
+        assert_eq!(result[0].photo_ids, expected);
+        assert_eq!(
+            result[0].candidates.len(),
+            usize::from(access == ScanAccess::Full)
+        );
+        if access == ScanAccess::Full {
+            assert_eq!(result[0].candidates[0].key, photos[1].assets[0].key);
+        }
+    }
+}
+
+#[test]
+#[ignore = "explicit local performance comparison"]
+fn indexed_album_large_library_comparison() -> Result<(), std::io::Error> {
+    use crux_core::App;
+    use std::{collections::BTreeSet, time::Instant};
+    let mut state = fixture_state();
+    let template = Suwop
+        .view(&Model {
+            state: state.clone(),
+            ready: true,
+            ..Model::default()
+        })
+        .photos[0]
+        .clone();
+    let photos: Vec<_> = (0..50_000)
+        .map(|index| {
+            let mut photo = template.clone();
+            photo.assets[0].key.asset_id = index.to_string();
+            photo
+        })
+        .collect();
+    state.snapshots[0].assets = photos.iter().flat_map(|p| p.assets.clone()).collect();
+    state.albums[0].albums = (0..100)
+        .map(|index| {
+            let mut item = album();
+            item.key.album_id = format!("{index:03}");
+            item.members = photos
+                .iter()
+                .skip(index)
+                .step_by(100)
+                .map(|p| p.assets[0].key.clone())
+                .collect();
+            item
+        })
+        .collect();
+    let start = Instant::now();
+    let before: Vec<Vec<String>> = state.albums[0]
+        .albums
+        .iter()
+        .map(|item| {
+            let members: BTreeSet<_> = item.members.iter().collect();
+            photos
+                .iter()
+                .filter(|photo| {
+                    photo
+                        .assets
+                        .iter()
+                        .any(|asset| members.contains(&asset.key))
+                })
+                .map(suwop_core::browser::photo_id)
+                .collect()
+        })
+        .collect();
+    let before_seconds = start.elapsed().as_secs_f64();
+    let start = Instant::now();
+    let after = suwop_core::albums::views(&state.albums, &photos, &state.snapshots);
+    let after_seconds = start.elapsed().as_secs_f64();
+    assert_eq!(
+        before,
+        after
+            .iter()
+            .map(|v| v.photo_ids.clone())
+            .collect::<Vec<_>>()
+    );
+    std::fs::write(
+        std::env::temp_dir().join(format!("suwop-album-benchmark-{}.json", std::process::id())),
+        json!({
+            "photos": 50_000,
+            "albums": 100,
+            "before_seconds": before_seconds,
+            "after_seconds": after_seconds,
+        })
+        .to_string(),
+    )?;
     Ok(())
 }

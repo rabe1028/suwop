@@ -77,6 +77,12 @@ struct PhotoInfo: View {
                     Text("撮影日不明").foregroundStyle(.secondary)
                 }
                 Text(photo.presence.title)
+                if let format = photo.rawFormatTitle {
+                    Text(format)
+                }
+                if photo.hasImmichStack {
+                    Text("Immich スタック（閲覧可能な原本のみ）")
+                }
             }
             ForEach(Provider.allCases, id: \.self) { provider in
                 let assets = photo.assets.filter { $0.key.provider == provider }
@@ -99,7 +105,7 @@ struct PhotoInfo: View {
                             ForEach(asset.resources) { resource in
                                 VStack(alignment: .leading, spacing: 2) {
                                     HStack {
-                                        Text(resource.role.title)
+                                        Text(resource.formatTitle)
                                         Text(resource.name).lineLimit(1)
                                         Spacer()
                                         if let bytes = resource.bytes {

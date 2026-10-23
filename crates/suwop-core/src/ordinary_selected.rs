@@ -134,8 +134,20 @@ pub(crate) fn images(model: &crate::app::Model) -> Vec<OrdinarySelectedImageAcce
         .collect()
 }
 pub(crate) fn public_library(model: &crate::app::Model) -> crate::privacy::PublishedLibrary {
-    let ordinary = crate::protection::ordinary_state(model);
-    let access = crate::privacy::ContentAccess::new(&ordinary);
+    let ordinary = crate::protection::ordinary_state_view(model);
+    let public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+    public_library_from(model, &ordinary, public)
+}
+
+pub(crate) fn public_library_from(
+    model: &crate::app::Model,
+    ordinary: &crate::app::SavedLibrary,
+    mut public: crate::privacy::PublishedLibrary,
+) -> crate::privacy::PublishedLibrary {
+    if model.ordinary_selected.proofs.is_empty() {
+        return public;
+    }
+    let access = crate::privacy::ContentAccess::new(ordinary);
     let allowed = model
         .ordinary_selected
         .proofs
@@ -143,7 +155,6 @@ pub(crate) fn public_library(model: &crate::app::Model) -> crate::privacy::Publi
         .filter(|p| p.current(model))
         .map(|p| p.asset.key.clone())
         .collect::<std::collections::BTreeSet<_>>();
-    let mut public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
     for proof in model
         .ordinary_selected
         .proofs
@@ -242,7 +253,13 @@ impl RefreshOrigin {
         session.map(|s| (s.endpoint.clone(), s.scope.clone(), s.user_id.clone()))
     }
     fn accepts(&self, model: &crate::app::Model, result: &crate::workflow::Outcome) -> bool {
-        if self.session != Self::identity(model.session.as_ref())
+        // A refresh may publish its authenticated session with a Limited subset
+        // before completion. The refresh id/generation still fence stale work;
+        // initial connections must additionally match the configured endpoint below.
+        let current = Self::identity(model.session.as_ref());
+        let published_initial =
+            self.session.is_none() && current == Self::identity(result.session.as_ref());
+        if (self.session != current && !published_initial)
             || self.connection
                 != model
                     .state

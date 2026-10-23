@@ -764,6 +764,19 @@ fn verify_stacked_hints(
             now: scan_now()?,
         },
     )?;
+    let view = core.view();
+    let stacked = view
+        .photos
+        .iter()
+        .find(|p| p.assets.iter().any(|a| a.key == *key))
+        .ok_or("stacked display photo")?;
+    assert!(stacked.assets.iter().any(|a| a.key.asset_id == peer));
+    assert!(
+        stacked
+            .assets
+            .iter()
+            .all(|a| a.immich_stack_membership.is_some())
+    );
     let hint = core
         .view()
         .immich_visibility_actions

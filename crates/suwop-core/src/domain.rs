@@ -87,6 +87,15 @@ pub enum ImmichStackState {
     Stacked,
 }
 
+/// Server-declared membership, used only to group already visible assets.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ImmichStackMembership {
+    pub id: String,
+    pub primary_asset_id: String,
+    pub asset_count: u64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAsset {
@@ -94,6 +103,8 @@ pub struct StoredAsset {
     pub immich_visibility: Option<crate::immich_visibility::ImmichVisibility>,
     #[serde(default)]
     pub immich_stack: ImmichStackState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_stack_membership: Option<ImmichStackMembership>,
     #[serde(default)]
     pub apple_visibility: AppleVisibility,
     pub key: AssetKey,

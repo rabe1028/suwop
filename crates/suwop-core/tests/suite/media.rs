@@ -18,6 +18,7 @@ fn asset(kind: PlaybackKind) -> StoredAsset {
     StoredAsset {
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
+        immich_stack_membership: None,
         apple_visibility: suwop_core::domain::AppleVisibility::Visible,
         key: AssetKey {
             provider: Provider::Apple,
@@ -531,5 +532,33 @@ fn apple_change_during_delayed_playback_preparation_never_opens_player() -> Resu
         assert!(changed && cleaned);
         assert!(core.view().error.is_some());
     }
+    Ok(())
+}
+
+#[test]
+fn unverified_live_pair_remains_one_playable_selection() -> Result<(), String> {
+    let mut apple = asset(PlaybackKind::Live);
+    apple.captured_at = Some(100.125);
+    for resource in &mut apple.resources {
+        resource.sha1 = None;
+    }
+    let mut remote = apple.clone();
+    remote.key.provider = Provider::Immich;
+    remote.key.scope = "remote".into();
+    let keys = vec![apple.key.clone(), remote.key.clone()];
+    let snapshots: Vec<_> = [apple, remote]
+        .into_iter()
+        .map(|a| LibrarySnapshot {
+            provider: a.key.provider,
+            scope: a.key.scope.clone(),
+            assets: vec![a],
+            access: ScanAccess::Full,
+            scanned_at: Some(200.0),
+        })
+        .collect();
+    assert_eq!(
+        source(&snapshots, &[], &keys)?,
+        (keys[0].clone(), PlaybackKind::Live)
+    );
     Ok(())
 }

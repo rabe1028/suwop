@@ -241,7 +241,13 @@ fn current_asset<'a>(model: &'a Model, key: &AssetKey) -> Option<&'a StoredAsset
 }
 #[must_use]
 pub fn ordinary_state(model: &Model) -> SavedLibrary {
-    let mut state = model.state.clone();
+    ordinary_state_view(model).into_owned()
+}
+
+pub(crate) fn ordinary_state_view(model: &Model) -> std::borrow::Cow<'_, SavedLibrary> {
+    // Most snapshots have no pending denial. Borrow the canonical state rather
+    // than copying every asset for each read-only projection.
+    let mut state = std::borrow::Cow::Borrowed(&model.state);
     for key in model
         .protection
         .denied
@@ -249,10 +255,13 @@ pub fn ordinary_state(model: &Model) -> SavedLibrary {
         .chain(&model.immich_visibility.denied)
     {
         if !state.protected_entries.iter().any(|e| e.key == *key) {
-            state.protected_entries.push(PersistentProtectedEntry {
-                id: entry_id("pending-denial", key),
-                key: key.clone(),
-            });
+            state
+                .to_mut()
+                .protected_entries
+                .push(PersistentProtectedEntry {
+                    id: entry_id("pending-denial", key),
+                    key: key.clone(),
+                });
         }
     }
     state
@@ -932,4 +941,40 @@ fn persisted(
     }
     model.protection.image = None;
     Command::done()
+}
+
+#[cfg(test)]
+mod snapshot_borrow_tests {
+    use super::*;
+
+    #[test]
+    fn ordinary_state_borrows_until_a_new_denial_requires_an_overlay() {
+        let mut model = Model::default();
+        assert!(matches!(
+            ordinary_state_view(&model),
+            std::borrow::Cow::Borrowed(_)
+        ));
+        let key = AssetKey {
+            provider: Provider::Immich,
+            scope: "test-scope".into(),
+            asset_id: "test-asset".into(),
+        };
+        model.protection.denied.insert(key.clone());
+        model.immich_visibility.denied.insert(key.clone());
+        let overlay = ordinary_state_view(&model);
+        assert!(matches!(overlay, std::borrow::Cow::Owned(_)));
+        assert_eq!(overlay.protected_entries.len(), 1);
+        assert_eq!(overlay.protected_entries[0].key, key);
+        assert!(model.state.protected_entries.is_empty());
+        model
+            .state
+            .protected_entries
+            .push(PersistentProtectedEntry {
+                id: "persisted".into(),
+                key,
+            });
+        let persisted = ordinary_state_view(&model);
+        assert!(matches!(persisted, std::borrow::Cow::Borrowed(_)));
+        assert_eq!(persisted.protected_entries[0].id, "persisted");
+    }
 }

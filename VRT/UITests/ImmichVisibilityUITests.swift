@@ -494,6 +494,8 @@ extension ImmichVisibilityUITests {
         if largeText {
             attachWriteMenu(app, name: "unsupported-write-AX3-preview-action")
         }
+        let enabled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "enabled == true"), object: preview)
+        XCTAssertEqual(XCTWaiter.wait(for: [enabled], timeout: 10), .completed)
         preview.tap()
         let raster = app.images["immichLockedRaster"]
         for _ in 0 ..< 5 {

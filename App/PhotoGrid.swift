@@ -39,7 +39,7 @@ enum TimelineGrouping: String, CaseIterable, Identifiable {
 private struct PhotoSection: Identifiable {
     var id: String
     var heading: String?
-    var photos: [UnifiedPhoto]
+    var photos: [LibraryPresentationIndex.Row]
 }
 
 struct PhotoGrid: View {
@@ -53,10 +53,10 @@ struct PhotoGrid: View {
 
     private var sections: [PhotoSection] {
         if timeline == .all {
-            return [PhotoSection(id: "all", photos: model.visiblePhotos)]
+            return [PhotoSection(id: "all", photos: model.visibleRows)]
         }
-        let grouped = Dictionary(grouping: model.visiblePhotos) {
-            timeline.date(model.displayedSource($0)?.capturedAt)
+        let grouped = Dictionary(grouping: model.visibleRows) {
+            timeline.date(model.displayedSource($0.photo)?.capturedAt)
         }
         return grouped.keys.sorted { first, second in
             switch (first, second) {
@@ -84,8 +84,8 @@ struct PhotoGrid: View {
                 ) {
                     ForEach(sections) { section in
                         Section {
-                            ForEach(section.photos) { photo in
-                                tile(photo)
+                            ForEach(section.photos) { row in
+                                tile(row.photo)
                             }
                         } header: {
                             if let heading = section.heading {
@@ -108,6 +108,7 @@ struct PhotoGrid: View {
                 }
             }
         }
+        .onDisappear { model.gridDisappeared() }
     }
 
     private func tile(_ photo: UnifiedPhoto) -> some View {
@@ -131,7 +132,10 @@ struct PhotoGrid: View {
             )
             .accessibilityElement(children: .ignore)
         }.buttonStyle(.plain)
-            .accessibilityLabel("\(photo.name)、\(photo.presence.title)\(photo.isFavorite ? "、お気に入り" : "")")
+            .onAppear { model.thumbnailAppeared(photo) }
+            .accessibilityLabel(
+                "\(photo.name)、\(photo.presence.title)\(photo.rawFormatTitle.map { "、" + $0 } ?? "")\(photo.isFavorite ? "、お気に入り" : "")"
+            )
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
             .accessibilityAddTraits(!selectedKeys.isDisjoint(with: photo.assets.map(\.key)) ? .isSelected : [])
             .disabled(selecting && model.operationKeys(photo).isEmpty)
@@ -204,8 +208,8 @@ struct PhotoTile: View {
                     } else if photo.resources.contains(where: { $0.role == .video }) {
                         Image(systemName: "video.fill")
                     }
-                    if photo.resources.contains(where: { $0.role == .rawImage }) {
-                        Text("RAW").bold()
+                    if let format = photo.rawFormatTitle {
+                        Text(format).bold()
                     }
                     if model.selectedPresentation(photo) != nil {
                         Text("表示のみ")

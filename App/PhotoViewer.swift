@@ -15,6 +15,7 @@ struct PhotoViewer: View {
     @State private var showVisibility = false
     @State private var protectedSource: AssetKey?
     @State private var lockingSource: AssetKey?
+    @State private var prefetchOwner = UUID().uuidString
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .title2) private var actionWidth: CGFloat = 44
@@ -62,6 +63,22 @@ struct PhotoViewer: View {
                     withAnimation { chrome.toggle() }
                 }
                 .id(photo.id)
+                .overlay(alignment: .bottom) {
+                    if model.isBusy {
+                        GeometryReader { geometry in
+                            VStack {
+                                Spacer(minLength: 0)
+                                PhotoOperationStatus(model: model)
+                                    .frame(maxHeight: max(0, geometry.size.height - 24))
+                                    .padding(12)
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        }
+                    }
+                }
+                .task(id: model.previewIdentifier(photo)) {
+                    model.prefetchPreviews(pages, at: index, owner: prefetchOwner)
+                }
                 if chrome {
                     if model.selectedPresentation(photo) != nil {
                         Text("表示のみ — この表示元の共有・編集・再生・転送はできません。")
@@ -78,6 +95,7 @@ struct PhotoViewer: View {
                 Button("非表示変更と再表示案内") { showVisibility = true }
             }
         }.background(.black).foregroundStyle(.white).preferredColorScheme(.dark)
+            .onDisappear { model.stopPreviewPrefetch(owner: prefetchOwner) }
             .onChange(of: photo?.assets.map(\.key), initial: true) {
                 if let photo {
                     cursor.remember(photo)
@@ -185,12 +203,6 @@ struct PhotoViewer: View {
                 model.choosePreview(photo, key: chosen) { cursor.point(to: $0, in: photo) }
             }
             .disabled(model.isBusy)
-            if model.isBusy {
-                HStack {
-                    ProgressView(model.status).font(.caption)
-                    Button("停止") { model.stop() }
-                }
-            }
             if model.selectedPresentation(photo) == nil, Set(model.operationKeys(photo).map(\.provider)).count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }
@@ -337,6 +349,8 @@ private struct ZoomablePhoto: View {
     let toggleChrome: () -> Void
     @State private var image: PlatformImage?
     @State private var imageIdentifier = ""
+    @State private var placeholder: PlatformImage?
+    @State private var placeholderIdentifier = ""
     @State private var error: String?
     @State private var retry = UUID()
     @State private var scale: CGFloat = 1
@@ -362,12 +376,19 @@ private struct ZoomablePhoto: View {
                     ContentUnavailableView {
                         Label("写真を読み込めません", systemImage: "exclamationmark.triangle")
                     } description: { Text(error) } actions: { Button("再試行") { retry = UUID() } }
+                } else if let placeholder, placeholderIdentifier == model.previewIdentifier(photo) {
+                    // The grid raster stands in until the full preview arrives.
+                    platformImage(placeholder).resizable().scaledToFit()
+                        .frame(width: geometry.size.width, height: geometry.size.height)
+                        .overlay { ProgressView().tint(.white) }
+                        .accessibilityLabel("写真を読み込み中…")
                 } else {
                     ProgressView("写真を読み込み中…")
                 }
             }.frame(maxWidth: .infinity, maxHeight: .infinity).clipped()
         }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
+            placeholder = nil
             guard model.selectedPresentation(photo) == nil else { return }
             let identifier = model.previewIdentifier(photo)
             error = nil
@@ -375,12 +396,23 @@ private struct ZoomablePhoto: View {
             settledScale = 1
             offset = .zero
             settledOffset = .zero
+            let cached = await model.cachedThumbnail(photo)
+            if let cached, !Task.isCancelled, identifier == model.previewIdentifier(photo) {
+                placeholderIdentifier = identifier
+                placeholder = cached
+            }
             do { let loaded = try await model.preview(photo)
                 try Task.checkCancellation()
                 guard identifier == model.previewIdentifier(photo) else { throw CancellationError() }
                 imageIdentifier = identifier
                 image = loaded
-            } catch is CancellationError { return } catch {
+            } catch is CancellationError {
+                // Navigation cancellation is silent. A still-current request
+                // rejected by fresh authority must not leave an endless spinner.
+                if !Task.isCancelled, identifier == model.previewIdentifier(photo) {
+                    error = PreviewLoadError.accessChanged.localizedDescription
+                }
+            } catch {
                 if !Task.isCancelled {
                     self.error = error.localizedDescription
                 }

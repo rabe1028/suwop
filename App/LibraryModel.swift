@@ -5,6 +5,10 @@ import SwiftUI
 
 @MainActor final class LibraryModel: ObservableObject {
     @Published private(set) var view: ViewModel?
+    let progress = LibraryProgress()
+    private var operationKeyIndex: Set<AssetKey> = []
+    private(set) var presentationIndex: LibraryPresentationIndex?
+    private var effectViewVersion: String?
     @Published var errorMessage: String?
     @Published var showSettings = false
     @Published var showTransfers = false
@@ -18,7 +22,7 @@ import SwiftUI
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
-    private var work: Task<Void, Never>?
+    @Published private var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
     private var previewWork: Task<Void, Never>?
     private var browseGeneration: UInt64 = 0
@@ -29,6 +33,10 @@ import SwiftUI
     private var pendingTrashRefresh = false
     private var albumsRequested = false
     let thumbnails = NSCache<NSString, PlatformImage>()
+    let previews = NSCache<NSString, PlatformImage>()
+    let thumbnailLoads = ImageLoadQueue(width: 8)
+    let previewLoads = ImageLoadQueue(width: 3)
+    var thumbnailAnchor: (position: Int, forward: Bool)?
     let protection = ProtectedLibrarySession()
     let immichLocked = ImmichLockedLibrarySession()
     let immichArchive = ImmichArchiveSession()
@@ -70,6 +78,8 @@ import SwiftUI
 
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage], semanticSearch: SemanticSearchModel? = nil) {
             view = snapshotView
+            presentationIndex = LibraryPresentationIndex(view: snapshotView)
+            operationKeyIndex = Set(snapshotView.ordinaryContentKeys)
             snapshotImages = images
             self.semanticSearch = semanticSearch
             started = true
@@ -89,9 +99,14 @@ import SwiftUI
         if let runtime, let shell {
             configurePrivateSessions(runtime: runtime, shell: shell)
         }
-        thumbnails.countLimit = 300
-        thumbnails.totalCostLimit = 64 * 1024 * 1024
-        observer = PhotoObserver { [weak self] in
+        configureImageCaches()
+        observer = PhotoObserver { [weak self] assetsChanged in
+            guard assetsChanged else {
+                if self?.albumsRequested == true {
+                    self?.refreshAlbums()
+                }
+                return
+            }
             if self?.protection.ownerSceneID != nil {
                 self?.protection.close()
             }
@@ -104,22 +119,12 @@ import SwiftUI
         }
     }
 
-    var photos: [UnifiedPhoto] {
-        view?.photos ?? []
-    }
-
     var editClipboard: EditClipboard? {
         view?.state.editClipboard
     }
 
     var pendingEditPastes: [PendingEditPaste] {
         view?.state.pendingEditPastes ?? []
-    }
-
-    var visiblePhotos: [UnifiedPhoto] {
-        guard let browser = view?.browser else { return photos }
-        let byID = Dictionary(photos.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
-        return browser.photoIDs.compactMap { byID[$0] }
     }
 
     var browser: BrowserView? {
@@ -185,7 +190,7 @@ import SwiftUI
     }
 
     func operationKeys(_ photo: UnifiedPhoto) -> [AssetKey] {
-        photo.assets.map(\.key).filter { view?.ordinaryContentKeys.contains($0) == true }
+        photo.assets.map(\.key).filter { operationKeyIndex.contains($0) }
     }
 
     func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
@@ -218,18 +223,6 @@ import SwiftUI
                 }
             }
         }
-    }
-
-    func playbackKind(_ photo: UnifiedPhoto) -> PlaybackKind? {
-        view?.media[photo.id]
-    }
-
-    func metadataTargets(_ photo: UnifiedPhoto) -> [MetadataTarget] {
-        view?.metadataTargets[photo.id] ?? []
-    }
-
-    func editingTargets(_ photo: UnifiedPhoto) -> [EditingTarget] {
-        view?.editingTargets[photo.id] ?? []
     }
 
     func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
@@ -304,7 +297,7 @@ import SwiftUI
     }
 
     var status: String {
-        view?.status ?? "写真ライブラリを接続してください。"
+        progress.value ?? view?.status ?? "写真ライブラリを接続してください。"
     }
 
     var canTransfer: Bool {
@@ -389,17 +382,34 @@ import SwiftUI
     }
 }
 
-private extension LibraryModel {
-    func readView() async throws {
+extension LibraryModel {
+    private func readView() async throws {
         guard let runtime else { return }
+        let version = try await runtime.progress().version // First: a racing change forces another read.
+        let span = PerformanceTrace.begin(.snapshot)
+        defer { PerformanceTrace.end(span) }
         try await publish(runtime.snapshot())
+        effectViewVersion = version
     }
 
-    private func publish(_ snapshot: RuntimeSnapshot) {
+    func publish(_ snapshot: RuntimeSnapshot) {
         guard snapshot.revision >= publishedRevision else { return }
+        PerformanceTrace.recordSnapshot(snapshot)
+        let span = PerformanceTrace.begin(.publish)
+        defer { PerformanceTrace.end(span) }
+        // Best-effort background retirement: keep a copy until every session
+        // receives the new snapshot. Other owners may still release on MainActor.
+        let retiredView = view
+        let retiredIndex = presentationIndex
+        defer {
+            Task.detached(priority: .utility) {
+                withExtendedLifetime((retiredView, retiredIndex)) {}
+            }
+        }
         publishedRevision = snapshot.revision
-        let previousKeys = Set(view?.photos.flatMap { $0.assets.map(\.key) } ?? [])
-        let currentKeys = Set(snapshot.view.photos.flatMap { $0.assets.map(\.key) })
+        progress.value = nil
+        let previousKeys = presentationIndex?.assetKeys ?? []
+        let currentKeys = snapshot.presentationIndex.assetKeys
         let removed = !previousKeys.isSubset(of: currentKeys)
         let contentChanged = view != nil && view?.privateContentRevision != snapshot.view.privateContentRevision
         if contentChanged {
@@ -408,7 +418,7 @@ private extension LibraryModel {
         if removed {
             let removedKeys = previousKeys.subtracting(currentKeys)
             let priorReadOnly = Set(view?.ordinarySelectedPresentation.map(\.key) ?? [])
-            let priorOperations = Set(view?.ordinaryContentKeys ?? [])
+            let priorOperations = operationKeyIndex
             let isolatedProofLoss = !contentChanged &&
                 view?.ordinarySelectedGeneration == snapshot.view.ordinarySelectedGeneration &&
                 removedKeys.isSubset(of: priorReadOnly) && removedKeys.isDisjoint(with: priorOperations)
@@ -418,10 +428,16 @@ private extension LibraryModel {
                 shell?.invalidateContentPresentations()
             }
         }
-        if contentChanged || removed || view?.previewSources != snapshot.view.previewSources {
+        let replacedSource = view?.previewSources.contains { id, key in
+            snapshot.view.previewSources[id] != key
+        } ?? false
+        if contentChanged || removed || replacedSource {
             invalidateThumbnails()
         }
+        operationKeyIndex = snapshot.presentationIndex.operationKeys
+        presentationIndex = snapshot.presentationIndex
         view = snapshot.view
+        prefetchAfterPublish()
         protection.receive(snapshot)
         immichLocked.receive(snapshot)
         immichArchive.receive(snapshot)
@@ -453,30 +469,39 @@ private extension LibraryModel {
 
     func resolveRequests(_ initial: [EffectRequest], context: ContentPresentationContext?) async throws {
         guard let runtime, let executeEffect else { throw SuwopError("入出力が利用できません。") }
-        var requests = initial
-        while !requests.isEmpty {
-            let request = requests.removeFirst()
-            guard let operation = request.effect["Io"] else { throw SuwopError("未知の Rust effect です。") }
-            let value: JSONValue?
-            let failure: String?
-            do {
-                value = try await executeEffect(operation, context)
-                failure = nil
-            } catch is CancellationError {
-                value = nil
-                failure = "cancelled"
-            } catch {
-                value = nil
-                failure = error.localizedDescription
-            }
-            requests += try await runtime.resolve(id: request.id, value: value, error: failure)
-            try await readView()
+        PerformanceTrace.startMonitoring()
+        let refreshSpan = PerformanceTrace.begin(.refresh)
+        defer {
+            PerformanceTrace.end(refreshSpan)
+            PerformanceTrace.export()
         }
+        try await EffectBatch.drain(initial, context: context, execute: executeEffect) { [self] reply in
+            let span = PerformanceTrace.begin(.resolve)
+            let requests: [EffectRequest]
+            do {
+                requests = try await runtime.resolve(id: reply.id, value: reply.value, error: reply.failure)
+                PerformanceTrace.end(span)
+            } catch {
+                PerformanceTrace.end(span)
+                throw error
+            }
+            let progress = try await runtime.progress()
+            self.progress.value = progress.progress
+            if effectViewVersion != progress.version {
+                try await readView()
+            }
+            return requests
+        }
+        guard try await runtime.progress().version == effectViewVersion else { return try await readView() }
+        progress.value = nil // Count-only progress keeps the version; clear it as publish would.
     }
 
     func invalidateThumbnails() {
         thumbnailGeneration = UUID()
         thumbnails.removeAllObjects()
+        previews.removeAllObjects()
+        thumbnailLoads.cancelAll()
+        previewLoads.cancelAll()
         if errorMessage != nil {
             errorMessage = "写真へのアクセスが変わりました。処理結果を確認してください。"
         }
@@ -502,30 +527,6 @@ private extension LibraryModel {
 }
 
 extension LibraryModel {
-    var pendingAppleCount: Int64 {
-        view?.pendingAppleCount ?? 0
-    }
-
-    var appleVisibilityOperations: [AppleVisibilitySummary] {
-        view?.state.appleVisibilityOperations ?? []
-    }
-
-    var appleVisibilityHideKeys: [AssetKey] {
-        view?.appleVisibilityHideKeys ?? []
-    }
-
-    var trashSnapshot: TrashSnapshot? {
-        view?.state.trash
-    }
-
-    var pendingAppleTrashOperations: [AppleTrashOperation] {
-        view?.state.pendingAppleTrash ?? []
-    }
-
-    var pendingTrashOperations: [TrashOperation] {
-        view?.state.pendingTrash ?? []
-    }
-
     func refreshTrash() {
         if isBusy {
             pendingTrashRefresh = true
@@ -574,6 +575,8 @@ extension LibraryModel {
 
 extension LibraryModel {
     func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
+        let span = PerformanceTrace.begin(preview ? .previewImage : .thumbnail)
+        defer { PerformanceTrace.end(span) }
         #if SUWOP_VRT
             if let thumbnailEffect {
                 return try await thumbnailEffect(key, preview)

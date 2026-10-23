@@ -12,6 +12,14 @@ public struct SuwopError: Error, LocalizedError, Sendable {
     }
 }
 
+/// Rust rejected the input budget before consuming the pending effect ID.
+public struct BridgeInputRejected: Error, LocalizedError, Sendable {
+    public let message: String
+    public var errorDescription: String? {
+        message
+    }
+}
+
 #if DEBUG
     public enum JSONDecodeDiagnostic {
         @TaskLocal public static var failure: (@Sendable (Data, String, any Error, [String]) -> Void)?
@@ -101,6 +109,13 @@ public enum Wire {
     }
 }
 
+struct DecodedMeasurement<Value> {
+    let value: Value
+    let start: TimeInterval
+    let decodeStart: TimeInterval
+    let end: TimeInterval
+}
+
 /// Every instance is confined to its actor. Rust additionally serializes calls to its registry.
 public final class CoreBridge {
     private let handle: UInt64
@@ -114,22 +129,79 @@ public final class CoreBridge {
         try Self.invoke(handle: handle, action: action, input: input)
     }
 
+    /// Decode large views directly instead of materializing and re-encoding JSONValue.
+    public func callDecoded<Value: Decodable>(_ action: UInt32, as type: Value.Type) throws -> Value {
+        try callDecodedMeasured(action, as: type).value
+    }
+
+    /// Separate synchronous Rust/FFI work from Swift JSON decoding using one monotonic clock.
+    func callDecodedMeasured<Value: Decodable>(
+        _ action: UInt32, as type: Value.Type
+    ) throws -> DecodedMeasurement<Value> {
+        try callDecodedMeasured(action, as: type) { $0 }
+    }
+
+    /// `transform` runs inside the measured decode window, on the caller's actor.
+    func callDecodedMeasured<Payload: Decodable, Value>(
+        _ action: UInt32, as type: Payload.Type, transform: (Payload) throws -> Value
+    ) throws -> DecodedMeasurement<Value> {
+        let start = ProcessInfo.processInfo.systemUptime
+        let output = try Self.invokeData(handle: handle, action: action, input: .null)
+        let decodeStart = ProcessInfo.processInfo.systemUptime
+        let value = try transform(Wire.decoder().decode(BridgeEnvelope<Payload>.self, from: output).value)
+        return DecodedMeasurement(
+            value: value,
+            start: start,
+            decodeStart: decodeStart,
+            end: ProcessInfo.processInfo.systemUptime
+        )
+    }
+
     public static func utility(_ action: UInt32, input: JSONValue) throws -> JSONValue {
         try invoke(handle: 0, action: action, input: input)
     }
 
     private static func invoke(handle: UInt64, action: UInt32, input: JSONValue) throws -> JSONValue {
+        let output = try invokeData(handle: handle, action: action, input: input)
+        return try Wire.decoder().decode(BridgeEnvelope<JSONValue>.self, from: output).value
+    }
+
+    private static func invokeData(handle: UInt64, action: UInt32, input: JSONValue) throws -> Data {
         let data = try Wire.encoder().encode(input)
         guard let text = String(data: data, encoding: .utf8) else { throw SuwopError("JSON を生成できません。") }
         let pointer = text.withCString { suwop_call(handle, action, $0) }
         guard let pointer else { throw SuwopError("Rust コアから応答がありません。") }
-        defer { suwop_free(pointer) }
-        let output = Data(String(cString: pointer).utf8)
-        let envelope = try Wire.decoder().decode(JSONValue.self, from: output)
-        if let error = envelope["error"].string {
+        // Rust returns a NUL-terminated CString with no interior NUL. The Data adopts
+        // that allocation without copying and returns it to Rust exactly once, when the
+        // last reference is released; JSONDecoder still validates UTF-8 itself.
+        let count = strlen(pointer)
+        guard count > 0 else {
+            suwop_free(pointer)
+            throw SuwopError("Rust コアから応答がありません。")
+        }
+        return Data(
+            bytesNoCopy: UnsafeMutableRawPointer(pointer),
+            count: count,
+            deallocator: .custom { bytes, _ in
+                suwop_free(bytes.assumingMemoryBound(to: CChar.self))
+            }
+        )
+    }
+}
+
+private struct BridgeEnvelope<Value: Decodable>: Decodable {
+    let value: Value
+    private enum CodingKeys: String, CodingKey { case value, error, inputRejected }
+
+    init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        if let error = try container.decodeIfPresent(String.self, forKey: .error) {
+            if try container.decodeIfPresent(Bool.self, forKey: .inputRejected) == true {
+                throw BridgeInputRejected(message: error)
+            }
             throw SuwopError(error)
         }
-        return envelope["value"]
+        value = try container.decode(Value.self, forKey: .value)
     }
 }
 

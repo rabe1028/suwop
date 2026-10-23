@@ -9,7 +9,7 @@ use crux_core::{
 use serde_json::{Value, json};
 use sha1::Digest;
 use std::{
-    collections::BTreeMap,
+    collections::{BTreeMap, BTreeSet},
     ffi::{CStr, CString, c_char},
     io::Read,
     sync::{
@@ -18,12 +18,20 @@ use std::{
     },
 };
 use suwop_core::{
-    app::Suwop,
     domain::{AppleFacts, FileSignature, StoredAsset, describe_apple, hex},
     workflow::HashResult,
 };
 
-type Runtime = Bridge<Suwop, JsonFfiFormat>;
+mod compact;
+mod input_limits;
+mod projection;
+#[cfg(test)]
+mod snapshot_tests;
+struct Runtime {
+    bridge: Bridge<projection::ProjectionApp, JsonFfiFormat>,
+    query: projection::Query,
+    bulk_replies: BTreeSet<u32>,
+}
 static CORES: OnceLock<Mutex<BTreeMap<u64, Runtime>>> = OnceLock::new();
 static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 type Cancellations = BTreeMap<u64, Arc<AtomicBool>>;
@@ -65,8 +73,21 @@ pub extern "C" fn suwop_new() -> u64 {
         return 0;
     };
     let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    registry.insert(id, Bridge::new(Core::new()));
+    registry.insert(id, Runtime::new(suwop_core::app::Model::default()));
     id
+}
+impl Runtime {
+    fn new(model: suwop_core::app::Model) -> Self {
+        let query = Arc::default();
+        Self {
+            bridge: Bridge::new(Core::new_with(
+                projection::ProjectionApp::new(Arc::clone(&query)),
+                model,
+            )),
+            query,
+            bulk_replies: BTreeSet::new(),
+        }
+    }
 }
 #[unsafe(no_mangle)]
 pub extern "C" fn suwop_drop(handle: u64) {
@@ -89,19 +110,41 @@ pub unsafe extern "C" fn suwop_call(handle: u64, action: u32, input: *const c_ch
                 .to_str()
                 .map_err(|_| "Invalid UTF-8".to_owned())?
         };
-        if text.len() > 16 * 1024 * 1024 {
-            return Err("Bridge input exceeds 16 MiB".into());
-        }
-        execute(handle, action, text)
+        input_limits::admit_envelope(action, text.len())?;
+        respond(handle, action, text)
     });
     let envelope = match result {
-        Ok(Ok(value)) => json!({"value":value}),
-        Ok(Err(error)) => json!({"error":error}),
+        Ok(Ok(value)) => value_envelope(&value),
+        Ok(Err(error)) => error_envelope(&error),
         Err(_) => {
             json!({"error":"Rust bridge failed. No operation will be retried automatically."})
+                .to_string()
+                .into_bytes()
         }
     };
-    CString::new(envelope.to_string()).map_or(std::ptr::null_mut(), CString::into_raw)
+    CString::new(envelope).map_or(std::ptr::null_mut(), CString::into_raw)
+}
+/// Wraps already-serialized JSON without decoding it again. Large library views stay
+/// one serde pass instead of serialize, parse into `Value` and serialize again.
+fn value_envelope(value: &[u8]) -> Vec<u8> {
+    const PREFIX: &[u8] = br#"{"value":"#;
+    let mut envelope = Vec::with_capacity(PREFIX.len() + value.len() + 2);
+    envelope.extend_from_slice(PREFIX);
+    envelope.extend_from_slice(value);
+    envelope.push(b'}');
+    envelope
+}
+fn error_envelope(error: &str) -> Vec<u8> {
+    json!({"inputRejected": error == input_limits::ERROR, "error":error})
+        .to_string()
+        .into_bytes()
+}
+fn respond(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String> {
+    if (3..=15).contains(&action) {
+        serde_json::to_vec(&execute(action, input)?).map_err(|e| e.to_string())
+    } else {
+        execute_core(handle, action, input)
+    }
 }
 /// # Safety
 /// `value` is null or a live allocation returned by `suwop_call`; call exactly once.
@@ -112,7 +155,7 @@ pub unsafe extern "C" fn suwop_free(value: *mut c_char) {
         drop(unsafe { CString::from_raw(value) });
     }
 }
-fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
+fn execute(action: u32, input: &str) -> Result<Value, String> {
     match action {
         3 => {
             return serde_json::to_value(describe_apple(
@@ -171,19 +214,24 @@ fn execute(handle: u64, action: u32, input: &str) -> Result<Value, String> {
             return color_plan(input);
         }
         15 => {
+            let value: Value = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            input_limits::admit_catalog(&value, input.len())?;
             return suwop_local_store::dispatch(
-                serde_json::from_str(input).map_err(|e| e.to_string())?,
+                serde_json::from_value(value).map_err(|e| e.to_string())?,
             );
         }
         _ => {}
     }
-    execute_core(handle, action, input)
+    Err("Unknown bridge action".into())
 }
-fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> {
-    let registry = cores()
+/// Returns the bridge's serialized JSON as is. Only effect lists are decoded, to record
+/// core-issued bulk replies; views are never parsed back into `Value`.
+fn execute_core(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String> {
+    let mut registry = cores()
         .lock()
         .map_err(|_| "Rust bridge lock failed".to_owned())?;
-    let bridge = registry.get(&handle).ok_or("Invalid core handle")?;
+    let runtime = registry.get_mut(&handle).ok_or("Invalid core handle")?;
+    let bridge = &runtime.bridge;
     let mut output = Vec::new();
     match action {
         0 => bridge
@@ -196,6 +244,7 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> 
                 response: Value,
             }
             let response: Response = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            input_limits::admit_reply(&runtime.bulk_replies, response.id, input.len())?;
             bridge
                 .resolve(
                     crux_core::bridge::EffectId(response.id),
@@ -203,11 +252,34 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Value, String> 
                     &mut output,
                 )
                 .map_err(|e| e.to_string())?;
+            runtime.bulk_replies.remove(&response.id);
         }
         2 => bridge.view(&mut output).map_err(|e| e.to_string())?,
+        17 | 18 => {
+            *runtime.query.lock().map_err(|e| e.to_string())? = Some(if action == 17 {
+                projection::Selection::Progress
+            } else {
+                projection::Selection::Compact
+            });
+            let result = bridge.view(&mut output);
+            *runtime.query.lock().map_err(|e| e.to_string())? = None;
+            result.map_err(|e| e.to_string())?;
+        }
+        16 => {
+            let keys = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            *runtime.query.lock().map_err(|e| e.to_string())? =
+                Some(projection::Selection::Ordinary(keys));
+            let result = bridge.view(&mut output);
+            *runtime.query.lock().map_err(|e| e.to_string())? = None;
+            result.map_err(|e| e.to_string())?;
+        }
         _ => return Err("Unknown bridge action".into()),
     }
-    serde_json::from_slice(&output).map_err(|e| e.to_string())
+    if action == 0 || action == 1 {
+        let value: Value = serde_json::from_slice(&output).map_err(|e| e.to_string())?;
+        input_limits::remember_replies(&mut runtime.bulk_replies, &value);
+    }
+    Ok(output)
 }
 
 fn color_plan(input: &str) -> Result<Value, String> {

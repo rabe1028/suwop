@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+futures = "0.3"
 getrandom = "0.2.17"
 crux_core.workspace = true
 serde.workspace = true

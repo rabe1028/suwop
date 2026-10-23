@@ -5,7 +5,6 @@ use serde_json::Value;
 use crate::{
     domain::{
         LibrarySnapshot, Provider, ScanAccess, TransferIntent, TransferReceipt, UnifiedPhoto,
-        catalog,
     },
     immich::{HttpRequest, Session},
 };
@@ -852,6 +851,9 @@ pub enum Event {
         key: crate::albums::AlbumKey,
         edit: crate::albums::AlbumEdit,
     },
+    BrowseAlbumCandidates {
+        key: Option<crate::albums::AlbumKey>,
+    },
     Browse {
         options: crate::browser::BrowserOptions,
     },
@@ -909,8 +911,13 @@ pub enum Event {
         result: crate::immich_visibility::VisibilityCompletion,
     },
     #[serde(skip)]
+    FetchProgress {
+        status: String,
+    },
+    #[serde(skip)]
     Progress {
         state: SavedLibrary,
+        session: Option<Session>,
         status: String,
     },
     #[serde(skip)]
@@ -935,12 +942,14 @@ pub struct Model {
     /// Observation-only token shared with in-flight workflows; never persisted.
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
+    pub album_candidate_key: Option<crate::albums::AlbumKey>,
     pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
     pub session: Option<Session>,
     pub busy: bool,
     pub ready: bool,
     pub status: String,
+    pub fetch_status: Option<String>,
     pub error: Option<String>,
     pub changed_during_work: bool,
 }
@@ -988,6 +997,11 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        // Internal count-only notifications cannot change catalog or authority.
+        if let Event::FetchProgress { status } = event {
+            model.fetch_status = Some(status);
+            return Command::done();
+        }
         if let Event::RetryPrivateMediaCleanup {
             recovery_id,
             expected_attempt,
@@ -1008,6 +1022,34 @@ impl crux_core::App for Suwop {
     }
 }
 impl Suwop {
+    /// Ordinary membership has no clock-dependent grants. Native callers still
+    /// validate their presentation context before and after every read.
+    #[must_use]
+    pub fn ordinary_content_membership(model: &Model) -> (Vec<crate::domain::AssetKey>, String) {
+        let public = crate::privacy::PublishedLibrary::from_canonical(
+            &crate::protection::ordinary_state_view(model),
+        );
+        ordinary_projection(model, &public)
+    }
+
+    /// Fresh authority for native reads, without building the full gallery view.
+    #[must_use]
+    pub fn ordinary_content_projection(
+        model: &Model,
+        requested: &[crate::domain::AssetKey],
+    ) -> (Vec<crate::domain::AssetKey>, String) {
+        let (keys, revision) = Self::ordinary_content_membership(model);
+        let keys: std::collections::BTreeSet<_> = keys.into_iter().collect();
+        (
+            requested
+                .iter()
+                .filter(|key| keys.contains(*key))
+                .cloned()
+                .collect(),
+            revision,
+        )
+    }
+
     fn update_after_capture(event: Event, model: &mut Model) -> Command<Effect, Event> {
         if let Some(command) = crate::immich_live_resources::update(&event, model) {
             return command;
@@ -1115,15 +1157,30 @@ impl Suwop {
                 model.error = choose_preview(model, &anchor, key).err();
                 Command::done()
             }
+            Event::BrowseAlbumCandidates { key } => {
+                model.album_candidate_key = key;
+                Command::done()
+            }
             Event::Browse { options } => {
                 model.browser = options;
                 Command::done()
             }
-            Event::Progress { mut state, status } => {
+            Event::FetchProgress { status } => {
+                model.fetch_status = Some(status);
+                Command::done()
+            }
+            Event::Progress {
+                mut state,
+                session,
+                status,
+            } => {
                 if model.changed_during_work {
                     invalidate_apple(&mut state);
                 }
                 model.state = state;
+                if let Some(session) = session {
+                    model.session = Some(session);
+                }
                 model.status = status;
                 crate::protection::reconcile(model)
             }
@@ -1142,6 +1199,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
+                model.fetch_status = None;
                 model.ready = model.state.schema_version == 8;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
@@ -1162,7 +1220,7 @@ impl Suwop {
         model.busy = true;
         model.error = None;
         model.changed_during_work = false;
-        model.status = "処理中…".into();
+        model.status = crate::workflow::initial_status(&event).into();
         let origin = crate::ordinary_selected::RefreshOrigin::capture(model);
         let state = model.state.clone();
         let session = model.session.clone();
@@ -1217,12 +1275,15 @@ impl Suwop {
     }
     fn library_view(model: &Model) -> ViewModel {
         let can_transfer = can_transfer(model);
-        let move_blockers = public_move_blockers(model, can_transfer);
-        let operation_public = crate::privacy::PublishedLibrary::from_canonical(
-            &crate::protection::ordinary_state(model),
+        let ordinary = crate::protection::ordinary_state_view(model);
+        let move_blockers = public_move_blockers(model, can_transfer, &ordinary);
+        let operation_public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+        let public = crate::ordinary_selected::public_library_from(
+            model,
+            &ordinary,
+            operation_public.clone(),
         );
-        let public = crate::ordinary_selected::public_library(model);
-        let photos = catalog(&public.snapshots, &public.receipts);
+        let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
         let preview_access = crate::media::PreviewAccess::new(
             &public.snapshots,
             &model.state.apple_scope,
@@ -1242,8 +1303,10 @@ impl Suwop {
             &operation_public.snapshots,
             &model.state.apple_scope,
         );
+        let metadata_access = crate::metadata::MetadataAccess::new(&operation_public.snapshots);
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
+        let (status, error) = public_messages(model, &ordinary);
         ViewModel {
             private_media_cleanup: crate::private_media_cleanup::projection(model),
             ordinary_selected_presentation: crate::ordinary_selected::presentations(model),
@@ -1253,13 +1316,21 @@ impl Suwop {
             ordinary_content_keys,
             private_content_revision,
             immich_archive_view: crate::immich_archive::view(model),
-            immich_archive_actions: crate::immich_archive::actions(model),
-            immich_visibility_actions: crate::immich_visibility::actions(model),
+            immich_archive_actions: crate::immich_archive::actions_for_public(
+                model,
+                &ordinary,
+                &operation_public,
+            ),
+            immich_visibility_actions: crate::immich_visibility::actions_for_public(
+                model,
+                &ordinary,
+                &operation_public,
+            ),
             immich_visibility_view: crate::immich_visibility::view(model),
             immich_live_resources: crate::immich_live_resources::view(model),
             immich_locked_view: crate::immich_locked::view(model),
             protected_view: crate::protection::view(model),
-            apple_visibility_hide_keys: apple_visibility_hide_keys(model),
+            apple_visibility_hide_keys: apple_visibility_hide_keys(model, &ordinary),
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
             editing_targets: photos
                 .iter()
@@ -1267,12 +1338,7 @@ impl Suwop {
                 .collect(),
             metadata_targets: photos
                 .iter()
-                .map(|p| {
-                    (
-                        crate::browser::photo_id(p),
-                        crate::metadata::targets(p, &operation_public.snapshots),
-                    )
-                })
+                .map(|p| (crate::browser::photo_id(p), metadata_access.targets(p)))
                 .collect(),
             preview_sources: preview_choices
                 .iter()
@@ -1287,34 +1353,52 @@ impl Suwop {
                     crate::media::kind(p).map(|kind| (crate::browser::photo_id(p), kind))
                 })
                 .collect(),
-            albums: crate::albums::views(&public.albums, &photos, &public.snapshots),
+            albums: crate::albums::views_for_picker(
+                &public.albums,
+                &photos,
+                &public.snapshots,
+                model.album_candidate_key.as_ref(),
+            ),
             browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
             photos,
-            pending_apple_count: public
-                .snapshots
-                .iter()
-                .filter(|s| s.provider == Provider::Apple)
-                .flat_map(|s| &s.assets)
-                .filter(|a| !a.fingerprints_complete())
-                .count(),
+            pending_apple_count: pending_apple_count(&public),
             state: public,
             busy: model.busy,
-            status: crate::privacy::public_text(
-                &crate::protection::ordinary_state(model),
-                &model.status,
-            ),
-            error: model.error.as_ref().map(|error| {
-                crate::privacy::public_text(&crate::protection::ordinary_state(model), error)
-            }),
+            status,
+            error,
             server_version: model.session.as_ref().map(|s| s.version.description()),
             can_transfer,
             move_blockers,
         }
     }
 }
-fn apple_visibility_hide_keys(model: &Model) -> Vec<crate::domain::AssetKey> {
+fn pending_apple_count(public: &crate::privacy::PublishedLibrary) -> usize {
+    public
+        .snapshots
+        .iter()
+        .filter(|s| s.provider == Provider::Apple)
+        .flat_map(|s| &s.assets)
+        .filter(|a| !a.fingerprints_complete())
+        .count()
+}
+fn public_messages(model: &Model, ordinary: &SavedLibrary) -> (String, Option<String>) {
+    (
+        model
+            .fetch_status
+            .clone()
+            .unwrap_or_else(|| crate::privacy::public_text(ordinary, &model.status)),
+        model
+            .error
+            .as_ref()
+            .map(|error| crate::privacy::public_text(ordinary, error)),
+    )
+}
+fn apple_visibility_hide_keys(
+    model: &Model,
+    ordinary: &SavedLibrary,
+) -> Vec<crate::domain::AssetKey> {
     if model.ready && !model.busy && !model.protection.membership_uncertain {
-        crate::apple_visibility::hide_keys(&crate::protection::ordinary_state(model))
+        crate::apple_visibility::hide_keys(ordinary)
     } else {
         vec![]
     }
@@ -1322,10 +1406,10 @@ fn apple_visibility_hide_keys(model: &Model) -> Vec<crate::domain::AssetKey> {
 fn public_move_blockers(
     model: &Model,
     can_transfer: bool,
+    ordinary: &SavedLibrary,
 ) -> std::collections::BTreeMap<String, Vec<String>> {
     let mut move_blockers = std::collections::BTreeMap::new();
-    let ordinary = crate::protection::ordinary_state(model);
-    let content_access = crate::privacy::ContentAccess::new(&ordinary);
+    let content_access = crate::privacy::ContentAccess::new(ordinary);
     for receipt in &model.state.receipts {
         if receipt
             .source
@@ -1404,7 +1488,7 @@ fn choose_preview(
     if !present(anchor) || !present(&key) {
         return Err("写真の可視性を確認してください。".into());
     }
-    let photos = catalog(&public.snapshots, &public.receipts);
+    let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
     let photo = photos
         .iter()
         .find(|p| p.assets.iter().any(|a| a.key == *anchor))
@@ -1426,7 +1510,7 @@ fn choose_preview(
     Ok(())
 }
 fn update_preview_preferences(model: &mut Model, selected: Option<crate::domain::AssetKey>) {
-    let photos = catalog(&model.state.snapshots, &model.state.receipts);
+    let photos = crate::display_catalog::photos(&model.state.snapshots, &model.state.receipts);
     model.preview_preferences.retain(|key| {
         photos
             .iter()
@@ -1520,9 +1604,11 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
         && !matches!(
             event,
             Event::AppleChanged
+                | Event::FetchProgress { .. }
                 | Event::Progress { .. }
                 | Event::Finished { .. }
                 | Event::Browse { .. }
+                | Event::BrowseAlbumCandidates { .. }
                 | Event::ChoosePreview { .. }
         )
 }
