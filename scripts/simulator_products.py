@@ -13,7 +13,6 @@ KINDS = {"vrt": "DerivedData/VRT", "photokit": "DerivedData/PhotoKit"}
 PLATFORM = "Debug-iphonesimulator"
 # Static archives, objects and module interfaces are already linked into the bundles.
 BUILD_ONLY = ("*.a", "*.o", "*.swiftmodule", "include")
-ENUMERATION = "DerivedData/VRTEnumeration/registered-raw.json"
 VRT_ENVIRONMENT = ("SUWOP_VRT_ARTIFACTS", "SUWOP_VRT_BASELINES", "SUWOP_VRT_RECORD")
 
 
@@ -51,8 +50,6 @@ def stage(output):
             symlinks=True,
             ignore=shutil.ignore_patterns(*BUILD_ONLY),
         )
-    # Unfiltered enumeration of exactly these VRT products, shared by every lane.
-    shutil.copy2(vrt.ROOT / ENUMERATION, output / "vrt" / "registered-raw.json")
     (output / "manifest.json").write_text(json.dumps(identity(), indent=2) + "\n")
 
 
@@ -82,13 +79,6 @@ def prepare_vrt(products, artifacts):
     return path
 
 
-def enumeration(products, destination):
-    """The products' own unfiltered test enumeration, for this lane's inventory."""
-    source = bound(products, "vrt") / "registered-raw.json"
-    require(source.is_file(), "Products lack their test enumeration")
-    shutil.copy2(source, destination)
-
-
 def prepare_photokit(products):
     folder = bound(products, "photokit")
     app = folder / PLATFORM / "SuwopPhotoKitHost.app"
@@ -102,14 +92,10 @@ def main():
         stage(Path(args[0]))
     elif operation == "prepare-vrt":
         print(prepare_vrt(Path(args[0]), Path(args[1])))
-    elif operation == "enumeration":
-        enumeration(Path(args[0]), Path(args[1]))
     elif operation == "prepare-photokit":
         print("\n".join(str(path) for path in prepare_photokit(Path(args[0]))))
     else:
-        raise ValueError(
-            "Usage: simulator_products.py stage|prepare-vrt|enumeration|prepare-photokit"
-        )
+        raise ValueError("Usage: simulator_products.py stage|prepare-vrt|prepare-photokit")
     return 0
 
 

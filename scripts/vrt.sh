@@ -112,9 +112,9 @@ else
     stage build xcodebuild "${ARGS[@]}" build-for-testing
 fi
 if [[ -n "$LANE" ]]; then
-    # The products job enumerated these exact products once for every lane.
-    stage enumerate uv run --no-project python scripts/simulator_products.py enumeration \
-        "$SUWOP_SIMULATOR_PRODUCTS" "$ARTIFACTS/registered-raw.json"
+    stage enumerate xcodebuild "${ARGS[@]}" test-without-building -enumerate-tests \
+        -test-enumeration-style flat -test-enumeration-format json \
+        -test-enumeration-output-path "$ARTIFACTS/registered-raw.json"
     stage inventory uv run --no-project python scripts/vrt_lanes.py inventory \
         "$ARTIFACTS/registered-raw.json" "$ARTIFACTS/registered-tests.json"
     # UI lanes are deterministic duration-balanced shards of the enumerated bundle.

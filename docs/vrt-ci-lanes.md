@@ -16,10 +16,7 @@ baselines and artifacts, with recording off. Lanes then run
 packages nor XcodeGen. Run locally without `SUWOP_SIMULATOR_PRODUCTS`, a lane
 builds its own products first.
 
-The products job enumerates the entire unfiltered built scheme once, while
-PhotoKit builds, and ships the result inside the source-bound products. Every
-lane's `enumerate` stage reads it from there and rejects products from another
-source. The `select` stage then
+Every lane first enumerates the entire unfiltered built scheme. The `select` stage then
 derives the lane's method IDs: the whole host bundle, or one shard of the UI
 bundle. Shards are assigned longest-first from the measured seconds in
 `VRT/ui-test-durations.json`; a test missing from that file counts as the
@@ -50,7 +47,7 @@ The xcresult parser uses real completed Xcode 26.4.1 JSON fixtures. Unfiltered
 flat enumeration was captured after a matching Rust simulator build and normal
 build-for-testing: 168 host and 61 UI method IDs. The adapter rejects disabled,
 unknown, duplicate and malformed registrations. The fixture records schema and
-IDs, not a permanent count; every run enumerates its current built scheme.
+IDs, not a permanent count; every lane enumerates its current built scheme.
 
 Complete native lane runs and aggregate CI acceptance remain separate gates.
 Pure Python checks and enumeration alone do not establish native success.
