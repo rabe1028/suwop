@@ -44,6 +44,8 @@ class ProductTests(unittest.TestCase):
         unbound = dict.fromkeys(products.VRT_ENVIRONMENT, "unbound")
         built(self.root, "vrt", {**unbound, "TZ": "UTC"})
         built(self.root, "photokit", {})
+        (self.root / products.ENUMERATION).parent.mkdir(parents=True)
+        (self.root / products.ENUMERATION).write_text('{"errors": [], "values": []}')
         patches = (
             patch.object(products.vrt, "ROOT", self.root),
             patch.object(products.vrt, "BASELINES", self.root / "VRT/Baselines"),
@@ -96,6 +98,21 @@ class ProductTests(unittest.TestCase):
         path.write_bytes(plistlib.dumps(run))
         with self.assertRaisesRegex(ValueError, "lacks the VRT environment"):
             products.prepare_vrt(self.output, self.root / "artifacts")
+
+    def test_lanes_read_the_products_own_enumeration_only_from_the_same_source(self):
+        products.stage(self.output)
+        destination = self.root / "registered-raw.json"
+        products.enumeration(self.output, destination)
+        self.assertEqual(destination.read_text(), '{"errors": [], "values": []}')
+        foreign = {**IDENTITY, "source": "c" * 64}
+        with (
+            patch.object(products, "identity", lambda: foreign),
+            self.assertRaisesRegex(ValueError, "another source"),
+        ):
+            products.enumeration(self.output, destination)
+        (self.output / "vrt/registered-raw.json").unlink()
+        with self.assertRaisesRegex(ValueError, "lack their test enumeration"):
+            products.enumeration(self.output, destination)
 
     def test_photokit_products_name_the_installed_host_app(self):
         products.stage(self.output)

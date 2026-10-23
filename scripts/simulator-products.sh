@@ -18,7 +18,7 @@ if [[ "$(xcodebuild -version)" != "$(printf 'Xcode %s\nBuild version %s' "$(conf
     echo 'Select the Xcode pinned in VRT/environment.json with DEVELOPER_DIR.' >&2
     exit 1
 fi
-# The pinned device is only a build destination here; it is never booted.
+# The pinned device is the build destination and boots only to enumerate tests.
 UDID="$(xcrun simctl list --json | uv run --no-project python scripts/vrt.py device)"
 if [[ -z "$UDID" ]]; then
     UDID="$(xcrun simctl create "$(uv run --no-project python scripts/vrt.py name)" "$(config device)" "$(config runtime)")"
@@ -35,5 +35,26 @@ COMMON=(
 xcodebuild "${COMMON[@]}" -scheme SuwopVRT -derivedDataPath DerivedData/VRT \
     -testLanguage ja -testRegion JP \
     SUWOP_VRT_RECORD=0 SUWOP_VRT_BASELINES=unbound SUWOP_VRT_ARTIFACTS=unbound build-for-testing
+# Enumerate the built VRT tests once for every lane. Enumeration needs a booted
+# device, so it runs while PhotoKit builds instead of in each lane.
+ENUMERATION="$PWD/DerivedData/VRTEnumeration"
+mkdir -p "$ENUMERATION"
+rm -f "$ENUMERATION/registered-raw.json"
+WAS_BOOTED=0
+if xcrun simctl list devices | grep -F "$UDID" | grep -q Booted; then WAS_BOOTED=1; fi
+VRT_RUN="$(find DerivedData/VRT/Build/Products -maxdepth 1 -name '*.xctestrun' | head -1)"
+{
+    xcrun simctl bootstatus "$UDID" -b
+    xcodebuild test-without-building -xctestrun "$VRT_RUN" -destination "platform=iOS Simulator,id=$UDID" \
+        -enumerate-tests -test-enumeration-style flat -test-enumeration-format json \
+        -test-enumeration-output-path "$ENUMERATION/registered-raw.json"
+} > "$ENUMERATION/enumerate.log" 2>&1 &
+ENUMERATE_PID=$!
 xcodebuild "${COMMON[@]}" -scheme SuwopPhotoKit -derivedDataPath DerivedData/PhotoKit build-for-testing
+if ! wait "$ENUMERATE_PID"; then
+    tail -50 "$ENUMERATION/enumerate.log" >&2
+    exit 1
+fi
+# A lane that already booted and slimmed this device keeps it running.
+if [[ "$WAS_BOOTED" == 0 ]]; then xcrun simctl shutdown "$UDID"; fi
 uv run --no-project python scripts/simulator_products.py stage "$OUTPUT"
