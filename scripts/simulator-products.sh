@@ -44,7 +44,9 @@ WAS_BOOTED=0
 if xcrun simctl list devices | grep -F "$UDID" | grep -q Booted; then WAS_BOOTED=1; fi
 VRT_RUN="$(find DerivedData/VRT/Build/Products -maxdepth 1 -name '*.xctestrun' | head -1)"
 {
-    xcrun simctl bootstatus "$UDID" -b
+    # A stock simulator needs about 4 GB; booting it beside the PhotoKit build
+    # swapped on 7 GB runners (run 39919532380). Boot it slim, as lanes do.
+    if [[ "$WAS_BOOTED" == 0 ]]; then simslim on "$UDID" --profile VRT/simslim.json; fi
     xcodebuild test-without-building -xctestrun "$VRT_RUN" -destination "platform=iOS Simulator,id=$UDID" \
         -enumerate-tests -test-enumeration-style flat -test-enumeration-format json \
         -test-enumeration-output-path "$ENUMERATION/registered-raw.json"
