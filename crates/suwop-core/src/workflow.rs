@@ -46,7 +46,7 @@ struct Runtime<'a> {
     ordinary_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     started_ordinary_generation: u64,
     ordinary_revision: String,
-    // False while this workflow holds a session the model has not received.
+    // Only a session the model already holds may be published before Finished.
     session_published: bool,
     // A generation comparison is a cancellation fence, not cross-thread data synchronization.
     // Capture once at workflow start; refresh must never renew an already granted read.
@@ -593,133 +593,93 @@ impl Runtime<'_> {
         }
     }
     async fn refresh_immich(&mut self, now: f64, errors: &mut Vec<String>) -> Result<(), String> {
-        let listed = match &self.session {
-            Some(session) => session.list(self.ctx, now).await,
-            None => return Ok(()),
-        };
-        match listed {
-            Ok(assets) => {
-                let by_id: BTreeMap<_, _> = assets.iter().map(|a| (&a.id, a)).collect();
-                let mut records = Vec::new();
-                let total = assets.len();
-                self.ctx.send_event(Event::FetchProgress {
-                    status: format!("Immich の詳細を取得中: 0 / {total} 件"),
-                });
-                // Bound native requests; publish verified subsets as Limited so
-                // incomplete enumeration never authorizes a Move.
-                // Do not clone the previous full remote catalog at every
-                // publication only to discard it again. Keep failure recovery
-                // in self.state and clone a remote-free base for partial views.
-                let mut partial_base = self.state.clone();
-                partial_base
-                    .snapshots
-                    .retain(|s| s.provider != Provider::Immich);
-                self.publish_established_session(&partial_base, now)?;
-                let Some(session) = &self.session else {
-                    return Ok(());
-                };
-                let mut proofs = Vec::new();
-                let mut completed = 0;
-                let pending: Vec<_> = assets
-                    .iter()
-                    .map(|asset| self.refresh_immich_record(session, asset, &by_id))
-                    .collect();
-                let mut hydration = futures::stream::iter(pending).buffer_unordered(32);
-                let mut failure = None;
-                while let Some(result) = hydration.next().await {
-                    let result = self.check_content_generation(&[]).and(result);
-                    let record = match result {
-                        Ok(record) => record,
-                        Err(error) => {
-                            failure = Some(error);
-                            break;
+        if let Some(session) = &self.session {
+            match session.list(self.ctx, now).await {
+                Ok(assets) => {
+                    let by_id: BTreeMap<_, _> = assets.iter().map(|a| (&a.id, a)).collect();
+                    let mut records = Vec::new();
+                    let total = assets.len();
+                    self.ctx.send_event(Event::FetchProgress {
+                        status: format!("Immich の詳細を取得中: 0 / {total} 件"),
+                    });
+                    // Bound native requests; publish verified subsets as Limited so
+                    // incomplete enumeration never authorizes a Move.
+                    // Do not clone the previous full remote catalog at every
+                    // publication only to discard it again. Keep failure recovery
+                    // in self.state and clone a remote-free base for partial views.
+                    let mut partial_base = self.state.clone();
+                    partial_base
+                        .snapshots
+                        .retain(|s| s.provider != Provider::Immich);
+                    let mut proofs = Vec::new();
+                    let mut completed = 0;
+                    let pending: Vec<_> = assets
+                        .iter()
+                        .map(|asset| self.refresh_immich_record(session, asset, &by_id))
+                        .collect();
+                    let mut hydration = futures::stream::iter(pending).buffer_unordered(32);
+                    let mut failure = None;
+                    while let Some(result) = hydration.next().await {
+                        let result = self.check_content_generation(&[]).and(result);
+                        let record = match result {
+                            Ok(record) => record,
+                            Err(error) => {
+                                failure = Some(error);
+                                break;
+                            }
+                        };
+                        completed += 1;
+                        if let Some((record, proof)) = record {
+                            records.push(record);
+                            if let Some(proof) = proof {
+                                proofs.push(proof);
+                            }
                         }
-                    };
-                    completed += 1;
-                    if let Some((record, proof)) = record {
-                        records.push(record);
-                        if let Some(proof) = proof {
-                            proofs.push(proof);
+                        // Publish the first batch promptly, then amortize full-view work.
+                        // The canonical workflow state stays private until completion.
+                        if completed == 32 || completed % 512 == 0 {
+                            let mut partial = partial_base.clone();
+                            partial.snapshots.push(LibrarySnapshot {
+                                provider: Provider::Immich,
+                                scope: session.scope.clone(),
+                                assets: records.clone(),
+                                access: ScanAccess::Limited,
+                                scanned_at: Some(now),
+                            });
+                            self.ctx.send_event(Event::Progress {
+                                state: partial,
+                                // A session this workflow established changes the
+                                // ordinary revision that its in-flight reads carry.
+                                session: self.session_published.then(|| session.clone()),
+                                status: "取得済みの写真を表示しています。".into(),
+                            });
+                        }
+                        if completed % 32 == 0 || completed == total {
+                            self.ctx.send_event(Event::FetchProgress {
+                                status: format!("Immich の詳細を取得中: {completed} / {total} 件"),
+                            });
                         }
                     }
-                    // Publish the first batch promptly, then amortize full-view work.
-                    // The canonical workflow state stays private until completion.
-                    if completed == 32 || completed % 512 == 0 {
-                        let mut partial = partial_base.clone();
-                        partial.snapshots.push(LibrarySnapshot {
-                            provider: Provider::Immich,
-                            scope: session.scope.clone(),
-                            assets: records.clone(),
-                            access: ScanAccess::Limited,
-                            scanned_at: Some(now),
-                        });
-                        self.ctx.send_event(Event::Progress {
-                            state: partial,
-                            session: Some(session.clone()),
-                            status: "取得済みの写真を表示しています。".into(),
-                        });
+                    drop(hydration);
+                    self.ordinary_selected.extend(proofs);
+                    if let Some(error) = failure {
+                        return Err(error);
                     }
-                    if completed % 32 == 0 || completed == total {
-                        self.ctx.send_event(Event::FetchProgress {
-                            status: format!("Immich の詳細を取得中: {completed} / {total} 件"),
-                        });
-                    }
+                    self.check_content_generation(&[])?;
+                    self.replace(LibrarySnapshot {
+                        provider: Provider::Immich,
+                        scope: session.scope.clone(),
+                        assets: records,
+                        access: ScanAccess::Full,
+                        scanned_at: Some(now),
+                    });
                 }
-                drop(hydration);
-                self.ordinary_selected.extend(proofs);
-                if let Some(error) = failure {
-                    return Err(error);
+                Err(e) => {
+                    self.invalidate(Provider::Immich);
+                    errors.push(e);
                 }
-                self.check_content_generation(&[])?;
-                self.replace(LibrarySnapshot {
-                    provider: Provider::Immich,
-                    scope: session.scope.clone(),
-                    assets: records,
-                    access: ScanAccess::Full,
-                    scanned_at: Some(now),
-                });
-            }
-            Err(e) => {
-                self.invalidate(Provider::Immich);
-                errors.push(e);
             }
         }
-        Ok(())
-    }
-    /// Partial publication exposes a session this workflow established. Publish
-    /// it before any authorized read so no in-flight request carries the
-    /// session-less revision. The started generation still fences revocation.
-    fn publish_established_session(&mut self, base: &SavedLibrary, now: f64) -> Result<(), String> {
-        if self.session_published {
-            return Ok(());
-        }
-        self.check_ordinary_generation()?;
-        let Some(session) = &mut self.session else {
-            return Ok(());
-        };
-        let revision =
-            crate::app::ordinary_revision(Some(&session.scope), self.started_ordinary_generation);
-        bind_ordinary_context(
-            session,
-            &self.ordinary_generation,
-            self.started_ordinary_generation,
-            &revision,
-        );
-        let mut partial = base.clone();
-        partial.snapshots.push(LibrarySnapshot {
-            provider: Provider::Immich,
-            scope: session.scope.clone(),
-            assets: Vec::new(),
-            access: ScanAccess::Limited,
-            scanned_at: Some(now),
-        });
-        self.ctx.send_event(Event::Progress {
-            state: partial,
-            session: Some(session.clone()),
-            status: "取得済みの写真を表示しています。".into(),
-        });
-        self.ordinary_revision = revision;
-        self.session_published = true;
         Ok(())
     }
     async fn refresh_immich_record(

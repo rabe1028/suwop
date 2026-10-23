@@ -316,7 +316,7 @@ fn explicit_ordinary_refresh_restores_only_current_own_still_without_pin_or_jour
     Ok(())
 }
 #[test]
-fn first_refresh_publishes_its_session_before_authorizing_metadata() -> Result<(), String> {
+fn first_refresh_keeps_its_authorization_revision_until_finished() -> Result<(), String> {
     let c = Core::new_with(
         Suwop,
         Model {
@@ -334,10 +334,14 @@ fn first_refresh_publishes_its_session_before_authorizing_metadata() -> Result<(
         extra
     });
     shell.listed.splice(0..0, extras);
+    let before = c.view().private_content_revision;
     shell.refresh(&c)?;
     assert!(shell.paths.contains(&format!("assets/{ASSET}")));
+    // A mid-refresh revision change would also cancel the native workflow context.
     assert_eq!(shell.stale_authorizations, 0);
     assert_eq!(c.view().ordinary_selected_presentation.len(), 1);
+    // The established session is published with the completed catalog.
+    assert_ne!(c.view().private_content_revision, before);
     Ok(())
 }
 #[test]
