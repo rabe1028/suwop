@@ -112,7 +112,7 @@ fn start<'a>(
         },
     )?;
     let journal = host.raw().clone();
-    assert_eq!(journal["schemaVersion"], 8);
+    assert_eq!(journal["schemaVersion"], 9);
     write_json(&directory.join("journal-before.json"), &journal)?;
     Ok((core, host, journal))
 }

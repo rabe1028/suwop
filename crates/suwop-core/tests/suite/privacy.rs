@@ -356,7 +356,8 @@ fn journal_only_sources_are_redacted_from_state_and_stale_text()
 #[test]
 fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
 -> Result<(), Box<dyn std::error::Error>> {
-    let canonical = state(AppleVisibility::Visible);
+    let mut canonical = state(AppleVisibility::Visible);
+    canonical.schema_version = 9;
     for version in [1, 2] {
         let mut old = serde_json::to_value(&canonical)?;
         old["schemaVersion"] = json!(version);
@@ -369,7 +370,7 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
             .ok_or("receipt")?
             .remove("appleVisibility");
         let migrated = migrate(old)?;
-        assert_eq!(migrated.schema_version, 8);
+        assert_eq!(migrated.schema_version, 9);
         assert_eq!(
             migrated.snapshots[0].assets[0].apple_visibility,
             AppleVisibility::Unknown

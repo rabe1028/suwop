@@ -24,6 +24,8 @@ import SuwopShell
     let immichLockedAccess = ImmichLockedNativeAccess()
     let immichLockedVideoAccess = ImmichLockedVideoNativeAccess()
     let immichLockedLiveAccess = ImmichLockedLiveNativeAccess()
+    let amazonHTTP = AmazonHTTP()
+    let amazonSubmission = NativeSubmissionGate()
     let privateMediaCaptureScope = PrivateMediaConsumerRegistry.SelectedWriteScope()
     var immichVisibilityConfirmationCurrent: (@MainActor (ImmichVisibilityPrompt) async throws -> Bool)?
     var immichLockedTimerEffect: (@MainActor (ImmichLockedTimer) -> Void)?
@@ -36,6 +38,7 @@ import SuwopShell
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
     func invalidateContentPresentations() {
+        amazonSubmission.invalidate()
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
@@ -50,6 +53,7 @@ import SuwopShell
     }
 
     func invalidateImmichLockedPresentations() {
+        amazonSubmission.invalidate()
         immichLockedAccess.invalidate()
         immichLockedVideoAccess.invalidate()
         immichLockedLiveAccess.invalidate()
@@ -58,6 +62,7 @@ import SuwopShell
     }
 
     func invalidateProtectedPresentations() {
+        amazonSubmission.invalidate()
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
@@ -90,10 +95,22 @@ import SuwopShell
     }
 
     func execute(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
+        if operation.type == "amazonUpload" {
+            // Makes the same owner/cancellation checks, reporting them as unsent.
+            return try await amazonUpload(operation.data ?? .null, context: context)
+        }
+        return try await executeChecked(operation, context: context)
+    }
+
+    private func executeChecked(
+        _ operation: ShellOperation,
+        context: ContentPresentationContext
+    ) async throws -> JSONValue {
         try context.requireOwner(presentationEpoch)
         let data = operation.data ?? .null
         let completionEffects = [
-            "persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply", "appleVisibilityApply",
+            "persist", "cleanup", "removeCredential", "removeAmazonCredential", "appleEditClose", "appleTrashApply",
+            "appleVisibilityApply",
             "releaseProtectedImages", "releaseProtectedImage",
             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
@@ -142,11 +159,24 @@ import SuwopShell
                 destination: requiredString(data, "destination")
             ))
         }
-        return try await dispatch(operation, data: data, context: context)
+        return try await dispatchProviderEffect(operation, data: data, context: context)
     }
 }
 
 extension AppleShell {
+    private func dispatchProviderEffect(
+        _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        if operation.type == "readCredential" {
+            let account = try requiredString(data, "account")
+            return try await .string(NativeKeychainRead.run { try Credentials.read(account) })
+        }
+        if ["amazonHttp", "amazonHashFile", "removeAmazonCredential"].contains(operation.type) {
+            return try await amazonEffect(operation.type, data: data, context: context)
+        }
+        return try await dispatch(operation, data: data, context: context)
+    }
+
     private func dispatch(
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
@@ -506,42 +536,6 @@ extension AppleShell {
 
     func embeddingThumbnail(_ request: HttpRequest) async throws -> Data {
         try await http.thumbnail(request)
-    }
-
-    func thumbnail(
-        _ key: AssetKey,
-        connection: ConnectionSettings?,
-        version: Version? = nil,
-        preview: Bool = false
-    ) async throws -> PlatformImage {
-        let context = beginWorkflow()
-        let revision = try await ordinaryContent.validate(keys: [key], context: context)
-        if key.provider == .apple {
-            let image = try await appleStore(scope: key.scope).thumbnail(
-                key,
-                edge: preview ? 2048 : 360,
-                preview: preview
-            )
-            _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
-            return image
-        }
-        guard let connection else {
-            throw PreviewLoadError.missingConnection
-        }
-        let credential = try Credentials.read(connection.credentialID)
-        let input: JSONValue = try .object([
-            "address": .string(connection.address),
-            "key": .string(credential),
-            "assetID": .string(key.assetID),
-            "preview": .bool(preview),
-            "version": .from(version),
-        ])
-        let request = try CoreBridge.utility(7, input: input).decode(HttpRequest.self)
-        _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
-        let bytes = try await http.thumbnail(request)
-        _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
-        guard let image = PlatformImage(data: bytes) else { throw PreviewLoadError.invalidImage }
-        return image
     }
 }
 

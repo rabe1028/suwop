@@ -6,6 +6,7 @@ struct PhotoInfo: View {
     @ObservedObject var model: LibraryModel
     @Environment(\.dismiss) private var dismiss
     @State private var pendingSource: Provider?
+    @State private var pendingDestination: Provider?
     @State private var wantsMove = false
     @State private var pendingMetadata: MetadataTarget?
     init(photo: UnifiedPhoto, model: LibraryModel) {
@@ -56,7 +57,7 @@ struct PhotoInfo: View {
             ) {
                 if let source = pendingSource {
                     Button(wantsMove ? "コピーして移動を準備" : "コピーを開始") {
-                        model.copy(photo, from: source, move: wantsMove)
+                        model.copy(photo, from: source, to: pendingDestination, move: wantsMove)
                         dismiss()
                     }
                 }
@@ -130,15 +131,22 @@ struct PhotoInfo: View {
                             Button("日時・位置情報を変更") { pendingMetadata = target }
                                 .disabled(model.isBusy || !canOperate)
                         }
-                        let destination = provider == .apple ? Provider.immich : .apple
-                        Button("\(destination.title) にコピー") { wantsMove = false
-                            pendingSource = provider
+                        ForEach(Provider.allCases.filter { $0 != provider }, id: \.self) { destination in
+                            Button("\(destination.title) にコピー") {
+                                wantsMove = false
+                                pendingDestination = destination
+                                pendingSource = provider
+                            }.disabled(!model.canTransfer || !canOperate)
+                            if provider != .amazon, destination != .amazon {
+                                Button("\(destination.title) へ移動") {
+                                    wantsMove = true
+                                    pendingDestination = destination
+                                    pendingSource = provider
+                                }
+                                .disabled(!model.canTransfer || !canOperate || assets
+                                    .contains { !$0.deletionBlockers.isEmpty })
+                            }
                         }
-                        .disabled(!model.canTransfer || !canOperate)
-                        Button("\(destination.title) へ移動") { wantsMove = true
-                            pendingSource = provider
-                        }
-                        .disabled(!model.canTransfer || !canOperate || assets.contains { !$0.deletionBlockers.isEmpty })
                         if provider == .apple {
                             Button(
                                 assets.count > 1 ? "Apple 側のすべての \(assets.count) 件を削除" : "Apple Photos から削除",
@@ -167,15 +175,51 @@ struct ConnectionView: View {
     @State private var address = ""
     @State private var key = ""
     @State private var allowHTTP = false
+    @State private var showAmazonLogin = false
+    @State private var loadingSavedKey = false
+    @State private var loadingAmazon = false
+    @State private var amazonError: String?
+    @State private var keyError: String?
     var body: some View {
         NavigationStack {
             Form {
+                Section("Amazon Photos（日本）") {
+                    Button("Amazon Photosにログイン") { showAmazonLogin = true }
+                        .disabled(model.isBusy).accessibilityIdentifier("connectAmazonPhotos")
+                    if model.view?.state.amazonConnection == nil {
+                        Button("保存済みのAmazon認証で再接続") { reconnectAmazon() }
+                            .disabled(model.isBusy || loadingAmazon)
+                            .accessibilityIdentifier("reconnectSavedAmazonPhotos")
+                    }
+                    if let amazonError {
+                        Text(amazonError).foregroundStyle(.red)
+                    }
+                    if model.view?.state.amazonConnection != nil {
+                        Text("接続済み・CookieはKeychainに保存されています。")
+                        Button("アップロード結果を再確認") {
+                            model.send(["type": .string("resolveAmazonUploads"), "id": .string(UUID().uuidString)])
+                        }.disabled(model.isBusy)
+                        Button("Amazon Photosの接続を解除", role: .destructive) {
+                            model.send(["type": .string("disconnectAmazon")])
+                        }.disabled(model.isBusy)
+                    }
+                    Text("原本の閲覧・コピーとお気に入りに対応します。非対応形式は変換せず停止し、元の原本を残します。Live Photoの組や補助データはAmazon側での保持を確認できるまで転送しません。")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
                 Section("Immich") {
                     TextField("https://immich.example.com", text: $address)
                     #if os(iOS)
                         .textInputAutocapitalization(.never).autocorrectionDisabled().keyboardType(.URL)
                     #endif
                     SecureField("API キー", text: $key)
+                    if let settings = model.connection, key.isEmpty {
+                        Button(loadingSavedKey ? "保存済みのキーを読込中…" : "保存済みのImmich APIキーを読み込む") {
+                            loadSavedKey(settings.credentialID)
+                        }.disabled(loadingSavedKey || model.isBusy)
+                    }
+                    if let keyError {
+                        Text(keyError).font(.caption).foregroundStyle(.red)
+                    }
                     Toggle("HTTP 接続を許可（暗号化なし）", isOn: $allowHTTP)
                     if allowHTTP {
                         Text("HTTP では API キーと写真が暗号化されません。信頼できるネットワークでのみ使用してください。")
@@ -212,18 +256,45 @@ struct ConnectionView: View {
                 }
             }
             .formStyle(.grouped).navigationTitle("接続設定")
+            .sheet(isPresented: $showAmazonLogin) {
+                AmazonLoginView { account in
+                    model.configureAmazon(account)
+                }
+            }
             .toolbar { ToolbarItem(placement: .cancellationAction) { Button("閉じる") { dismiss() } } }
             .onAppear {
                 if let settings = model.connection {
                     address = settings.address
                     allowHTTP = settings.allowHTTP
-                    key = (try? Credentials.read(settings.credentialID)) ?? ""
                 }
             }
         }
         #if os(macOS)
         .frame(minWidth: 540, minHeight: 600)
         #endif
+    }
+
+    private func reconnectAmazon() {
+        loadingAmazon = true
+        amazonError = nil
+        Task {
+            defer { loadingAmazon = false }
+            do {
+                let account = try await NativeKeychainRead.run { try AmazonCredentials.unambiguousSavedAccount() }
+                model.configureAmazon(account)
+            } catch { amazonError = error.localizedDescription }
+        }
+    }
+
+    private func loadSavedKey(_ account: String) {
+        loadingSavedKey = true
+        keyError = nil
+        Task {
+            defer { loadingSavedKey = false }
+            do {
+                key = try await NativeKeychainRead.run { try Credentials.read(account) }
+            } catch { keyError = error.localizedDescription }
+        }
     }
 }
 

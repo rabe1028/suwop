@@ -6,6 +6,7 @@ use crux_core::{
     Core,
     bridge::{Bridge, JsonFfiFormat},
 };
+use md5::Digest as _;
 use serde_json::{Value, json};
 use sha1::Digest;
 use std::{
@@ -17,10 +18,10 @@ use std::{
         atomic::{AtomicBool, Ordering},
     },
 };
-use suwop_core::{
-    domain::{AppleFacts, FileSignature, StoredAsset, describe_apple, hex},
-    workflow::HashResult,
-};
+use suwop_core::domain::{AppleFacts, FileSignature, StoredAsset, describe_apple, hex};
+
+#[cfg(test)]
+use suwop_core::workflow::HashResult;
 
 mod compact;
 mod input_limits;
@@ -140,7 +141,7 @@ fn error_envelope(error: &str) -> Vec<u8> {
         .into_bytes()
 }
 fn respond(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String> {
-    if (3..=15).contains(&action) {
+    if (3..=15).contains(&action) || matches!(action, 20 | 21) {
         serde_json::to_vec(&execute(action, input)?).map_err(|e| e.to_string())
     } else {
         execute_core(handle, action, input)
@@ -157,6 +158,12 @@ pub unsafe extern "C" fn suwop_free(value: *mut c_char) {
 }
 fn execute(action: u32, input: &str) -> Result<Value, String> {
     match action {
+        20 => {
+            return suwop_core::amazon::utility(
+                &serde_json::from_str(input).map_err(|_| "Amazon Photos要求が不正です。")?,
+            );
+        }
+        21 => return hash_amazon_input(input),
         3 => {
             return serde_json::to_value(describe_apple(
                 serde_json::from_str(input).map_err(|e| e.to_string())?,
@@ -317,6 +324,10 @@ fn thumbnail_request(input: &str) -> Result<Value, String> {
         .map_err(|e| e.to_string())
 }
 fn hash_input(input: &str) -> Result<Value, String> {
+    let hash = hash_amazon_input(input)?;
+    Ok(json!({"sha1":hash["sha1"],"signature":hash["signature"]}))
+}
+fn hash_amazon_input(input: &str) -> Result<Value, String> {
     #[derive(serde::Deserialize)]
     struct Input {
         path: String,
@@ -335,7 +346,7 @@ fn hash_input(input: &str) -> Result<Value, String> {
         .ok_or("Invalid cancellation handle")?;
     check_cancelled(&flag)?;
     let file = std::fs::File::open(input.path).map_err(|_| "原本を読み出せません。".to_owned())?;
-    serde_json::to_value(hash_reader(file, &flag)?).map_err(|e| e.to_string())
+    serde_json::to_value(hash_amazon_reader(file, &flag)?).map_err(|e| e.to_string())
 }
 fn check_cancelled(flag: &AtomicBool) -> Result<(), String> {
     if flag.load(Ordering::Acquire) {
@@ -344,8 +355,20 @@ fn check_cancelled(flag: &AtomicBool) -> Result<(), String> {
         Ok(())
     }
 }
+#[cfg(test)]
 fn hash_reader(mut file: impl Read, flag: &AtomicBool) -> Result<HashResult, String> {
+    let result = hash_amazon_reader(&mut file, flag)?;
+    Ok(HashResult {
+        sha1: result.sha1,
+        signature: result.signature,
+    })
+}
+fn hash_amazon_reader(
+    mut file: impl Read,
+    flag: &AtomicBool,
+) -> Result<suwop_core::amazon::Hash, String> {
     let mut sha1 = sha1::Sha1::new();
+    let mut md5 = md5::Md5::new();
     let mut sha256 = sha2::Sha256::new();
     let mut count = 0;
     let mut buffer = vec![0_u8; 1024 * 1024];
@@ -359,10 +382,12 @@ fn hash_reader(mut file: impl Read, flag: &AtomicBool) -> Result<HashResult, Str
             break;
         }
         sha1.update(&buffer[..n]);
+        md5.update(&buffer[..n]);
         sha256.update(&buffer[..n]);
         count += n as u64;
     }
-    Ok(HashResult {
+    Ok(suwop_core::amazon::Hash {
+        md5: hex(&md5.finalize()),
         sha1: hex(&sha1.finalize()),
         signature: FileSignature {
             sha256: hex(&sha256.finalize()),
@@ -426,6 +451,18 @@ mod tests {
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
         assert_eq!(result.signature.bytes, 3);
+        Ok(())
+    }
+
+    #[test]
+    fn amazon_stream_hash_includes_md5_for_remote_integrity() -> Result<(), String> {
+        let result = super::hash_amazon_reader(io::Cursor::new(b"abc"), &AtomicBool::new(false))?;
+        assert_eq!(result.md5, "900150983cd24fb0d6963f7d28e17f72");
+        assert_eq!(result.sha1, "a9993e364706816aba3e25717850c26c9cd0d89d");
+        assert_eq!(
+            result.signature.sha256,
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
         Ok(())
     }
 

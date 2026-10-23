@@ -160,6 +160,19 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance.tests
         TEST_TARGET_NAME: SuwopPhotoKitHost
+  SuwopAmazonMacTests:
+    type: bundle.unit-test
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources: [NativeAcceptance/AmazonMacTests]
+    dependencies:
+      - target: SuwopmacOS
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.amazon.tests
+        TEST_HOST: '$(BUILT_PRODUCTS_DIR)/SuwopmacOS.app/Contents/MacOS/SuwopmacOS'
+        BUNDLE_LOADER: '$(TEST_HOST)'
   SuwopSharingTests:
     type: bundle.unit-test
     platform: macOS
@@ -413,6 +426,14 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopPhotoKitTests]
+  SuwopAmazonMac:
+    build:
+      targets:
+        SuwopmacOS: all
+        SuwopAmazonMacTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopAmazonMacTests]
   SuwopSharing:
     build:
       targets:

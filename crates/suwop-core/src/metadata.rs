@@ -123,11 +123,13 @@ impl<'a> MetadataAccess<'a> {
                         .flatten(),
                     locations_vary,
                     can_remove_location: provider == Provider::Apple && accessible,
-                    disabled_reason: (!accessible).then(|| {
+                    disabled_reason: if provider == Provider::Amazon {
+                        Some("Amazon Photosの日時・位置情報の書換えには対応していません。Apple PhotosまたはImmichで編集してください。".into())
+                    } else { (!accessible).then(|| {
                         if provider == Provider::Apple {
                 "日時・位置情報の変更には Apple Photos のフルアクセスと最新の一覧が必要です。"
             } else { "Immich の一覧を更新してアクセスを確認してください。" }.into()
-                    }),
+                    }) },
                 }
             })
             .collect()

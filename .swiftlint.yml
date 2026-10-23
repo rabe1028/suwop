@@ -13,6 +13,7 @@ included:
   - NativeAcceptance/PrivateLiveUIProbeShared
   - NativeAcceptance/PrivateLiveUIProbeTests
   - NativeAcceptance/SharingTests
+  - NativeAcceptance/AmazonMacTests
 excluded:
   - Sources/SuwopShell/Generated
 opt_in_rules:

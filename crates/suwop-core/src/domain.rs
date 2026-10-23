@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 pub enum Provider {
     Apple,
     Immich,
+    Amazon,
 }
 
 impl Provider {
@@ -17,7 +18,7 @@ impl Provider {
     pub fn other(self) -> Self {
         match self {
             Self::Apple => Self::Immich,
-            Self::Immich => Self::Apple,
+            Self::Immich | Self::Amazon => Self::Apple,
         }
     }
 }
@@ -202,6 +203,8 @@ impl LibrarySnapshot {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum Presence {
+    Amazon,
+    Multiple,
     Both,
     AppleOnly,
     ImmichOnly,
@@ -226,6 +229,61 @@ fn join(parent: &mut [usize], a: usize, b: usize) {
     let y = root(parent, b);
     parent[x.max(y)] = x.min(y);
 }
+fn group_presence(group: &[StoredAsset], snapshots: &[LibrarySnapshot]) -> Presence {
+    let current = |p| snapshot_current(snapshots, p);
+    let indexed = |p| snapshot_indexed(snapshots, p);
+    let apple = group.iter().any(|a| a.key.provider == Provider::Apple);
+    let immich = group.iter().any(|a| a.key.provider == Provider::Immich);
+    let complete = group.iter().all(StoredAsset::fingerprints_complete);
+    let amazon_indexed =
+        !snapshots.iter().any(|s| s.provider == Provider::Amazon) || indexed(Provider::Amazon);
+    if group.iter().any(|a| a.is_offline) {
+        Presence::Unverified
+    } else if group.iter().any(|a| a.key.provider == Provider::Amazon) {
+        let providers: BTreeSet<_> = group.iter().map(|a| a.key.provider).collect();
+        if !current(Provider::Amazon) {
+            Presence::Unverified
+        } else if providers.len() == 1 {
+            Presence::Amazon
+        } else if complete
+            && providers.iter().all(|p| current(*p))
+            && providers
+                .iter()
+                .all(|p| checksum_counts(group, *p) == checksum_counts(group, Provider::Amazon))
+        {
+            Presence::Multiple
+        } else {
+            Presence::Unverified
+        }
+    } else if apple && immich {
+        if !current(Provider::Apple) || !current(Provider::Immich) {
+            Presence::Unverified
+        } else if complete
+            && checksum_counts(group, Provider::Apple) == checksum_counts(group, Provider::Immich)
+        {
+            Presence::Both
+        } else {
+            Presence::Partial
+        }
+    } else if apple
+        && complete
+        && current(Provider::Apple)
+        && indexed(Provider::Immich)
+        && amazon_indexed
+    {
+        Presence::AppleOnly
+    } else if immich
+        && complete
+        && current(Provider::Immich)
+        && indexed(Provider::Apple)
+        && amazon_indexed
+    {
+        Presence::ImmichOnly
+    } else {
+        Presence::Unverified
+    }
+}
+
 fn checksum_counts(assets: &[StoredAsset], provider: Provider) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for asset in assets.iter().filter(|a| a.key.provider == provider) {
@@ -297,34 +355,10 @@ pub fn catalog(snapshots: &[LibrarySnapshot], receipts: &[TransferReceipt]) -> V
     for (i, asset) in assets.into_iter().enumerate() {
         groups.entry(root(&parent, i)).or_default().push(asset);
     }
-    let current = |p| snapshot_current(snapshots, p);
-    let indexed = |p| snapshot_indexed(snapshots, p);
     let mut photos: Vec<_> = groups
         .into_values()
         .map(|group| {
-            let apple = group.iter().any(|a| a.key.provider == Provider::Apple);
-            let immich = group.iter().any(|a| a.key.provider == Provider::Immich);
-            let complete = group.iter().all(StoredAsset::fingerprints_complete);
-            let presence = if group.iter().any(|a| a.is_offline) {
-                Presence::Unverified
-            } else if apple && immich {
-                if !current(Provider::Apple) || !current(Provider::Immich) {
-                    Presence::Unverified
-                } else if complete
-                    && checksum_counts(&group, Provider::Apple)
-                        == checksum_counts(&group, Provider::Immich)
-                {
-                    Presence::Both
-                } else {
-                    Presence::Partial
-                }
-            } else if apple && complete && current(Provider::Apple) && indexed(Provider::Immich) {
-                Presence::AppleOnly
-            } else if immich && complete && current(Provider::Immich) && indexed(Provider::Apple) {
-                Presence::ImmichOnly
-            } else {
-                Presence::Unverified
-            };
+            let presence = group_presence(&group, snapshots);
             UnifiedPhoto {
                 assets: group,
                 presence,

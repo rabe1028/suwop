@@ -1020,7 +1020,7 @@ fn schema_migration_preserves_dates_and_disables_legacy_deletion() -> Result<(),
     let state = suwop_core::workflow::migrate(
         json!({"schemaVersion":1,"appleScope":"old","connection":null,"snapshots":[],"receipts":[]}),
     )?;
-    assert_eq!(state.schema_version, 8);
+    assert_eq!(state.schema_version, 9);
     assert_eq!(state.apple_scope, "old");
     assert!(suwop_core::workflow::migrate(json!({"schemaVersion":99})).is_err());
     Ok(())

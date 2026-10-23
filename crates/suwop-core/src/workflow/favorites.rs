@@ -30,8 +30,16 @@ impl Runtime<'_> {
             .filter(|k| k.provider == Provider::Immich)
             .cloned()
             .collect();
+        let amazon: Vec<_> = keys
+            .iter()
+            .filter(|k| k.provider == Provider::Amazon)
+            .cloned()
+            .collect();
         // Validate both current libraries and access before the first write.
-        for group in [&apple, &remote].into_iter().filter(|g| !g.is_empty()) {
+        for group in [&apple, &remote, &amazon]
+            .into_iter()
+            .filter(|g| !g.is_empty())
+        {
             self.check_keys(group)?;
         }
         if keys.iter().any(|key| {
@@ -68,6 +76,19 @@ impl Runtime<'_> {
             self.save_favorite_result(std::slice::from_ref(key), value, result)
                 .await?;
             self.progress("Immich のお気に入りを保存しました。");
+        }
+        for key in &amazon {
+            let connection = self.amazon_session(
+                std::slice::from_ref(key),
+                crate::immich::OrdinaryContentPurpose::Read,
+            )?;
+            let result = connection
+                .favorite(self.ctx, &key.asset_id, value)
+                .await
+                .map(|record| vec![record]);
+            self.save_favorite_result(std::slice::from_ref(key), value, result)
+                .await?;
+            self.progress("Amazon Photosのお気に入りを保存しました。");
         }
         Ok(format!("{} 件のお気に入りを変更しました。", keys.len()))
     }

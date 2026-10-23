@@ -12,6 +12,10 @@ use std::collections::BTreeSet;
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PublishedLibrary {
+    #[serde(default)]
+    pub amazon_connection: Option<crate::amazon::Connection>,
+    #[serde(default)]
+    pub amazon_uploads: Vec<crate::amazon::UploadRecord>,
     pub apple_visibility_operations: Vec<crate::apple_visibility::AppleVisibilitySummary>,
     #[serde(default)]
     pub edit_clipboard: Option<crate::editing::EditClipboard>,
@@ -222,6 +226,7 @@ impl PublishedLibrary {
                 redact_asset(&access, a);
             }
         }
+        redact_amazon_uploads(canonical, &access, &mut state.amazon_uploads);
         for o in &mut state.pending_apple_trash {
             for a in &mut o.assets {
                 redact_asset(&access, a);
@@ -280,6 +285,8 @@ impl PublishedLibrary {
             schema_version: state.schema_version,
             apple_scope: state.apple_scope,
             connection: state.connection,
+            amazon_connection: state.amazon_connection,
+            amazon_uploads: state.amazon_uploads,
             snapshots: state.snapshots,
             receipts: state.receipts,
             albums: state.albums,
@@ -288,6 +295,32 @@ impl PublishedLibrary {
             trash: state.trash,
             pending_trash: state.pending_trash,
             pending_apple_trash: state.pending_apple_trash,
+        }
+    }
+}
+
+fn redact_amazon_uploads(
+    canonical: &SavedLibrary,
+    access: &ContentAccess,
+    uploads: &mut [crate::amazon::UploadRecord],
+) {
+    for upload in uploads {
+        let visible = canonical
+            .receipts
+            .iter()
+            .find(|r| r.id == upload.receipt_id)
+            .is_some_and(|r| {
+                r.source
+                    .iter()
+                    .chain(&r.destination)
+                    .all(|a| access.visible(&a.key))
+            });
+        if !visible {
+            upload.name = "非公開の写真".into();
+            upload.md5.clear();
+            upload.signature.sha256.clear();
+            upload.signature.bytes = 0;
+            upload.node_id = None;
         }
     }
 }
