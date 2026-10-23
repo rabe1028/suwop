@@ -4,7 +4,7 @@ Local `make vrt` remains the complete host and UI run. Recording is local and
 requires explicit reviewed approval; CI never records baselines.
 
 CI runs `make vrt-ci-host` (all host tests and 50 comparisons) and
-`make vrt-ci-ui-1` and `make vrt-ci-ui-2` (UI test shards). Lanes never build.
+`make vrt-ci-ui-1` … `make vrt-ci-ui-3` (UI test shards). Lanes never build.
 The `apple-products` job runs `make simulator-products` once: the Rust
 simulator library plus `build-for-testing` for the VRT and PhotoKit schemes.
 It keeps only runtime bundles and xctestrun files, without static archives,
@@ -25,7 +25,7 @@ exactly its selected IDs once, pass with zero skips, and retain the pinned
 device/configuration. A lane report always says `full_suite_passed: false`.
 
 UI tests dominate VRT time (61 tests took 2,732s serially in run
-39049104153), so two shards run on separate macOS runners. The host lane runner
+39049104153), so three shards run on separate macOS runners. The host lane runner
 then runs `make apple-native-test` with the same products. PhotoKit service
 changes therefore always follow that runner's screenshot comparisons. When tests are added
 or change cost, refresh the durations from every UI shard's `compare.log`:

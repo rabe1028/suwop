@@ -17,7 +17,7 @@ from vrt_test_inventory import (
     require,
 )
 
-UI_SHARDS = 2
+UI_SHARDS = 3
 SCOPES = {
     "host-snapshots": "SuwopVRT",
     **{f"ui-{index}": "SuwopVRTUI" for index in range(1, UI_SHARDS + 1)},

@@ -220,6 +220,10 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -266,6 +270,10 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -333,6 +341,10 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -382,7 +394,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [vrt-ci-ui-1, vrt-ci-ui-2, vrt-ci-host]
+        suite: [vrt-ci-ui-1, vrt-ci-ui-2, vrt-ci-ui-3, vrt-ci-host]
     timeout-minutes: 45
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
@@ -393,6 +405,10 @@ jobs:
         uses: ./.github/actions/ci-metrics
         with:
           mode: start
+      # Spotlight indexed every restored cache and build output, using up to a
+      # core of these 3-CPU runners (ci-metrics run 39895970992).
+      - name: Stop Spotlight indexing
+        run: sudo mdutil -a -i off
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:

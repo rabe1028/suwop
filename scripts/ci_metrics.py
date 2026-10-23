@@ -146,7 +146,13 @@ def mac_frames(folder, info):
                 "net_rx": (current.get("net", 0) - previous.get("net", 0)) / seconds,
             }
         )
-        processes += [(current["time"], name, cpu) for name, cpu in current["procs"]]
+        # macOS top occasionally reports nonsense (e.g. 197533297%) for a process
+        # that just started or exited; no process exceeds every core.
+        processes += [
+            (current["time"], name, cpu)
+            for name, cpu in current["procs"]
+            if cpu <= 100 * int(info["cpus"])
+        ]
     return samples, processes
 
 

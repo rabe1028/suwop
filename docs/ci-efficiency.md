@@ -96,7 +96,7 @@ library and re-instantiating its generics.
 
 Changes:
 
-- UI tests run as two duration-balanced shards on separate macOS runners
+- UI tests run as three duration-balanced shards on separate macOS runners
   (see [VRT CI lanes](vrt-ci-lanes.md)). The aggregate still requires the
   shards to cover the registered UI bundle exactly once.
 - `lint`, `core (debug)` and `core (release)` run in parallel with separate
@@ -112,7 +112,7 @@ Changes:
   the Apple release slices rebuilt dependencies cold (42 minutes instead of
   about 3). PRs now restore main's caches without writing their own.
 - `make test-rust` runs tests with cargo-nextest (pinned in
-  `scripts/install-tools.sh`, no retries) and doctests with `cargo test --doc`.
+  `mise.toml`, no retries) and doctests with `cargo test --doc`.
   `RUST_TEST_ARGS=--release` runs the release suite.
 
 A local warm rebuild after touching `suwop-core` (Apple M-series,
@@ -135,7 +135,7 @@ The workflow now has these macOS jobs:
 | `apple-rust` ×3 | macos-15 | One release slice each (about 3 minutes warm) |
 | `apple` | macos-15 | Rust-to-Swift bridge tests, iOS/macOS apps from the slices, macOS sharing/private media tests |
 | `apple-products` | macos-26 | Rust simulator library and VRT/PhotoKit `build-for-testing`, once |
-| `simulator` ×3 | macos-26 | `vrt-ci-ui-1`, `vrt-ci-ui-2`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
+| `simulator` ×4 | macos-26 | `vrt-ci-ui-1`…`vrt-ci-ui-3`, and `vrt-ci-host` followed by PhotoKit acceptance; prebuilt products only |
 
 With warm caches, the slice jobs finish before the simulator lanes start, so
 at most five macOS jobs run at once for one workflow run. The slices stay in
@@ -172,3 +172,26 @@ Kept on macOS deliberately:
   would need fake link stubs and would test libraries built by a different C
   compiler than developers and releases use. At most it would save about
   nine warm macOS minutes per run.
+
+## Resource metrics (2026-10)
+
+Every job except the `vrt` aggregate runs `.github/actions/ci-metrics`. It
+samples CPU, memory, swap, disk, network and the busiest processes in the
+background (Linux `/proc` every 2s, macOS `top` frames) and uploads them as
+`ci-metrics-<job>-<attempt>`. To see each step's use:
+
+```sh
+uv run --no-project python scripts/ci_metrics.py RUN_ID [--attempt N]
+```
+
+The first warm run, [39895970992](https://github.com/rabe1028/suwop/actions/runs/39895970992),
+took 35.4 minutes. The critical path was `apple-products` (7.9m), then
+`simulator (vrt-ci-ui-1)` (27.1m).
+
+| Finding | Evidence | Change |
+| --- | --- | --- |
+| UI lanes are latency-bound, not CPU-bound | 52–58% of 3 CPUs; `compare` took 1,454s and 1,276s of each lane | Three UI shards; the expected loads are 889, 887 and 889s for 68 tests |
+| Spotlight competes with builds on 3-CPU macOS runners | `mds_stores`/`mdworker` took 50–80% of a core during `apple` builds (93–99% CPU) and cache restores | `sudo mdutil -a -i off` first in every macOS job |
+| UI test time is mostly app idle waits | Of 2,662s of XCUITest activity, 31% was "Wait for app to idle" (471 waits over 1s, mean 1.5s). Explicit waits took about 1s each; none timed out | Not changed: animations belong to the app under test |
+| Linux Rust jobs are CPU-bound | `core (release)` used 92% of 4 CPUs (`rustc`) | Already parallel and cached |
+| macOS memory | About 6.9 of 7 GiB is in use, with no swapouts | None; file cache counts as used |
