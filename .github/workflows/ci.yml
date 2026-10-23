@@ -10,14 +10,19 @@ permissions:
 
 env:
   CARGO_BUILD_JOBS: '2'
+  NEXTEST_PROFILE: ci
 
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  core:
+  # Lint, debug tests and release tests run on separate runners with separate
+  # caches, so no job compiles the workspace twice or discards its build.
+  lint:
     runs-on: ubuntu-latest
+    env:
+      CARGO_BUILD_JOBS: '4'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install pinned uv
@@ -37,15 +42,71 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
       - name: Enforce Rust, script, workflow and architecture rules
         run: make lint-common
-      - run: make test
-      - name: Test release without retaining the completed debug build
+
+  # The pinned Swift image provides the SourceKit that SwiftLint's custom rules need.
+  swift-lint:
+    runs-on: ubuntu-latest
+    container: swift:6.2-noble@sha256:d6f8f6112e9a63da0a4a151d6b93acd16699d35c0b82531ac1a245f5af210197
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install archive and build utilities
+        run: apt-get update && apt-get install -y --no-install-recommends curl unzip make
+      - name: Install pinned SwiftLint and SwiftFormat
+        run: bash scripts/install-swift-tools.sh
+      - name: Enforce Swift formatting and strict lint
+        run: make lint-swift
+
+  core:
+    name: core (${{ matrix.profile }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: debug
+            target: test
+            args: ''
+          - profile: release
+            target: test-rust
+            args: --release
+    env:
+      CARGO_BUILD_JOBS: '4'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.11.24'
+          enable-cache: true
+      - name: Isolate Rust toolchains from the runner image
         run: |
-          cargo clean
-          cargo test --locked --workspace --all-features --release
+          suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
+          echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
+          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Cache Rust dependencies and target builds
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
+        with:
+          # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
+          key: ${{ runner.os }}-${{ runner.arch }}-${{ matrix.profile }}
+          cache-bin: false
+          env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install pinned quality tools
+        run: bash scripts/install-tools.sh
+      - name: Run the ${{ matrix.profile }} test suite
+        env:
+          TARGET: ${{ matrix.target }}
+          ARGS: ${{ matrix.args }}
+        run: make "$TARGET" RUST_TEST_ARGS="$ARGS"
 
   immich-integration:
     runs-on: ubuntu-latest
@@ -69,6 +130,9 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Verify old-server ordinary, read, recovery and denied PIN writes
         env:
           IMMICH_VERSION: v3.2.4
@@ -90,6 +154,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  # macOS runs only what needs Apple SDKs, Xcode or simulators. Each kind of
+  # build happens once, with one main-only cache, and is shared by artifacts.
+  # Rust tests and repository checks already run on Linux.
+  # Release slices stay parallel: a cold slice takes about 40 minutes on
+  # macos-15, so three in one job exceeded the timeout and no cache was saved.
   apple-rust:
     name: apple-rust (${{ matrix.target }})
     runs-on: macos-15
@@ -119,6 +188,7 @@ jobs:
           key: ${{ runner.os }}-${{ runner.arch }}-release-${{ matrix.target }}
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install protobuf compiler
         run: brew install protobuf
       - name: Build one release slice
@@ -133,7 +203,8 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  apple-tests:
+  apple:
+    needs: apple-rust
     runs-on: macos-15
     timeout-minutes: 60
     steps:
@@ -143,47 +214,33 @@ jobs:
         with:
           version: '0.11.24'
           enable-cache: true
-      - name: Isolate Rust toolchains from the runner image
+      - name: Isolate the pinned Rust toolchain
         run: |
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
           echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
-          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal --component clippy --component rustfmt
-      - name: Cache Rust dependencies and target builds
+          RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
+      - name: Cache the Rust host build for Swift tests
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
-          key: ${{ runner.os }}-${{ runner.arch }}-host-tests-v2
+          key: ${{ runner.os }}-${{ runner.arch }}-host-tests
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
+          # Only main saves: per-PR caches exceeded the 10 GB repository limit and
+          # evicted main's caches, so every PR started cold.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install pinned quality tools
         run: bash scripts/install-tools.sh
-      - name: Enforce Swift formatting and strict lint
-        run: make lint-swift
       - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
-        run: make test
-
-  apple:
-    needs: [apple-rust, apple-tests]
-    runs-on: macos-15
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
-      - name: Install pinned uv
-        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
-        with:
-          version: '0.11.24'
-          enable-cache: true
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - uses: ./.github/actions/cache-apple-packages
+        run: make test-swift
       - name: Download this run's three ARM64 release slices
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: rust-slice-*
           path: Generated/RustSlices
           merge-multiple: true
-      - name: Build ARM64 Rust libraries, iOS and macOS apps
+      - name: Build iOS and macOS apps from the revision-bound slices
         run: make apple-build APPLE_RUST_BUILD_ARGS=--package
       - name: Verify native sharing source invalidation and selected-service leases
         run: make sharing-test
@@ -200,21 +257,14 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  simulator:
+  # Builds the VRT and PhotoKit test products once for every simulator lane.
+  apple-products:
     runs-on: macos-26
-    name: simulator (${{ matrix.suite }})
-    # Independent runners keep PhotoKit service changes away from screenshot tests.
-    strategy:
-      fail-fast: false
-      matrix:
-        suite: [vrt-ci-host, vrt-ci-ui, apple-native-test]
-    timeout-minutes: ${{ matrix.suite == 'vrt-ci-ui' && 65 || 60 }}
+    timeout-minutes: 60
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
-      CARGO_BUILD_JOBS: '2'
       CARGO_INCREMENTAL: '0'
       CARGO_PROFILE_DEV_DEBUG: '0'
-      CARGO_PROFILE_TEST_DEBUG: '0'
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Install pinned uv
@@ -227,20 +277,71 @@ jobs:
           suwop_rustup_dir="$RUNNER_TEMP/suwop-rustup"
           echo "RUSTUP_HOME=$suwop_rustup_dir" >> "$GITHUB_ENV"
           RUSTUP_HOME="$suwop_rustup_dir" rustup toolchain install 1.95.0 --profile minimal
-      - name: Cache Rust dependencies and target builds
+      - name: Cache the Rust simulator build
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           # RUSTUP_HOME is hashed by rust-cache; keep its isolated path stable.
-          key: ${{ runner.os }}-${{ runner.arch }}
+          key: ${{ runner.os }}-${{ runner.arch }}-simulator
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
-      - name: Install XcodeGen and pinned SimSlim
-        run: |
-          brew install xcodegen protobuf
-          make setup-vrt
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Install XcodeGen
+        run: brew install xcodegen protobuf
       - uses: ./.github/actions/cache-apple-packages
+      - name: Build simulator test products
+        run: make simulator-products
+      # upload-artifact drops file modes; a tarball keeps executables and bundle symlinks.
+      - name: Pack simulator test products
+        run: tar -czf "$RUNNER_TEMP/simulator-products.tgz" -C DerivedData/SimulatorProducts/current .
+      - name: Retain this attempt's simulator test products
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: simulator-products-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/simulator-products.tgz
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 1
+
+  simulator:
+    needs: apple-products
+    runs-on: macos-26
+    name: simulator (${{ matrix.suite }})
+    # Lanes only run prebuilt products. The host lane runs PhotoKit acceptance after
+    # its screenshots, so PhotoKit service changes never precede a comparison.
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [vrt-ci-ui-1, vrt-ci-ui-2, vrt-ci-host]
+    timeout-minutes: 45
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.4.1.app/Contents/Developer
+      SUWOP_SIMULATOR_PRODUCTS: ${{ github.workspace }}/DerivedData/SimulatorProducts/ci
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+      - name: Install pinned uv
+        uses: astral-sh/setup-uv@37802adc94f370d6bfd71619e3f0bf239e1f3b78 # v7
+        with:
+          version: '0.11.24'
+          enable-cache: true
+      - name: Install pinned SimSlim
+        run: make setup-vrt
+      - name: Download this attempt's simulator test products
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: simulator-products-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}
+      - name: Unpack simulator test products
+        run: |
+          mkdir -p "$SUWOP_SIMULATOR_PRODUCTS"
+          tar -xzf "$RUNNER_TEMP/simulator-products.tgz" -C "$SUWOP_SIMULATOR_PRODUCTS"
       - name: Run the selected pinned simulator lane
-        run: make "${{ matrix.suite }}"
+        id: lane
+        env:
+          SUITE: ${{ matrix.suite }}
+        run: make "$SUITE"
+      - name: Verify unchanged PhotoKit acceptance after the screenshots
+        if: ${{ matrix.suite == 'vrt-ci-host' && !cancelled() && steps.lane.outcome != 'skipped' }}
+        run: make apple-native-test
       - name: Preserve screenshots, pixel diffs, timing, profile and native test results
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -268,7 +369,7 @@ jobs:
         env:
           SIMULATOR_RESULT: ${{ needs.simulator.result }}
         run: test "$SIMULATOR_RESULT" = success
-      - name: Read only this run attempt's two VRT lane artifacts
+      - name: Read only this run attempt's host and UI shard VRT lane artifacts
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: vrt-ci-*-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
