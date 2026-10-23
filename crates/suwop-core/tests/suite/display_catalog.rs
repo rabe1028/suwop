@@ -1,4 +1,8 @@
-use suwop_core::{display_catalog, domain::*};
+use suwop_core::{
+    display_catalog,
+    domain::*,
+    metadata::{self, MetadataAction, MetadataInput},
+};
 
 fn asset(provider: Provider, id: &str, name: &str) -> StoredAsset {
     StoredAsset {
@@ -100,6 +104,41 @@ fn raw_jpeg_stack_groups_visible_members_and_cross_provider_pair() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].assets.len(), 3); // Never invent the missing/private fourth asset.
     assert_eq!(catalog(&s, &[]).len(), 3);
+}
+#[test]
+fn stacked_photo_metadata_target_is_accepted_by_prepare() -> Result<(), String> {
+    let mut jpeg = asset(Provider::Immich, "jpeg", "P1075884.JPG");
+    let mut raw = asset(Provider::Immich, "raw", "P1075884.RW2");
+    raw.resources[0].role = ResourceRole::RawImage;
+    for member in [&mut jpeg, &mut raw] {
+        member.immich_stack = ImmichStackState::Stacked;
+        member.immich_stack_membership = Some(ImmichStackMembership {
+            id: "stack".into(),
+            primary_asset_id: "jpeg".into(),
+            asset_count: 2,
+        });
+    }
+    let s = snapshots(&[jpeg, raw]);
+    let photos = display_catalog::photos(&s, &[]);
+    let [photo] = photos.as_slice() else {
+        return Err("the stack is not one displayed photo".into());
+    };
+    let [target] = metadata::targets(photo, &s)
+        .try_into()
+        .map_err(|_| "one target")?;
+    assert_eq!(target.keys.len(), 2);
+    let input = MetadataInput {
+        action: MetadataAction::SetCapturedAt,
+        captured_at: Some(1_730_615_400.0),
+        time_zone: Some("Asia/Tokyo".into()),
+        latitude: None,
+        longitude: None,
+    };
+    let (prepared, _) = metadata::prepare(&s, &[], &target.keys, &input)?;
+    assert_eq!(prepared.keys, target.keys);
+    // Half of the displayed stack is never a valid target.
+    assert!(metadata::prepare(&s, &[], &target.keys[..1], &input).is_err());
+    Ok(())
 }
 #[test]
 fn incomplete_or_contradictory_stack_metadata_does_not_invent_membership() {

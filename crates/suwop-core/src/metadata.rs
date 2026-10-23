@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
     AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferReceipt, UnifiedPhoto,
-    catalog, normalize_sha1, same_location,
+    normalize_sha1, same_location,
 };
 
 #[derive(
@@ -190,8 +190,9 @@ fn coordinate(input: Option<&str>, limit: f64, label: &str) -> Result<f64, Strin
     value.ok_or_else(|| format!("{label}は -{limit}〜{limit} の数値で指定してください。"))
 }
 
-/// Mutate one complete provider/scope group of one catalog photo. A caller
-/// cannot silently edit only a Live companion or one half of a RAW/JPEG pair.
+/// Mutate one complete provider/scope group of one displayed photo, the same
+/// grouping its targets were offered from. A caller cannot silently edit only a
+/// Live companion or one half of a RAW/JPEG pair.
 pub fn prepare(
     snapshots: &[LibrarySnapshot],
     receipts: &[TransferReceipt],
@@ -202,7 +203,7 @@ pub fn prepare(
     if requested.is_empty() {
         return Err("変更する写真と保存先を選択してください。".into());
     }
-    let photos = catalog(snapshots, receipts);
+    let photos = crate::display_catalog::photos(snapshots, receipts);
     let selected: Vec<_> = photos
         .iter()
         .filter(|p| p.assets.iter().any(|a| requested.contains(&a.key)))
