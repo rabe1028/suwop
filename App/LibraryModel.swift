@@ -22,7 +22,7 @@ import SwiftUI
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
-    private var work: Task<Void, Never>?
+    @Published private var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
     private var previewWork: Task<Void, Never>?
     private var browseGeneration: UInt64 = 0
