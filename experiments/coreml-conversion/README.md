@@ -19,17 +19,28 @@ Feasible. Measurements are in `docs/evidence/coreml-20261024/`.
 - On the Neural Engine, int8 weights reach cosine ≥ 0.999 (images) and ≥ 0.9999
   (text) against float32 transformers. The current LiteRT-LM output is 0.97 / 0.99.
   6-bit palettes (iOS 17 allows per-tensor only) give ≥ 0.992 at 317 MB; 4-bit
-  is too lossy.
+  is too lossy. These are model-file sizes only: see the specialization cache below.
 - Retrieval on 1,000 COCO photos is not significantly different from LiteRT-LM.
 - With tokens on the CPU, peak memory footprint was 142 MB, against ~950 MiB RSS
   for LiteRT-LM. Latency was ~110 ms per image and ~8 ms per query, against ~0.7 s
   per image for LiteRT-LM on CPU (M1 Max).
 
+On the iOS Simulator (no Neural Engine; the Core ML GPU backend was rejected),
+Core ML was slower than LiteRT-LM: ~1.55 s per image on the CPU with corrupted fp16
+output, or ~2.5 s and 1.2 GB when forced off the CPU. Loads took 2.8–4.8 s on first
+launch and ~0.2 s afterwards (LiteRT-LM: 1.7 s, then 0.17 s). Core ML also wrote an
+~840 MB specialization cache per configuration, about the fp16 weight size, so int8
+needed ~1.26 GB on disk against LiteRT-LM's 646 MiB including its XNNPACK caches.
+The simulator cannot show the Neural Engine case, which is the only one where Core ML
+won; see `docs/evidence/coreml-20261024/simulator.txt`.
+
 Blocking issues before integration:
 
-- Neural Engine model loading took ~43 s on every process start of the CLI
-  benchmark. Device behaviour, and whether iOS caches the compiled plan per app,
-  is unmeasured.
+- Measure on a device: Neural Engine load time on first and later launches, and the
+  size of the specialization cache. If it also stores expanded weights, Core ML does
+  not reduce storage.
+- Neural Engine model loading took ~43 s on every process start of the macOS CLI
+  benchmark. Whether iOS reuses the compiled plan per app is unmeasured.
 - fp16 models computed on the CPU are corrupted (image cosine 0.63–0.70). Request
   `.cpuAndNeuralEngine`, and fall back to fp32 models or decline when it is
   unavailable; never `.all` with silent CPU execution.
@@ -58,3 +69,10 @@ torch 2.14 at import. For `Bench.swift`, compile models with
 arrays (`pixels<i>.bin` float32 [1,630,768], `positions<i>.bin` int32 [1,630,2],
 `image_ids<i>.bin` and `text_ids<i>.bin` int32), then run
 `swiftc -O Bench.swift -o bench && ./bench <compiled> int8 <inputs> ane`.
+
+The simulator app in `simulator/` loads the same models and the app's LiteRT-LM
+runtime. Generate it with `xcodegen generate`, build for a simulator, then launch with
+`SIMCTL_CHILD_BENCH_DIR` (holding `fixture.json`, `litert/model.litertlm`,
+`compiled/` and `benchin/`) and `SIMCTL_CHILD_BENCH_MODE` (`litert`, `cpu`, `gpu`,
+`ane` or `all`).
+

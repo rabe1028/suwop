@@ -3,3 +3,6 @@ out/
 *.mlpackage/
 *.mlmodelc/
 bench
+simulator/LoadBench.xcodeproj/
+simulator/Generated/
+simulator/DerivedData/
