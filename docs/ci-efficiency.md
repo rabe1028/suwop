@@ -192,6 +192,7 @@ took 35.4 minutes. The critical path was `apple-products` (7.9m), then
 | --- | --- | --- |
 | UI lanes are latency-bound, not CPU-bound | 52–58% of 3 CPUs; `compare` took 1,454s and 1,276s of each lane | Three UI shards; the expected loads are 889, 887 and 889s for 68 tests |
 | Spotlight competes with builds on 3-CPU macOS runners | `mds_stores`/`mdworker` took 50–80% of a core during `apple` builds (93–99% CPU) and cache restores | `sudo mdutil -a -i off` first in every macOS job |
-| UI test time is mostly app idle waits | Of 2,662s of XCUITest activity, 31% was "Wait for app to idle" (471 waits over 1s, mean 1.5s). Explicit waits took about 1s each; none timed out | Not changed: animations belong to the app under test |
+| UI test time is mostly app idle waits | Of 2,662s of XCUITest activity, 31% was "Wait for app to idle" (471 waits over 1s, mean 1.5s). Explicit waits took about 1s each; none timed out | The VRT host disables UIKit animations when XCUITest launches it (not as a unit-test host). Locally, the 68 UI tests took 2,347s → 1,891s (−19.4%) and idle waits 759s → 329s. One test swiped down before its raster loaded and dismissed the sheet; it now waits for the loading spinner to disappear |
+| Each lane enumerated the same products (32–50s) | Lane `enumerate` stages | The products job enumerates once while PhotoKit builds |
 | Linux Rust jobs are CPU-bound | `core (release)` used 92% of 4 CPUs (`rustc`) | Already parallel and cached |
 | macOS memory | About 6.9 of 7 GiB is in use, with no swapouts | None; file cache counts as used |
