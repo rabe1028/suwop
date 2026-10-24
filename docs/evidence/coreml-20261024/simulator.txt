@@ -1,0 +1,20 @@
+iOS 26.4 Simulator (iPhone 16) on M1 Max, Release LoadBench app (experiments/coreml-conversion/simulator).
+One fixture (COCO 197658); each line is a separate app launch. Simulator has no Neural Engine, and the
+Core ML GPU backend refused to run ("MpsGraph backend validation on incompatible OS"), so Core ML ran on the CPU.
+Cosine is against the Core ML Neural Engine vectors from the Mac evaluation.
+
+                         load      image   text    peak footprint   image/text cosine
+LiteRT-LM, first launch  1,695 ms  568 ms   99 ms  325 MiB          0.974 / 0.986
+LiteRT-LM, second        173 ms    566 ms  106 ms  289 MiB          0.974 / 0.986
+Core ML int8 CPU, first  4,764 ms  1,582 ms 244 ms 32 MiB           0.701 / 0.963  (fp16 on CPU: corrupted)
+Core ML int8 CPU, second 205 ms    1,552 ms 231 ms 27 MiB           0.701 / 0.963
+Core ML int8 .all/.cpuAndGPU 3,255 ms 2,554 ms 387 ms 1,230 MiB    0.999 / 1.000  (GPU rejected; slow fallback)
+Core ML pal6 CPU, first  4,049 ms  1,575 ms 233 ms 31 MiB           0.684 / 0.953
+Core ML pal6 .all        2,802 ms  2,566 ms 386 ms 1,230 MiB        0.995 / 0.992
+
+Disk after loading (clean install, Library/Caches/<bundle>/com.apple.e5rt.e5bundlecache):
+  Core ML int8 CPU: models 423 MB + specialization cache 841 MB = ~1.26 GB
+  Core ML pal6 CPU: models 317 MB + another 839 MB cache (cache grows per configuration)
+  The cache size matches fp16 weights: quantized weights are expanded when specialized.
+  LiteRT-LM: model 369.8 MiB + XNNPACK caches 276.6 MiB = 646 MiB
+Device (Neural Engine) cache size and load time remain unmeasured.

@@ -1,5 +1,6 @@
 """Download a deterministic COCO validation subset, retaining source IDs and hashes."""
 
+import argparse
 import concurrent.futures
 import hashlib
 import http.client
@@ -9,11 +10,19 @@ import re
 import zipfile
 from pathlib import Path
 
+parser = argparse.ArgumentParser()
+parser.add_argument("--count", type=int, default=100)
+parser.add_argument("--manifest", default="manifest.json")
+parser.add_argument("--japanese", help="JSON object mapping image ID to a Japanese query")
+args = parser.parse_args()
 root = Path(__file__).parent / "results"
+japanese = json.loads(Path(args.japanese).read_text()) if args.japanese else {}
 with zipfile.ZipFile(root / "annotations.zip") as archive:
     captions = json.loads(archive.read("annotations/captions_val2017.json"))
 # Deterministic fixture sampling, not security randomness.
-images = random.Random(20261015).sample(sorted(captions["images"], key=lambda x: x["id"]), 100)  # noqa: S311
+images = random.Random(20261015).sample(  # noqa: S311
+    sorted(captions["images"], key=lambda x: x["id"]), args.count
+)
 by_id = {}
 for annotation in sorted(captions["annotations"], key=lambda x: x["id"]):
     by_id.setdefault(annotation["image_id"], annotation["caption"])
@@ -44,6 +53,7 @@ def fetch(item):
         "id": str(item["id"]),
         "file": str(target.resolve()),
         "query": by_id[item["id"]],
+        "queryJa": japanese.get(str(item["id"])),
         "source": url,
         "sha256": hashlib.sha256(target.read_bytes()).hexdigest(),
     }
@@ -51,5 +61,5 @@ def fetch(item):
 
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
     records = list(executor.map(fetch, images))
-(root / "manifest.json").write_text(json.dumps(records, indent=2) + "\n")
+(root / args.manifest).write_text(json.dumps(records, indent=2) + "\n")
 print(f"{len(records)} images and {len(records)} caption-to-image queries")

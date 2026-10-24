@@ -24,4 +24,10 @@ CREATE TABLE IF NOT EXISTS inference_selection (id INTEGER PRIMARY KEY CHECK(id=
 CREATE TABLE IF NOT EXISTS analysis_asset_keys (id TEXT PRIMARY KEY, json TEXT NOT NULL);
 INSERT OR IGNORE INTO analysis_asset_keys SELECT id,json_extract(json,'$.key') FROM assets;
 CREATE INDEX IF NOT EXISTS jobs_asset_revision ON jobs(asset,revision);
-PRAGMA user_version=4;
+CREATE TABLE IF NOT EXISTS index_vectors (
+ job INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+ shard INTEGER NOT NULL REFERENCES shards(id), scale REAL NOT NULL, codes BLOB NOT NULL
+);
+CREATE INDEX IF NOT EXISTS index_vectors_shard ON index_vectors(shard);
+CREATE TABLE IF NOT EXISTS pending_cleanup (name TEXT PRIMARY KEY);
+PRAGMA user_version=5;

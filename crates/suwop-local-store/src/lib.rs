@@ -1,4 +1,4 @@
-//! Local metadata transactions and a separately scheduled, rebuildable Lance index.
+//! Local metadata transactions and a separately scheduled, rebuildable vector index.
 mod api;
 mod catalog;
 mod engine;

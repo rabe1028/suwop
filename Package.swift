@@ -5,12 +5,7 @@ import PackageDescription
 let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().path
 #if os(macOS)
     let nativeTarget: Target = .binaryTarget(name: "CSuwop", path: "Generated/RustCore.xcframework")
-    let linkSettings: [LinkerSetting] = [
-        .linkedFramework("Security"),
-        .linkedFramework("SystemConfiguration"),
-        .linkedLibrary("c++"),
-        .linkedLibrary("iconv"),
-    ]
+    let linkSettings: [LinkerSetting] = []
 #else
     let nativeTarget: Target = .systemLibrary(name: "CSuwop", path: "Sources/CSuwop")
     let linkSettings: [LinkerSetting] = [.unsafeFlags([root + "/target/debug/libsuwop_ffi.a"])]

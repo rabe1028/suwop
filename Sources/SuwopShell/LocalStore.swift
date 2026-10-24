@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thin native scheduling adapter. SQLite, migration, jobs and Lance belong to Rust.
+/// Thin native scheduling adapter. SQLite, migration, jobs and the vector index belong to Rust.
 /// Blocking database/FFI calls never run on the main actor or cooperative executor.
 public final class LocalStore: Sendable {
     private let root: String

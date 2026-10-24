@@ -1,17 +1,7 @@
-//! Bounded, immutable Lance shards. `SQLite` is the publication/recovery journal.
+//! Int8 vectors in the catalog. Publication and vector writes share one transaction.
 use crate::{Result, Store, error, jobs::normalized};
-use arrow_array::{
-    Array, FixedSizeListArray, Float32Array, Int64Array, RecordBatch, types::Float32Type,
-};
-use arrow_schema::{DataType, Field, Schema};
-use futures::TryStreamExt;
-use lancedb::{
-    connect,
-    index::{Index, vector::IvfHnswFlatIndexBuilder},
-    query::{ExecutableQuery, QueryBase},
-};
-use rusqlite::{OptionalExtension, params};
-use std::{fs::File, sync::Arc};
+use rusqlite::{OptionalExtension, Transaction, params};
+use std::fs::File;
 use suwop_core::{
     analysis::{AnalysisBudget, SimilarityHit},
     domain::StoredAsset,
@@ -22,12 +12,35 @@ struct Chunk {
     id: i64,
     generation: i64,
     model: String,
-    dimensions: u32,
-    budget: AnalysisBudget,
     rows: Vec<(i64, Vec<f32>)>,
 }
-fn name(generation: i64, shard: i64) -> String {
-    format!("g{generation}_s{shard}")
+/// Symmetric per-vector int8 codes. Components of a normalized vector lie in [-1, 1].
+fn quantize(vector: &[f32]) -> (f32, Vec<u8>) {
+    let peak = vector.iter().fold(0.0_f32, |m, v| m.max(v.abs()));
+    let scale = if peak > 0.0 { peak / 127.0 } else { 1.0 };
+    #[allow(clippy::cast_possible_truncation)] // Rounded values are within [-127, 127].
+    let codes = vector
+        .iter()
+        .map(|v| (v / scale).round().clamp(-127.0, 127.0) as i8)
+        .map(i8::cast_unsigned)
+        .collect();
+    (scale, codes)
+}
+/// Squared L2 distance between unit vectors, matching the previous index ordering.
+fn distance(query: &[f32], scale: f32, codes: &[u8]) -> f32 {
+    let dot: f32 = query
+        .iter()
+        .zip(codes)
+        .map(|(q, c)| q * f32::from(c.cast_signed()))
+        .sum();
+    2.0 - 2.0 * dot * scale
+}
+fn drop_shard(tx: &Transaction<'_>, shard: i64) -> Result<()> {
+    tx.execute("DELETE FROM index_vectors WHERE shard=?1", [shard])
+        .map_err(error)?;
+    tx.execute("DELETE FROM shards WHERE id=?1", [shard])
+        .map_err(error)?;
+    Ok(())
 }
 impl Store {
     pub(crate) fn analysis_lock(&self) -> Result<File> {
@@ -40,20 +53,6 @@ impl Store {
             .map_err(error)?;
         file.lock().map_err(error)?;
         Ok(file)
-    }
-    async fn connection(&self, budget: &AnalysisBudget) -> Result<lancedb::Connection> {
-        let cache = usize::try_from(budget.cache_bytes).map_err(error)?;
-        let session = Arc::new(lancedb::Session::new(
-            cache,
-            cache,
-            Arc::new(lancedb::ObjectStoreRegistry::default()),
-        ));
-        let path = self.root.join("analysis");
-        connect(path.to_str().ok_or("Non-UTF8 analysis path")?)
-            .session(session)
-            .execute()
-            .await
-            .map_err(error)
     }
     fn claim(&mut self) -> Result<Option<Chunk>> {
         let tx = self
@@ -125,14 +124,11 @@ impl Store {
             id,
             generation,
             model,
-            dimensions: config.dimensions,
-            budget,
             rows,
         }))
     }
-    /// Runs one bounded checkpoint. No `SQLite` transaction spans Lance work.
-    /// Call on an I/O thread; the file lock serializes native engine working sets.
-    pub async fn step(&mut self) -> Result<bool> {
+    /// Runs one bounded checkpoint. Vectors become searchable in the publishing transaction.
+    pub fn step(&mut self) -> Result<bool> {
         let _guard = self.analysis_lock()?;
         let Some(chunk) = self.claim()? else {
             let tx = self
@@ -144,231 +140,145 @@ impl Store {
             tx.commit().map_err(error)?;
             // Publication is durable before cleanup. Each checkpoint drops at most
             // one retired shard so searches and newly queued work can interleave.
-            if self.prune_one().await?.is_some() {
+            if self.prune_one()?.is_some() {
                 return Ok(true);
             }
             return self.compact();
         };
-        if let Err(message) = self.write_chunk(&chunk).await {
-            self.db.execute("UPDATE generations SET state='paused',error=?2 WHERE id=?1 AND state='building'",params![chunk.generation,message]).map_err(error)?;
-            return Err(message);
+        match self.publish(&chunk) {
+            Ok(published) => Ok(published),
+            Err(message) => {
+                self.db.execute("UPDATE generations SET state='paused',error=?2 WHERE id=?1 AND state='building'",params![chunk.generation,message]).map_err(error)?;
+                Err(message)
+            }
         }
+    }
+    /// An unpublished (paused or superseded) shard keeps its staged vectors for replay.
+    fn publish(&mut self, chunk: &Chunk) -> Result<bool> {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
         let publish: bool = tx.query_row("SELECT EXISTS(SELECT 1 FROM models m JOIN generations g ON g.id=m.latest WHERE m.id=?1 AND g.id=?2 AND g.state='building')",params![chunk.model,chunk.generation],|r|r.get(0)).map_err(error)?;
-        if publish {
-            tx.execute("UPDATE shards SET state='ready' WHERE id=?1", [chunk.id])
+        if !publish {
+            return Ok(false);
+        }
+        {
+            let mut insert = tx
+                .prepare("INSERT OR REPLACE INTO index_vectors(job,shard,scale,codes) VALUES(?1,?2,?3,?4)")
                 .map_err(error)?;
-            tx.execute(
-                "UPDATE jobs SET state='done' WHERE shard=?1 AND state='queued'",
-                [chunk.id],
-            )
+            for (job, vector) in &chunk.rows {
+                let (scale, codes) = quantize(vector);
+                insert
+                    .execute(params![job, chunk.id, f64::from(scale), codes])
+                    .map_err(error)?;
+            }
+        }
+        tx.execute("UPDATE shards SET state='ready' WHERE id=?1", [chunk.id])
             .map_err(error)?;
-            tx.execute("DELETE FROM embedding_vectors WHERE job IN (SELECT id FROM jobs WHERE shard=?1 AND state='done')",[chunk.id]).map_err(error)?;
-        }
-        tx.commit().map_err(error)?;
-        Ok(publish)
-    }
-    async fn write_chunk(&self, chunk: &Chunk) -> Result<()> {
-        if chunk.rows.is_empty() {
-            return Ok(());
-        }
-        let dimensions = i32::try_from(chunk.dimensions).map_err(error)?;
-        let vectors = FixedSizeListArray::from_iter_primitive::<Float32Type, _, _>(
-            chunk
-                .rows
-                .iter()
-                .map(|(_, v)| Some(v.iter().copied().map(Some))),
-            dimensions,
-        );
-        let schema = Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("vector", vectors.data_type().clone(), true),
-        ]));
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(Int64Array::from(
-                    chunk.rows.iter().map(|(id, _)| *id).collect::<Vec<_>>(),
-                )),
-                Arc::new(vectors),
-            ],
+        tx.execute(
+            "UPDATE jobs SET state='done' WHERE shard=?1 AND state='queued'",
+            [chunk.id],
         )
         .map_err(error)?;
-        let connection = self.connection(&chunk.budget).await?;
-        // This manifest entry is unpublished and protected by the analysis lock.
-        // Recreate it so repeated interrupted writes cannot accumulate old versions.
-        match connection
-            .drop_table(&name(chunk.generation, chunk.id), &[])
-            .await
-        {
-            Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
-            Err(e) => return Err(error(e)),
-        }
-        let table = connection
-            .create_table(name(chunk.generation, chunk.id), batch)
-            .execute()
-            .await
-            .map_err(error)?;
-        // Tiny shards use exact search; no global training matrix is ever built.
-        if chunk.rows.len() >= 32 {
-            table
-                .create_index(
-                    &["vector"],
-                    Index::IvfHnswFlat(
-                        IvfHnswFlatIndexBuilder::default()
-                            .num_partitions(1)
-                            .sample_rate(32)
-                            .max_iterations(5)
-                            .num_edges(16)
-                            .ef_construction(64),
-                    ),
-                )
-                .execute()
-                .await
-                .map_err(error)?;
-        }
-        Ok(())
+        tx.execute("DELETE FROM embedding_vectors WHERE job IN (SELECT id FROM jobs WHERE shard=?1 AND state='done')",[chunk.id]).map_err(error)?;
+        tx.commit().map_err(error)?;
+        Ok(true)
     }
     /// Remove retired generations and unreferenced shards, preserving live jobs.
-    pub async fn prune(&mut self) -> Result<u64> {
+    pub fn prune(&mut self) -> Result<u64> {
         let _guard = self.analysis_lock()?;
         let mut removed = 0;
-        while let Some(count) = self.prune_one().await? {
+        while let Some(count) = self.prune_one()? {
             removed += count;
         }
         Ok(removed)
     }
-    /// Caller holds the analysis lock. Journal entries are removed only after
-    /// their Lance table is gone, so an interrupted cleanup safely replays.
-    async fn prune_one(&mut self) -> Result<Option<u64>> {
-        let retired: Option<(i64, String)> = self.db.query_row("SELECT g.id,g.budget FROM generations g JOIN models m ON m.id=g.model WHERE g.id!=m.latest AND (m.active IS NULL OR g.id!=m.active) ORDER BY g.id LIMIT 1", [], |r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?;
-        let Some((generation, budget)) = retired else {
-            return self.prune_detached_shard().await;
-        };
-        let shard: Option<i64> = self
-            .db
-            .query_row(
-                "SELECT id FROM shards WHERE generation=?1 ORDER BY id LIMIT 1",
-                [generation],
-                |r| r.get(0),
-            )
-            .optional()
-            .map_err(error)?;
-        if let Some(shard) = shard {
-            let budget: AnalysisBudget = serde_json::from_str(&budget).map_err(error)?;
-            let connection = self.connection(&budget).await?;
-            match connection.drop_table(&name(generation, shard), &[]).await {
-                Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
-                Err(e) => return Err(error(e)),
-            }
-            self.db
-                .execute("DELETE FROM shards WHERE id=?1", [shard])
-                .map_err(error)?;
-            return Ok(Some(1));
-        }
+    /// Caller holds the analysis lock. Each removal commits with its journal entry.
+    fn prune_one(&mut self) -> Result<Option<u64>> {
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
-        tx.execute("DELETE FROM jobs WHERE generation=?1", [generation])
-            .map_err(error)?;
-        tx.execute("DELETE FROM generations WHERE id=?1", [generation])
-            .map_err(error)?;
-        tx.commit().map_err(error)?;
-        Ok(Some(0))
-    }
-    /// The analysis lock prevents a writer from claiming a shard during cleanup.
-    /// Metadata may detach references, but never attaches jobs to an existing shard.
-    async fn prune_detached_shard(&self) -> Result<Option<u64>> {
-        let shard: Option<(i64, i64, String)> = self.db.query_row(
-            "SELECT s.id,s.generation,g.budget FROM shards s JOIN generations g ON g.id=s.generation WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.shard=s.id) ORDER BY s.id LIMIT 1",
-            [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?)),
-        ).optional().map_err(error)?;
-        let Some((shard, generation, budget)) = shard else {
-            return Ok(None);
+        let retired: Option<i64> = tx.query_row("SELECT g.id FROM generations g JOIN models m ON m.id=g.model WHERE g.id!=m.latest AND (m.active IS NULL OR g.id!=m.active) ORDER BY g.id LIMIT 1", [], |r|r.get(0)).optional().map_err(error)?;
+        let removed = if let Some(generation) = retired {
+            let shard: Option<i64> = tx
+                .query_row(
+                    "SELECT id FROM shards WHERE generation=?1 ORDER BY id LIMIT 1",
+                    [generation],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(error)?;
+            if let Some(shard) = shard {
+                drop_shard(&tx, shard)?;
+                Some(1)
+            } else {
+                tx.execute("DELETE FROM jobs WHERE generation=?1", [generation])
+                    .map_err(error)?;
+                tx.execute("DELETE FROM generations WHERE id=?1", [generation])
+                    .map_err(error)?;
+                Some(0)
+            }
+        } else {
+            // Metadata may detach references, but never attaches jobs to an existing shard.
+            let shard: Option<i64> = tx.query_row(
+                "SELECT s.id FROM shards s WHERE NOT EXISTS (SELECT 1 FROM jobs j WHERE j.shard=s.id) ORDER BY s.id LIMIT 1",
+                [], |r| r.get(0),
+            ).optional().map_err(error)?;
+            if let Some(shard) = shard {
+                drop_shard(&tx, shard)?;
+                Some(1)
+            } else {
+                None
+            }
         };
-        let budget: AnalysisBudget = serde_json::from_str(&budget).map_err(error)?;
-        let connection = self.connection(&budget).await?;
-        match connection.drop_table(&name(generation, shard), &[]).await {
-            Ok(()) | Err(lancedb::Error::TableNotFound { .. }) => {}
-            Err(e) => return Err(error(e)),
-        }
-        // Keep the manifest until the table is gone, including across interruption.
-        self.db
-            .execute("DELETE FROM shards WHERE id=?1", [shard])
-            .map_err(error)?;
-        Ok(Some(1))
+        tx.commit().map_err(error)?;
+        Ok(removed)
     }
-    pub async fn search(
-        &self,
-        key: &str,
-        vector: &[f32],
-        limit: u32,
-    ) -> Result<Vec<SimilarityHit>> {
+    /// Exact search over the active generation's current revisions.
+    pub fn search(&self, key: &str, vector: &[f32], limit: u32) -> Result<Vec<SimilarityHit>> {
         if !(1..=100).contains(&limit) {
             return Err("Search limit must be 1..100".into());
         }
         let model = self.model(key)?;
         let vector = normalized(vector, model.dimensions)?;
-        let _guard = self.analysis_lock()?;
-        let (generation,budget): (i64,String) = self.db.query_row("SELECT g.id,g.budget FROM models m JOIN generations g ON g.id=m.active WHERE m.id=?1",[key],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(error)?.ok_or("Model index is not ready")?;
-        let budget = serde_json::from_str(&budget).map_err(error)?;
-        let connection = self.connection(&budget).await?;
-        let mut after = 0;
-        let mut best: Vec<(i64, f32)> = Vec::new();
-        loop {
-            let shard: Option<i64> = self.db.query_row("SELECT id FROM shards WHERE generation=?1 AND state='ready' AND id>?2 ORDER BY id LIMIT 1",params![generation,after],|r|r.get(0)).optional().map_err(error)?;
-            let Some(shard) = shard else {
-                break;
-            };
-            after = shard;
-            let ids = {
-                let mut statement = self.db.prepare("SELECT j.id FROM jobs j JOIN assets a ON a.id=j.asset AND a.revision=j.revision WHERE j.shard=?1 AND j.state='done'").map_err(error)?;
-                statement
-                    .query_map([shard], |r| r.get::<_, i64>(0))
-                    .map_err(error)?
-                    .map(|r| r.map(|id| id.to_string()).map_err(error))
-                    .collect::<Result<Vec<_>>>()?
-            };
-            if ids.is_empty() {
+        let limit = usize::try_from(limit).map_err(error)?;
+        // One read snapshot spans generation selection, the scan and hit lookup, so a
+        // concurrent publication or prune cannot leave this search on a removed generation.
+        let tx = self.db.unchecked_transaction().map_err(error)?;
+        let generation: i64 = tx
+            .query_row(
+                "SELECT g.id FROM models m JOIN generations g ON g.id=m.active WHERE m.id=?1",
+                [key],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(error)?
+            .ok_or("Model index is not ready")?;
+        // Catalog commits mark jobs for replaced or removed revisions obsolete in the
+        // same transaction, so a done job is current; winners are rechecked below.
+        let mut best: Vec<(f32, i64)> = Vec::with_capacity(limit + 1);
+        let mut query = tx.prepare("SELECT v.job,v.scale,v.codes FROM jobs j JOIN index_vectors v ON v.job=j.id AND v.shard=j.shard WHERE j.generation=?1 AND j.state='done'").map_err(error)?;
+        let mut rows = query.query([generation]).map_err(error)?;
+        while let Some(row) = rows.next().map_err(error)? {
+            let codes = row.get_ref(2).map_err(error)?.as_blob().map_err(error)?;
+            if codes.len() != vector.len() {
+                return Err("Invalid stored vector".into());
+            }
+            #[allow(clippy::cast_possible_truncation)] // Stored from an f32 scale.
+            let scale = row.get::<_, f64>(1).map_err(error)? as f32;
+            let candidate = (distance(&vector, scale, codes), row.get(0).map_err(error)?);
+            if best.len() == limit && best.last().is_some_and(|last| candidate >= *last) {
                 continue;
             }
-            let table = connection
-                .open_table(name(generation, shard))
-                .execute()
-                .await
-                .map_err(error)?;
-            let mut batches = table
-                .query()
-                .nearest_to(vector.clone())
-                .map_err(error)?
-                .nprobes(1)
-                .ef(usize::try_from(limit.max(64)).map_err(error)?)
-                .limit(usize::try_from(limit).map_err(error)?)
-                .only_if(format!("id IN ({})", ids.join(",")))
-                .execute()
-                .await
-                .map_err(error)?;
-            while let Some(batch) = batches.try_next().await.map_err(error)? {
-                let ids = batch
-                    .column_by_name("id")
-                    .and_then(|v| v.as_any().downcast_ref::<Int64Array>())
-                    .ok_or("Invalid Lance identifier column")?;
-                let distances = batch
-                    .column_by_name("_distance")
-                    .and_then(|v| v.as_any().downcast_ref::<Float32Array>())
-                    .ok_or("Invalid Lance distance column")?;
-                best.extend((0..batch.num_rows()).map(|i| (ids.value(i), distances.value(i))));
-                best.sort_by(|a, b| a.1.total_cmp(&b.1).then_with(|| a.0.cmp(&b.0)));
-                best.truncate(usize::try_from(limit).map_err(error)?);
-            }
+            let at = best.partition_point(|entry| *entry < candidate);
+            best.insert(at, candidate);
+            best.truncate(limit);
         }
-        let mut hits = Vec::new();
-        for (id, distance) in best {
-            let asset: Option<String> = self.db.query_row("SELECT a.json FROM assets a JOIN jobs j ON j.asset=a.id AND j.revision=a.revision WHERE j.id=?1 AND j.state='done'",[id],|r|r.get(0)).optional().map_err(error)?;
+        let mut hits = Vec::with_capacity(best.len());
+        for (distance, job) in best {
+            let asset: Option<String> = tx.query_row("SELECT a.json FROM jobs j JOIN assets a ON a.id=j.asset AND a.revision=j.revision JOIN shards s ON s.id=j.shard WHERE j.id=?1 AND j.state='done' AND s.state='ready'",[job],|r|r.get(0)).optional().map_err(error)?;
             if let Some(asset) = asset {
                 let asset: StoredAsset = serde_json::from_str(&asset).map_err(error)?;
                 hits.push(SimilarityHit {
@@ -379,5 +289,23 @@ impl Store {
             }
         }
         Ok(hits)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn int8_distance_tracks_exact_unit_distance() -> Result<()> {
+        let a = normalized(&[0.9, -0.3, 0.2, 0.05, -0.7, 0.4], 6)?;
+        let b = normalized(&[0.8, -0.1, 0.3, 0.0, -0.6, 0.5], 6)?;
+        let exact: f32 = 2.0 - 2.0 * a.iter().zip(&b).map(|(x, y)| x * y).sum::<f32>();
+        let (scale, codes) = quantize(&b);
+        assert!((distance(&a, scale, &codes) - exact).abs() < 0.01);
+        let (scale, codes) = quantize(&a);
+        assert!(distance(&a, scale, &codes).abs() < 0.01);
+        assert!(distance(&a, scale, &codes) < distance(&b, scale, &codes));
+        Ok(())
     }
 }

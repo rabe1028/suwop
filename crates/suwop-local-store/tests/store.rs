@@ -68,14 +68,8 @@ fn supply(store: &mut Store, key: &str) -> std::result::Result<(), String> {
     }
     Ok(())
 }
-fn runtime() -> std::result::Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-}
 #[test]
-fn metadata_does_not_open_lance_and_migration_retains_legacy() -> Result {
+fn metadata_does_not_touch_analysis_and_migration_retains_legacy() -> Result {
     let root = tempfile::tempdir()?;
     std::fs::write(root.path().join("analysis"), b"not a directory")?;
     let original = state(3);
@@ -163,7 +157,7 @@ fn model_identity_budget_and_stale_results() -> Result {
     Ok(())
 }
 #[test]
-fn lance_resume_rebuild_publication_and_pruning() -> Result {
+fn index_resume_rebuild_publication_and_pruning() -> Result {
     let root = tempfile::tempdir()?;
     let mut store = Store::open(root.path())?;
     store.persist(&state(70))?;
@@ -173,34 +167,25 @@ fn lance_resume_rebuild_publication_and_pruning() -> Result {
     };
     let key = store.register(&model(), &budget)?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    assert!(rt.block_on(store.step())?);
+    assert!(store.step()?);
     assert_eq!(store.status()?[0].indexed, 32);
     store.pause(&key, true)?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     drop(store);
     let mut store = Store::open(root.path())?;
     assert_eq!(store.status()?[0].indexed, 32);
     store.pause(&key, false)?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     let first = store.status()?[0].active_generation;
     assert!(first.is_some());
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5))?
-            .len(),
-        5
-    );
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5)?.len(), 5);
     store.rebuild(&key, &budget)?;
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5))?
-            .len(),
-        5
-    );
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5)?.len(), 5);
+    assert_eq!(store.prune()?, 0);
     supply(&mut store, &key)?;
     // Three new shards, then publication plus exactly one cleanup checkpoint.
     for _ in 0..4 {
-        assert!(rt.block_on(store.step())?);
+        assert!(store.step()?);
     }
     assert_ne!(store.status()?[0].active_generation, first);
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
@@ -214,9 +199,9 @@ fn lance_resume_rebuild_publication_and_pruning() -> Result {
     );
     drop(store);
     let mut store = Store::open(root.path())?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     // Normal scheduling reclaims old tables/jobs without an explicit Prune command.
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(store.prune()?, 0);
     assert_eq!(
         db.query_row("SELECT count(*) FROM generations", [], |r| r
             .get::<_, i64>(0))?,
@@ -230,22 +215,15 @@ fn lance_resume_rebuild_publication_and_pruning() -> Result {
         )?,
         0
     );
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5))?
-            .len(),
-        5
-    );
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5)?.len(), 5);
     store.persist(&state(71))?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(store.pending(&key, 32)?.len(), 1);
     supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(store.status()?[0].indexed, 71);
     store.persist(&state(0))?;
-    assert!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5))?
-            .is_empty()
-    );
+    assert!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 5)?.is_empty());
     Ok(())
 }
 
@@ -260,11 +238,10 @@ fn interrupted_publication_replays_only_unfinished_shard() -> Result {
     };
     let key = store.register(&model(), &budget)?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    assert!(rt.block_on(store.step())?);
-    assert!(rt.block_on(store.step())?);
-    // Simulate loss after the second Lance write but before its journal commit:
-    // the first published shard remains immutable, second retains queued vectors.
+    assert!(store.step()?);
+    assert!(store.step()?);
+    // Simulate a journal rolled back to before the second publication while its
+    // index rows remain: replay must overwrite them, never duplicate or lose them.
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
     let vector = [1.0_f32, 0.1, 0.2, 0.3]
         .iter()
@@ -278,15 +255,11 @@ fn interrupted_publication_replays_only_unfinished_shard() -> Result {
     db.execute("UPDATE shards SET state='pending' WHERE id=2", [])?;
     drop(store);
     let mut store = Store::open(root.path())?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(store.status()?[0].indexed, 70);
     let count: i64 = db.query_row("SELECT count(*) FROM shards", [], |r| r.get(0))?;
     assert_eq!(count, 3);
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 100))?
-            .len(),
-        70
-    );
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 100)?.len(), 70);
     Ok(())
 }
 #[test]
@@ -311,15 +284,20 @@ fn metadata_commit_does_not_wait_for_analysis_lock() -> Result {
 }
 
 #[test]
-fn lance_failure_pauses_only_analysis_and_can_resume() -> Result {
+fn index_write_failure_pauses_only_analysis_and_can_resume() -> Result {
     let root = tempfile::tempdir()?;
     let mut store = Store::open(root.path())?;
     store.persist(&state(2))?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
-    std::fs::write(root.path().join("analysis"), b"not a directory")?;
-    let rt = runtime()?;
-    assert!(rt.block_on(store.step()).is_err());
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    db.execute_batch("CREATE TRIGGER fail_index BEFORE INSERT ON index_vectors BEGIN SELECT RAISE(ABORT,'injected'); END;")?;
+    assert!(store.step().is_err());
+    assert_eq!(
+        db.query_row("SELECT count(*) FROM index_vectors", [], |r| r
+            .get::<_, i64>(0))?,
+        0
+    );
     let status = store.status()?;
     assert_eq!(status[0].state, "paused");
     assert!(status[0].error.is_some());
@@ -330,10 +308,10 @@ fn lance_failure_pauses_only_analysis_and_can_resume() -> Result {
             .len(),
         3
     );
-    std::fs::remove_file(root.path().join("analysis"))?;
+    db.execute_batch("DROP TRIGGER fail_index;")?;
     store.pause(&key, false)?;
     supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(store.status()?[0].indexed, 3);
     Ok(())
 }
@@ -376,8 +354,7 @@ fn full_width_vectors_are_sharded_under_the_admission_limit() -> Result {
     }
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
     let before: i64 = db.query_row("PRAGMA page_count", [], |r| r.get(0))?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     let after: i64 = db.query_row("PRAGMA page_count", [], |r| r.get(0))?;
     let remaining: i64 =
         db.query_row("SELECT count(*) FROM embedding_vectors", [], |r| r.get(0))?;
@@ -393,7 +370,7 @@ fn full_width_vectors_are_sharded_under_the_admission_limit() -> Result {
         .query_map([], |r| r.get::<_, i64>(0))?
         .collect::<std::result::Result<Vec<_>, _>>()?;
     assert_eq!(sizes, vec![512, 512, 1]);
-    assert_eq!(rt.block_on(store.search(&key, &[0.5; 512], 10))?.len(), 10);
+    assert_eq!(store.search(&key, &[0.5; 512], 10)?.len(), 10);
     Ok(())
 }
 
@@ -406,8 +383,7 @@ fn explicitly_skipped_media_does_not_block_publication() -> Result {
     let jobs = store.pending(&key, 2)?;
     store.skip(&key, &jobs[0].id, "unsupported media")?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(store.status()?[0].skipped, 1);
     assert_eq!(store.status()?[0].indexed, 1);
     assert_eq!(store.status()?[0].state, "ready");
@@ -439,16 +415,15 @@ fn models_and_revisions_never_mix_in_search() -> Result {
         }
         store.submit(key, &vectors)?;
     }
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     assert_eq!(
-        rt.block_on(store.search(&first, &[1.0, 0.0, 0.0, 0.0], 1))?[0]
+        store.search(&first, &[1.0, 0.0, 0.0, 0.0], 1)?[0]
             .asset
             .asset_id,
         "0"
     );
     assert_eq!(
-        rt.block_on(store.search(&second, &[1.0, 0.0, 0.0, 0.0], 1))?[0]
+        store.search(&second, &[1.0, 0.0, 0.0, 0.0], 1)?[0]
             .asset
             .asset_id,
         "1"
@@ -456,7 +431,7 @@ fn models_and_revisions_never_mix_in_search() -> Result {
     let mut changed = state(3);
     changed.snapshots[0].assets[0].revision = "new".into();
     store.persist(&changed)?;
-    let hits = rt.block_on(store.search(&first, &[1.0, 0.0, 0.0, 0.0], 3))?;
+    let hits = store.search(&first, &[1.0, 0.0, 0.0, 0.0], 3)?;
     assert_eq!(hits.len(), 2);
     assert!(hits.iter().all(|h| h.asset.asset_id != "0"));
     Ok(())
@@ -479,7 +454,7 @@ fn v1_migration_preserves_queued_vectors_and_library() -> Result {
     )?;
     let mut store = Store::open(root.path())?;
     let version: i64 = db.query_row("PRAGMA user_version", [], |r| r.get(0))?;
-    assert_eq!(version, 4);
+    assert_eq!(version, 5);
     assert_eq!(
         store.read()?.ok_or("missing library")?.snapshots[0]
             .assets
@@ -487,13 +462,8 @@ fn v1_migration_preserves_queued_vectors_and_library() -> Result {
         3
     );
     assert_eq!(store.status()?[0].queued_vectors, 3);
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 3))?
-            .len(),
-        3
-    );
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 3)?.len(), 3);
     // Also exercise an untouched v1 catalog without incremental vacuum enabled.
     let empty = tempfile::tempdir()?;
     let legacy = rusqlite::Connection::open(empty.path().join("catalog.sqlite3"))?;
@@ -521,7 +491,7 @@ fn missing_queued_payload_is_never_published() -> Result {
         "DELETE FROM embedding_vectors WHERE job=(SELECT min(id) FROM jobs)",
         [],
     )?;
-    assert!(runtime()?.block_on(store.step()).is_err());
+    assert!(store.step().is_err());
     assert_eq!(store.status()?[0].indexed, 0);
     assert_eq!(store.status()?[0].state, "paused");
     assert!(store.status()?[0].error.is_some());
@@ -698,13 +668,8 @@ fn unavailable_immich_snapshot_revokes_analysis_until_freshly_available() -> Res
     let key = store.register(&model(), &AnalysisBudget::default())?;
     let job = store.pending(&key, 1)?.remove(0);
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
-            .len(),
-        1
-    );
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1)?.len(), 1);
     library.snapshots[0].access = ScanAccess::Unavailable;
     store.persist(&library)?;
     assert!(store.pending(&key, 1)?.is_empty());
@@ -719,10 +684,7 @@ fn unavailable_immich_snapshot_revokes_analysis_until_freshly_available() -> Res
             )
             .is_err()
     );
-    assert!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
-            .is_empty()
-    );
+    assert!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1)?.is_empty());
     assert!(
         store
             .validate_embedding_input(&job.asset, &job.asset, None)
@@ -732,12 +694,8 @@ fn unavailable_immich_snapshot_revokes_analysis_until_freshly_available() -> Res
     store.persist(&library)?;
     assert_eq!(store.pending(&key, 1)?.len(), 1);
     supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1))?
-            .len(),
-        1
-    );
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 1)?.len(), 1);
     Ok(())
 }
 
@@ -831,8 +789,7 @@ fn failed_photo_recovery_survives_restart_and_preserves_originals() -> Result {
             vector: vec![1.0; 256],
         }],
     )?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     let status = &store.status()?[0];
     assert_eq!(status.state, "ready");
     assert_eq!(status.indexed, 1);
@@ -905,13 +862,8 @@ fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
     store.persist(&catalog)?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .len(),
-        1
-    );
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.len(), 1);
     let asset = catalog.snapshots[0].assets[0].clone();
     catalog
         .immich_visibility_operations
@@ -921,10 +873,7 @@ fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
         }))?);
     store.persist(&catalog)?;
     assert!(store.pending(&key, 32)?.is_empty());
-    assert!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .is_empty()
-    );
+    assert!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.is_empty());
     assert!(
         store
             .validate_embedding_input(&asset, &asset, None)
@@ -945,8 +894,7 @@ fn returning_assets_reclaim_detached_active_shards_one_at_a_time() -> Result {
     };
     let key = store.register(&model(), &budget)?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
     let count = || db.query_row("SELECT count(*) FROM shards", [], |r| r.get::<_, i64>(0));
     let generation = store.status()?[0].active_generation;
@@ -963,7 +911,7 @@ fn returning_assets_reclaim_detached_active_shards_one_at_a_time() -> Result {
         assert_eq!(store.status()?[0].awaiting_embeddings, 65);
         // No new vectors are required for reclamation. Each idle checkpoint drops one table.
         for remaining in (0..3).rev() {
-            assert!(rt.block_on(store.step())?);
+            assert!(store.step()?);
             assert_eq!(count()?, remaining);
         }
         for (id, generation) in old {
@@ -978,64 +926,51 @@ fn returning_assets_reclaim_detached_active_shards_one_at_a_time() -> Result {
         drop(store);
         store = Store::open(root.path())?;
         supply(&mut store, &key)?;
-        while rt.block_on(store.step())? {}
+        while store.step()? {}
         assert_eq!(store.status()?[0].active_generation, generation);
         assert_eq!(count()?, 3);
-        assert_eq!(
-            rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 100))?
-                .len(),
-            65
-        );
+        assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 100)?.len(), 65);
     }
     Ok(())
 }
 
 #[test]
-fn detached_cleanup_preserves_shared_shards_and_resumes_after_table_drop() -> Result {
+fn detached_cleanup_preserves_shared_shards_and_reclaims_detached_vectors() -> Result {
     let root = tempfile::tempdir()?;
     let mut store = Store::open(root.path())?;
     let library = state(2);
     store.persist(&library)?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
-    let (id, generation): (i64, i64) =
-        db.query_row("SELECT id,generation FROM shards", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })?;
     let mut partial = library.clone();
     partial.snapshots[0].assets.remove(0);
     store.persist(&partial)?;
     store.persist(&library)?;
-    while rt.block_on(store.step())? {}
-    assert_eq!(rt.block_on(store.prune())?, 0);
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .len(),
-        1
-    );
+    while store.step()? {}
+    assert_eq!(store.prune()?, 0);
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.len(), 1);
     let mut absent = library.clone();
     absent.snapshots[0].access = ScanAccess::Unavailable;
     store.persist(&absent)?;
     store.persist(&library)?;
-    // Simulate interruption after deleting the Lance table but before journal cleanup.
-    let connection = rt.block_on(
-        lancedb::connect(root.path().join("analysis").to_str().ok_or("path")?).execute(),
-    )?;
-    rt.block_on(connection.drop_table(&format!("g{generation}_s{id}"), &[]))?;
     drop(store);
     let mut store = Store::open(root.path())?;
-    assert_eq!(rt.block_on(store.prune())?, 1);
-    assert_eq!(rt.block_on(store.prune())?, 0);
-    supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
+    assert_eq!(store.prune()?, 1);
+    assert_eq!(store.prune()?, 0);
+    // The detached shard's vectors leave with its journal entry.
     assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .len(),
-        2
+        db.query_row(
+            "SELECT count(*) FROM index_vectors v WHERE NOT EXISTS (SELECT 1 FROM shards s WHERE s.id=v.shard)",
+            [],
+            |r| r.get::<_, i64>(0)
+        )?,
+        0
     );
+    supply(&mut store, &key)?;
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.len(), 2);
     Ok(())
 }
 
@@ -1047,14 +982,13 @@ fn confirmed_removal_detaches_shards_after_unavailable_and_limited_scans() -> Re
     store.persist(&library)?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     for access in [ScanAccess::Unavailable, ScanAccess::Limited] {
         let mut uncertain = library.clone();
         uncertain.snapshots[0].access = access;
         uncertain.snapshots[0].assets.clear();
         store.persist(&uncertain)?;
-        assert_eq!(rt.block_on(store.prune())?, 0);
+        assert_eq!(store.prune()?, 0);
         drop(store);
         store = Store::open(root.path())?;
     }
@@ -1063,18 +997,18 @@ fn confirmed_removal_detaches_shards_after_unavailable_and_limited_scans() -> Re
     let mut unstamped = missing.clone();
     unstamped.snapshots[0].scanned_at = None;
     store.persist(&unstamped)?;
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(store.prune()?, 0);
     let mut other = missing.clone();
     other.snapshots[0].scope = "different-source".into();
     store.persist(&other)?;
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(store.prune()?, 0);
     let mut ambiguous = missing.clone();
     ambiguous.snapshots.push(missing.snapshots[0].clone());
     store.persist(&ambiguous)?;
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert_eq!(store.prune()?, 0);
     store.persist(&missing)?;
-    assert!(rt.block_on(store.step())?);
-    assert_eq!(rt.block_on(store.prune())?, 0);
+    assert!(store.step()?);
+    assert_eq!(store.prune()?, 0);
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
     assert_eq!(
         db.query_row("SELECT count(*) FROM shards", [], |r| r.get::<_, i64>(0))?,
@@ -1093,10 +1027,7 @@ fn confirmed_removal_detaches_shards_after_unavailable_and_limited_scans() -> Re
         )?,
         0
     );
-    assert!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .is_empty()
-    );
+    assert!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.is_empty());
     Ok(())
 }
 
@@ -1108,8 +1039,7 @@ fn v3_migration_retains_identity_for_later_confirmed_revision_removal() -> Resul
     store.persist(&library)?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
-    let rt = runtime()?;
-    while rt.block_on(store.step())? {}
+    while store.step()? {}
     drop(store);
     let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
     db.execute_batch(
@@ -1118,24 +1048,23 @@ fn v3_migration_retains_identity_for_later_confirmed_revision_removal() -> Resul
     let mut store = Store::open(root.path())?;
     assert_eq!(
         db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
-        4
+        5
     );
     assert_eq!(
         db.query_row("SELECT count(*) FROM analysis_asset_keys", [], |r| r
             .get::<_, i64>(0))?,
         1
     );
-    assert_eq!(
-        rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?
-            .len(),
-        1
-    );
+    // The v5 step requires published vectors to be supplied again.
+    supply(&mut store, &key)?;
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?.len(), 1);
     library.snapshots[0].assets[0].revision = "new".into();
     store.persist(&library)?;
-    assert_eq!(rt.block_on(store.prune())?, 1);
+    assert_eq!(store.prune()?, 1);
     supply(&mut store, &key)?;
-    while rt.block_on(store.step())? {}
-    let hits = rt.block_on(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10))?;
+    while store.step()? {}
+    let hits = store.search(&key, &[1.0, 0.1, 0.2, 0.3], 10)?;
     assert_eq!(hits.len(), 1);
     assert_eq!(hits[0].revision, "new");
     Ok(())
@@ -1171,5 +1100,72 @@ fn explicit_exclusions_survive_visibility_refresh_until_revision_or_rebuild() ->
     store.rebuild(&key, &AnalysisBudget::default())?;
     assert_eq!(store.pending(&key, 1)?.len(), 1);
     assert_eq!(store.status()?[0].skipped, 0);
+    Ok(())
+}
+
+#[test]
+fn v4_migration_requests_vectors_again_and_reclaims_lance_files() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut store = Store::open(root.path())?;
+    store.persist(&state(3))?;
+    let budget = AnalysisBudget {
+        max_batch_rows: 2,
+        ..AnalysisBudget::default()
+    };
+    let key = store.register(&model(), &budget)?;
+    supply(&mut store, &key)?;
+    while store.step()? {}
+    assert!(store.status()?[0].active_generation.is_some());
+    drop(store);
+    // Rebuild the v4 layout: published vectors existed only in former Lance files.
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    db.execute_batch("DROP TABLE index_vectors; PRAGMA user_version=4;")?;
+    std::fs::create_dir_all(root.path().join("analysis").join("g1_s1.lance"))?;
+    let mut store = Store::open(root.path())?;
+    assert_eq!(
+        db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))?,
+        5
+    );
+    assert_eq!(std::fs::read_dir(root.path().join("analysis"))?.count(), 0);
+    let status = &store.status()?[0];
+    assert_eq!(status.indexed, 0);
+    assert_eq!(status.awaiting_embeddings, 3);
+    assert!(status.active_generation.is_none());
+    assert!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 3).is_err());
+    supply(&mut store, &key)?;
+    while store.step()? {}
+    assert_eq!(store.search(&key, &[1.0, 0.1, 0.2, 0.3], 3)?.len(), 3);
+    assert_eq!(store.prune()?, 0);
+    Ok(())
+}
+
+#[test]
+fn lance_file_cleanup_is_retried_until_it_completes() -> Result {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir()?;
+    drop(Store::open(root.path())?);
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    let pending = |db: &rusqlite::Connection| -> rusqlite::Result<i64> {
+        db.query_row("SELECT count(*) FROM pending_cleanup", [], |r| r.get(0))
+    };
+    // A fresh catalog never touches `analysis/`, which the native adapter owns.
+    let analysis = root.path().join("analysis");
+    std::fs::create_dir_all(analysis.join("fresh"))?;
+    drop(Store::open(root.path())?);
+    assert!(analysis.join("fresh").exists());
+    // Simulate termination after the schema-5 commit but before reclamation, with
+    // one entry that cannot be removed yet.
+    db.execute("INSERT INTO pending_cleanup VALUES('lance-files')", [])?;
+    let locked = analysis.join("g1_s1.lance");
+    std::fs::create_dir_all(&locked)?;
+    std::fs::write(locked.join("data"), b"vectors")?;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500))?;
+    drop(Store::open(root.path())?);
+    assert_eq!(pending(&db)?, 1);
+    assert!(locked.exists());
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))?;
+    drop(Store::open(root.path())?);
+    assert_eq!(pending(&db)?, 0);
+    assert_eq!(std::fs::read_dir(&analysis)?.count(), 0);
     Ok(())
 }

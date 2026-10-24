@@ -10,6 +10,10 @@
 - Use `make setup` for pinned tools (mise.toml / mise.lock) and repository hooks.
   Add or update tools only through mise; never download or brew-install them by hand. Preserve the
   user's global hooks. Do not suppress checks to commit or merge.
+- Minimize dependencies to limit vulnerability exposure. Before adding one, prefer
+  std/Apple frameworks or a short local implementation, then a small focused crate
+  with few transitive dependencies; disable unused default features. Report the
+  transitive crate count it adds (`cargo tree -e normal`).
 - Rust unsafe code belongs only in the documented C ABI. Swift unchecked
   Sendable requires a narrow, documented native-API invariant.
 - Moves require an explicit Move receipt and fresh source/destination
