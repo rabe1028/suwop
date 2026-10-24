@@ -1,12 +1,14 @@
 use crux_core::Core;
 use serde_json::{Value, json};
 use suwop_core::{
-    amazon::{Connection, Node, admit_url, formats},
+    amazon::{Connection, Node, UploadRecord, admit_url, formats},
     app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
     domain::{
-        AppleVisibility, AssetKey, FileSignature, LibrarySnapshot, Provider, ResourceRole,
-        ScanAccess, StoredAsset, TransferBundle, TransferFile, TransferIntent, TransferPhase,
+        AppleVisibility, AssetKey, FileSignature, LibrarySnapshot, Presence, Provider,
+        ResourceRole, ScanAccess, StoredAsset, TransferBundle, TransferFile, TransferIntent,
+        TransferPhase, TransferReceipt,
     },
+    protection::PersistentProtectedEntry,
 };
 
 const SHA1: &str = "a9993e364706816aba3e25717850c26c9cd0d89d";
@@ -41,9 +43,9 @@ fn source(name: &str) -> Result<StoredAsset, String> {
     asset.resources[0].sha1 = Some(SHA1.into());
     Ok(asset)
 }
-fn core(name: &str) -> Result<Core<Suwop>, String> {
+fn state(name: &str) -> Result<SavedLibrary, String> {
     let asset = source(name)?;
-    let state = SavedLibrary {
+    Ok(SavedLibrary {
         schema_version: 9,
         apple_scope: "apple".into(),
         amazon_connection: Some(connection()?),
@@ -55,15 +57,96 @@ fn core(name: &str) -> Result<Core<Suwop>, String> {
             scanned_at: Some(1.0),
         }],
         ..SavedLibrary::default()
-    };
-    Ok(Core::new_with(
+    })
+}
+fn core_from(state: SavedLibrary) -> Core<Suwop> {
+    Core::new_with(
         Suwop,
         Model {
             state,
             ready: true,
             ..Model::default()
         },
-    ))
+    )
+}
+fn core(name: &str) -> Result<Core<Suwop>, String> {
+    Ok(core_from(state(name)?))
+}
+/// A fully indexed (empty) Immich library, so only Amazon can prevent an
+/// Apple-only presence claim.
+fn with_indexed_immich(mut state: SavedLibrary) -> SavedLibrary {
+    state.snapshots.push(LibrarySnapshot {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        assets: vec![],
+        access: ScanAccess::Full,
+        scanned_at: Some(1.0),
+    });
+    state
+}
+fn amazon_key() -> Result<AssetKey, String> {
+    Ok(AssetKey {
+        provider: Provider::Amazon,
+        scope: connection()?.scope,
+        asset_id: "photo".into(),
+    })
+}
+fn amazon_snapshot(core: &Core<Suwop>) -> Option<LibrarySnapshot> {
+    core.view()
+        .state
+        .snapshots
+        .into_iter()
+        .find(|s| s.provider == Provider::Amazon)
+}
+fn refresh_event() -> Event {
+    Event::Refresh {
+        permission: false,
+        now: 2.0,
+    }
+}
+fn resolve_event() -> Event {
+    Event::ResolveAmazonUploads {
+        id: "reconcile".into(),
+    }
+}
+/// A durable fence from an upload whose response was lost before this run.
+fn fenced_core(
+    apple: Option<StoredAsset>,
+    protect_destination: bool,
+) -> Result<Core<Suwop>, String> {
+    let mut state = state("photo.jpg")?;
+    state.snapshots[0].assets = apple.into_iter().collect();
+    let signature = FileSignature {
+        sha256: SHA256.into(),
+        bytes: 3,
+    };
+    state.receipts.push(TransferReceipt {
+        id: "copy".into(),
+        created_at: 1.0,
+        phase: TransferPhase::Copying,
+        intent: TransferIntent::Copy,
+        source: vec![source("photo.jpg")?],
+        destination: vec![],
+        destination_provider: Provider::Amazon,
+        destination_scope: connection()?.scope,
+        signatures: [signature.clone()].into(),
+    });
+    state.amazon_uploads.push(UploadRecord {
+        receipt_id: "copy".into(),
+        scope: connection()?.scope,
+        name: "photo.jpg".into(),
+        signature,
+        md5: MD5.into(),
+        node_id: None,
+        verified: false,
+    });
+    if protect_destination {
+        state.protected_entries.push(PersistentProtectedEntry {
+            id: "entry".into(),
+            key: amazon_key()?,
+        });
+    }
+    Ok(core_from(state))
 }
 
 #[derive(Default, PartialEq, Eq)]
@@ -86,6 +169,12 @@ enum Fault {
     Connect,
     Persist,
     Search,
+    /// The upload succeeds, but every later metadata read of it fails.
+    NodeRead,
+    /// The upload succeeds with an ID that is not a valid Amazon node ID.
+    InvalidId,
+    /// Search reports a library beyond the unofficial listing cap.
+    HugeLibrary,
 }
 
 #[derive(Default)]
@@ -99,6 +188,17 @@ struct Shell {
     favorite: bool,
     removed: Vec<String>,
     fault: Fault,
+    /// Apple Photos inventory returned by a scan.
+    apple: Vec<StoredAsset>,
+    apple_exports: usize,
+    searches: usize,
+    downloads: usize,
+    /// Method of every Amazon HTTP effect.
+    methods: Vec<String>,
+    /// Bump the access generation (a connection event) while a search is in flight.
+    interrupt_search: bool,
+    /// Whether the published view already held Amazon assets at each persist.
+    amazon_visible_at_persist: Vec<bool>,
 }
 impl Shell {
     fn upload(&mut self, request: &suwop_core::amazon::Request) -> Result<Value, String> {
@@ -128,6 +228,9 @@ impl Shell {
                 Ok(json!({"submitted":true,"response":{"status":415,"body":null}}))
             }
             Fault::MalformedSubmission => Ok(json!({"submitted":true})),
+            Fault::InvalidId => {
+                Ok(json!({"submitted":true,"response":{"status":201,"body":{"id":"../photo"}}}))
+            }
             _ => Ok(json!({"submitted":true,"response":{"status":201,"body":{"id":"photo"}}})),
         }
     }
@@ -154,7 +257,16 @@ impl Shell {
                 Ok(Value::Null)
             }
             ShellOperation::AmazonUpload { request } => self.upload(&request),
+            ShellOperation::AppleScan { scope, .. } => serde_json::to_value(LibrarySnapshot {
+                provider: Provider::Apple,
+                scope,
+                assets: self.apple.clone(),
+                access: ScanAccess::Full,
+                scanned_at: Some(2.0),
+            })
+            .map_err(|e| e.to_string()),
             ShellOperation::AppleExport { .. } => {
+                self.apple_exports += 1;
                 let asset = source("photo.jpg")?;
                 serde_json::to_value(TransferBundle {
                     files: vec![TransferFile {
@@ -176,13 +288,22 @@ impl Shell {
                 let url = url::Url::parse(&request.http.url).map_err(|e| e.to_string())?;
                 // Uploads must use the typed AmazonUpload effect.
                 assert_ne!(request.http.method, "POST");
+                self.methods.push(request.http.method.clone());
+                match url.path() {
+                    "/drive/v1/search" => self.searches += 1,
+                    "/drive/v1/nodes/photo/contentRedirection" => self.downloads += 1,
+                    _ => {}
+                }
                 let failing = match self.fault {
-                    Fault::Connect => url.path() == "/drive/v1/nodes",
-                    Fault::Search => url.path() == "/drive/v1/search",
-                    _ => false,
+                    Fault::Connect => (url.path() == "/drive/v1/nodes").then_some(401),
+                    Fault::Search => (url.path() == "/drive/v1/search").then_some(401),
+                    Fault::NodeRead => {
+                        (self.posts > 0 && url.path() == "/drive/v1/nodes/photo").then_some(503)
+                    }
+                    _ => None,
                 };
-                if failing {
-                    return Ok(json!({"status":401,"body":null}));
+                if let Some(status) = failing {
+                    return Ok(json!({"status":status,"body":null}));
                 }
                 if request.http.method == "PATCH" {
                     self.patches += 1;
@@ -199,7 +320,10 @@ impl Shell {
                         json!({"uploadServiceUrl":if self.fault == Fault::Endpoint {"https://upload-photos.amazon.co.jp.evil.test/"} else {"https://upload-photos.amazon.co.jp/"}})
                     }
                     "/drive/v1/nodes" => json!({"data":[{"ownerId":"owner","id":"root"}]}),
-                    "/drive/v1/search" => json!({"count":1,"data":[node(self.favorite)]}),
+                    "/drive/v1/search" => json!({
+                        "count": if self.fault == Fault::HugeLibrary { 20_000 } else { 1 },
+                        "data": [node(self.favorite)],
+                    }),
                     "/drive/v1/nodes/photo" => node(self.favorite),
                     "/drive/v1/nodes/photo/contentRedirection" => Value::Null,
                     _ => return Err("unexpected Amazon route".into()),
@@ -218,6 +342,19 @@ impl Shell {
                 return Err("effect loop".into());
             }
             let Effect::Io(mut request) = effects.remove(0);
+            match &request.operation {
+                ShellOperation::Persist(_) => self
+                    .amazon_visible_at_persist
+                    .push(amazon_snapshot(core).is_some_and(|s| !s.assets.is_empty())),
+                ShellOperation::AmazonHttp { request }
+                    if self.interrupt_search && request.http.url.contains("/drive/v1/search") =>
+                {
+                    self.interrupt_search = false;
+                    // Ignored while busy, but it still invalidates the running workflow.
+                    effects.extend(core.process_event(Event::DisconnectAmazon));
+                }
+                _ => {}
+            }
             let response = match self.handle(request.operation.clone()) {
                 Ok(value) => ShellResponse {
                     value: Some(value),
@@ -804,6 +941,206 @@ fn favorite_updates_are_read_back_from_amazon() -> Result<(), String> {
             .iter()
             .flat_map(|p| &p.assets)
             .any(|a| a.key.provider == Provider::Amazon && a.is_favorite)
+    );
+    Ok(())
+}
+
+#[test]
+fn refresh_publishes_the_amazon_catalog_only_with_its_final_result() -> Result<(), String> {
+    let core = core("photo.jpg")?;
+    let mut shell = Shell {
+        apple: vec![source("photo.jpg")?],
+        ..Shell::default()
+    };
+    shell.run(&core, refresh_event())?;
+    assert_eq!(shell.searches, 1);
+    // The refresh's own durable save happens before admission; no Amazon page
+    // was published as working state ahead of it.
+    assert_eq!(shell.amazon_visible_at_persist.first(), Some(&false));
+    let snapshot = amazon_snapshot(&core).ok_or("missing admitted Amazon catalog")?;
+    assert_eq!(snapshot.access, ScanAccess::Full);
+    assert_eq!(snapshot.assets.len(), 1);
+    Ok(())
+}
+
+#[test]
+fn access_change_during_an_amazon_page_publishes_no_refresh_state() -> Result<(), String> {
+    let core = core("photo.jpg")?;
+    let mut shell = Shell {
+        apple: vec![source("photo.jpg")?],
+        interrupt_search: true,
+        ..Shell::default()
+    };
+    shell.run(&core, refresh_event())?;
+    assert_eq!(shell.searches, 1);
+    assert!(core.view().error.is_some());
+    // The stale page is neither saved nor published.
+    assert!(
+        shell
+            .amazon_visible_at_persist
+            .iter()
+            .all(|visible| !visible)
+    );
+    assert!(amazon_snapshot(&core).is_none_or(|s| s.assets.is_empty()));
+    assert!(shell.saved.as_ref().is_none_or(|s| {
+        s.snapshots
+            .iter()
+            .all(|s| s.provider != Provider::Amazon || s.assets.is_empty())
+    }));
+    Ok(())
+}
+
+#[test]
+fn amazon_assets_are_not_queued_for_semantic_analysis() -> Result<(), String> {
+    let mut state = state("photo.jpg")?;
+    state.snapshots.push(LibrarySnapshot {
+        provider: Provider::Amazon,
+        scope: connection()?.scope,
+        assets: vec![
+            serde_json::from_value::<Node>(node(false))
+                .map_err(|e| e.to_string())?
+                .record(&connection()?),
+        ],
+        access: ScanAccess::Full,
+        scanned_at: Some(1.0),
+    });
+    let providers: Vec<_> = suwop_core::analysis::visible_assets(&state)
+        .map(|a| a.key.provider)
+        .collect();
+    assert_eq!(providers, [Provider::Apple]);
+    Ok(())
+}
+
+#[test]
+fn returned_upload_id_is_journaled_before_a_failed_readback() -> Result<(), String> {
+    let core = core("photo.jpg")?;
+    let mut shell = Shell {
+        fault: Fault::NodeRead,
+        ..Shell::default()
+    };
+    shell.run(&core, copy_event()?)?;
+    assert_eq!(shell.posts, 1);
+    assert!(core.view().error.is_some());
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert_eq!(saved.amazon_uploads[0].node_id.as_deref(), Some("photo"));
+    assert!(!saved.amazon_uploads[0].verified);
+    // A library beyond the listing cap: only the journaled ID can resolve it.
+    shell.fault = Fault::HugeLibrary;
+    shell.run(&core, resolve_event())?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert_eq!((shell.posts, shell.searches, shell.downloads), (1, 0, 1));
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert!(saved.amazon_uploads[0].verified);
+    assert_eq!(saved.receipts[0].phase, TransferPhase::Copying);
+    Ok(())
+}
+
+#[test]
+fn invalid_returned_upload_id_keeps_the_ambiguous_fence() -> Result<(), String> {
+    let core = core("photo.jpg")?;
+    let mut shell = Shell {
+        fault: Fault::InvalidId,
+        ..Shell::default()
+    };
+    shell.run(&core, copy_event()?)?;
+    assert_eq!(shell.posts, 1);
+    assert!(core.view().error.is_some());
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert!(saved.amazon_uploads[0].node_id.is_none() && !saved.amazon_uploads[0].verified);
+    shell.fault = Fault::None;
+    shell.run(&core, copy_event_id("next")?)?;
+    assert_eq!((shell.attempts, shell.posts), (1, 1));
+    assert!(core.view().error.is_some_and(|e| e.contains("未確定")));
+    Ok(())
+}
+
+#[test]
+fn reconciliation_reads_only_the_destination_when_the_source_is_gone() -> Result<(), String> {
+    let mut hidden = source("photo.jpg")?;
+    hidden.apple_visibility = AppleVisibility::Hidden;
+    for apple in [None, Some(hidden)] {
+        let core = fenced_core(apple, false)?;
+        let mut shell = Shell::default();
+        shell.run(&core, resolve_event())?;
+        assert!(core.view().error.is_none(), "{:?}", core.view().error);
+        // GET-only destination reads: no write, no source export.
+        assert_eq!(
+            (shell.attempts, shell.patches, shell.apple_exports),
+            (0, 0, 0)
+        );
+        assert!(shell.methods.iter().all(|m| m == "GET"));
+        assert_eq!((shell.searches, shell.downloads), (1, 1));
+        let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+        assert_eq!(saved.amazon_uploads[0].node_id.as_deref(), Some("photo"));
+        assert!(saved.amazon_uploads[0].verified);
+        // Never completes the copy or creates Move/deletion authority.
+        assert_eq!(saved.receipts[0].phase, TransferPhase::Copying);
+        assert!(saved.receipts[0].destination.is_empty());
+    }
+    Ok(())
+}
+
+#[test]
+fn reconciliation_never_reads_a_protected_destination() -> Result<(), String> {
+    let core = fenced_core(Some(source("photo.jpg")?), true)?;
+    let mut shell = Shell::default();
+    shell.run(&core, resolve_event())?;
+    assert!(core.view().error.is_some());
+    assert_eq!((shell.searches, shell.downloads), (1, 0));
+    assert!(
+        shell
+            .saved
+            .as_ref()
+            .is_some_and(|s| !s.amazon_uploads[0].verified)
+    );
+    Ok(())
+}
+
+#[test]
+fn adopted_connection_without_an_inventory_is_unavailable_not_absent() -> Result<(), String> {
+    let core = core_from(with_indexed_immich(state("photo.jpg")?));
+    let mut shell = Shell {
+        fault: Fault::Search,
+        ..Shell::default()
+    };
+    shell.run(&core, configure_event("fresh"))?;
+    assert!(core.view().error.is_some());
+    let scope = connection()?.scope;
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert!(
+        saved
+            .snapshots
+            .iter()
+            .any(|s| s.provider == Provider::Amazon
+                && s.scope == scope
+                && s.access == ScanAccess::Unavailable)
+    );
+    for snapshots in [saved.snapshots.clone(), core.view().state.snapshots] {
+        assert!(
+            suwop_core::domain::catalog(&snapshots, &[])
+                .iter()
+                .all(|p| p.presence != Presence::AppleOnly)
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn connected_library_whose_root_read_fails_never_claims_apple_only() -> Result<(), String> {
+    // A connected state persisted before any Amazon inventory existed.
+    let core = core_from(with_indexed_immich(state("photo.jpg")?));
+    let mut shell = Shell {
+        apple: vec![source("photo.jpg")?],
+        fault: Fault::Connect,
+        ..Shell::default()
+    };
+    shell.run(&core, refresh_event())?;
+    let snapshot = amazon_snapshot(&core).ok_or("missing Amazon placeholder")?;
+    assert_eq!(snapshot.access, ScanAccess::Unavailable);
+    assert!(
+        suwop_core::domain::catalog(&core.view().state.snapshots, &[])
+            .iter()
+            .all(|p| p.presence != Presence::AppleOnly)
     );
     Ok(())
 }

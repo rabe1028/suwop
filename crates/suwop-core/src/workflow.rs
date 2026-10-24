@@ -218,6 +218,7 @@ impl Runtime<'_> {
         for s in &mut self.state.albums {
             s.access = ScanAccess::Unavailable;
         }
+        self.invalidate_amazon();
         if let Some(trash) = &mut self.state.trash {
             trash.verified = false;
         }
@@ -591,9 +592,14 @@ impl Runtime<'_> {
             }
         }
         self.refresh_immich(now, &mut errors).await?;
-        if let Err(error) = self.refresh_amazon(now).await {
-            self.invalidate(Provider::Amazon);
-            errors.push(error);
+        match self.refresh_amazon(now).await {
+            Ok(None) => {}
+            // A Limited partial catalog at the page cap is kept, not invalidated.
+            Ok(Some(warning)) => errors.push(warning),
+            Err(error) => {
+                self.invalidate_amazon();
+                errors.push(error);
+            }
         }
         self.check_content_generation(&[])?;
         self.ctx.send_event(Event::FetchProgress {
@@ -1013,6 +1019,8 @@ impl Runtime<'_> {
             .await
     }
     /// Only fresh keys returned by this operation's import may bypass catalog membership.
+    /// (Amazon upload-journal reconciliation separately binds one exact journaled
+    /// destination ID with the same purpose; it is not general unpublished access.)
     async fn export_readback(
         &self,
         keys: &[AssetKey],

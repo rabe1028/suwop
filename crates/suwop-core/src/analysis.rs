@@ -115,7 +115,9 @@ pub struct SimilarityHit {
     pub distance: f32,
 }
 
-/// Analysis uses the same privacy boundary as ordinary browsing.
+/// Analysis uses the same privacy boundary as ordinary browsing. Amazon Photos
+/// has no native embedding image source yet; its assets are never queued, so
+/// they cannot pause an analysis run.
 pub fn visible_assets(
     state: &crate::app::SavedLibrary,
 ) -> impl Iterator<Item = &crate::domain::StoredAsset> {
@@ -123,6 +125,7 @@ pub fn visible_assets(
     state
         .snapshots
         .iter()
+        .filter(|snapshot| snapshot.provider != crate::domain::Provider::Amazon)
         .filter(|snapshot| snapshot.access != crate::domain::ScanAccess::Unavailable)
         .flat_map(|snapshot| &snapshot.assets)
         .filter(move |asset| access.visible(&asset.key))

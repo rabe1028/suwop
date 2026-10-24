@@ -56,6 +56,14 @@ impl Runtime<'_> {
         });
         Ok(connection)
     }
+    /// Metadata listing only, as in catalog refresh: no content authorization,
+    /// but bound to this workflow's access generation and current connection.
+    fn amazon_listing_session(&self) -> Result<Connection, String> {
+        let mut connection =
+            self.amazon_session(&[], crate::immich::OrdinaryContentPurpose::Read)?;
+        connection.content_authorization = None;
+        Ok(connection)
+    }
     pub(super) async fn configure_amazon(
         &mut self,
         credential_id: &str,
@@ -73,6 +81,7 @@ impl Runtime<'_> {
         self.state
             .snapshots
             .retain(|s| s.provider != Provider::Amazon);
+        self.invalidate_amazon();
         if let Err(error) = self.persist().await {
             self.state = old;
             self.discard_provisional_amazon_credential(credential_id)
@@ -92,9 +101,40 @@ impl Runtime<'_> {
             )
             .await;
         }
-        self.refresh_amazon(now).await?;
+        let warning = self.refresh_amazon(now).await?;
         self.persist().await?;
+        if let Some(warning) = warning {
+            return Err(warning);
+        }
         Ok("Amazon Photosに接続しました。".into())
+    }
+
+    /// A connected account without a current inventory is Unavailable, never
+    /// absent: absence would let Apple/Immich-only claims ignore Amazon.
+    pub(super) fn invalidate_amazon(&mut self) {
+        self.invalidate(Provider::Amazon);
+        let Some(scope) = self
+            .state
+            .amazon_connection
+            .as_ref()
+            .map(|c| c.scope.clone())
+        else {
+            return;
+        };
+        if !self
+            .state
+            .snapshots
+            .iter()
+            .any(|s| s.provider == Provider::Amazon && s.scope == scope)
+        {
+            self.state.snapshots.push(LibrarySnapshot {
+                provider: Provider::Amazon,
+                scope,
+                assets: vec![],
+                access: ScanAccess::Unavailable,
+                scanned_at: None,
+            });
+        }
     }
 
     /// Remove a login reference that was never durably adopted. The current
@@ -140,12 +180,16 @@ impl Runtime<'_> {
         Ok("Amazon Photosの接続を解除しました。転送履歴は保持しています。".into())
     }
 
-    pub(super) async fn refresh_amazon(&mut self, now: f64) -> Result<(), String> {
+    /// Records are only placed in the workflow state; publication belongs to the
+    /// caller's final result (for `Refresh`, after its generation admission).
+    /// `Ok(Some(_))` reports a Limited partial catalog at the unofficial page cap.
+    pub(super) async fn refresh_amazon(&mut self, now: f64) -> Result<Option<String>, String> {
         let Some(connection) = self.state.amazon_connection.clone() else {
-            return Ok(());
+            return Ok(None);
         };
         let mut checked = connection.clone();
         checked.connect(self.ctx).await?;
+        self.check_content_generation(&[])?;
         if checked.scope != connection.scope {
             return Err(
                 "Amazon Photosのアカウントが変わりました。接続設定から確認してください。".into(),
@@ -157,6 +201,7 @@ impl Runtime<'_> {
         loop {
             self.check_content_generation(&[])?;
             if records.len() >= 9999 {
+                self.preserve_original_fingerprints(&mut records);
                 self.replace(LibrarySnapshot {
                     provider: Provider::Amazon,
                     scope: connection.scope.clone(),
@@ -164,9 +209,11 @@ impl Runtime<'_> {
                     access: ScanAccess::Limited,
                     scanned_at: Some(now),
                 });
-                return Err("Amazon Photosは取得可能なページ上限に達しました。取得済み分を表示しています。一覧は未完了です。".into());
+                return Ok(Some("Amazon Photosは取得可能なページ上限に達しました。取得済み分を表示しています。一覧は未完了です。".into()));
             }
             let (total, nodes) = connection.page(self.ctx, records.len()).await?;
+            // A page read across an access change is never recorded.
+            self.check_content_generation(&[])?;
             if expected.is_some_and(|old| old != total)
                 || (nodes.is_empty() && records.len() != total)
             {
@@ -182,28 +229,23 @@ impl Runtime<'_> {
                 }
                 records.push(node.record(&connection));
             }
-            self.preserve_original_fingerprints(&mut records);
-            let complete = records.len() == total;
-            self.replace(LibrarySnapshot {
-                provider: Provider::Amazon,
-                scope: connection.scope.clone(),
-                assets: records.clone(),
-                access: if complete {
-                    ScanAccess::Full
-                } else {
-                    ScanAccess::Limited
-                },
-                scanned_at: Some(now),
-            });
-            self.progress("Amazon Photosの取得済み写真を表示しています。");
+            if records.len() > total {
+                return Err("Amazon Photosの一覧件数が一致しません。".into());
+            }
+            // Status text only; never the working catalog state.
             self.ctx.send_event(Event::FetchProgress {
                 status: format!("Amazon Photosを取得中: {} / {total} 件", records.len()),
             });
-            if complete {
-                return Ok(());
-            }
-            if records.len() > total {
-                return Err("Amazon Photosの一覧件数が一致しません。".into());
+            if records.len() == total {
+                self.preserve_original_fingerprints(&mut records);
+                self.replace(LibrarySnapshot {
+                    provider: Provider::Amazon,
+                    scope: connection.scope.clone(),
+                    assets: records,
+                    access: ScanAccess::Full,
+                    scanned_at: Some(now),
+                });
+                return Ok(None);
             }
         }
     }
@@ -353,10 +395,14 @@ impl Runtime<'_> {
             let id = response.body["id"].as_str().ok_or(
                 "Amazon Photosのアップロード結果が不明です。再送せず一覧を確認してください。",
             )?;
+            // The returned ID is this POST's only attribution. Journal it before
+            // any read, so a failed readback never forces a listing search. An
+            // invalid ID leaves the attempt's fence ambiguous.
+            crate::amazon::valid_id(id)?;
+            self.state.amazon_uploads[index].node_id = Some(id.to_owned());
+            self.persist().await?;
             let node = connection.node(self.ctx, id).await?;
             node.validate(&connection)?;
-            self.state.amazon_uploads[index].node_id = Some(node.id.clone());
-            self.persist().await?;
             let path = format!("{}/amazon-{index}", self.directory("readback")?);
             let readback = connection.download(self.ctx, &node, &path).await?;
             if readback.signature != file.signature {
@@ -426,39 +472,32 @@ impl Runtime<'_> {
         Ok(())
     }
 
+    /// Journal reconciliation reads only the Amazon destination, never the
+    /// original source, which may since have been deleted or hidden. It never
+    /// changes a receipt phase or grants Move/deletion authority.
     pub(super) async fn resolve_amazon_uploads(&mut self, id: &str) -> Result<String, String> {
-        let connection = self
+        let scope = self
             .state
             .amazon_connection
-            .clone()
-            .ok_or("Amazon Photosに接続してください。")?;
+            .as_ref()
+            .ok_or("Amazon Photosに接続してください。")?
+            .scope
+            .clone();
         self.workspace(id).await?;
         let indices: Vec<_> = self
             .state
             .amazon_uploads
             .iter()
             .enumerate()
-            .filter(|(_, r)| r.scope == connection.scope && !r.verified)
+            .filter(|(_, r)| r.scope == scope && !r.verified)
             .map(|(i, _)| i)
             .collect();
         for index in indices {
             let saved = self.state.amazon_uploads[index].clone();
-            let source_keys: Vec<_> = self
-                .state
-                .receipts
-                .iter()
-                .find(|r| r.id == saved.receipt_id)
-                .ok_or("転送元の記録がありません。再送せず確認してください。")?
-                .source
-                .iter()
-                .map(|a| a.key.clone())
-                .collect();
-            self.check_content_keys(&source_keys)?;
-            let connection =
-                self.amazon_session(&source_keys, crate::immich::OrdinaryContentPurpose::Read)?;
             let node_id = if let Some(node_id) = saved.node_id {
                 node_id
             } else {
+                let connection = self.amazon_listing_session()?;
                 // A lost POST response must only trigger reads. Require one
                 // candidate, then verify its actual bytes before clearing the fence.
                 let mut offset = 0;
@@ -502,7 +541,20 @@ impl Runtime<'_> {
                 self.persist().await?;
                 node_id
             };
-            let node = connection.node(self.ctx, &node_id).await?;
+            // Bind the exact journaled destination. Current owner, generation,
+            // protection and denial still apply to it; drift keeps the fence.
+            let key = AssetKey {
+                provider: Provider::Amazon,
+                scope: scope.clone(),
+                asset_id: node_id,
+            };
+            let keys = std::slice::from_ref(&key);
+            self.check_keys(keys)?;
+            let connection = self.amazon_session(
+                keys,
+                crate::immich::OrdinaryContentPurpose::DestinationReadback,
+            )?;
+            let node = connection.node(self.ctx, &key.asset_id).await?;
             let path = format!("{}/amazon-{index}", self.directory("reconcile")?);
             let hash = connection.download(self.ctx, &node, &path).await?;
             if hash.signature != saved.signature || hash.md5 != saved.md5 {
@@ -510,6 +562,7 @@ impl Runtime<'_> {
                     "Amazon Photosの原本と転送記録が一致しません。元の原本は残します。".into(),
                 );
             }
+            self.check_keys(keys)?;
             self.state.amazon_uploads[index].verified = true;
             self.persist().await?;
         }
