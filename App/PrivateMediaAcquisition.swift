@@ -73,7 +73,8 @@ final class PrivateMediaAcquisition: Sendable {
             return value.deadline
         }
         guard let deadline else { return false }
-        try await ContinuousClock().sleep(until: deadline)
+        // Zero tolerance: a late timer would extend read authorization past the lease.
+        try await ContinuousClock().sleep(until: deadline, tolerance: .zero)
         return expire(leaseID: leaseID)
     }
 
