@@ -17,9 +17,12 @@ import XCTest
             return true
         }
         guard discover(element, in: app, menu: menu, viewport: viewport) else { return false }
-        // Native menu pans can consume part of a drag before scrolling. Allow
-        // bounded continued alignment only while the clipping deficit decreases.
-        // No menu action is retried and full containment remains required.
+        // Native menu pans can consume part of a drag before scrolling, or all of it
+        // (run 40081451846: an identical drag scrolled once and later moved nothing).
+        // Allow bounded continued alignment only while the clipping deficit decreases,
+        // re-issuing a fully swallowed pan at most twice. No menu action is retried
+        // and full containment remains required.
+        var swallowed = 0
         for _ in 0 ..< 12 {
             if visible() {
                 return true
@@ -31,8 +34,12 @@ import XCTest
             if visible() {
                 return true
             }
-            guard element.exists, !element.frame.isEmpty,
-                  clippingDeficit(element.frame, in: viewport) < clippingDeficit(before, in: viewport)
+            guard element.exists, !element.frame.isEmpty else { return false }
+            if element.frame == before, swallowed < 2 {
+                swallowed += 1
+                continue
+            }
+            guard clippingDeficit(element.frame, in: viewport) < clippingDeficit(before, in: viewport)
             else { return false }
         }
         return visible()

@@ -60,14 +60,9 @@ final class ImmichVisibilityStackUITests: XCTestCase {
     }
 
     @MainActor private func authenticate(_ app: XCUIApplication) {
-        let email = app.textFields["immichLockedEmail"]
-        XCTAssertTrue(email.waitForExistence(timeout: 10))
-        email.tap()
-        email.typeText("fixture@example.invalid")
-        app.secureTextFields["immichLockedPassword"].tap()
-        app.secureTextFields["immichLockedPassword"].typeText("C1-ONLY-SYNTHETIC-PASSWORD")
-        app.secureTextFields["immichLockedPIN"].tap()
-        app.secureTextFields["immichLockedPIN"].typeText("135790")
+        app.textFields["immichLockedEmail"].typeTextWhenFocused("fixture@example.invalid")
+        app.secureTextFields["immichLockedPassword"].typeTextWhenFocused("C1-ONLY-SYNTHETIC-PASSWORD")
+        app.secureTextFields["immichLockedPIN"].typeTextWhenFocused("135790")
         let submit = app.buttons["openImmichLocked"]
         for _ in 0 ..< 5 {
             if submit.isHittable {
