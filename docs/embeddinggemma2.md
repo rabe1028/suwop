@@ -32,7 +32,11 @@ existing vectors. Rebuild retains the previous active generation until publicati
   dimensions; Rust truncates to 256/512 and L2-normalizes. Queries use
   `task: search query | text: ...`; queries longer than 128 tokens are rejected.
 - fp16/int8 models computed on the CPU produce corrupted vectors, so inference is
-  refused without a Neural Engine instead of falling back.
+  refused without a Neural Engine instead of falling back. Core ML can still move a
+  model to the CPU without reporting it, so every load embeds a fixed synthetic
+  image (`EmbeddingCanary`) and compares it with the vector Rust pins for these
+  models (`CANARY_MIN_COSINE` 0.98; the Neural Engine gives > 0.9999, the CPU ~0.6).
+  A mismatch releases the models before any photo is embedded.
 - This provider uses **current previews**, including current edits. It is not an
   original/pre-retouch similarity provider. A future original rendition must have
   its own model identity, source revision and preprocessing.
@@ -53,7 +57,12 @@ Inference handles one image at a time. Each completed vector is durably enqueued
 before continuing. Pause persists inference and index states, stops scheduling,
 and drains the current native operation before unloading the model. Restart resumes
 only unfinished jobs; manually paused runs remain paused. App inactivity cancels
-in-flight scheduling; foreground entry can resume a running journal. Failed input
+in-flight scheduling; foreground entry can resume a running journal. On iOS, leaving
+the app with a running journal requests a `BGProcessingTask` that needs external
+power and network; it continues the same journal until the system expires it, and
+then requests another. A canary mismatch in the background stops without pausing,
+because the Neural Engine may be unavailable only there; in the foreground it pauses
+visibly. Failed input
 pauses visibly rather than silently declaring a complete index; the provider API
 also supports explicit per-job exclusion with a reason.
 

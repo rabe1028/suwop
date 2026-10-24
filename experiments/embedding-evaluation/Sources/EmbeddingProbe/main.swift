@@ -66,7 +66,8 @@ func embedImage(_ fixture: Fixture) async throws -> [Float] {
 }
 
 if ["raw", "embed"].contains(args[1]) {
-    try await runtime.load(models: modelsDirectory, lockDirectory: output.appendingPathComponent("lock"))
+    let canary = try await store.embeddingCanary(spec)
+    try await runtime.load(models: modelsDirectory, lockDirectory: output.appendingPathComponent("lock"), canary: canary)
     let afterLoad = runtime.memory().resident
     var raw: [RawVectors] = []
     var projected: [Vectors] = []

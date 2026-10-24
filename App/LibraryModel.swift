@@ -22,13 +22,13 @@ import SwiftUI
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
-    @Published private var work: Task<Void, Never>?
+    @Published private(set) var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
     private var previewWork: Task<Void, Never>?
     private var browseGeneration: UInt64 = 0
     private var publishedRevision: UInt64 = 0
-    private var started = false
-    private var pendingRefresh = false
+    private(set) var started = false
+    private(set) var pendingRefresh = false
     private var pendingAlbumsRefresh = false
     private var pendingTrashRefresh = false
     var pendingAmazonAccount: String?

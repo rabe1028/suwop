@@ -51,6 +51,9 @@ targets:
         NSLocalNetworkUsageDescription: 自宅ネットワーク上の Immich サーバーに接続します。
         NSAppTransportSecurity:
           NSAllowsArbitraryLoads: true
+        # Photo analysis continues while charging; see App/BackgroundAnalysis.swift.
+        UIBackgroundModes: [processing]
+        BGTaskSchedulerPermittedIdentifiers: [jp.rabe1028.suwop.ios.analysis]
   SuwopmacOS:
     type: application
     platform: macOS
