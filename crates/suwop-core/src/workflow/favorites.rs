@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use crate::{
-    app::{ShellOperation, io},
     domain::{AssetKey, Provider, ScanAccess, StoredAsset},
+    provider::{Ability, PROVIDERS},
 };
 
 use super::Runtime;
@@ -17,29 +17,22 @@ impl Runtime<'_> {
         if keys.is_empty() {
             return Err("写真を選択してください。".into());
         }
-        if keys.iter().any(|k| k.provider == Provider::Immich) {
-            self.ensure_session().await?;
-        }
-        let apple: Vec<_> = keys
-            .iter()
-            .filter(|k| k.provider == Provider::Apple)
-            .cloned()
-            .collect();
-        let remote: Vec<_> = keys
-            .iter()
-            .filter(|k| k.provider == Provider::Immich)
-            .cloned()
-            .collect();
-        let amazon: Vec<_> = keys
-            .iter()
-            .filter(|k| k.provider == Provider::Amazon)
-            .cloned()
-            .collect();
-        // Validate both current libraries and access before the first write.
-        for group in [&apple, &remote, &amazon]
+        self.ensure_connections(keys.iter().map(|k| k.provider))
+            .await?;
+        let groups: Vec<(Provider, Vec<AssetKey>)> = PROVIDERS
             .into_iter()
-            .filter(|g| !g.is_empty())
-        {
+            .map(|provider| {
+                let group = keys
+                    .iter()
+                    .filter(|k| k.provider == provider)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (provider, group)
+            })
+            .filter(|(_, group)| !group.is_empty())
+            .collect();
+        // Validate every current library and access before the first write.
+        for (_, group) in &groups {
             self.check_keys(group)?;
         }
         if keys.iter().any(|key| {
@@ -54,41 +47,21 @@ impl Runtime<'_> {
                 "選択した写真を確認できません。一覧とアクセス権を確認してください。".into(),
             );
         }
-        if !apple.is_empty() {
-            let result = io(
-                self.ctx,
-                ShellOperation::AppleFavorite {
-                    keys: apple.clone(),
-                    value,
-                },
-            )
-            .await;
-            self.save_favorite_result(&apple, value, result).await?;
-            self.progress("Apple Photos のお気に入りを保存しました。");
+        // Every selected library must offer the ability before the first write.
+        let registry = self.registry();
+        let mut writers = Vec::new();
+        for (provider, group) in &groups {
+            let writer = registry
+                .favorites(*provider)
+                .ok_or_else(|| registry.missing(*provider, Ability::Favorite))?;
+            writers.push((writer, group));
         }
-        for key in &remote {
-            let result = async {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-                let asset = session.favorite(self.ctx, &key.asset_id, value).await?;
-                Ok(vec![self.immich_record(&asset).await?])
+        for (writer, group) in writers {
+            for batch in group.chunks(writer.batch_size().max(1)) {
+                let result = writer.set_favorite(self.read_io(), batch, value).await;
+                self.save_favorite_result(batch, value, result).await?;
+                self.progress(writer.saved_status());
             }
-            .await;
-            self.save_favorite_result(std::slice::from_ref(key), value, result)
-                .await?;
-            self.progress("Immich のお気に入りを保存しました。");
-        }
-        for key in &amazon {
-            let connection = self.amazon_session(
-                std::slice::from_ref(key),
-                crate::immich::OrdinaryContentPurpose::Read,
-            )?;
-            let result = connection
-                .favorite(self.ctx, &key.asset_id, value)
-                .await
-                .map(|record| vec![record]);
-            self.save_favorite_result(std::slice::from_ref(key), value, result)
-                .await?;
-            self.progress("Amazon Photosのお気に入りを保存しました。");
         }
         Ok(format!("{} 件のお気に入りを変更しました。", keys.len()))
     }

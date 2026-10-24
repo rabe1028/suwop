@@ -14,8 +14,12 @@ pub mod privacy;
 pub mod protection;
 pub mod sharing;
 pub mod tokenizer;
+pub mod transfer_lifecycle;
+pub mod transport;
 pub mod trash;
 pub mod workflow;
+
+mod provider;
 
 pub mod immich_locked;
 

@@ -50,7 +50,9 @@ fn real_immich_upload_gps_list_download_stack_sidecar_and_trash() -> Result<(), 
         for effect in effects {
             let Effect::Io(mut request) = effect;
             let result = match request.operation {
-                ShellOperation::Http(ref http) => execute(&agent, http),
+                ShellOperation::Http(ref http) | ShellOperation::HttpDeletion(ref http) => {
+                    execute(&agent, http)
+                }
                 ShellOperation::Wait { milliseconds } => {
                     std::thread::sleep(Duration::from_millis(u64::from(milliseconds)));
                     Ok(Value::Null)

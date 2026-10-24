@@ -32,6 +32,7 @@ mod preview;
 mod privacy;
 mod reversion;
 mod sharing;
+mod transfer_lifecycle;
 mod trash;
 mod upload_dates;
 mod workflow;
