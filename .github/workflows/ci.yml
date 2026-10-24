@@ -233,7 +233,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -283,7 +285,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -354,7 +358,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -418,7 +424,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
