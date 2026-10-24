@@ -1138,3 +1138,34 @@ fn v4_migration_requests_vectors_again_and_reclaims_lance_files() -> Result {
     assert_eq!(store.prune()?, 0);
     Ok(())
 }
+
+#[test]
+fn lance_file_cleanup_is_retried_until_it_completes() -> Result {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir()?;
+    drop(Store::open(root.path())?);
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    let pending = |db: &rusqlite::Connection| -> rusqlite::Result<i64> {
+        db.query_row("SELECT count(*) FROM pending_cleanup", [], |r| r.get(0))
+    };
+    // A fresh catalog never touches `analysis/`, which the native adapter owns.
+    let analysis = root.path().join("analysis");
+    std::fs::create_dir_all(analysis.join("fresh"))?;
+    drop(Store::open(root.path())?);
+    assert!(analysis.join("fresh").exists());
+    // Simulate termination after the schema-5 commit but before reclamation, with
+    // one entry that cannot be removed yet.
+    db.execute("INSERT INTO pending_cleanup VALUES('lance-files')", [])?;
+    let locked = analysis.join("g1_s1.lance");
+    std::fs::create_dir_all(&locked)?;
+    std::fs::write(locked.join("data"), b"vectors")?;
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o500))?;
+    drop(Store::open(root.path())?);
+    assert_eq!(pending(&db)?, 1);
+    assert!(locked.exists());
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o700))?;
+    drop(Store::open(root.path())?);
+    assert_eq!(pending(&db)?, 0);
+    assert_eq!(std::fs::read_dir(&analysis)?.count(), 0);
+    Ok(())
+}

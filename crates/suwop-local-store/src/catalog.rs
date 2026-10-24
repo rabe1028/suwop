@@ -77,8 +77,17 @@ impl Store {
                 migrate(&mut db, from, sql)?;
             }
         }
-        if (1..=4).contains(&version) {
-            reclaim_lance_files(&root.join("analysis"));
+        // Retried on every open until every former Lance file is gone.
+        let pending: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pending_cleanup WHERE name='lance-files')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        if pending && reclaim_lance_files(&root.join("analysis")) {
+            db.execute("DELETE FROM pending_cleanup WHERE name='lance-files'", [])
+                .map_err(error)?;
         }
         Ok(Self { root, db })
     }
@@ -185,19 +194,28 @@ impl Store {
     }
 }
 /// Former Lance index files are unreadable derived data. Keep the directory itself:
-/// the native adapter owns its backup exclusion attribute.
-fn reclaim_lance_files(directory: &Path) {
-    let Ok(entries) = std::fs::read_dir(directory) else {
-        return;
+/// the native adapter owns its backup exclusion attribute. Returns whether nothing
+/// remains to reclaim.
+fn reclaim_lance_files(directory: &Path) -> bool {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(e) => return e.kind() == std::io::ErrorKind::NotFound,
     };
-    for entry in entries.flatten() {
+    let mut complete = true;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            complete = false;
+            continue;
+        };
         let path = entry.path();
-        let _ = if path.is_dir() {
+        let removed = if path.is_dir() {
             std::fs::remove_dir_all(path)
         } else {
             std::fs::remove_file(path)
         };
+        complete &= removed.is_ok();
     }
+    complete
 }
 fn migrate(db: &mut Connection, from: i64, sql: &str) -> Result<()> {
     let tx = db

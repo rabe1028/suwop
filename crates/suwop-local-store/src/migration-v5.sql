@@ -12,4 +12,7 @@ DELETE FROM shards WHERE state='ready';
 UPDATE generations SET state='retired' WHERE id NOT IN (SELECT latest FROM models);
 UPDATE generations SET state='building' WHERE state='ready';
 UPDATE models SET active=NULL;
+-- Files are removed after this commit; the marker keeps that cleanup retryable.
+CREATE TABLE IF NOT EXISTS pending_cleanup (name TEXT PRIMARY KEY);
+INSERT OR IGNORE INTO pending_cleanup VALUES('lance-files');
 PRAGMA user_version=5;

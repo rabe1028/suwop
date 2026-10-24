@@ -29,4 +29,5 @@ CREATE TABLE IF NOT EXISTS index_vectors (
  shard INTEGER NOT NULL REFERENCES shards(id), scale REAL NOT NULL, codes BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS index_vectors_shard ON index_vectors(shard);
+CREATE TABLE IF NOT EXISTS pending_cleanup (name TEXT PRIMARY KEY);
 PRAGMA user_version=5;

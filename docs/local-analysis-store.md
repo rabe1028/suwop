@@ -59,7 +59,9 @@ vectors in a batch. Valid working budgets are 64–512 MiB, row limits 1–512. 
 budget's cache fields are still validated for API compatibility but no longer size
 an engine cache. Admission estimates 16 copies of each vector plus per-row overhead.
 Index writes and pruning share an advisory file lock, including across processes;
-searches and metadata commits do not take it. There is one background worker per
+searches and metadata commits do not take it. A search reads the active generation,
+its vectors and its hits in one SQLite read snapshot, so a concurrent publication or
+prune cannot leave it scanning a removed generation. There is one background worker per
 open catalog, which retires after inactivity.
 
 These are **managed buffer/admission bounds, not a strict process RSS cap**.
@@ -158,6 +160,8 @@ it also no longer needs `protoc`). Published vectors existed only in Lance files
 which this version cannot read, so migration returns those jobs to `awaiting`,
 drops their shards, clears each model's active generation and retires non-latest
 generations. Photos must be embedded again before search is available; staged
-vectors of unpublished shards are kept. Migration empties `analysis/` but keeps the
-directory. Schema 5 catalogs are not readable by earlier versions.
+vectors of unpublished shards are kept. Migration records a `pending_cleanup` marker;
+each open then empties `analysis/` (keeping the directory) and clears the marker only
+after every entry is removed, so an interrupted or failed cleanup is retried. New
+catalogs never touch `analysis/`. Schema 5 catalogs are not readable by earlier versions.
 

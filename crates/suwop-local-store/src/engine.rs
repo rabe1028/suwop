@@ -244,8 +244,10 @@ impl Store {
         let model = self.model(key)?;
         let vector = normalized(vector, model.dimensions)?;
         let limit = usize::try_from(limit).map_err(error)?;
-        let generation: i64 = self
-            .db
+        // One read snapshot spans generation selection, the scan and hit lookup, so a
+        // concurrent publication or prune cannot leave this search on a removed generation.
+        let tx = self.db.unchecked_transaction().map_err(error)?;
+        let generation: i64 = tx
             .query_row(
                 "SELECT g.id FROM models m JOIN generations g ON g.id=m.active WHERE m.id=?1",
                 [key],
@@ -257,7 +259,7 @@ impl Store {
         // Catalog commits mark jobs for replaced or removed revisions obsolete in the
         // same transaction, so a done job is current; winners are rechecked below.
         let mut best: Vec<(f32, i64)> = Vec::with_capacity(limit + 1);
-        let mut query = self.db.prepare("SELECT v.job,v.scale,v.codes FROM jobs j JOIN index_vectors v ON v.job=j.id AND v.shard=j.shard WHERE j.generation=?1 AND j.state='done'").map_err(error)?;
+        let mut query = tx.prepare("SELECT v.job,v.scale,v.codes FROM jobs j JOIN index_vectors v ON v.job=j.id AND v.shard=j.shard WHERE j.generation=?1 AND j.state='done'").map_err(error)?;
         let mut rows = query.query([generation]).map_err(error)?;
         while let Some(row) = rows.next().map_err(error)? {
             let codes = row.get_ref(2).map_err(error)?.as_blob().map_err(error)?;
@@ -276,7 +278,7 @@ impl Store {
         }
         let mut hits = Vec::with_capacity(best.len());
         for (distance, job) in best {
-            let asset: Option<String> = self.db.query_row("SELECT a.json FROM jobs j JOIN assets a ON a.id=j.asset AND a.revision=j.revision JOIN shards s ON s.id=j.shard WHERE j.id=?1 AND j.state='done' AND s.state='ready'",[job],|r|r.get(0)).optional().map_err(error)?;
+            let asset: Option<String> = tx.query_row("SELECT a.json FROM jobs j JOIN assets a ON a.id=j.asset AND a.revision=j.revision JOIN shards s ON s.id=j.shard WHERE j.id=?1 AND j.state='done' AND s.state='ready'",[job],|r|r.get(0)).optional().map_err(error)?;
             if let Some(asset) = asset {
                 let asset: StoredAsset = serde_json::from_str(&asset).map_err(error)?;
                 hits.push(SimilarityHit {
