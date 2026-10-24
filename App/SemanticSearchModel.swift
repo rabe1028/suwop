@@ -35,6 +35,10 @@ import SwiftUI
     private var selectionTask: Task<InferenceSelection, Error>?
     private var selectionRevision = 0
     private var pausing = false
+    /// Set while a background task lets analysis run without an active scene.
+    private var background = false
+    /// Asks the system for background time when the last scene leaves with analysis running.
+    var requestBackgroundTime: (@MainActor () -> Void)?
 
     init(
         store: LocalStore,
@@ -54,6 +58,10 @@ import SwiftUI
             try await shell.embeddingImage(job, connection: library?.connection, version: library?.remoteVersion)
         }
         shell.catalogChanged = { [weak search] in search?.wake() }
+        #if os(iOS)
+            BackgroundAnalysis.search = search
+            search.requestBackgroundTime = { BackgroundAnalysis.schedule() }
+        #endif
         Task { await search.restore() }
         return search
     }
@@ -184,12 +192,47 @@ import SwiftUI
         } else {
             activeScenes.remove(id)
         }
-        suspended = activeScenes.isEmpty
+        if activeScenes.isEmpty, inference?.state == "running" {
+            requestBackgroundTime?()
+        }
+        suspended = activeScenes.isEmpty && !background
         if suspended {
             task?.cancel()
         } else {
             wake()
         }
+    }
+
+    /// Runs pending analysis until none is left or the background task is cancelled.
+    /// Returns false when the system interrupted it; the remaining photos are requested again.
+    func analyzeInBackground() async -> Bool {
+        background = true
+        suspended = false
+        defer {
+            background = false
+            suspended = activeScenes.isEmpty
+            if suspended {
+                task?.cancel()
+            }
+        }
+        if inference == nil {
+            await restore()
+        }
+        wake()
+        await withTaskCancellationHandler {
+            while let current = task, !Task.isCancelled {
+                await current.value
+            }
+        } onCancel: {
+            Task { @MainActor in self.task?.cancel() }
+        }
+        guard !Task.isCancelled else {
+            if inference?.state == "running" {
+                requestBackgroundTime?()
+            }
+            return false
+        }
+        return true
     }
 
     func search() {
@@ -287,8 +330,8 @@ import SwiftUI
 extension SemanticSearchModel {
     static let unavailableMessage = "この端末またはビルドでは写真の内容検索を利用できません。Neural Engine と同梱モデルが必要です。"
 
-    /// The bundled models, or nil when an injected preparation stands in for them.
-    private func ensureModel() async throws -> URL? {
+    /// The bundled models and their canary, or nil when an injected preparation stands in for them.
+    private func ensureModel() async throws -> (URL, EmbeddingCanary)? {
         try Task.checkCancellation()
         if let prepareModel {
             try await prepareModel()
@@ -299,19 +342,20 @@ extension SemanticSearchModel {
             unavailable = Self.unavailableMessage
             throw SuwopError(Self.unavailableMessage)
         }
-        return directory
+        let canary = try await store.embeddingCanary(spec)
+        return (directory, canary)
     }
 
     private func loadIfAdmitted(key: String, query: Bool = false) async throws {
         if !loaded {
-            let directory = try await ensureModel()
+            let model = try await ensureModel()
             try Task.checkCancellation()
             // Reserve native working memory immediately before loading.
             guard try await store.admitInference(key: key, runtime: runtime, loaded: false, query: query) else {
                 throw SuwopError("メモリ予算またはメモリ不足のため停止しました。")
             }
-            guard let directory else { throw SuwopError("モデルを読み込めません。") }
-            try await runtime.load(models: directory, lockDirectory: store.inferenceLockDirectory)
+            guard let (directory, canary) = model else { throw SuwopError("モデルを読み込めません。") }
+            try await runtime.load(models: directory, lockDirectory: store.inferenceLockDirectory, canary: canary)
             loaded = true
         }
         guard try await store.admitInference(key: key, runtime: runtime, loaded: true, query: query) else {
@@ -404,6 +448,12 @@ extension SemanticSearchModel {
 
     private func failed(_ error: Error) async {
         if Task.isCancelled || error is CancellationError {
+            return
+        }
+        // The Neural Engine may be unavailable only in the background; stop without pausing.
+        if background, error is EmbeddingRuntime.CanaryMismatch {
+            message = error.localizedDescription
+            suspended = true
             return
         }
         message = error.localizedDescription

@@ -3,6 +3,13 @@ import SwiftUI
 
 @main @MainActor struct SuwopApp: App {
     @StateObject private var model = LibraryModel()
+
+    init() {
+        #if os(iOS)
+            BackgroundAnalysis.register()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             LibrarySceneRoot(model: model)
