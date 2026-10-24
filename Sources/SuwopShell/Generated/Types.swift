@@ -1620,6 +1620,8 @@ public struct InferenceSelection: Codable, Sendable {
 }
 
 public struct InferenceSpec: Codable, Sendable {
+    public var canaryEmbedding: [Double]
+    public var canaryMinCosine: Double
     public var imageEdge: Int64
     public var imageTokens: Int64
     public var maxPatches: Int64
@@ -1628,7 +1630,9 @@ public struct InferenceSpec: Codable, Sendable {
     public var patchSize: Int64
     public var poolingKernel: Int64
     public var textTokens: Int64
-    public init(imageEdge: Int64, imageTokens: Int64, maxPatches: Int64, model: AnalysisModel, modelDirectory: String, patchSize: Int64, poolingKernel: Int64, textTokens: Int64) {
+    public init(canaryEmbedding: [Double] = [], canaryMinCosine: Double, imageEdge: Int64, imageTokens: Int64, maxPatches: Int64, model: AnalysisModel, modelDirectory: String, patchSize: Int64, poolingKernel: Int64, textTokens: Int64) {
+        self.canaryEmbedding = canaryEmbedding
+        self.canaryMinCosine = canaryMinCosine
         self.imageEdge = imageEdge
         self.imageTokens = imageTokens
         self.maxPatches = maxPatches

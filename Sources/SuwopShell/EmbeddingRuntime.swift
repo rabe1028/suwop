@@ -101,8 +101,9 @@ public final class EmbeddingRuntime: @unchecked Sendable {
         #endif
     }
 
-    /// Loads the models once. `lockDirectory` holds the cross-process inference lease.
-    public func load(models directory: URL, lockDirectory: URL) async throws {
+    /// Loads the models once and embeds `canary`; a mismatch means Core ML did not run the
+    /// models as converted, so they are released. `lockDirectory` holds the inference lease.
+    public func load(models directory: URL, lockDirectory: URL, canary: EmbeddingCanary) async throws {
         try await perform {
             guard self.models == nil else { return }
             guard Self.hasNeuralEngine else { throw SuwopError("この端末では写真の内容検索を利用できません。") }
@@ -143,6 +144,12 @@ public final class EmbeddingRuntime: @unchecked Sendable {
             } catch {
                 throw SuwopError("モデルを読み込めません。")
             }
+            guard let models = self.models else { return }
+            let vector = try? Self.image(models, patches: canary.patches, tokens: canary.tokens)
+            guard let vector, canary.accepts(vector) else {
+                self.models = nil
+                throw CanaryMismatch()
+            }
         }
     }
 
@@ -160,20 +167,24 @@ public final class EmbeddingRuntime: @unchecked Sendable {
         try Task.checkCancellation()
         return try await perform {
             guard let models = self.models else { throw SuwopError("推論入力が利用できません。") }
-            let count = patches.positions.count / 2
-            let pixels = try Self.array(patches.pixels, shape: [1, count, patches.pixels.count / max(count, 1)])
-            let positions = try Self.array(patches.positions, shape: [1, count, 2])
-            let hidden = try Self.output(
-                models.visionEncoder,
-                ["pixel_values": pixels, "position_ids": positions],
-                "hidden"
-            )
-            let soft = try Self.output(models.visionHead, ["hidden": hidden, "position_ids": positions], "soft_tokens")
-            guard tokens.count(where: { $0 == Self.imageToken }) == patches.softTokens else {
-                throw SuwopError("画像の入力形式が一致しません。")
-            }
-            return try Self.encode(models, tokens: tokens, soft: soft)
+            return try Self.image(models, patches: patches, tokens: tokens)
         }
+    }
+
+    private static func image(_ models: Models, patches: EmbeddingPatches, tokens: [Int32]) throws -> [Float] {
+        let count = patches.positions.count / 2
+        let pixels = try Self.array(patches.pixels, shape: [1, count, patches.pixels.count / max(count, 1)])
+        let positions = try Self.array(patches.positions, shape: [1, count, 2])
+        let hidden = try Self.output(
+            models.visionEncoder,
+            ["pixel_values": pixels, "position_ids": positions],
+            "hidden"
+        )
+        let soft = try Self.output(models.visionHead, ["hidden": hidden, "position_ids": positions], "soft_tokens")
+        guard tokens.count(where: { $0 == Self.imageToken }) == patches.softTokens else {
+            throw SuwopError("画像の入力形式が一致しません。")
+        }
+        return try Self.encode(models, tokens: tokens, soft: soft)
     }
 
     public func close() async {
@@ -255,6 +266,17 @@ public final class EmbeddingRuntime: @unchecked Sendable {
             queue.async {
                 continuation.resume(with: Result { try autoreleasepool(invoking: body) })
             }
+        }
+    }
+}
+
+public extension EmbeddingRuntime {
+    /// The canary embedding did not match: Core ML ran the models somewhere other than the Neural Engine.
+    struct CanaryMismatch: LocalizedError {
+        public init() {}
+
+        public var errorDescription: String? {
+            "Neural Engine で正しく推論できないため、解析を停止しました。"
         }
     }
 }
