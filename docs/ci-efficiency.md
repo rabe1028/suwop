@@ -194,3 +194,12 @@ took 35.4 minutes. The critical path was `apple-products` (7.9m), then
 | Each lane enumerates the same products (32–50s) | Lane `enumerate` stages | Tried and reverted. Enumerating in `apple-products` beside the PhotoKit build first swapped with a stock simulator (13.4m, run 39919532380). With a slim simulator it still competed for the 3 CPUs (10.5m vs 7.3m, run 39925771974). That cost more than the ~40s each lane saved |
 | Linux Rust jobs are CPU-bound | `core (release)` used 92% of 4 CPUs (`rustc`) | Already parallel and cached |
 | macOS memory | About 6.9 of 7 GiB is in use, with no swapouts | None; file cache counts as used |
+
+## Swift package cache removed (2026-10)
+
+After #55 replaced LiteRT-LM with Core ML, the package has no external Swift
+dependencies and no `Package.resolved`. The `cache-apple-packages` step still
+restored about 2.8 GB of SwiftPM downloads in `apple` and `apple-products`
+(about a minute each). Its main and PR copies took 5.7 GB of the 10 GB
+repository cache limit. The step and its action are removed. Add a cache
+again only if external packages return.
