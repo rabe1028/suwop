@@ -155,9 +155,9 @@ fn schema_seven_and_older_migrate_without_inventing_observation_or_changing_old_
         raw["schemaVersion"] = json!(version);
         let expected = raw["immichVisibilityOperations"].clone();
         let mut expected_state = raw.clone();
-        expected_state["schemaVersion"] = json!(8);
+        expected_state["schemaVersion"] = json!(9);
         let state = suwop_core::workflow::migrate(raw)?;
-        assert_eq!(state.schema_version, 8);
+        assert_eq!(state.schema_version, 9);
         assert!(
             state.immich_visibility_operations[0]
                 .selected_observation

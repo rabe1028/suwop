@@ -22,6 +22,10 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub amazon_connection: Option<crate::amazon::Connection>,
+    #[serde(default)]
+    pub amazon_uploads: Vec<crate::amazon::UploadRecord>,
+    #[serde(default)]
     pub immich_visibility_operations: Vec<crate::immich_visibility::ImmichVisibilityOperation>,
     #[serde(default)]
     pub protected_entries: Vec<crate::protection::PersistentProtectedEntry>,
@@ -55,6 +59,19 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    AmazonHttp {
+        request: crate::amazon::Request,
+    },
+    /// Upload POST only. Returns `AmazonUploadSubmission`.
+    AmazonUpload {
+        request: crate::amazon::Request,
+    },
+    AmazonHashFile {
+        path: String,
+    },
+    RemoveAmazonCredential {
+        account: String,
+    },
     ConfirmImmichArchive {
         prompt: crate::immich_archive::ImmichArchivePrompt,
     },
@@ -399,6 +416,21 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    ConfigureAmazon {
+        credential_id: String,
+        now: f64,
+    },
+    DisconnectAmazon,
+    ResolveAmazonUploads {
+        id: String,
+    },
+    CopyTo {
+        keys: Vec<crate::domain::AssetKey>,
+        destination: Provider,
+        intent: TransferIntent,
+        id: String,
+        now: f64,
+    },
     InspectImmichLiveResources {
         #[serde(rename = "parentKey")]
         parent_key: crate::domain::AssetKey,
@@ -1058,6 +1090,8 @@ impl Suwop {
             || matches!(
                 event,
                 Event::Disconnect
+                    | Event::DisconnectAmazon
+                    | Event::ConfigureAmazon { .. }
                     | Event::Configure { .. }
                     | Event::ProtectedPersisted { .. }
                     | Event::ProtectedReconciled { .. }
@@ -1067,8 +1101,13 @@ impl Suwop {
             model
                 .ordinary_generation
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let connection_changed = matches!(event, Event::Disconnect | Event::Configure { .. })
-                || matches!(&event, Event::Finished { session, .. }
+            let connection_changed = matches!(
+                event,
+                Event::Disconnect
+                    | Event::Configure { .. }
+                    | Event::DisconnectAmazon
+                    | Event::ConfigureAmazon { .. }
+            ) || matches!(&event, Event::Finished { session, .. }
                     if model.session.as_ref().map(|s| &s.scope) != session.as_ref().map(|s| &s.scope));
             if connection_changed {
                 model.immich_archive.scene_id = None;
@@ -1200,7 +1239,7 @@ impl Suwop {
                 model.error = error;
                 model.busy = false;
                 model.fetch_status = None;
-                model.ready = model.state.schema_version == 8;
+                model.ready = [8, 9].contains(&model.state.schema_version);
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
             }
@@ -1284,10 +1323,11 @@ impl Suwop {
             operation_public.clone(),
         );
         let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
-        let preview_access = crate::media::PreviewAccess::new(
+        let preview_access = crate::media::PreviewAccess::with_amazon(
             &public.snapshots,
             &model.state.apple_scope,
             model.session.as_ref(),
+            amazon_scope(model),
         );
         let preview_choices: std::collections::BTreeMap<_, _> = photos
             .iter()
@@ -1372,11 +1412,18 @@ impl Suwop {
         }
     }
 }
+fn amazon_scope(model: &Model) -> Option<&str> {
+    model
+        .state
+        .amazon_connection
+        .as_ref()
+        .map(|c| c.scope.as_str())
+}
 fn pending_apple_count(public: &crate::privacy::PublishedLibrary) -> usize {
     public
         .snapshots
         .iter()
-        .filter(|s| s.provider == Provider::Apple)
+        .filter(|s| matches!(s.provider, Provider::Apple | Provider::Amazon))
         .flat_map(|s| &s.assets)
         .filter(|a| !a.fingerprints_complete())
         .count()
@@ -1493,10 +1540,15 @@ fn choose_preview(
         .iter()
         .find(|p| p.assets.iter().any(|a| a.key == *anchor))
         .ok_or("表示する写真を確認できません。一覧を更新してください。")?;
-    let choices = crate::media::PreviewAccess::new(
+    let choices = crate::media::PreviewAccess::with_amazon(
         &public.snapshots,
         &model.state.apple_scope,
         model.session.as_ref(),
+        model
+            .state
+            .amazon_connection
+            .as_ref()
+            .map(|c| c.scope.as_str()),
     )
     .choices(photo, &model.preview_preferences);
     let choice = choices
@@ -1615,7 +1667,7 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
 
 fn can_transfer(model: &Model) -> bool {
     model.ready
-        && model.session.is_some()
+        && (model.session.is_some() || model.state.amazon_connection.is_some())
         && !model.busy
         && !model.protection.membership_uncertain
         && !model.immich_visibility.persistence_uncertain

@@ -6,23 +6,27 @@ import Foundation
 public final class BoundedHTTPData: NSObject, URLSessionDataDelegate, @unchecked Sendable {
     private let lock = NSLock()
     private let limit: Int
+    private let allowRedirects: Bool
     private var bytes = Data()
     private var response: HTTPURLResponse?
     private var task: URLSessionTask?
     private var continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>?
     private var result: Result<(Data, HTTPURLResponse), Error>?
 
-    public init(limit: Int) {
+    public init(limit: Int, allowRedirects: Bool = true) {
         self.limit = max(0, limit)
+        self.allowRedirects = allowRedirects
     }
 
     public static func load(
         _ request: URLRequest,
         session: URLSession,
         uploadFile: URL? = nil,
-        limit: Int
+        limit: Int,
+        allowRedirects: Bool = true,
+        submit: (@Sendable (URLSessionTask) throws -> Void)? = nil
     ) async throws -> (Data, HTTPURLResponse) {
-        let receiver = BoundedHTTPData(limit: limit)
+        let receiver = BoundedHTTPData(limit: limit, allowRedirects: allowRedirects)
         return try await withTaskCancellationHandler {
             try await withCheckedThrowingContinuation { continuation in
                 let task = if let uploadFile {
@@ -31,7 +35,7 @@ public final class BoundedHTTPData: NSObject, URLSessionDataDelegate, @unchecked
                     session.dataTask(with: request)
                 }
                 task.delegate = receiver
-                receiver.start(task, continuation: continuation)
+                receiver.start(task, continuation: continuation, submit: submit)
             }
         } onCancel: {
             receiver.finish(.failure(CancellationError()))
@@ -40,7 +44,8 @@ public final class BoundedHTTPData: NSObject, URLSessionDataDelegate, @unchecked
 
     private func start(
         _ task: URLSessionTask,
-        continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>
+        continuation: CheckedContinuation<(Data, HTTPURLResponse), Error>,
+        submit: (@Sendable (URLSessionTask) throws -> Void)?
     ) {
         lock.lock()
         let completed = result
@@ -53,7 +58,13 @@ public final class BoundedHTTPData: NSObject, URLSessionDataDelegate, @unchecked
             task.cancel()
             continuation.resume(with: completed)
         } else {
-            task.resume()
+            do {
+                if let submit {
+                    try submit(task)
+                } else {
+                    task.resume()
+                }
+            } catch { finish(.failure(error)) }
         }
     }
 
@@ -64,6 +75,9 @@ public final class BoundedHTTPData: NSObject, URLSessionDataDelegate, @unchecked
         newRequest request: URLRequest,
         completionHandler: @escaping (URLRequest?) -> Void
     ) {
+        guard allowRedirects else { completionHandler(nil)
+            return
+        }
         guard let first = task.originalRequest?.url, let second = request.url else {
             completionHandler(nil)
             return

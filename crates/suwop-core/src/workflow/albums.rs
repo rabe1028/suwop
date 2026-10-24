@@ -58,6 +58,9 @@ impl Runtime<'_> {
 
     async fn read_albums(&self, provider: Provider) -> Result<AlbumSnapshot, String> {
         let snapshot = match provider {
+            Provider::Amazon => {
+                return Err("Amazon Photosのアルバム操作には対応していません。".into());
+            }
             Provider::Apple => {
                 io(
                     self.ctx,
@@ -116,6 +119,12 @@ impl Runtime<'_> {
 
     fn album_scope(&self, provider: Provider) -> Result<&str, String> {
         match provider {
+            Provider::Amazon => Ok(&self
+                .state
+                .amazon_connection
+                .as_ref()
+                .ok_or("Amazon Photosに接続してください。")?
+                .scope),
             Provider::Apple => Ok(&self.state.apple_scope),
             Provider::Immich => Ok(&self
                 .session
@@ -137,6 +146,9 @@ impl Runtime<'_> {
         let scope = self.album_scope(provider)?.to_owned();
         let title = title.trim();
         let result: Result<StoredAlbum, String> = match provider {
+            Provider::Amazon => {
+                return Err("Amazon Photosのアルバム作成には対応していません。".into());
+            }
             Provider::Apple => {
                 io(
                     self.ctx,
@@ -240,6 +252,7 @@ impl Runtime<'_> {
 
     async fn perform_album_edit(&self, key: &AlbumKey, edit: &AlbumEdit) -> Result<(), String> {
         match key.provider {
+            Provider::Amazon => Err("Amazon Photosのアルバム変更には対応していません。".into()),
             Provider::Apple => io::<serde_json::Value>(
                 self.ctx,
                 ShellOperation::AppleAlbumEdit {

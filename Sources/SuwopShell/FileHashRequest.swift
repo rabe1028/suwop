@@ -21,4 +21,10 @@ public final class FileHashRequest: Sendable {
             "cancellation": .string(String(handle)),
         ])).decode(HashResult.self)
     }
+
+    public func readAmazon(_ url: URL) throws -> AmazonHash {
+        try CoreBridge.utility(21, input: .object([
+            "path": .string(url.path), "cancellation": .string(String(handle)),
+        ])).decode(AmazonHash.self)
+    }
 }

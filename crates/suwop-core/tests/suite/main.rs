@@ -4,6 +4,7 @@
 
 mod albums;
 mod albums_contract;
+mod amazon;
 mod app_protection;
 mod apple_trash;
 mod apple_visibility;

@@ -766,7 +766,7 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
     let state = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(state.schema_version, 8);
+    assert_eq!(state.schema_version, 9);
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     let record = raw["immichVisibilityOperations"][0].clone();
     raw["immichVisibilityOperations"]

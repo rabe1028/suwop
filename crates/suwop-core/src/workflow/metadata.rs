@@ -12,6 +12,9 @@ impl Runtime<'_> {
         keys: &[AssetKey],
         input: &MetadataInput,
     ) -> Result<String, String> {
+        if keys.iter().any(|key| key.provider == Provider::Amazon) {
+            return Err("Amazon Photosの日時・位置情報の変更には対応していません。別の保存先を選択してください。".into());
+        }
         let (target, change) = prepare(
             &self.state.presentation_snapshots(),
             &self.state.receipts,

@@ -1431,6 +1431,7 @@ name = "suwop-ffi"
 version = "0.1.0"
 dependencies = [
  "crux_core",
+ "md-5",
  "serde",
  "serde_json",
  "sha1",

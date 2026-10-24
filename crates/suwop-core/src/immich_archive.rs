@@ -159,7 +159,7 @@ pub fn view(model: &Model) -> ImmichArchiveView {
 // Busy/scene ownership and operation IDs remain request-specific.
 fn durable_state_available(model: &Model) -> bool {
     model.ready
-        && model.state.schema_version == 8
+        && [8, 9].contains(&model.state.schema_version)
         && !model.immich_visibility.persistence_uncertain
         && !model.protection.membership_uncertain
 }

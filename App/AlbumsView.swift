@@ -42,7 +42,7 @@ struct AlbumCreationView: View {
             Form {
                 TextField("アルバム名", text: $title).accessibilityIdentifier("albumTitle")
                 Picker("保存先", selection: $provider) {
-                    ForEach(Provider.allCases, id: \.self) { Text($0.title).tag($0) }
+                    ForEach(Provider.allCases.filter { $0 != .amazon }, id: \.self) { Text($0.title).tag($0) }
                 }
                 Text("選んだ保存先にアルバムを作成します。")
                     .font(.caption).foregroundStyle(.secondary)

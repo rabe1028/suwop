@@ -454,7 +454,7 @@ fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> 
     raw["schemaVersion"] = json!(6);
     raw["immichVisibilityOperations"] = json!([{"id":ID,"scope":"scope","key":key(),"witnessDigest":"a".repeat(64),"from":"timeline","to":"locked","outcome":"unknown"}]);
     let migrated = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(migrated.schema_version, 8);
+    assert_eq!(migrated.schema_version, 9);
     assert_eq!(
         migrated.immich_visibility_operations[0].kind,
         ImmichVisibilityOperationKind::LockedTransition

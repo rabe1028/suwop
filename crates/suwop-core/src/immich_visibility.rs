@@ -796,7 +796,7 @@ pub(crate) fn capture_authority(
 ) -> Option<crate::immich_archive::VisibilityAuthority> {
     if model.busy
         || !model.ready
-        || model.state.schema_version != 8
+        || ![8, 9].contains(&model.state.schema_version)
         || model.immich_visibility.persistence_uncertain
         || model.protection.membership_uncertain
     {
@@ -893,7 +893,7 @@ fn recover(
             crate::app::io(&ctx, crate::app::ShellOperation::ReadState).await;
         let state = raw
             .ok()
-            .filter(|v| v["schemaVersion"].as_u64() == Some(8))
+            .filter(|v| matches!(v["schemaVersion"].as_u64(), Some(8 | 9)))
             .and_then(|v| crate::workflow::migrate(v).ok())
             .filter(|s| {
                 serde_json::to_value(&s.connection).ok()
