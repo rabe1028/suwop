@@ -12,6 +12,7 @@ pub mod metadata;
 pub mod privacy;
 pub mod protection;
 pub mod sharing;
+pub mod tokenizer;
 pub mod trash;
 pub mod workflow;
 
