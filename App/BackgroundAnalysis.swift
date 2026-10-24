@@ -6,11 +6,12 @@
     /// chooses when the task runs and cancels it when its time expires.
     @MainActor enum BackgroundAnalysis {
         static let identifier = "jp.rabe1028.suwop.ios.analysis"
-        /// Set when the library connects; the task completes immediately without it.
-        weak static var search: SemanticSearchModel?
+        /// The app's library, retained for launches that deliver the task without a scene.
+        private static var library: LibraryModel?
 
         /// Must run before the app finishes launching.
-        static func register() {
+        static func register(library: LibraryModel) {
+            self.library = library
             _ = BGTaskScheduler.shared.register(forTaskWithIdentifier: identifier, using: .main) { task in
                 MainActor.assumeIsolated { run(task) }
             }
@@ -26,15 +27,30 @@
         }
 
         private static func run(_ task: BGTask) {
-            guard let search else {
+            guard let library, let search = library.semanticSearch else {
                 task.setTaskCompleted(success: false)
                 return
             }
-            let work = Task { await search.analyzeInBackground() }
+            let work = Task {
+                // Immich photos need the connection the library loads on start.
+                await library.loadWithoutScene()
+                return await search.analyzeInBackground()
+            }
             task.expirationHandler = { work.cancel() }
             Task {
                 let finished = await work.value
                 task.setTaskCompleted(success: finished)
+            }
+        }
+    }
+
+    extension LibraryModel {
+        /// Starts the library as a scene would and waits for its first view, which carries the
+        /// Immich connection; returns early when cancelled.
+        func loadWithoutScene() async {
+            start()
+            for await view in $view.values where view != nil {
+                return
             }
         }
     }

@@ -2,11 +2,15 @@ import SuwopShell
 import SwiftUI
 
 @main @MainActor struct SuwopApp: App {
-    @StateObject private var model = LibraryModel()
+    @StateObject private var model: LibraryModel
 
     init() {
+        // Created here rather than lazily so a launch for background analysis, which has no
+        // scene, still owns the library.
+        let model = LibraryModel()
+        _model = StateObject(wrappedValue: model)
         #if os(iOS)
-            BackgroundAnalysis.register()
+            BackgroundAnalysis.register(library: model)
         #endif
     }
 

@@ -59,7 +59,6 @@ import SwiftUI
         }
         shell.catalogChanged = { [weak search] in search?.wake() }
         #if os(iOS)
-            BackgroundAnalysis.search = search
             search.requestBackgroundTime = { BackgroundAnalysis.schedule() }
         #endif
         Task { await search.restore() }
