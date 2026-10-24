@@ -146,7 +146,7 @@ fn exercise(
             scope: "apple".into(),
         },
     )?;
-    assert_eq!(host.raw()?["schemaVersion"], 8);
+    assert_eq!(host.raw()?["schemaVersion"], 9);
     assert_eq!(host.operation()?, old);
     evidence(&format!("{outcome}-migrated-before"), &host.raw()?)?;
     host.authenticate(&core, &fixture.email, GRANT)?;

@@ -276,4 +276,62 @@ mod tests {
         assert_eq!(store.read()?.ok_or("missing library")?.apple_scope, "newer");
         Ok(())
     }
+
+    /// Analysis jobs are the cross product of models and `assets` rows. With no
+    /// native embedding source for Amazon, its photos must never become rows.
+    #[test]
+    fn amazon_assets_never_enter_the_analysis_queue() -> Result<()> {
+        use suwop_core::domain::{
+            AppleVisibility, AssetKey, LibrarySnapshot, Provider, ScanAccess,
+        };
+        let root = tempfile::tempdir().map_err(error)?;
+        let mut store = Store::open(root.path())?;
+        let mut connection = suwop_core::amazon::Connection::provisional("credential")?;
+        connection.owner_id = "owner".into();
+        connection.scope = "amazon.co.jp|owner".into();
+        connection.root_id = "root".into();
+        let node: suwop_core::amazon::Node = serde_json::from_value(serde_json::json!({
+            "id":"photo","name":"photo.jpg","ownerId":"owner",
+            "modifiedDate":"2026-10-23T00:00:00Z","status":"AVAILABLE",
+            "contentProperties":{"size":3,"md5":"900150983cd24fb0d6963f7d28e17f72",
+                "contentType":"image/jpeg"}
+        }))
+        .map_err(error)?;
+        let amazon = node.record(&connection);
+        let mut apple = amazon.clone();
+        apple.key = AssetKey {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            asset_id: "source".into(),
+        };
+        apple.apple_visibility = AppleVisibility::Visible;
+        let snapshot = |provider, scope: &str, asset| LibrarySnapshot {
+            provider,
+            scope: scope.into(),
+            assets: vec![asset],
+            access: ScanAccess::Full,
+            scanned_at: Some(1.0),
+        };
+        let state = SavedLibrary {
+            schema_version: 9,
+            apple_scope: "apple".into(),
+            snapshots: vec![
+                snapshot(Provider::Apple, "apple", apple),
+                snapshot(Provider::Amazon, &connection.scope, amazon),
+            ],
+            amazon_connection: Some(connection),
+            ..SavedLibrary::default()
+        };
+        store.persist(&state)?;
+        let providers: Vec<String> = store
+            .db
+            .prepare("SELECT json_extract(json,'$.key.provider') FROM assets")
+            .map_err(error)?
+            .query_map([], |r| r.get(0))
+            .map_err(error)?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(error)?;
+        assert_eq!(providers, ["apple"]);
+        Ok(())
+    }
 }

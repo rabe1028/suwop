@@ -322,7 +322,7 @@ fn schema_three_migrates_without_swallowing_journal_and_summary_hides_inventory(
     let mut raw = serde_json::to_value(&state).map_err(|e| e.to_string())?;
     raw["schemaVersion"] = json!(3);
     let migrated = suwop_core::workflow::migrate(raw)?;
-    assert_eq!(migrated.schema_version, 8);
+    assert_eq!(migrated.schema_version, 9);
     assert_eq!(migrated.apple_visibility_operations.len(), 1);
     let view = core(migrated).view();
     let public = serde_json::to_string(&view.state.apple_visibility_operations)

@@ -499,7 +499,7 @@ fn upload_date(seconds: f64) -> Result<String, String> {
     }
     Ok(date_string(seconds))
 }
-fn parse_date(value: &str) -> Option<f64> {
+pub(crate) fn parse_date(value: &str) -> Option<f64> {
     chrono::DateTime::parse_from_rfc3339(value).ok().map(|d| {
         #[allow(clippy::cast_precision_loss)]
         {

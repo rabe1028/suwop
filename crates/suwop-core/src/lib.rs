@@ -1,4 +1,5 @@
 pub mod albums;
+pub mod amazon;
 pub mod analysis;
 pub mod app;
 pub mod apple_visibility;

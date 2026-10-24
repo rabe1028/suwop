@@ -36,12 +36,22 @@ impl<'a> PreviewAccess<'a> {
         apple_scope: &str,
         session: Option<&Session>,
     ) -> Self {
+        Self::with_amazon(snapshots, apple_scope, session, None)
+    }
+    #[must_use]
+    pub fn with_amazon(
+        snapshots: &'a [LibrarySnapshot],
+        apple_scope: &str,
+        session: Option<&Session>,
+        amazon_scope: Option<&str>,
+    ) -> Self {
         let mut assets = BTreeMap::new();
         let mut duplicates = BTreeSet::new();
         for snapshot in snapshots {
             let current = match snapshot.provider {
                 Provider::Apple => snapshot.scope == apple_scope,
                 Provider::Immich => session.is_some_and(|s| s.scope == snapshot.scope),
+                Provider::Amazon => amazon_scope == Some(snapshot.scope.as_str()),
             };
             if !current
                 || snapshot.access == ScanAccess::Unavailable

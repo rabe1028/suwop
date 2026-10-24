@@ -2,7 +2,11 @@ import Foundation
 
 public extension Provider {
     var title: String {
-        self == .apple ? "Apple Photos" : "Immich"
+        switch self {
+        case .apple: "Apple Photos"
+        case .immich: "Immich"
+        case .amazon: "Amazon Photos"
+        }
     }
 }
 
@@ -102,7 +106,9 @@ extension UnifiedPhoto: Identifiable { public var id: String {
 public extension Presence {
     var title: String {
         switch self {
-        case .both: "両方に原本あり"
+        case .amazon: "Amazon（他は未照合）"
+        case .multiple: "複数の保存先に原本あり"
+        case .both: "Apple・Immichに原本あり"
         case .appleOnly: "Apple のみ"
         case .immichOnly: "Immich のみ"
         case .partial: "一部だけ両方"

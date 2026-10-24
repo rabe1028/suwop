@@ -9,6 +9,10 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    amazon_request: suwop_core::amazon::Request,
+    amazon_response: suwop_core::amazon::Response,
+    amazon_upload_submission: suwop_core::amazon::UploadSubmission,
+    amazon_hash: suwop_core::amazon::Hash,
     immich_locked_live_storage_facts: suwop_core::immich_locked::live::ImmichLockedLiveStorageFacts,
     immich_locked_live_read: suwop_core::immich_locked::live::ImmichLockedLiveRead,
     immich_locked_live_original: suwop_core::immich_locked::live::ImmichLockedLiveOriginal,

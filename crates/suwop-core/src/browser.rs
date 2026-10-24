@@ -52,6 +52,7 @@ pub fn photo_id(photo: &UnifiedPhoto) -> String {
             let provider = match a.key.provider {
                 crate::domain::Provider::Apple => "apple",
                 crate::domain::Provider::Immich => "immich",
+                crate::domain::Provider::Amazon => "amazon",
             };
             format!("{provider}|{}|{}", a.key.scope, a.key.asset_id)
         })
