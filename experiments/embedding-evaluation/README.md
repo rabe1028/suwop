@@ -1,8 +1,15 @@
 # Reproduce the 256/512 comparison
 
-Requirements: Apple Silicon macOS, pinned repository Rust/Xcode/LiteRT dependencies,
-Python 3.10+, `curl`. This downloads public COCO fixtures and the pinned model; it
-never reads the user's photo library. Results and photos are ignored by Git.
+The probe runs the app's Core ML pipeline: an edge-448 preview re-encoded as JPEG
+(the Apple Photos path), Swift patch preparation, Rust tokens and the bundled models.
+Results in `docs/evidence/embeddinggemma2-20261015/` and the `raw` LiteRT rows in
+`docs/evidence/vector-store-20261024/` came from the former LiteRT-LM runtime; reproduce
+those from a checkout before the switch, whose `profile` and `lifecycle` phases this
+version no longer has.
+
+Requirements: Apple Silicon macOS with a Neural Engine, pinned repository Rust/Xcode
+tools, Python 3.10+, `curl`. This downloads public COCO fixtures; it never reads the
+user's photo library. Results and photos are ignored by Git.
 
 1. From the repository root, build the host bridge:
    `bash scripts/build-rust-apple.sh --host`.
@@ -11,19 +18,20 @@ never reads the user's photo library. Results and photos are ignored by Git.
    `results/annotations.zip`, then run `uv run --no-project python prepare.py` from this directory.
    The deterministic sample uses seed 20261015 and the first caption by annotation
    ID. HTTP is the public dataset's endpoint, not a credential-bearing service.
-3. Download the immutable model URL in `crates/suwop-core/src/inference.rs` to a
-   local file. Verify the exact SHA-256 there before running native inference.
+3. Run `make coreml-models` from the repository root; it produces
+   `Generated/CoreMLModels/EmbeddingGemma2`.
 4. `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift build` here.
-5. Run each phase in a separate process, replacing `/absolute/model.litertlm`:
+5. Run each phase in a separate process, with `MODELS` the absolute path of
+   `Generated/CoreMLModels/EmbeddingGemma2`:
 
 ```bash
 for dims in 256 512; do
   mkdir -p "results/d$dims"
   /usr/bin/time -l .build/debug/EmbeddingProbe embed "$dims" \
-    /absolute/model.litertlm "$PWD/results/manifest.json" "$PWD/results/d$dims" \
+    "$MODELS" "$PWD/results/manifest.json" "$PWD/results/d$dims" \
     > "results/d$dims/embedding.log" 2> "results/d$dims/embedding.time"
   /usr/bin/time -l .build/debug/EmbeddingProbe index "$dims" \
-    /absolute/model.litertlm "$PWD/results/manifest.json" "$PWD/results/d$dims" \
+    "$MODELS" "$PWD/results/manifest.json" "$PWD/results/d$dims" \
     > "results/d$dims/index.log" 2> "results/d$dims/index.time"
 done
 uv run --no-project python summarize.py
@@ -41,18 +49,6 @@ the app persists one at a time. It does not exercise the app's UI or prove its
 memory admission budget. Durable pause, restart and stale-source behavior have
 separate Rust/Swift tests. See `docs/embeddinggemma2.md` for limitations and results.
 
-For VM category inspection, replace `embed` with `profile`: it pauses for 20 seconds
-after model loading and 30 seconds after processing. During those windows run
-`vmmap -summary <EmbeddingProbe PID>`. Do not compare that run's elapsed time
-with the regular benchmark, and do not add shared VM regions to process RSS.
-
-The `lifecycle` phase runs five real model load/image/pause/reopen/unload cycles. It
-asserts that a 768 MiB startup budget is refused, a 1.5 GiB budget admits the host
-before and after inference, and a paused journal stays paused in a new store
-instance. `lifecycle.json` records RSS before load, after load/work and after close.
-The native allocator can retain pages after engine deletion; this is not a hard
-process-memory limit or physical-device acceptance.
-
 Japanese diagnostic: use `docs/evidence/embeddinggemma2-20261015/japanese-queries.json`
 for the first 20 query translations and join file paths by ID from `manifest.json`.
 Run `embed` on those 20 entries into `results/japanese256` / `japanese512` and retain
@@ -66,10 +62,11 @@ limit interpretation.
 Prefix, dimension and stored-precision comparison (2026-10-24): run
 `uv run --no-project python prepare.py --count 1000 --manifest manifest-1000.json
 --japanese <id-to-query.json>`, then the `raw` phase, which stores unprojected
-768-dimensional image vectors and query vectors for the app and model-card prefixes:
+768-dimensional image vectors and app-prefix query vectors (the 2026-10-24 LiteRT run also
+stored model-card-prefix queries):
 
 ```bash
-.build/debug/EmbeddingProbe raw 256 /absolute/model.litertlm \
+.build/debug/EmbeddingProbe raw 256 "$MODELS" \
   "$PWD/results/manifest-1000.json" "$PWD/results/raw1000"
 uv run --no-project --with numpy python quantization.py results/raw1000/raw.json
 ```

@@ -1,9 +1,11 @@
 # Local image and text search with EmbeddingGemma 2
 
-The Search tab now offers **写真の内容**. Starting analysis downloads a pinned model
-once (387,710,976 bytes), verifies its exact size and SHA-256, then performs local
-CPU inference. PhotoKit and configured Immich sources supply previews; photo
-contents are not sent to an external embedding service. Registration commits
+The Search tab now offers **写真の内容**. The app bundles four Core ML models
+converted from the upstream checkpoint (int8 weights, ~424 MB compiled) and runs them
+on the Neural Engine; nothing is downloaded. Devices or builds without a Neural
+Engine or the bundled models (iOS Simulator, CI) report the feature as unavailable.
+PhotoKit and configured Immich sources supply previews; photo contents are not sent
+to an external embedding service. Registration commits
 metadata and durable jobs without waiting for inference or indexing.
 
 The default is **256 dimensions** to reduce storage, with a **1.5 GiB** inference
@@ -14,17 +16,23 @@ existing vectors. Rebuild retains the previous active generation until publicati
 
 ## Runtime and source semantics
 
-- LiteRT-LM Swift package 0.18.0, native C embedding API on a dedicated serial queue.
-  Rust owns model identity, query formatting, projection, budgets and durable jobs;
-  Swift performs native image I/O, memory observation and UI scheduling.
-- Text+vision 440M model, pinned revision
-  `e301f74d5551b0c2641bd5cb4652a76239d5c5f8`, SHA-256
-  `92dcbea108899e5d6e30d919b0744f90d9967e80c67a4ab5503ac16d54f62eb0`.
-  Download goes to a temporary file with a byte quota; Rust rechecks before atomic
-  installation. The SDK is a build dependency; model weights are not in Git.
-- CPU, 2 threads, 70 vision tokens, 128 text tokens, fit-to-448 JPEG at quality 0.9.
-  The native output is 768 dimensions. Rust truncates to 256/512 and L2-normalizes
-  independently. Queries use `task: search query | text: ...`.
+- Core ML (system framework) on a dedicated serial queue. Rust owns model identity,
+  query formatting and tokenization (`suwop_core::tokenizer`, parity-tested against
+  Hugging Face `tokenizers`), image token sequences, projection, budgets and durable
+  jobs. Swift performs native image I/O, patch preparation, memory observation and
+  UI scheduling.
+- Text+vision 440M checkpoint `google/embeddinggemma-2` revision
+  `914f7f89142e33e77833254d9c9b90c3cef7303b`, converted by `make coreml-models`
+  (`scripts/coreml/convert.py`) into VisionEncoder (fp16 activations, Neural Engine),
+  VisionHead (fp32; its activations exceed the fp16 range), Tokens (CPU) and Encoder
+  (fp16, Neural Engine). Conversion is deterministic; the script verifies the output
+  identity pinned as `COREML_MODEL_SHA256`. Model weights are not in Git.
+- 70 vision tokens (630 16-pixel patches, aspect-preserving bicubic resize ported
+  from transformers), 128 text tokens, fit-to-448 previews. The output is 768
+  dimensions; Rust truncates to 256/512 and L2-normalizes. Queries use
+  `task: search query | text: ...`; queries longer than 128 tokens are rejected.
+- fp16/int8 models computed on the CPU produce corrupted vectors, so inference is
+  refused without a Neural Engine instead of falling back.
 - This provider uses **current previews**, including current edits. It is not an
   original/pre-retouch similarity provider. A future original rendition must have
   its own model identity, source revision and preprocessing.
@@ -66,6 +74,10 @@ cannot be cancelled or prevented from allocating above the budget mid-call. The
 next checkpoint stops work and unloads the model. macOS RSS includes mapped pages;
 iOS memory-pressure and process-available-memory signals are also considered.
 Physical-device acceptance remains necessary before claiming a safe iPhone budget.
+
+The lifecycle observations below were made with the former LiteRT-LM runtime. On an
+M1 Max, Core ML int8 on the Neural Engine peaked at ~82 MiB footprint after the first
+compilation ([Mac comparison](evidence/coreml-20261024/)).
 
 An actual-model five-cycle load/infer/pause/reopen/unload probe confirmed durable
 pause and rejection of a 768 MiB startup budget, and admitted every cycle at
@@ -184,8 +196,7 @@ was not significantly better than the app's `task: search query | text:` prefix.
 Japanese top-1 remains about 13 points below English on the same images. Details and
 limits are in [the evidence](evidence/vector-store-20261024/).
 
-A Core ML conversion of the upstream checkpoint was also measured as a possible
-replacement for LiteRT-LM; it is not used by the app. See
+The Core ML replacement for LiteRT-LM was first measured in
 [the feasibility spike](../experiments/coreml-conversion/README.md).
 
 ## Validation scope
@@ -238,4 +249,4 @@ Unreadable photos pause inference with a durable, revision-bound failed-job ID. 
 
 Apple CI builds three ARM64 Rust release targets (macOS, iOS device and iOS simulator) in separate matrix jobs. The app job depends on all three and the separate host test job, verifies each library's source revision, target and SHA-256 against the current clean checkout, then runs an ARM64-only XCFramework, iOS/macOS app builds and native sharing tests. Intermediate libraries expire after one day; screenshots and acceptance results retain their existing retention. Local `make apple-build` still builds every target from source.
 
-Catalog-only wakes check the pending journal before touching model weights. A required load reuses the verified path, avoiding duplicate 388 MB SHA-256 reads. Native image preparation also checks the live Rust ordinary-content projection before I/O and before returning bytes; persisted Immich lock intents remove pending jobs and published search hits.
+Catalog-only wakes check the pending journal before touching model weights. Former LiteRT-LM weights and XNNPACK caches in `models/` are deleted when the catalog opens. Native image preparation also checks the live Rust ordinary-content projection before I/O and before returning bytes; persisted Immich lock intents remove pending jobs and published search hits.

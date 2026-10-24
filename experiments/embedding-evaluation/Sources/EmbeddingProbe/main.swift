@@ -36,7 +36,7 @@ struct Report: Codable {
 
 let args = CommandLine.arguments
 if args.count != 6 {
-    throw SuwopError("phase dimensions model manifest output-directory")
+    throw SuwopError("phase dimensions models-directory manifest output-directory")
 }
 
 guard let dimensions = UInt32(args[2]), [256, 512].contains(dimensions) else { throw SuwopError("Invalid dimensions") }
@@ -47,65 +47,46 @@ let spec = try await store.inferenceSpec(dimensions: dimensions)
 let fixtures = try JSONDecoder().decode([Fixture].self, from: Data(contentsOf: URL(fileURLWithPath: args[4])))
 let started = Date()
 let runtime = EmbeddingRuntime()
-if args[1] == "raw" {
-    try await runtime.load(path: args[3], spec: spec)
-    var vectors: [RawVectors] = []
-    for fixture in fixtures {
-        let image = try await EmbeddingImage.prepare(
-            Data(contentsOf: URL(fileURLWithPath: fixture.file)),
-            edge: Int(spec.imageEdge)
-        )
-        // The app's prefix and the model card's asymmetric search prefix.
-        var texts = try await [
-            "app_en": store.queryText(fixture.query),
-            "card_en": "task: search result | query: \(fixture.query)",
-        ]
-        if let ja = fixture.queryJa {
-            texts["app_ja"] = try await store.queryText(ja)
-            texts["card_ja"] = "task: search result | query: \(ja)"
-        }
-        var queries: [String: [Float]] = [:]
-        for (name, text) in texts {
-            queries[name] = try await runtime.embedding(Data(text.utf8), image: false)
-        }
-        try await vectors.append(RawVectors(
-            id: fixture.id,
-            image: runtime.embedding(image, image: true),
-            queries: queries
-        ))
-    }
-    try JSONEncoder().encode(vectors).write(to: output.appendingPathComponent("raw.json"))
-    let report = Report(
-        dimensions: dimensions,
-        seconds: Date().timeIntervalSince(started),
-        residentAfterLoad: 0,
-        residentAfterWork: runtime.memory().resident,
-        results: []
+let modelsDirectory = URL(fileURLWithPath: args[3], isDirectory: true)
+
+/// The app's Apple Photos path: an edge-limited preview, JPEG at 0.9, then patch preparation.
+func embedImage(_ fixture: Fixture) async throws -> [Float] {
+    let preview = try PreviewDecoder.image(
+        Data(contentsOf: URL(fileURLWithPath: fixture.file)),
+        edge: Int(spec.imageEdge)
     )
-    try JSONEncoder().encode(report).write(to: output.appendingPathComponent("raw-inference.json"))
-    await runtime.close()
-} else if ["embed", "profile"].contains(args[1]) {
-    try await runtime.load(path: args[3], spec: spec)
+    let patches = try await EmbeddingPatches.prepare(
+        EmbeddingImage.jpeg(preview),
+        maxPatches: Int(spec.maxPatches),
+        patchSize: Int(spec.patchSize),
+        pooling: Int(spec.poolingKernel)
+    )
+    let tokens = try await store.imageTokens(softTokens: patches.softTokens)
+    return try await runtime.embedding(patches: patches, tokens: tokens)
+}
+
+if ["raw", "embed"].contains(args[1]) {
+    try await runtime.load(models: modelsDirectory, lockDirectory: output.appendingPathComponent("lock"))
     let afterLoad = runtime.memory().resident
-    if args[1] == "profile" {
-        print("PROFILE loaded pid=\(ProcessInfo.processInfo.processIdentifier)")
-        try await Task.sleep(for: .seconds(20))
-    }
-    var vectors: [Vectors] = []
+    var raw: [RawVectors] = []
+    var projected: [Vectors] = []
     for fixture in fixtures {
-        let image = try await EmbeddingImage.prepare(
-            Data(contentsOf: URL(fileURLWithPath: fixture.file)),
-            edge: Int(spec.imageEdge)
-        )
-        let fullImage = try await runtime.embedding(image, image: true)
-        let text = try await store.queryText(fixture.query)
-        let fullQuery = try await runtime.embedding(Data(text.utf8), image: false)
-        try await vectors.append(Vectors(
-            id: fixture.id,
-            image: store.projectEmbedding(fullImage, dimensions: dimensions),
-            query: store.projectEmbedding(fullQuery, dimensions: dimensions)
-        ))
+        let image = try await embedImage(fixture)
+        var queries = try await ["app_en": runtime.embedding(tokens: store.queryTokens(fixture.query))]
+        if let ja = fixture.queryJa {
+            queries["app_ja"] = try await runtime.embedding(tokens: store.queryTokens(ja))
+        }
+        raw.append(RawVectors(id: fixture.id, image: image, queries: queries))
+        if let query = queries["app_en"] {
+            try await projected.append(Vectors(
+                id: fixture.id,
+                image: store.projectEmbedding(image, dimensions: dimensions),
+                query: store.projectEmbedding(query, dimensions: dimensions)
+            ))
+        }
     }
+    try JSONEncoder().encode(raw).write(to: output.appendingPathComponent("raw.json"))
+    try JSONEncoder().encode(projected).write(to: output.appendingPathComponent("vectors.json"))
     let report = Report(
         dimensions: dimensions,
         seconds: Date().timeIntervalSince(started),
@@ -113,12 +94,7 @@ if args[1] == "raw" {
         residentAfterWork: runtime.memory().resident,
         results: []
     )
-    try JSONEncoder().encode(vectors).write(to: output.appendingPathComponent("vectors.json"))
     try JSONEncoder().encode(report).write(to: output.appendingPathComponent("inference.json"))
-    if args[1] == "profile" {
-        print("PROFILE completed pid=\(ProcessInfo.processInfo.processIdentifier)")
-        try await Task.sleep(for: .seconds(30))
-    }
     await runtime.close()
 } else if args[1] == "index" {
     let vectors = try JSONDecoder().decode(
@@ -182,46 +158,6 @@ if args[1] == "raw" {
     )
     try JSONEncoder().encode(report).write(to: output.appendingPathComponent("index.json"))
     try await Task.sleep(for: .seconds(3))
-} else if args[1] == "lifecycle" {
-    let installed = try await store.installModel(from: URL(fileURLWithPath: args[3]))
-    guard try await store.modelPath() == installed else { throw SuwopError("Model installation did not verify") }
-    let denied = try await store.configureInference(dimensions: dimensions, budget: 768 << 20)
-    guard try await !store.admitInference(key: denied.modelKey, runtime: runtime, loaded: false) else {
-        throw SuwopError("A budget without room for startup was admitted")
-    }
-    guard let fixture = fixtures.first else { throw SuwopError("Missing fixture") }
-    let image = try await EmbeddingImage.prepare(
-        Data(contentsOf: URL(fileURLWithPath: fixture.file)),
-        edge: Int(spec.imageEdge)
-    )
-    var observations: [[String: UInt64]] = []
-    for _ in 0 ..< 5 {
-        let configured = try await store.configureInference(dimensions: dimensions, budget: 1536 << 20)
-        guard try await store.admitInference(key: configured.modelKey, runtime: runtime, loaded: false) else {
-            throw SuwopError("Host cannot admit the configured inference budget")
-        }
-        let before = runtime.memory().resident
-        try await runtime.load(path: installed, spec: spec)
-        let afterLoad = runtime.memory().resident
-        _ = try await runtime.embedding(image, image: true)
-        let afterWork = runtime.memory().resident
-        guard try await store.admitInference(key: configured.modelKey, runtime: runtime, loaded: true) else {
-            throw SuwopError("Host exceeded the configured budget after inference")
-        }
-        try await store.pauseInference(key: configured.modelKey)
-        let reopened = try LocalStore(root: output.appendingPathComponent("catalog"))
-        guard try await reopened.inferenceStatus(key: configured.modelKey)?.state == "paused",
-              try await !reopened.admitInference(key: configured.modelKey, runtime: runtime, loaded: true)
-        else {
-            throw SuwopError("Pause did not persist across store instances")
-        }
-        await runtime.close()
-        try await Task.sleep(for: .milliseconds(100))
-        observations.append([
-            "before": before, "afterLoad": afterLoad, "afterWork": afterWork, "afterClose": runtime.memory().resident,
-        ])
-    }
-    try JSONEncoder().encode(observations).write(to: output.appendingPathComponent("lifecycle.json"))
 } else {
     throw SuwopError("Unknown phase")
 }

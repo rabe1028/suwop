@@ -1,16 +1,26 @@
-import CLiteRTLM
+import CoreML
 import Darwin
 import Foundation
 import os
 
-// The native handle is serialized on queue; deinit runs only after all queued owners finish. C inference
-// is synchronous and cannot be interrupted inside a kernel. Callers checkpoint
-// before/after each image; close drains the one in-flight call before freeing it.
-// Remove this exception when LiteRT offers a nonblocking, cancellable C API.
+// Core ML execution of the four bundled EmbeddingGemma 2 models. Rust owns model identity,
+// token sequences and projection; this adapter only runs fixed-shape predictions.
+// Models are touched only on `queue`; deinit runs after every queued owner finishes.
+// Core ML prediction is synchronous: callers checkpoint before and after each input.
 // swiftlint:disable:next no_force_sendable
 public final class EmbeddingRuntime: @unchecked Sendable {
+    private struct Models {
+        let visionEncoder: MLModel
+        let visionHead: MLModel
+        let tokens: MLModel
+        let encoder: MLModel
+    }
+
+    private static let sequenceLength = 128
+    private static let hiddenSize = 512
+    private static let imageToken: Int32 = 258_880
     private let queue = DispatchQueue(label: "suwop.embedding-native", qos: .utility)
-    private var handle: OpaquePointer?
+    private var models: Models?
     private var lockDescriptor: Int32 = -1
     private let pressure = OSAllocatedUnfairLock(initialState: false)
     private var monitor: DispatchSourceMemoryPressure?
@@ -32,12 +42,27 @@ public final class EmbeddingRuntime: @unchecked Sendable {
 
     deinit {
         monitor?.cancel()
-        // All queued closures retain self, so no native operation remains at deinit.
-        if let handle {
-            litert_lm_embedding_engine_delete(handle)
-        }
         if lockDescriptor >= 0 {
             Darwin.close(lockDescriptor)
+        }
+    }
+
+    /// The bundled compiled models, or nil when this build does not include them.
+    public static func bundledModels(_ spec: InferenceSpec, bundle: Bundle = .main) -> URL? {
+        guard let directory = bundle.url(forResource: spec.modelDirectory, withExtension: nil) else { return nil }
+        let complete = ["VisionEncoder", "VisionHead", "Tokens", "Encoder"].allSatisfy {
+            FileManager.default.fileExists(atPath: directory.appendingPathComponent("\($0).mlmodelc").path)
+        }
+        return complete ? directory : nil
+    }
+
+    /// fp16 and int8 models produce corrupted vectors on the CPU, so inference requires a Neural Engine.
+    public static var hasNeuralEngine: Bool {
+        MLComputeDevice.allComputeDevices.contains { device in
+            if case .neuralEngine = device {
+                return true
+            }
+            return false
         }
     }
 
@@ -76,12 +101,17 @@ public final class EmbeddingRuntime: @unchecked Sendable {
         #endif
     }
 
-    public func load(path: String, spec: InferenceSpec) async throws {
+    /// Loads the models once. `lockDirectory` holds the cross-process inference lease.
+    public func load(models directory: URL, lockDirectory: URL) async throws {
         try await perform {
-            guard self.handle == nil else { return }
-            let lockPath = URL(fileURLWithPath: path).deletingLastPathComponent()
-                .appendingPathComponent("inference.lock").path
-            let descriptor = Darwin.open(lockPath, O_CREAT | O_RDWR, 0o600)
+            guard self.models == nil else { return }
+            guard Self.hasNeuralEngine else { throw SuwopError("この端末では写真の内容検索を利用できません。") }
+            try FileManager.default.createDirectory(at: lockDirectory, withIntermediateDirectories: true)
+            let descriptor = Darwin.open(
+                lockDirectory.appendingPathComponent("inference.lock").path,
+                O_CREAT | O_RDWR,
+                0o600
+            )
             guard descriptor >= 0 else { throw SuwopError("推論の排他制御を開始できません。") }
             guard flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
                 Darwin.close(descriptor)
@@ -89,66 +119,135 @@ public final class EmbeddingRuntime: @unchecked Sendable {
             }
             self.lockDescriptor = descriptor
             defer {
-                if self.handle == nil {
+                if self.models == nil {
                     Darwin.close(descriptor)
                     self.lockDescriptor = -1
                 }
             }
-            guard let settings = litert_lm_embedding_engine_settings_create(path, "cpu", "cpu", nil) else {
-                throw SuwopError("推論設定を作成できません。")
+            func model(_ name: String, _ units: MLComputeUnits) throws -> MLModel {
+                let configuration = MLModelConfiguration()
+                configuration.computeUnits = units
+                return try MLModel(
+                    contentsOf: directory.appendingPathComponent("\(name).mlmodelc"),
+                    configuration: configuration
+                )
             }
-            defer { litert_lm_embedding_engine_settings_delete(settings) }
-            litert_lm_embedding_engine_settings_set_num_threads(settings, Int32(spec.threads))
-            litert_lm_embedding_engine_settings_set_max_input_length(settings, Int32(spec.textTokens))
-            litert_lm_embedding_engine_settings_set_vision_tokens_per_image(settings, Int32(spec.imageTokens))
-            guard let handle = litert_lm_embedding_engine_create(settings) else {
-                throw SuwopError("モデルを読み込めません。メモリ予算とモデルを確認してください。")
+            do {
+                // The token table and the fp32 head stay on the CPU; fp16 graphs need the Neural Engine.
+                self.models = try Models(
+                    visionEncoder: model("VisionEncoder", .cpuAndNeuralEngine),
+                    visionHead: model("VisionHead", .cpuOnly),
+                    tokens: model("Tokens", .cpuOnly),
+                    encoder: model("Encoder", .cpuAndNeuralEngine)
+                )
+            } catch {
+                throw SuwopError("モデルを読み込めません。")
             }
-            self.handle = handle
         }
     }
 
-    public func embedding(_ data: Data, image: Bool) async throws -> [Float] {
+    /// Mean-pooled 768-dimensional embedding of `tokens` (from Rust), before projection.
+    public func embedding(tokens: [Int32]) async throws -> [Float] {
         try Task.checkCancellation()
         return try await perform {
-            guard let handle = self.handle, data.count <= 8 << 20 else { throw SuwopError("推論入力が利用できません。") }
-            let input = data.withUnsafeBytes {
-                litert_lm_input_data_create(
-                    image ? kLiteRtLmInputDataTypeImage : kLiteRtLmInputDataTypeText,
-                    $0.baseAddress,
-                    data.count
-                )
+            guard let models = self.models else { throw SuwopError("推論入力が利用できません。") }
+            return try Self.encode(models, tokens: tokens, soft: nil)
+        }
+    }
+
+    /// Image embedding from prepared patches and the Rust token sequence for its soft tokens.
+    public func embedding(patches: EmbeddingPatches, tokens: [Int32]) async throws -> [Float] {
+        try Task.checkCancellation()
+        return try await perform {
+            guard let models = self.models else { throw SuwopError("推論入力が利用できません。") }
+            let count = patches.positions.count / 2
+            let pixels = try Self.array(patches.pixels, shape: [1, count, patches.pixels.count / max(count, 1)])
+            let positions = try Self.array(patches.positions, shape: [1, count, 2])
+            let hidden = try Self.output(
+                models.visionEncoder,
+                ["pixel_values": pixels, "position_ids": positions],
+                "hidden"
+            )
+            let soft = try Self.output(models.visionHead, ["hidden": hidden, "position_ids": positions], "soft_tokens")
+            guard tokens.count(where: { $0 == Self.imageToken }) == patches.softTokens else {
+                throw SuwopError("画像の入力形式が一致しません。")
             }
-            guard let input else { throw SuwopError("推論入力を作成できません。") }
-            defer { litert_lm_input_data_delete(input) }
-            guard let options = litert_lm_embedding_options_create() else { throw SuwopError("推論設定を作成できません。") }
-            defer { litert_lm_embedding_options_delete(options) }
-            litert_lm_embedding_options_set_normalize(options, false)
-            litert_lm_embedding_options_set_output_size(options, 768)
-            var pointer: OpaquePointer? = input
-            guard let response = litert_lm_embedding_engine_compute_embedding(handle, &pointer, 1, options) else {
-                throw SuwopError("この入力の特徴を生成できません。")
-            }
-            defer { litert_lm_embedding_response_delete(response) }
-            let count = litert_lm_embedding_response_get_size(response)
-            guard count == 768, let values = litert_lm_embedding_response_get_values(response) else {
-                throw SuwopError("モデルの出力形式が異なります。")
-            }
-            return Array(UnsafeBufferPointer(start: values, count: count))
+            return try Self.encode(models, tokens: tokens, soft: soft)
         }
     }
 
     public func close() async {
         _ = try? await perform {
-            if let handle = self.handle {
-                litert_lm_embedding_engine_delete(handle)
-            }
-            self.handle = nil
+            self.models = nil
             if self.lockDescriptor >= 0 {
                 Darwin.close(self.lockDescriptor)
                 self.lockDescriptor = -1
             }
         }
+    }
+
+    private static func encode(_ models: Models, tokens: [Int32], soft: MLMultiArray?) throws -> [Float] {
+        guard (2 ... sequenceLength).contains(tokens.count) else { throw SuwopError("推論入力が長すぎます。") }
+        let ids = try MLMultiArray(shape: [1, NSNumber(value: sequenceLength)], dataType: .int32)
+        let mask = try MLMultiArray(shape: [1, NSNumber(value: sequenceLength)], dataType: .float32)
+        let idPointer = ids.dataPointer.bindMemory(to: Int32.self, capacity: sequenceLength)
+        let maskPointer = mask.dataPointer.bindMemory(to: Float.self, capacity: sequenceLength)
+        for index in 0 ..< sequenceLength {
+            let present = index < tokens.count
+            // Image placeholders take the pad embedding before soft tokens replace them.
+            idPointer[index] = present && tokens[index] != imageToken ? tokens[index] : 0
+            maskPointer[index] = present ? 1 : 0
+        }
+        let embeds = try output(models.tokens, ["input_ids": ids], "inputs_embeds")
+        if let soft {
+            try replacePlaceholders(in: embeds, tokens: tokens, with: soft)
+        }
+        let vector = try output(models.encoder, ["inputs_embeds": embeds, "mask": mask], "embedding")
+        guard vector.count == 768, vector.dataType == .float32 else { throw SuwopError("モデルの出力形式が異なります。") }
+        let values = (0 ..< 768).map { vector[$0].floatValue }
+        guard values.allSatisfy(\.isFinite) else { throw SuwopError("この入力の特徴を生成できません。") }
+        return values
+    }
+
+    private static func replacePlaceholders(in embeds: MLMultiArray, tokens: [Int32], with soft: MLMultiArray) throws {
+        guard embeds.dataType == .float32, soft.dataType == .float32 else {
+            throw SuwopError("モデルの出力形式が異なります。")
+        }
+        let target = embeds.dataPointer.bindMemory(to: Float.self, capacity: embeds.count)
+        let source = soft.dataPointer.bindMemory(to: Float.self, capacity: soft.count)
+        let targetRow = embeds.strides[1].intValue, targetColumn = embeds.strides[2].intValue
+        let sourceRow = soft.strides[1].intValue, sourceColumn = soft.strides[2].intValue
+        var next = 0
+        for (index, id) in tokens.enumerated() where id == imageToken {
+            for column in 0 ..< hiddenSize {
+                target[index * targetRow + column * targetColumn] = source[next * sourceRow + column * sourceColumn]
+            }
+            next += 1
+        }
+    }
+
+    private static func array<T>(_ values: [T], shape: [Int]) throws -> MLMultiArray {
+        let type: MLMultiArrayDataType = T.self == Float.self ? .float32 : .int32
+        let array = try MLMultiArray(shape: shape.map { NSNumber(value: $0) }, dataType: type)
+        guard array.count == values.count else { throw SuwopError("推論入力の形式が不正です。") }
+        values.withUnsafeBytes { raw in
+            if let base = raw.baseAddress {
+                array.dataPointer.copyMemory(from: base, byteCount: raw.count)
+            }
+        }
+        return array
+    }
+
+    private static func output(
+        _ model: MLModel,
+        _ inputs: [String: MLMultiArray],
+        _ name: String
+    ) throws -> MLMultiArray {
+        let provider = try MLDictionaryFeatureProvider(dictionary: inputs.mapValues { MLFeatureValue(multiArray: $0) })
+        guard let value = try model.prediction(from: provider).featureValue(for: name)?.multiArrayValue else {
+            throw SuwopError("モデルの出力形式が異なります。")
+        }
+        return value
     }
 
     private func perform<Value: Sendable>(_ body: @escaping @Sendable () throws -> Value) async throws -> Value {

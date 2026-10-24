@@ -1,5 +1,10 @@
 # EmbeddingGemma 2 on Core ML (feasibility spike)
 
+The app now bundles models from `scripts/coreml/convert.py` (`make coreml-models`).
+This directory is the historical spike; its LiteRT-LM comparisons (`mac-bench`,
+`simulator/`) need a checkout from before the switch, when the package still
+depended on LiteRT-LM.
+
 Goal: replace the LiteRT-LM binary dependency with Core ML, a system framework.
 The spike converts the pinned upstream checkpoint (`google/embeddinggemma-2`,
 Apache-2.0, revision in `convert.py`) and measures parity, retrieval, size and

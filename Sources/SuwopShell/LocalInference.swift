@@ -79,16 +79,15 @@ public extension LocalStore {
         ])).decode([Float].self)
     }
 
-    func queryText(_ text: String) async throws -> String {
-        try await call(.object(["type": .string("queryText"), "text": .string(text)])).decode(String.self)
+    /// Rust formats and tokenizes the query, including `<bos>`/`<eos>`.
+    func queryTokens(_ text: String) async throws -> [Int32] {
+        try await call(.object(["type": .string("queryTokens"), "text": .string(text)])).decode([Int32].self)
     }
 
-    func modelPath() async throws -> String {
-        try await call(.object(["type": .string("modelPath")])).decode(String.self)
-    }
-
-    func installModel(from source: URL) async throws -> String {
-        try await call(.object(["type": .string("installModel"), "source": .string(source.path)])).decode(String.self)
+    /// Token sequence for one image whose patches yield `softTokens` vision embeddings.
+    func imageTokens(softTokens: Int) async throws -> [Int32] {
+        try await call(.object(["type": .string("imageTokens"), "softTokens": .number(Double(softTokens))]))
+            .decode([Int32].self)
     }
 }
 

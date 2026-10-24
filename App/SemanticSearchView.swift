@@ -52,15 +52,17 @@ struct SemanticSearchView: View {
                             Text("元の写真は残ります。検索データを作り直すと再試行します。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Button(search.inference == nil ? "モデルを保存して解析を開始" : "解析を開始・再開") { search.start() }
+                        Button(search.inference == nil ? "解析を開始" : "解析を開始・再開") { search.start() }
+                            .disabled(search.unavailable != nil)
                             .accessibilityIdentifier("resumeInference")
                         if search.status != nil {
                             Button("検索データを作り直す") { search.start(rebuild: true) }
+                                .disabled(search.unavailable != nil)
                                 .accessibilityIdentifier("rebuildInference")
                         }
                     }
                     Text(
-                        "最初に約388 MBをダウンロードし、作業キャッシュを含め約680 MBを使います。推論は端末内で行い、写真を外部のAIサービスには送信しません。予算を超えた場合は次の写真を処理せず停止します。"
+                        "モデルはアプリに含まれ、追加のダウンロードはありません。推論は端末の Neural Engine で行い、写真を外部のAIサービスには送信しません。予算を超えた場合は次の写真を処理せず停止します。"
                     )
                     .font(.caption).foregroundStyle(.secondary)
                 }
