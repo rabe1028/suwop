@@ -31,26 +31,13 @@
                 task.setTaskCompleted(success: false)
                 return
             }
-            let work = Task {
-                // Immich photos need the connection the library loads on start.
-                await library.loadWithoutScene()
-                return await search.analyzeInBackground()
-            }
+            // A launch without a scene has not started the library; analysis waits for it to settle.
+            library.start()
+            let work = Task { await search.analyzeInBackground() }
             task.expirationHandler = { work.cancel() }
             Task {
                 let finished = await work.value
                 task.setTaskCompleted(success: finished)
-            }
-        }
-    }
-
-    extension LibraryModel {
-        /// Starts the library as a scene would and waits for its first view, which carries the
-        /// Immich connection; returns early when cancelled.
-        func loadWithoutScene() async {
-            start()
-            for await view in $view.values where view != nil {
-                return
             }
         }
     }

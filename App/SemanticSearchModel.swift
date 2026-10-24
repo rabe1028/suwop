@@ -55,7 +55,10 @@ import SwiftUI
         library: LibraryModel
     ) -> SemanticSearchModel {
         let search = SemanticSearchModel(store: shell.localStore) { [weak library] job in
-            try await shell.embeddingImage(job, connection: library?.connection, version: library?.remoteVersion)
+            // Immich photos need the stored connection and the session refresh establishes.
+            await library?.untilSettled()
+            try Task.checkCancellation()
+            return try await shell.embeddingImage(job, connection: library?.connection, version: library?.remoteVersion)
         }
         shell.catalogChanged = { [weak search] in search?.wake() }
         #if os(iOS)
