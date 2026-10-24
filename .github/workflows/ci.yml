@@ -309,7 +309,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
         run: make test-swift
       - name: Download this run's three ARM64 release slices
@@ -380,7 +379,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/cache-apple-packages
       - name: Build simulator test products
         run: make simulator-products
       # upload-artifact drops file modes; a tarball keeps executables and bundle symlinks.
