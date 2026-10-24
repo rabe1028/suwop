@@ -36,7 +36,9 @@ extension ImmichLockedLiveNativeAccess {
         displayLease = lease
         displayExpiry?.cancel()
         displayExpiry = Task { @MainActor [weak self] in
-            do { try await ContinuousClock().sleep(until: lease.deadline) } catch { return }
+            // Without zero tolerance the timer may fire late by about 7% of the wait
+            // (666 ms for 10 s, measured), leaving a protected Live Photo shown after its deadline.
+            do { try await ContinuousClock().sleep(until: lease.deadline, tolerance: .zero) } catch { return }
             guard let self, displayLease == lease else { return }
             let captured = owners.values.filter {
                 $0.issued.grantID == lease.grantID && $0.issued.generation == lease.generation && !$0.retired
