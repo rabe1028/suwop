@@ -148,7 +148,8 @@ public final class CoreBridge {
         let start = ProcessInfo.processInfo.systemUptime
         let output = try Self.invokeData(handle: handle, action: action, input: .null)
         let decodeStart = ProcessInfo.processInfo.systemUptime
-        let value = try transform(Wire.decoder().decode(BridgeEnvelope<Payload>.self, from: output).value)
+        let payload = try Self.decodeEnvelope(Payload.self, from: output, action: action)
+        let value = try transform(payload)
         return DecodedMeasurement(
             value: value,
             start: start,
@@ -163,8 +164,37 @@ public final class CoreBridge {
 
     private static func invoke(handle: UInt64, action: UInt32, input: JSONValue) throws -> JSONValue {
         let output = try invokeData(handle: handle, action: action, input: input)
-        return try Wire.decoder().decode(BridgeEnvelope<JSONValue>.self, from: output).value
+        return try decodeEnvelope(JSONValue.self, from: output, action: action)
     }
+
+    private static func decodeEnvelope<Value: Decodable>(
+        _ type: Value.Type, from output: Data, action: UInt32
+    ) throws -> Value {
+        do {
+            return try Wire.decoder().decode(BridgeEnvelope<Value>.self, from: output).value
+        } catch let error as DecodingError {
+            #if DEBUG
+                NSLog("%@", decodeFailureReport(Value.self, from: output, action: action, error: error))
+            #endif
+            throw error
+        }
+    }
+
+    #if DEBUG
+        /// Intermittent CI failures reported impossible paths (Double expected at
+        /// `effect.Io.type`). Records whether Rust's bytes were valid JSON and whether a
+        /// Swift-owned copy decodes, to tell bad output from unstable reading.
+        static func decodeFailureReport<Value: Decodable>(
+            _ type: Value.Type, from output: Data, action: UInt32, error: any Error
+        ) -> String {
+            let copy = Data(output)
+            let valid = (try? JSONSerialization.jsonObject(with: copy)) != nil
+            let retried = (try? Wire.decoder().decode(BridgeEnvelope<Value>.self, from: copy)) != nil
+            let excerpt = String(bytes: copy.prefix(2048), encoding: .utf8) ?? "<not UTF-8>"
+            return "SUWOP_BRIDGE_DECODE_FAILURE action=\(action) bytes=\(copy.count) "
+                + "validJSON=\(valid) copiedRetryDecodes=\(retried) error=\(error) payload=\(excerpt)"
+        }
+    #endif
 
     private static func invokeData(handle: UInt64, action: UInt32, input: JSONValue) throws -> Data {
         let data = try Wire.encoder().encode(input)
