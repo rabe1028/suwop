@@ -141,6 +141,9 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
         ids.push(id);
     }
     wait_for(ctx, &session, &ids, true).await?;
+    // Upload extraction derives a GPS time zone asynchronously; a late job overwrote
+    // the adjusted America/New_York with Asia/Tokyo (run 39993518014).
+    wait_metadata_queues(ctx, &session).await?;
     assert!(session.favorite(ctx, &ids[0], true).await?.is_favorite);
     assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
     exercise_metadata(ctx, &session, &ids[..2]).await?;

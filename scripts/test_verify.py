@@ -232,9 +232,10 @@ class RegistryRetryTests(unittest.TestCase):
 
     def test_throttling_recovers_before_tests(self):
         self.assertEqual(self.run_pull(2, "toomanyrequests"), (0, 3))
+        self.assertEqual(self.run_pull(4, "toomanyrequests"), (0, 5))
 
     def test_persistent_throttling_is_bounded(self):
-        self.assertEqual(self.run_pull(10, "429 Too Many Requests"), (9, 3))
+        self.assertEqual(self.run_pull(10, "429 Too Many Requests"), (9, 5))
 
     def test_other_failures_are_not_retried(self):
         self.assertEqual(self.run_pull(10, "unauthorized"), (9, 1))

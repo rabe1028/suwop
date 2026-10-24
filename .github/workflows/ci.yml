@@ -144,6 +144,10 @@ jobs:
   immich-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      # Authenticated GHCR pulls get a higher rate limit than anonymous ones.
+      packages: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Start CI resource metrics
@@ -171,6 +175,12 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Authenticate image pulls from GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        # Anonymous pulls hit GHCR's rate limit (main run 39887115193); a failed
+        # login only falls back to anonymous pulls.
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "::warning::GHCR login failed; pulling anonymously"
       - name: Verify old-server ordinary, read, recovery and denied PIN writes
         env:
           IMMICH_VERSION: v3.2.4
