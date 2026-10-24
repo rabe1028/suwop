@@ -527,7 +527,7 @@ fn strict_current_schema_and_unknown_future_formats_fail_without_defaulting_to_n
         json!({"type":"futureSubmittedState"});
     assert!(crate::workflow::migrate(malformed).is_err());
     let mut future = raw.clone();
-    future["schemaVersion"] = json!(10);
+    future["schemaVersion"] = json!(super::CURRENT_SCHEMA_VERSION + 1);
     assert!(crate::workflow::migrate(future).is_err());
     let mut future = raw;
     future["immichLiveOperations"][0]["formatVersion"] = json!(2);

@@ -11,8 +11,10 @@ final class ImmichLiveParentArchiveUITests: XCTestCase {
 
     @MainActor private func exerciseParent(largeText: Bool) {
         let app = XCUIApplication()
+        // Closing the viewer and reopening a gallery photo needs UIKit's animated
+        // dismissal; without animations the gallery once stayed unhittable.
         app
-            .launchArguments = ["--immich-archive-fixture", "--archive-live-parent"] +
+            .launchArguments = ["--immich-archive-fixture", "--archive-live-parent", "--ui-test-animations"] +
             (largeText ? ["--large-text"] : [])
         app.launch()
         openChange(in: app, destination: "アーカイブ")

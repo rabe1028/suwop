@@ -44,7 +44,7 @@ private func browserRuntime() async throws -> RustRuntime {
     )
     let state = SavedLibrary(
         appleScope: "fixture",
-        schemaVersion: 9,
+        schemaVersion: 10,
         snapshots: [LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)]
     )
     let effects = try await runtime.update(.object(["type": .string("initialize"), "scope": .string("fixture")]))

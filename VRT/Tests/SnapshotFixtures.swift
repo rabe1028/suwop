@@ -60,7 +60,7 @@ import XCTest
             appleScope: "vrt",
             editClipboard: editClipboard,
             pendingEditPastes: pendingEditPastes,
-            schemaVersion: 9,
+            schemaVersion: 10,
             snapshots: [LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full)]
         )
         let bridge = try CoreBridge()
@@ -130,7 +130,7 @@ import XCTest
         let state = SavedLibrary(
             appleScope: "vrt",
             pendingTrash: pending ? [operation] : [],
-            schemaVersion: 9,
+            schemaVersion: 10,
             trash: TrashSnapshot(items: [TrashItem(asset: photo, identity: identity)], scope: "remote", verified: true)
         )
         let bridge = try CoreBridge()
@@ -152,7 +152,7 @@ import XCTest
             scope: "vrt",
             visibility: .absent
         )
-        let state = SavedLibrary(appleScope: "vrt", pendingAppleTrash: [operation], schemaVersion: 9)
+        let state = SavedLibrary(appleScope: "vrt", pendingAppleTrash: [operation], schemaVersion: 10)
         let bridge = try CoreBridge()
         let read = try XCTUnwrap(bridge
             .call(0, input: .object(["type": .string("initialize"), "scope": .string("vrt")]))

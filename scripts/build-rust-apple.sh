@@ -41,7 +41,7 @@ build_slice() {
     export SDKROOT
     SDKROOT="$(xcrun --sdk "$SDK" --show-sdk-path)"
     cargo build --locked --release -p suwop-ffi --target "$triple"
-    # Retain finished slices while optionally reclaiming large Lance object caches.
+    # Retain finished slices while optionally reclaiming large release object caches.
     mkdir -p "Generated/RustSlices/$triple"
     cp "target/$triple/release/libsuwop_ffi.a" "Generated/RustSlices/$triple/libsuwop_ffi.a"
     if [[ "${SUWOP_CLEAN_CHECK:-0}" == "1" ]]; then

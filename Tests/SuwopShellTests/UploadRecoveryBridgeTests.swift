@@ -138,7 +138,7 @@ private struct UploadRecoveryABI {
     var driver = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 9
+        schemaVersion: 10
     ))
     try driver.initializeAndRefresh()
     try driver.run([
@@ -199,7 +199,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     let state = SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 9
+        schemaVersion: 10
     )
     let copy: [String: JSONValue] = try [
         "type": .string("copy"),
@@ -231,7 +231,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     var first = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 9
+        schemaVersion: 10
     ))
     let copy: [String: JSONValue] = try [
         "type": .string("copy"), "keys": .from([uploadFixture().key]),
@@ -264,7 +264,7 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     var driver = try UploadRecoveryABI(state: SavedLibrary(
         appleScope: "library",
         connection: ConnectionSettings(address: "https://photos.example/api", allowHTTP: false, credentialID: "key"),
-        schemaVersion: 9
+        schemaVersion: 10
     ))
     try driver.initializeAndRefresh()
     driver.failCreatedJournal = true

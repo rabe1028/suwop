@@ -144,6 +144,10 @@ jobs:
   immich-integration:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      # Authenticated GHCR pulls get a higher rate limit than anonymous ones.
+      packages: read
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
       - name: Start CI resource metrics
@@ -171,6 +175,12 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Authenticate image pulls from GHCR
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        # Anonymous pulls hit GHCR's rate limit (main run 39887115193); a failed
+        # login only falls back to anonymous pulls.
+        run: echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin || echo "::warning::GHCR login failed; pulling anonymously"
       - name: Verify old-server ordinary, read, recovery and denied PIN writes
         env:
           IMMICH_VERSION: v3.2.4
@@ -223,7 +233,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -273,7 +285,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -295,7 +309,6 @@ jobs:
           # Only main saves: per-PR caches exceeded the 10 GB repository limit and
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/cache-apple-packages
       - name: Test the real Rust-to-Swift bridge
         run: make test-swift
       - name: Download this run's three ARM64 release slices
@@ -344,7 +357,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:
@@ -364,7 +379,6 @@ jobs:
           cache-bin: false
           env-vars: DEVELOPER_DIR SDKROOT
           save-if: ${{ github.ref == 'refs/heads/main' }}
-      - uses: ./.github/actions/cache-apple-packages
       - name: Build simulator test products
         run: make simulator-products
       # upload-artifact drops file modes; a tarball keeps executables and bundle symlinks.
@@ -408,7 +422,9 @@ jobs:
       # Spotlight indexed every restored cache and build output, using up to a
       # core of these 3-CPU runners (ci-metrics run 39895970992).
       - name: Stop Spotlight indexing
-        run: sudo mdutil -a -i off
+        # A speedup only: some volumes (e.g. Preboot) can report a transitional
+        # indexing state and fail, which must not fail the job.
+        run: sudo mdutil -i off / /System/Volumes/Data || echo "::warning::Spotlight indexing could not be disabled"
       - name: Install pinned tools from mise.lock
         uses: jdx/mise-action@2d8d4cafcbd33be2ea37d2b6f5ad595363d1f1ca # v5.1.1
         with:

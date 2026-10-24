@@ -162,7 +162,8 @@ fn schema_seven_and_older_migrate_without_inventing_observation_or_changing_old_
         }
         let expected = raw["immichVisibilityOperations"].clone();
         let mut expected_state = raw.clone();
-        expected_state["schemaVersion"] = json!(9);
+        expected_state["schemaVersion"] =
+            json!(suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION);
         expected_state["immichLiveOperations"] = json!([]);
         expected_state["immichLiveUnstartedClosures"] = json!([]);
         expected_state["immichLiveLegacyReconciliations"] = json!([]);

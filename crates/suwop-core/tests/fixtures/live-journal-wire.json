@@ -25,6 +25,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -223,7 +225,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -233,6 +235,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -417,7 +421,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -427,6 +431,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -590,7 +596,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -600,6 +606,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -822,7 +830,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -832,6 +840,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -972,7 +982,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -982,6 +992,8 @@
     {
       "library": {
         "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
         "appleScope": "wire-apple",
         "appleVisibilityOperations": [],
         "connection": null,
@@ -1292,7 +1304,7 @@
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 9,
+        "schemaVersion": 10,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []

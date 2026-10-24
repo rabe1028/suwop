@@ -1,6 +1,6 @@
 import Foundation
 
-/// Thin native scheduling adapter. SQLite, migration, jobs and Lance belong to Rust.
+/// Thin native scheduling adapter. SQLite, migration, jobs and the vector index belong to Rust.
 /// Blocking database/FFI calls never run on the main actor or cooperative executor.
 public final class LocalStore: Sendable {
     private let root: String
@@ -10,6 +10,11 @@ public final class LocalStore: Sendable {
     public init(root: URL) throws {
         try Self.prepareDerivedDirectories(root: root)
         self.root = root.path
+    }
+
+    /// Holds the cross-process inference lease, shared by every window of this catalog.
+    public var inferenceLockDirectory: URL {
+        URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent("models", isDirectory: true)
     }
 
     /// Native backup attributes apply only to reproducible files, never the catalog root.

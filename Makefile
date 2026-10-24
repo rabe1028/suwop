@@ -10,7 +10,7 @@ ifeq ($(shell uname -s),Darwin)
 export SDKROOT := $(shell DEVELOPER_DIR="$(DEVELOPER_DIR)" xcrun --sdk macosx --show-sdk-path)
 endif
 
-.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record vrt-capture
+.PHONY: setup lint lint-common lint-swift format test check generate-types check-generated apple-core apple-build integration setup-vrt vrt vrt-record vrt-capture coreml-models
 MISE_INSTALL = mise install --locked $$(mise ls --local --no-header 2>/dev/null | awk '{print $$1}')
 
 setup:
@@ -67,6 +67,10 @@ generate-types:
 
 check-generated:
 	bash scripts/check-generated.sh
+
+# Release apps must bundle these; other builds run with content search unavailable.
+coreml-models:
+	bash scripts/coreml-models.sh
 
 apple-core:
 	bash scripts/build-rust-apple.sh $(APPLE_RUST_BUILD_ARGS)

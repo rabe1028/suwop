@@ -64,17 +64,16 @@ pub enum Command {
         vector: Vec<f32>,
         dimensions: u32,
     },
-    QueryText {
+    QueryTokens {
         text: String,
+    },
+    ImageTokens {
+        soft_tokens: u32,
     },
     ValidateEmbeddingInput {
         expected: Box<suwop_core::domain::StoredAsset>,
         fresh: Box<suwop_core::domain::StoredAsset>,
         connection: Option<suwop_core::app::ConnectionSettings>,
-    },
-    ModelPath,
-    InstallModel {
-        source: String,
     },
     Read,
     ReadVersioned,
@@ -171,7 +170,10 @@ fn execute(store: &mut Store, command: Command) -> Result<Value> {
         Command::ProjectEmbedding { vector, dimensions } => {
             json(suwop_core::inference::project(&vector, dimensions)?)?
         }
-        Command::QueryText { text } => Value::String(suwop_core::inference::query(&text)?),
+        Command::QueryTokens { text } => json(suwop_core::inference::query_tokens(&text)?)?,
+        Command::ImageTokens { soft_tokens } => {
+            json(suwop_core::inference::image_tokens(soft_tokens)?)?
+        }
         Command::ValidateEmbeddingInput {
             expected,
             fresh,
@@ -180,8 +182,6 @@ fn execute(store: &mut Store, command: Command) -> Result<Value> {
             store.validate_embedding_input(&expected, &fresh, connection.as_ref())?;
             Value::Null
         }
-        Command::ModelPath => Value::String(store.model_path()?),
-        Command::InstallModel { source } => Value::String(store.install_model(Path::new(&source))?),
         other => return execute_analysis(store, other),
     };
     Ok(value)
@@ -223,7 +223,7 @@ fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
             store.submit(&model_key, &embeddings)?;
             Value::Null
         }
-        Command::Prune => json(crate::worker::runtime()?.block_on(store.prune())?)?,
+        Command::Prune => json(store.prune()?)?,
         Command::Skip {
             model_key,
             job_id,
@@ -237,7 +237,7 @@ fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
             model_key,
             vector,
             limit,
-        } => json(crate::worker::runtime()?.block_on(store.search(&model_key, &vector, limit))?)?,
+        } => json(store.search(&model_key, &vector, limit)?)?,
         _ => return Err("Unsupported analysis command".into()),
     };
     Ok(value)

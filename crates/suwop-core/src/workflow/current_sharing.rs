@@ -14,6 +14,9 @@ impl Runtime<'_> {
         key: &AssetKey,
         id: &str,
     ) -> Result<String, String> {
+        if key.provider == Provider::Amazon {
+            return Err("Amazon Photosの現在の編集画像の共有には対応していません。原本の共有を選んでください。".into());
+        }
         if key.provider == Provider::Immich {
             self.ensure_session().await?;
         }

@@ -109,7 +109,7 @@ struct GalleryView: View {
         } message: { Text(model.errorMessage ?? "") }
         .confirmationDialog("原本をダウンロードして照合しますか？", isPresented: $confirmIndex, titleVisibility: .visible) {
             Button("原本を照合") { model.indexOriginals() }
-        } message: { Text("iCloud 上の原本を取得する場合があります。元の写真は変更しません。") }
+        } message: { Text("iCloud・Amazon Photos 上の原本を取得する場合があります。元の写真は変更しません。") }
         .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
             Button("\(selection.count) 件の原本を共有") { model.share(selection) }
         } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }

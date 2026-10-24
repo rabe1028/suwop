@@ -1,7 +1,5 @@
 use crate::{Result, Store, error};
 use rusqlite::{OptionalExtension, params};
-use sha2::{Digest, Sha256};
-use std::{fs::File, io::Read, path::Path};
 use suwop_core::{
     analysis::{AnalysisBudget, AnalysisStatus},
     app::ConnectionSettings,
@@ -200,107 +198,5 @@ impl Store {
             return Ok(false);
         }
         Ok(true)
-    }
-    pub fn model_path(&self) -> Result<String> {
-        let path = self.root.join("models").join(inference::MODEL_FILE);
-        verify_model(&path)?;
-        Ok(path.to_string_lossy().into_owned())
-    }
-    pub fn install_model(&self, source: &Path) -> Result<String> {
-        verify_model(source)?;
-        let directory = self.root.join("models");
-        std::fs::create_dir_all(&directory).map_err(error)?;
-        // Share the native runtime's lease: never replace weights/caches under a live engine.
-        let lease = File::options()
-            .create(true)
-            .truncate(false)
-            .read(true)
-            .write(true)
-            .open(directory.join("inference.lock"))
-            .map_err(error)?;
-        lease.try_lock().map_err(error)?;
-        if let Ok(path) = self.model_path() {
-            return Ok(path);
-        }
-        // Temp file and atomic rename prevent a partial download being loaded.
-        let stage = directory.join("embeddinggemma-2.installing");
-        std::fs::copy(source, &stage).map_err(error)?;
-        verify_model(&stage)?;
-        File::open(&stage)
-            .and_then(|file| file.sync_all())
-            .map_err(error)?;
-        std::fs::rename(stage, directory.join(inference::MODEL_FILE)).map_err(error)?;
-        remove_replaced_model_caches(&directory)?;
-        File::open(&directory)
-            .and_then(|file| file.sync_all())
-            .map_err(error)?;
-        self.model_path()
-    }
-}
-fn verify_model(path: &Path) -> Result<()> {
-    let mut file = File::open(path).map_err(error)?;
-    if file.metadata().map_err(error)?.len() != inference::MODEL_BYTES {
-        return Err("Model download is incomplete or incompatible".into());
-    }
-    let mut hash = Sha256::new();
-    let mut buffer = vec![0u8; 65536];
-    loop {
-        let count = file.read(&mut buffer).map_err(error)?;
-        if count == 0 {
-            break;
-        }
-        hash.update(&buffer[..count]);
-    }
-    if suwop_core::domain::hex(&hash.finalize()) != inference::MODEL_SHA256 {
-        return Err("Model checksum mismatch".into());
-    }
-    Ok(())
-}
-
-/// Only this provider's generated caches; never arbitrary files or linked directories.
-fn remove_replaced_model_caches(directory: &Path) -> Result<()> {
-    let prefix = format!("{}_", inference::MODEL_FILE);
-    for entry in std::fs::read_dir(directory).map_err(error)? {
-        let entry = entry.map_err(error)?;
-        let filename = entry.file_name();
-        let Some(name) = filename.to_str() else {
-            continue;
-        };
-        if name.starts_with(&prefix)
-            && [
-                ".text_encoder.xnnpack_cache",
-                ".vision_adapter.xnnpack_cache",
-                ".vision_encoder.xnnpack_cache",
-            ]
-            .iter()
-            .any(|suffix| name.ends_with(suffix))
-            && entry.file_type().map_err(error)?.is_file()
-        {
-            std::fs::remove_file(entry.path()).map_err(error)?;
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn model_cache_cleanup_is_provider_owned_and_keeps_other_data() -> Result<()> {
-        let root = tempfile::tempdir().map_err(error)?;
-        let owned = root.path().join(format!(
-            "{}_1_387710976.text_encoder.xnnpack_cache",
-            inference::MODEL_FILE
-        ));
-        let unrelated = root.path().join("other-model.text_encoder.xnnpack_cache");
-        let weights = root.path().join(inference::MODEL_FILE);
-        for path in [&owned, &unrelated, &weights] {
-            std::fs::write(path, b"fixture").map_err(error)?;
-        }
-        remove_replaced_model_caches(root.path())?;
-        assert!(!owned.exists());
-        assert!(unrelated.exists());
-        assert!(weights.exists());
-        Ok(())
     }
 }

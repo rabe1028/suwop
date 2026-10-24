@@ -31,7 +31,7 @@ import Testing
         saved = SavedLibrary(
             appleScope: "library",
             connection: ConnectionSettings(address: endpoint, allowHTTP: false, credentialID: "ordinary"),
-            schemaVersion: 9
+            schemaVersion: 10
         )
     }
 

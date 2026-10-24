@@ -1,4 +1,5 @@
 pub mod albums;
+pub mod amazon;
 pub mod analysis;
 pub mod app;
 pub mod apple_visibility;
@@ -12,6 +13,7 @@ pub mod metadata;
 pub mod privacy;
 pub mod protection;
 pub mod sharing;
+pub mod tokenizer;
 pub mod trash;
 pub mod workflow;
 

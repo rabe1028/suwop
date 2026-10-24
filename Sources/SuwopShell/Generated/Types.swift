@@ -144,6 +144,84 @@ public struct Alias: Codable, Sendable {
     }
 }
 
+public struct AmazonConnection: Codable, Sendable {
+    public var credentialID: String
+    public var ownerId: String
+    public var rootId: String
+    public var scope: String
+    public init(credentialID: String, ownerId: String, rootId: String, scope: String) {
+        self.credentialID = credentialID
+        self.ownerId = ownerId
+        self.rootId = rootId
+        self.scope = scope
+    }
+}
+
+public struct AmazonHash: Codable, Sendable {
+    public var md5: String
+    public var sha1: String
+    public var signature: FileSignature
+    public init(md5: String, sha1: String, signature: FileSignature) {
+        self.md5 = md5
+        self.sha1 = sha1
+        self.signature = signature
+    }
+}
+
+public struct AmazonRequest: Codable, Sendable {
+    public var byteLimit: Int64
+    public var credentialID: String
+    public var http: HttpRequest
+    public init(byteLimit: Int64, credentialID: String, http: HttpRequest) {
+        self.byteLimit = byteLimit
+        self.credentialID = credentialID
+        self.http = http
+    }
+}
+
+public struct AmazonResponse: Codable, Sendable {
+    public var body: JSONValue
+    public var location: String?
+    public var path: String?
+    public var status: Int64
+    public init(body: JSONValue, location: String? = nil, path: String? = nil, status: Int64) {
+        self.body = body
+        self.location = location
+        self.path = path
+        self.status = status
+    }
+}
+
+public struct AmazonUploadRecord: Codable, Sendable {
+    public var md5: String
+    public var name: String
+    public var nodeId: String?
+    public var receiptId: String
+    public var scope: String
+    public var signature: FileSignature
+    public var verified: Bool
+    public init(md5: String, name: String, nodeId: String? = nil, receiptId: String, scope: String, signature: FileSignature, verified: Bool) {
+        self.md5 = md5
+        self.name = name
+        self.nodeId = nodeId
+        self.receiptId = receiptId
+        self.scope = scope
+        self.signature = signature
+        self.verified = verified
+    }
+}
+
+public struct AmazonUploadSubmission: Codable, Sendable {
+    public var failure: String?
+    public var response: AmazonResponse?
+    public var submitted: Bool
+    public init(failure: String? = nil, response: AmazonResponse? = nil, submitted: Bool) {
+        self.failure = failure
+        self.response = response
+        self.submitted = submitted
+    }
+}
+
 public struct AnalysisBudget: Codable, Sendable {
     public var cacheBytes: Int64
     public var maxBatchRows: Int64
@@ -1710,25 +1788,23 @@ public struct InferenceSelection: Codable, Sendable {
 }
 
 public struct InferenceSpec: Codable, Sendable {
-    public var bytes: Int64
-    public var filename: String
     public var imageEdge: Int64
     public var imageTokens: Int64
+    public var maxPatches: Int64
     public var model: AnalysisModel
-    public var sha256: String
+    public var modelDirectory: String
+    public var patchSize: Int64
+    public var poolingKernel: Int64
     public var textTokens: Int64
-    public var threads: Int64
-    public var url: String
-    public init(bytes: Int64, filename: String, imageEdge: Int64, imageTokens: Int64, model: AnalysisModel, sha256: String, textTokens: Int64, threads: Int64, url: String) {
-        self.bytes = bytes
-        self.filename = filename
+    public init(imageEdge: Int64, imageTokens: Int64, maxPatches: Int64, model: AnalysisModel, modelDirectory: String, patchSize: Int64, poolingKernel: Int64, textTokens: Int64) {
         self.imageEdge = imageEdge
         self.imageTokens = imageTokens
+        self.maxPatches = maxPatches
         self.model = model
-        self.sha256 = sha256
+        self.modelDirectory = modelDirectory
+        self.patchSize = patchSize
+        self.poolingKernel = poolingKernel
         self.textTokens = textTokens
-        self.threads = threads
-        self.url = url
     }
 }
 
@@ -2701,6 +2777,8 @@ public struct PostFacts: Codable, Sendable {
 }
 
 public enum Presence: String, Codable, CaseIterable, Sendable {
+    case `amazon`
+    case `multiple`
     case `both`
     case `appleOnly`
     case `immichOnly`
@@ -2893,10 +2971,13 @@ public enum ProtectionScenePhase: String, Codable, CaseIterable, Sendable {
 public enum Provider: String, Codable, CaseIterable, Sendable {
     case `apple`
     case `immich`
+    case `amazon`
 }
 
 public struct PublishedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
+    public var amazonConnection: AmazonConnection?
+    public var amazonUploads: [AmazonUploadRecord]
     public var appleScope: String
     public var appleVisibilityOperations: [AppleVisibilitySummary]
     public var connection: ConnectionSettings?
@@ -2910,8 +2991,10 @@ public struct PublishedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilitySummary] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilitySummary] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
+        self.amazonConnection = amazonConnection
+        self.amazonUploads = amazonUploads
         self.appleScope = appleScope
         self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
@@ -3006,6 +3089,8 @@ public enum Role: String, Codable, CaseIterable, Sendable {
 
 public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
+    public var amazonConnection: AmazonConnection?
+    public var amazonUploads: [AmazonUploadRecord]
     public var appleScope: String
     public var appleVisibilityOperations: [AppleVisibilityOperation]
     public var connection: ConnectionSettings?
@@ -3024,8 +3109,10 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichLiveLegacyReconciliations: [LegacyReconciliation] = [], immichLiveOperations: [Batch] = [], immichLiveUnstartedClosures: [UnstartedClosure] = [], immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichLiveLegacyReconciliations: [LegacyReconciliation] = [], immichLiveOperations: [Batch] = [], immichLiveUnstartedClosures: [UnstartedClosure] = [], immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
+        self.amazonConnection = amazonConnection
+        self.amazonUploads = amazonUploads
         self.appleScope = appleScope
         self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection

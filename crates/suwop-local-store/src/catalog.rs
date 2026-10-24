@@ -48,7 +48,7 @@ impl Store {
         let version: i64 = db
             .query_row("PRAGMA user_version", [], |r| r.get(0))
             .map_err(error)?;
-        if version > 4 {
+        if version > 5 {
             return Err("Unsupported local catalog version".into());
         }
         if version == 0 {
@@ -64,44 +64,31 @@ impl Store {
             tx.execute_batch(include_str!("schema.sql"))
                 .map_err(error)?;
             tx.commit().map_err(error)?;
-        } else if version == 1 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 1 {
-                tx.execute_batch(include_str!("migration-v2.sql"))
-                    .map_err(error)?;
-            }
-            tx.commit().map_err(error)?;
         }
-        if version <= 2 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
-                .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 2 {
-                tx.execute_batch(include_str!("migration-v3.sql"))
-                    .map_err(error)?;
+        // Each step re-reads the version inside its own write transaction, so a
+        // concurrent opener that already migrated is not migrated twice.
+        for (from, sql) in [
+            (1, include_str!("migration-v2.sql")),
+            (2, include_str!("migration-v3.sql")),
+            (3, include_str!("migration-v4.sql")),
+            (4, include_str!("migration-v5.sql")),
+        ] {
+            if version <= from {
+                migrate(&mut db, from, sql)?;
             }
-            tx.commit().map_err(error)?;
         }
-        if version <= 3 {
-            let tx = db
-                .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        // Retried on every open until every former Lance file is gone.
+        let pending: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM pending_cleanup WHERE name='lance-files')",
+                [],
+                |r| r.get(0),
+            )
+            .map_err(error)?;
+        reclaim_litert_files(&root.join("models"));
+        if pending && reclaim_lance_files(&root.join("analysis")) {
+            db.execute("DELETE FROM pending_cleanup WHERE name='lance-files'", [])
                 .map_err(error)?;
-            let current: i64 = tx
-                .query_row("PRAGMA user_version", [], |r| r.get(0))
-                .map_err(error)?;
-            if current == 3 {
-                tx.execute_batch(include_str!("migration-v4.sql"))
-                    .map_err(error)?;
-            }
-            tx.commit().map_err(error)?;
         }
         Ok(Self { root, db })
     }
@@ -161,7 +148,7 @@ impl Store {
         // A second process may have completed migration or persisted newer state.
         self.read()
     }
-    /// Metadata and the analysis outbox commit together. Never opens Lance here.
+    /// Metadata and the analysis outbox commit together. Never takes the analysis lock.
     pub fn persist(&mut self, state: &SavedLibrary) -> Result<()> {
         self.save(state, false, None).map(|_| ())
     }
@@ -266,6 +253,62 @@ impl Store {
         Ok(true)
     }
 }
+/// The former LiteRT-LM weights, partial download and XNNPACK caches. Their names are
+/// fixed and never recreated, so each open removes only these files; others are kept.
+fn reclaim_litert_files(directory: &Path) {
+    const MODEL: &str = "embeddinggemma-2-text-vision-440m.litertlm";
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let owned = name == MODEL
+            || name == "embeddinggemma-2.installing"
+            || (name.starts_with(&format!("{MODEL}_")) && name.ends_with(".xnnpack_cache"));
+        if owned && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+/// Former Lance index files are unreadable derived data. Keep the directory itself:
+/// the native adapter owns its backup exclusion attribute. Returns whether nothing
+/// remains to reclaim.
+fn reclaim_lance_files(directory: &Path) -> bool {
+    let entries = match std::fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(e) => return e.kind() == std::io::ErrorKind::NotFound,
+    };
+    let mut complete = true;
+    for entry in entries {
+        let Ok(entry) = entry else {
+            complete = false;
+            continue;
+        };
+        let path = entry.path();
+        let removed = if path.is_dir() {
+            std::fs::remove_dir_all(path)
+        } else {
+            std::fs::remove_file(path)
+        };
+        complete &= removed.is_ok();
+    }
+    complete
+}
+fn migrate(db: &mut Connection, from: i64, sql: &str) -> Result<()> {
+    let tx = db
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .map_err(error)?;
+    let current: i64 = tx
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(error)?;
+    if current == from {
+        tx.execute_batch(sql).map_err(error)?;
+    }
+    tx.commit().map_err(error)
+}
 pub(crate) fn asset_id(asset: &StoredAsset) -> Result<String> {
     Ok(digest(serde_json::to_vec(&asset.key).map_err(error)?))
 }
@@ -290,6 +333,64 @@ mod tests {
         };
         store.save(&old, true, None)?;
         assert_eq!(store.read()?.ok_or("missing library")?.apple_scope, "newer");
+        Ok(())
+    }
+
+    /// Analysis jobs are the cross product of models and `assets` rows. With no
+    /// native embedding source for Amazon, its photos must never become rows.
+    #[test]
+    fn amazon_assets_never_enter_the_analysis_queue() -> Result<()> {
+        use suwop_core::domain::{
+            AppleVisibility, AssetKey, LibrarySnapshot, Provider, ScanAccess,
+        };
+        let root = tempfile::tempdir().map_err(error)?;
+        let mut store = Store::open(root.path())?;
+        let mut connection = suwop_core::amazon::Connection::provisional("credential")?;
+        connection.owner_id = "owner".into();
+        connection.scope = "amazon.co.jp|owner".into();
+        connection.root_id = "root".into();
+        let node: suwop_core::amazon::Node = serde_json::from_value(serde_json::json!({
+            "id":"photo","name":"photo.jpg","ownerId":"owner",
+            "modifiedDate":"2026-10-23T00:00:00Z","status":"AVAILABLE",
+            "contentProperties":{"size":3,"md5":"900150983cd24fb0d6963f7d28e17f72",
+                "contentType":"image/jpeg"}
+        }))
+        .map_err(error)?;
+        let amazon = node.record(&connection);
+        let mut apple = amazon.clone();
+        apple.key = AssetKey {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            asset_id: "source".into(),
+        };
+        apple.apple_visibility = AppleVisibility::Visible;
+        let snapshot = |provider, scope: &str, asset| LibrarySnapshot {
+            provider,
+            scope: scope.into(),
+            assets: vec![asset],
+            access: ScanAccess::Full,
+            scanned_at: Some(1.0),
+        };
+        let state = SavedLibrary {
+            schema_version: 10,
+            apple_scope: "apple".into(),
+            snapshots: vec![
+                snapshot(Provider::Apple, "apple", apple),
+                snapshot(Provider::Amazon, &connection.scope, amazon),
+            ],
+            amazon_connection: Some(connection),
+            ..SavedLibrary::default()
+        };
+        store.persist(&state)?;
+        let providers: Vec<String> = store
+            .db
+            .prepare("SELECT json_extract(json,'$.key.provider') FROM assets")
+            .map_err(error)?
+            .query_map([], |r| r.get(0))
+            .map_err(error)?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(error)?;
+        assert_eq!(providers, ["apple"]);
         Ok(())
     }
 }

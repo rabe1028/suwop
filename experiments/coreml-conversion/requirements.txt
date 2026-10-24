@@ -1,0 +1,9 @@
+# Offline conversion experiment only; never an app or CI dependency.
+coremltools==9.0
+huggingface-hub==2.3.0
+numpy==2.5.4
+pillow==13.0.0
+sentence-transformers==6.2.0
+torch==2.14.1
+torchvision==0.29.1
+transformers==5.20.2

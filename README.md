@@ -1,10 +1,12 @@
 # Suwop
 
-Apple Photos と Immich の写真を一つの一覧で確認し、原本の保存先を確認・コピー・移動する iPhone / iPad / Mac 向け PoC です。
+Apple Photos・Immich・日本のAmazon Photosの写真を一つの一覧で確認し、原本の保存先を確認・コピーする iPhone / iPad / Mac 向け PoC です。Apple PhotosとImmichの間では、原本を検証してから移動できます。
 
-共通コアは Rust + Crux 0.20.0、UI は SwiftUI です。Swift に残すのは表示、PhotoKit、Keychain、URLSession、ファイルの入出力です。写真の同一性判定、保存状態、コピー／移動の進行、削除可否、Immich API の構築は Rust が担当します。
+共通コアは Rust + Crux 0.20.0、UI は SwiftUI です。Swift に残すのは表示、PhotoKit、Keychain、URLSession、ファイルの入出力です。写真の同一性判定、保存状態、コピー／移動の進行、削除可否、Immich・Amazon Photos API の構築は Rust が担当します。
 
-日・月・年のグリッド、表示密度、名前・撮影日の検索、メディアと保存先の絞り込み、複数選択、お気に入りの整理、静止画の全画面閲覧・前後移動・ズームを備えています。お気に入りは、統合された写真の Apple Photos / Immich の両方へ反映します。日付検索は端末のタイムゾーンで照合します。保存先ごとのアルバムの作成・名前変更・所属追加と解除・アルバム削除に対応し、写真の原本を残します。
+日・月・年のグリッド、表示密度、名前・撮影日の検索、メディアと保存先の絞り込み、複数選択、お気に入りの整理、静止画の全画面閲覧・前後移動・ズームを備えています。お気に入りは、統合された写真の Apple Photos / Immich / Amazon Photos へ反映します。日付検索は端末のタイムゾーンで照合します。Apple PhotosとImmichでは、アルバムの作成・名前変更・所属追加と解除・アルバム削除に対応し、写真の原本を残します。
+
+[Amazon Photos（日本）](docs/amazon-photos.md)は、アプリ内ブラウザでログインし、Cookieを端末のKeychainに保存する非公式API連携です。一覧・プレビュー・原本取得・双方向コピー・お気に入りに対応します。コピー後は原本を再取得してSHA-256を照合します。受け付けない形式やLive Photoの組は変換せず停止し、理由とApple Photos / Immichへの保存を案内します。Amazonを含む移動・削除、Amazonのアルバム編集・メタデータ変更は未対応です。
 
 同じ原本でも保存先によって編集結果が異なる場合は、全画面から表示元を選べます。グリッドと撮影日時も選んだコピーに合わせます。選択先にアクセスできなくなった場合は再選択を求めます。選択は現在の起動中に保持し、再起動時は既定の表示元に戻ります。
 
@@ -25,8 +27,8 @@ open Suwop.xcodeproj
 
 Xcode で `SuwopiOS` または `SuwopmacOS` を選びます。実機では Signing の Team を設定してください。`make` は通常の Xcode インストールを選択します。別の場所にある場合は `DEVELOPER_DIR` を指定します。
 
-1. Immich の URL と API キーを設定します。API キーは Keychain に保存します。
-2. 一覧を更新し、Apple Photos へのアクセスを許可します。
+1. 接続設定で、Immich の URL と API キーを設定するか、日本のAmazonアカウントでログインします。API キーとCookieは Keychain に保存します。
+2. 一覧を更新します。Apple Photosも利用する場合は、写真へのアクセスを許可します。
 3. 「未照合の原本を照合」を実行します。iCloud 上の原本をダウンロードする場合があります。
 4. 写真詳細からコピー、または移動準備を実行します。
 5. 移動は「転送履歴・移動確認」から明示的に完了します。
@@ -47,7 +49,7 @@ make apple-native-test # 同じ専用 Simulator で実 PhotoKit の保存・再�
 
 空き容量が厳しい場合は `SUWOP_CLEAN_CHECK=1 make check` を使えます。Clippy・生成物確認・Rustテスト・Swift用ライブラリ生成の各段階を完了してから、不要になった Rust のビルドキャッシュだけを clean します。全チェックを実行し、Swift用の生成済みライブラリは保持します。通常実行ではキャッシュを保持します。
 
-ツールは `mise.toml` で固定し、各プラットフォームの URL とチェックサムを `mise.lock` に記録します（uv、Ruff、ShellCheck、actionlint、protoc、cargo-nextest、SwiftLint、SwiftFormat、XcodeGen、simslim）。手動のダウンロードや Homebrew での導入はしません。Rust 1.95.0 は `rust-toolchain.toml` で固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
+ツールは `mise.toml` で固定し、各プラットフォームの URL とチェックサムを `mise.lock` に記録します（uv、Ruff、ShellCheck、actionlint、cargo-nextest、SwiftLint、SwiftFormat、XcodeGen、simslim）。手動のダウンロードや Homebrew での導入はしません。Rust 1.95.0 は `rust-toolchain.toml` で固定します。Clippy の all / pedantic と警告をエラー扱いにし、Swift 6 の厳格な並行性チェックとコンパイラ警告のエラー化も有効です。Swift の生成 DTO は Rust のスキーマから再生成し、CI で差分を検出します。Git の pre-commit は Lint、pre-push はテストを実行し、既存の hooks は保存します。core.hooksPath の委譲を確認できる場合は連結し、不明な独自設定では上書きせず停止します。
 
 Linux では `make setup` と `make check` で Rust／スクリプトを確認できます。Apple ビルドと Swift の FFI テストは macOS で行います。
 
@@ -58,7 +60,7 @@ Docker テストは `suwop-rust-test` という専用プロジェクトと local
 
 ## コピーと移動
 
-「両方」「Apple のみ」「Immich のみ」「一部だけ両方」「未照合」を区別します。RAW + JPEG は別原本として数え、JPEG だけの一致を完全保存とは判定しません。
+「両方」「Apple のみ」「Immich のみ」「一部だけ両方」「未照合」に加え、Amazonと複数保存先の状態を表示します。未照合の原本がある場合は、別の保存先に原本がないとは断定しません。RAW + JPEG は別原本として数え、JPEG だけの一致を完全保存とは判定しません。
 
 移動はコピー、転送先の原本検証、別画面での確認、両側の再検証、元のゴミ箱への移動、という順序です。削除前には原本を読み直し、SHA-256 とバイト長、revision、位置情報を確認します。コピーの履歴を後から移動に使うことはできません。旧形式の履歴はコピーとして移行します。
 

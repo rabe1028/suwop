@@ -163,15 +163,13 @@ Kept on macOS deliberately:
 - `swift test`: the package imports CoreGraphics, ImageIO,
   UniformTypeIdentifiers and LiteRT-LM's Apple binary, and its tests use
   AVFoundation, CoreMedia and CryptoKit. None of these exist on Linux.
-- Rust Apple libraries. Six dependencies compile C (`blake3`, `lance-linalg`,
-  `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`). Zig's C compiler can
-  build them for iOS only by forcing its macOS libc headers onto iOS targets,
-  which Zig does not support. `lance-arrow` also always builds a `cdylib`,
-  and linking it for iOS needs `libSystem`/`libiconv` stubs that only
-  Apple's SDK provides; a Linux cross-build stopped there. Making it work
-  would need fake link stubs and would test libraries built by a different C
-  compiler than developers and releases use. At most it would save about
-  nine warm macOS minutes per run.
+- Rust Apple libraries. When this was measured, six dependencies compiled C
+  (`blake3`, `lance-linalg`, `libsqlite3-sys`, `lz4-sys`, `ring`, `zstd-sys`)
+  and `lance-arrow` needed Apple-only link stubs, so a Linux cross-build
+  stopped. Schema 5 removed Lance; only `libsqlite3-sys` still compiles C. Zig
+  can build it for iOS only by forcing its macOS libc headers onto iOS targets,
+  which Zig does not support, and it would test a library built by a different
+  C compiler than developers and releases use. Re-measure before revisiting.
 
 ## Resource metrics (2026-10)
 
@@ -196,3 +194,12 @@ took 35.4 minutes. The critical path was `apple-products` (7.9m), then
 | Each lane enumerates the same products (32–50s) | Lane `enumerate` stages | Tried and reverted. Enumerating in `apple-products` beside the PhotoKit build first swapped with a stock simulator (13.4m, run 39919532380). With a slim simulator it still competed for the 3 CPUs (10.5m vs 7.3m, run 39925771974). That cost more than the ~40s each lane saved |
 | Linux Rust jobs are CPU-bound | `core (release)` used 92% of 4 CPUs (`rustc`) | Already parallel and cached |
 | macOS memory | About 6.9 of 7 GiB is in use, with no swapouts | None; file cache counts as used |
+
+## Swift package cache removed (2026-10)
+
+After #55 replaced LiteRT-LM with Core ML, the package has no external Swift
+dependencies and no `Package.resolved`. The `cache-apple-packages` step still
+restored about 2.8 GB of SwiftPM downloads in `apple` and `apple-products`
+(about a minute each). Its main and PR copies took 5.7 GB of the 10 GB
+repository cache limit. The step and its action are removed. Add a cache
+again only if external packages return.

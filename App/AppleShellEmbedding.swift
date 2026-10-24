@@ -2,7 +2,11 @@ import Foundation
 import SuwopShell
 
 extension AppleShell {
-    func embeddingImage(_ job: EmbeddingJob, connection: ConnectionSettings?, version: Version?) async throws -> Data {
+    func embeddingImage(
+        _ job: EmbeddingJob,
+        connection: ConnectionSettings?,
+        version: Version?
+    ) async throws -> EmbeddingPatches {
         let context = beginWorkflow()
         let revision = try await ordinaryContent.validate(keys: [job.asset.key], context: context)
         let bytes = try await prepareEmbeddingImage(
@@ -22,12 +26,20 @@ extension AppleShell {
         version: Version?,
         context: ContentPresentationContext,
         revision: String?
-    ) async throws -> Data {
+    ) async throws -> EmbeddingPatches {
         try Task.checkCancellation()
         let key = job.asset.key
         guard let dimensions = UInt32(exactly: job.model.dimensions) else { throw SuwopError("モデルの次元数が不正です。") }
         let spec = try await localStore.inferenceSpec(dimensions: dimensions)
         let edge = Int(spec.imageEdge)
+        let patches = { (bytes: Data) in
+            try await EmbeddingPatches.prepare(
+                bytes,
+                maxPatches: Int(spec.maxPatches),
+                patchSize: Int(spec.patchSize),
+                pooling: Int(spec.poolingKernel)
+            )
+        }
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         if key.provider == .apple {
             let store = embeddingAppleStore(scope: key.scope)
@@ -52,12 +64,12 @@ extension AppleShell {
                 else {
                     throw SuwopError("解析用画像を取得できません。")
                 }
-                return try await EmbeddingImage.prepare(bytes, edge: edge)
+                return try await patches(bytes)
             #else
                 guard let image = native.cgImage(forProposedRect: nil, context: nil, hints: nil) else {
                     throw SuwopError("解析用画像を取得できません。")
                 }
-                return try await EmbeddingImage.prepare(EmbeddingImage.jpeg(image), edge: edge)
+                return try await patches(EmbeddingImage.jpeg(image))
             #endif
         }
         guard key.provider == .immich, let connection, let version else {
@@ -72,6 +84,6 @@ extension AppleShell {
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         let bytes = try await embeddingThumbnail(request)
         try await localStore.validateEmbeddingInput(expected: job.asset, fresh: job.asset, connection: connection)
-        return try await EmbeddingImage.prepare(bytes, edge: edge)
+        return try await patches(bytes)
     }
 }

@@ -63,7 +63,7 @@ import SuwopShell
                     id: "77777777-7777-4777-8777-777777777777", key: ImmichArchiveFixtureServer.key
                 ),
             ] : [],
-            schemaVersion: 9
+            schemaVersion: 10
         )
         rawJournal = try .from(journal)
     }

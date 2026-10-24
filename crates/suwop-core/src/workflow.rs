@@ -11,6 +11,7 @@ use futures::StreamExt;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
+mod amazon;
 mod apple_trash;
 mod apple_visibility;
 mod current_rendering;
@@ -217,6 +218,7 @@ impl Runtime<'_> {
         for s in &mut self.state.albums {
             s.access = ScanAccess::Unavailable;
         }
+        self.invalidate_amazon();
         if let Some(trash) = &mut self.state.trash {
             trash.verified = false;
         }
@@ -263,6 +265,20 @@ impl Runtime<'_> {
                     Err("ローカル記録が利用できません。転送は無効です。".into())
                 })
             }
+            event => self.execute_ready(event),
+        }
+    }
+
+    fn execute_ready(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        match event {
+            event @ (Event::ConfigureAmazon { .. }
+            | Event::DisconnectAmazon
+            | Event::ResolveAmazonUploads { .. }
+            | Event::CopyTo { .. }) => self.execute_provider_event(event),
             Event::HideApple { keys, id } => {
                 Box::pin(async move { self.hide_apple(&keys, &id).await })
             }
@@ -362,9 +378,24 @@ impl Runtime<'_> {
                 .snapshots
                 .iter()
                 .flat_map(|s| &s.assets)
-                .find(|old| old.key == record.key)
+                .chain(
+                    self.state
+                        .receipts
+                        .iter()
+                        .filter(|r| r.phase != TransferPhase::Copying)
+                        .flat_map(|r| r.source.iter().chain(&r.destination)),
+                )
+                .find(|old| {
+                    old.key == record.key
+                        && (record.key.provider != Provider::Amazon
+                            || old.revision == record.revision)
+                })
             {
-                crate::metadata::preserve_original_fingerprints(old, record);
+                if record.key.provider == Provider::Amazon {
+                    crate::amazon::preserve_fingerprints(old, record);
+                } else {
+                    crate::metadata::preserve_original_fingerprints(old, record);
+                }
             }
         }
     }
@@ -427,15 +458,15 @@ impl Runtime<'_> {
     }
     async fn index(&mut self, id: &str) -> Result<String, String> {
         self.workspace(id).await?;
-        let index = self
+        let keys: Vec<_> = self
             .state
             .snapshots
             .iter()
-            .position(|s| s.provider == Provider::Apple && s.access != ScanAccess::Unavailable)
-            .ok_or("先に Apple Photos の一覧を更新してください。")?;
-        let keys: Vec<_> = self.state.snapshots[index]
-            .assets
-            .iter()
+            .filter(|s| {
+                matches!(s.provider, Provider::Apple | Provider::Amazon)
+                    && s.access != ScanAccess::Unavailable
+            })
+            .flat_map(|s| &s.assets)
             .filter(|a| {
                 self.state.apple_content_visible(&a.key)
                     && !self.denied_content.contains(&a.key)
@@ -451,14 +482,7 @@ impl Runtime<'_> {
                 .await
             {
                 Ok(bundle) => {
-                    if let Some(asset) = bundle.assets.first()
-                        && let Some(old) = self.state.snapshots[index]
-                            .assets
-                            .iter_mut()
-                            .find(|a| a.key == *key)
-                    {
-                        *old = asset.clone();
-                    }
+                    self.replace_records(bundle.assets);
                 }
                 Err(error) if error == "cancelled" => {
                     self.persist().await?;
@@ -580,6 +604,15 @@ impl Runtime<'_> {
             }
         }
         self.refresh_immich(now, &mut errors).await?;
+        match self.refresh_amazon(now).await {
+            Ok(None) => {}
+            // A Limited partial catalog at the page cap is kept, not invalidated.
+            Ok(Some(warning)) => errors.push(warning),
+            Err(error) => {
+                self.invalidate_amazon();
+                errors.push(error);
+            }
+        }
         self.check_content_generation(&[])?;
         self.ctx.send_event(Event::FetchProgress {
             status: "取得したカタログを保存中…".into(),
@@ -955,6 +988,13 @@ impl Runtime<'_> {
                 .ok_or("Immich に接続してください。")?
                 .scope
                 .as_str(),
+            Provider::Amazon => self
+                .state
+                .amazon_connection
+                .as_ref()
+                .ok_or("Amazon Photosに接続してください。")?
+                .scope
+                .as_str(),
         };
         if keys
             .iter()
@@ -991,6 +1031,8 @@ impl Runtime<'_> {
             .await
     }
     /// Only fresh keys returned by this operation's import may bypass catalog membership.
+    /// (Amazon upload-journal reconciliation separately binds one exact journaled
+    /// destination ID with the same purpose; it is not general unpublished access.)
     async fn export_readback(
         &self,
         keys: &[AssetKey],
@@ -1012,6 +1054,7 @@ impl Runtime<'_> {
         let provider = self.check_identity_keys(keys)?;
         let directory = self.directory(name)?;
         let bundle = match provider {
+            Provider::Amazon => self.export_amazon(keys, &directory, purpose).await?,
             Provider::Apple => {
                 io(
                     self.ctx,
@@ -1099,6 +1142,9 @@ impl Runtime<'_> {
             )
             .await;
         }
+        if provider == Provider::Amazon {
+            return self.import_amazon(bundle).await;
+        }
         let session = self.session.clone().ok_or("Immich に接続してください。")?;
         let mut seen = BTreeSet::new();
         let files: Vec<_> = bundle
@@ -1173,15 +1219,49 @@ impl Runtime<'_> {
         id: &str,
         now: f64,
     ) -> Result<(), String> {
-        self.ensure_session().await?;
+        let provider = keys.first().ok_or("写真を選択してください。")?.provider;
+        self.copy_to(keys, provider.other(), intent, id, now).await
+    }
+
+    async fn copy_to(
+        &mut self,
+        keys: &[AssetKey],
+        destination: Provider,
+        intent: TransferIntent,
+        id: &str,
+        now: f64,
+    ) -> Result<(), String> {
+        if destination == Provider::Immich || keys.iter().any(|k| k.provider == Provider::Immich) {
+            self.ensure_session().await?;
+        }
         let provider = self.check_keys(keys)?;
+        if provider == destination {
+            return Err("転送元と別の保存先を選択してください。".into());
+        }
+        if (provider == Provider::Amazon || destination == Provider::Amazon)
+            && intent == TransferIntent::Move
+        {
+            return Err(
+                "Amazon Photosとの移動は原本保持の検証が未対応です。コピーを選択してください。"
+                    .into(),
+            );
+        }
+        if destination == Provider::Amazon {
+            self.preflight_amazon(keys)?;
+        }
         self.workspace(id).await?;
         let mut bundle = self.export(keys, "source").await?;
         self.check_transfer_trash(&bundle.assets)?;
         bundle.block_duplicates();
-        let destination = provider.other();
         let scope = if destination == Provider::Apple {
             self.state.apple_scope.clone()
+        } else if destination == Provider::Amazon {
+            self.state
+                .amazon_connection
+                .as_ref()
+                .ok_or("Amazon Photosに接続してください。")?
+                .scope
+                .clone()
         } else {
             self.session
                 .as_ref()
@@ -1207,6 +1287,10 @@ impl Runtime<'_> {
         receipt.destination = verification.assets.clone();
         verify_destination(&receipt, &verification)?;
         receipt.phase = TransferPhase::Copied;
+        self.replace_records(bundle.assets);
+        if destination == Provider::Amazon {
+            self.publish_amazon_copies(&verification.assets, now);
+        }
         self.save_receipt(receipt);
         self.persist().await
     }
@@ -1326,7 +1410,8 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
     ];
-    if version < 9
+    let live_since = u64::from(crate::immich_live_writes::LIVE_JOURNAL_SCHEMA_VERSION);
+    if version < live_since
         && live_fields
             .iter()
             .any(|field| raw.get(field).is_some_and(|v| !v.is_null()))
@@ -1336,7 +1421,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
         );
     }
     for field in live_fields {
-        if version < 9 {
+        if version < live_since {
             raw[field] = serde_json::json!([]);
         } else if !raw.get(field).is_some_and(Value::is_array) {
             return Err("Live 変更記録の構成が不正です。既存ファイルは変更しません。".into());

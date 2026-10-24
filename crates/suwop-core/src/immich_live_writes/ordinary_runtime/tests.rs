@@ -139,7 +139,7 @@ fn scope() -> String {
 }
 fn model(shared: bool) -> Result<Model, String> {
     let state = SavedLibrary {
-        schema_version: 9,
+        schema_version: 10,
         connection: Some(ConnectionSettings {
             address: "https://fixture.invalid".into(),
             allow_http: false,

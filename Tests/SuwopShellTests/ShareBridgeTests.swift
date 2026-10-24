@@ -18,7 +18,7 @@ import Testing
         resources: [resource]
     )
     let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
-    let state = SavedLibrary(appleScope: "library", schemaVersion: 9)
+    let state = SavedLibrary(appleScope: "library", schemaVersion: 10)
     func update(_ event: [String: JSONValue]) throws -> [EffectRequest] {
         try bridge.call(0, input: .object(event)).decode([EffectRequest].self)
     }

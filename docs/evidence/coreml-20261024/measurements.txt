@@ -1,0 +1,31 @@
+M1 Max, macOS, coremltools 9.0, deployment target iOS 17. Debug-free Swift CLI (Bench.swift, swiftc -O).
+Model files (mlpackage): int8 vision-encoder 161M + encoder 132M + tokens 129M + vision-head 1.5M = ~423M
+                         pal6 vision-encoder 121M + encoder 99M + tokens 96M + vision-head 1.5M = ~317M
+                         pal4 81M + 66M + 64M + 1.5M = ~212M (rejected: parity 0.86-0.96)
+                         LiteRT-LM .litertlm for comparison: 369.8 MiB + 277 MiB XNNPACK caches
+
+Parity, cosine against float32 transformers (3 COCO fixtures; image / text):
+  fp32 all units                  1.0     / 1.0
+  fp16 single vision model, ANE   NaN (vision RMSNorm overflow)
+  fp16 split, CPU_AND_NE          0.99985-0.99991 / 0.99997-0.99999
+  fp16 split, CPU_ONLY            0.627-0.697 / 0.962-0.995   (CPU fp16 arithmetic; never fall back to it)
+  int8 split, CPU_AND_NE          0.99896-0.99945 / 0.99988-0.99992
+  pal6 split, CPU_AND_NE          0.99208-0.99621 / 0.99245-0.99898
+  pal4 split, CPU_AND_NE          0.861-0.921 / 0.920-0.958
+  LiteRT-LM (current app) vs fp32 0.967-0.974 / 0.986-0.993
+
+Swift benchmark, 20 fixtures, int8, tokens on CPU:
+  ANE (vision/encoder CPU_AND_NE): load 43.5 s on every process start (no ANE cache reuse observed for a CLI),
+       peak memory footprint 142 MB, image median 109 ms, text median 8 ms
+  GPU (CPU_AND_GPU):               load 1.9 s, peak memory footprint 696 MB,
+       image median 396 ms (first 4.5 s), text median 57 ms
+  tokens on ANE instead of CPU raised peak footprint to ~850 MB.
+Per-model ANE load: vision-encoder 23.4 s, encoder 11.8 s, tokens 7.7 s (GPU/CPU: 0.2-1.2 s).
+
+1,000 COCO + 200 Japanese, Python pipeline with transformers preprocessing on ANE: ~94 s total.
+Retrieval at 256 dimensions, f32 scoring (top-1 / top-5 / top-10):
+  LiteRT-LM  EN 64.6 / 88.9 / 94.9   JA 51.5 / 83.0 / 94.0
+  Core ML int8 EN 62.9 / 89.0 / 94.8 JA 48.5 / 82.5 / 92.0
+  Core ML pal6 EN 62.4 / 87.9 / 94.2 JA 51.5 / 81.5 / 90.0
+Paired top-1 sign test, Core ML int8 vs LiteRT: EN256 37 vs 54 (p=0.093), EN768 47 vs 55 (p=0.49),
+  JA256 8 vs 14 (p=0.29), JA768 14 vs 10 (p=0.54). No significant difference; preprocessing differs.

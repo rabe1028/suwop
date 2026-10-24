@@ -354,7 +354,7 @@ fn historical_state(
         },
     ];
     let state = SavedLibrary {
-        schema_version: 9,
+        schema_version: 10,
         connection: Some(ConnectionSettings {
             address: fixture.elevated.ordinary.endpoint.clone(),
             allow_http: true,
@@ -481,7 +481,7 @@ fn start<'a>(
     root: &'a Path,
 ) -> Result<(Core<Suwop>, PairShell<'a>), String> {
     let state = SavedLibrary {
-        schema_version: 9,
+        schema_version: 10,
         connection: Some(ConnectionSettings {
             address: fixture.elevated.ordinary.endpoint.clone(),
             allow_http: true,

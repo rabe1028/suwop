@@ -1,0 +1,26 @@
+name: LoadBench
+options:
+  deploymentTarget:
+    iOS: '17.0'
+packages:
+  SuwopShell:
+    path: ../../..
+targets:
+  LoadBench:
+    type: application
+    platform: iOS
+    sources: [Sources]
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    info:
+      path: Generated/Info.plist
+      properties:
+        UILaunchScreen: {}
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.loadbench
+        SWIFT_VERSION: '6.0'
+        SWIFT_STRICT_CONCURRENCY: minimal
+        CODE_SIGN_IDENTITY: '-'
+        CODE_SIGNING_REQUIRED: 'NO'

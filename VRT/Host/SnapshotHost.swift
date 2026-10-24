@@ -6,7 +6,10 @@ import SwiftUI
         // XCUITest waits for animations to settle after every interaction; without
         // them UI tests took 18.5% less time. Hosted snapshot tests set XCTest's
         // configuration variable and manage animations themselves.
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil {
+        // `--ui-test-animations` keeps them for flows that UIKit only completes with
+        // animations (a dismissed viewer once left its presenter shrunken and unhittable).
+        let hostedTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if !hostedTests, !CommandLine.arguments.contains("--ui-test-animations") {
             UIView.setAnimationsEnabled(false)
         }
     }

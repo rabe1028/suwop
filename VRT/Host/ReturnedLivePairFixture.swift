@@ -81,7 +81,7 @@ import UIKit
         let state = SavedLibrary(
             appleScope: "returned-pair-generated",
             connection: .init(address: endpoint, allowHTTP: true, credentialID: "returned-generated-key"),
-            schemaVersion: 9
+            schemaVersion: 10
         )
         try await shell.localStore.persist(.from(state))
         installTransport(endpoint: endpoint)

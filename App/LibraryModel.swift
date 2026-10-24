@@ -31,6 +31,7 @@ import SwiftUI
     private var pendingRefresh = false
     private var pendingAlbumsRefresh = false
     private var pendingTrashRefresh = false
+    var pendingAmazonAccount: String?
     private var albumsRequested = false
     let thumbnails = NSCache<NSString, PlatformImage>()
     let previews = NSCache<NSString, PlatformImage>()
@@ -88,6 +89,14 @@ import SwiftUI
     #endif
 
     init() {
+        #if DEBUG
+            // Hosted acceptance owns its shell. Do not concurrently
+            // start the normal UI workflow against the user's canonical store.
+            let hosted = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+            if hosted || ProcessInfo.processInfo.environment["SUWOP_AMAZON_LIVE"] == "1" {
+                return
+            }
+        #endif
         do { runtime = try RustRuntime()
             let nativeShell = try AppleShell()
             shell = nativeShell
@@ -297,20 +306,6 @@ import SwiftUI
         send(["type": .string("index"), "id": .string(UUID().uuidString)])
     }
 
-    func copy(_ photo: UnifiedPhoto, from provider: Provider, move: Bool = false) {
-        do {
-            let keys = photo.assets.filter { $0.key.provider == provider }.map(\.key)
-            try send([
-                "type": .string("copy"),
-                "keys": .from(keys),
-                "intent": .string(move ? "move" : "copy"),
-                "id": .string(UUID().uuidString),
-                "now": .number(Date().timeIntervalSince1970),
-            ])
-            showTransfers = true
-        } catch { errorMessage = error.localizedDescription }
-    }
-
     func completeMove(_ receipt: TransferReceipt) {
         send(["type": .string("completeMove"), "id": .string(receipt.id), "workspace": .string(UUID().uuidString)])
     }
@@ -341,13 +336,15 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 9 {
+                if pendingAmazonAccount != nil {
+                    resumeAmazonConnection()
+                } else if pendingRefresh, libraryReady {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 9 {
+                } else if pendingAlbumsRefresh, libraryReady {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 9 {
+                } else if pendingTrashRefresh, libraryReady {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -587,13 +584,12 @@ extension LibraryModel {
             }
         #endif
         guard let shell else { throw SuwopError("入出力が利用できません。") }
-        return try await shell.thumbnail(key, connection: connection, version: view?.remoteVersion, preview: preview)
-    }
-
-    func validatePreview(_ id: String, key: AssetKey, generation: UUID) throws {
-        try Task.checkCancellation()
-        guard generation == thumbnailGeneration, view?.previewSources[id] == key else {
-            throw SuwopError("写真の可視性が変わりました。一覧を更新してください。")
-        }
+        return try await shell.thumbnail(
+            key,
+            connection: connection,
+            amazonConnection: view?.state.amazonConnection,
+            version: view?.remoteVersion,
+            preview: preview
+        )
     }
 }

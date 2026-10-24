@@ -185,6 +185,7 @@ fn scope(model: &Model) -> String {
     serde_json::to_string(&(
         &model.state.apple_scope,
         model.session.as_ref().map(|s| &s.scope),
+        model.state.amazon_connection.as_ref().map(|c| &c.scope),
     ))
     .unwrap_or_default()
 }
@@ -214,6 +215,8 @@ fn current_asset<'a>(model: &'a Model, key: &AssetKey) -> Option<&'a StoredAsset
     let current = match key.provider {
         Provider::Apple => key.scope == model.state.apple_scope,
         Provider::Immich => model.session.as_ref().is_some_and(|s| s.scope == key.scope),
+        // Protected image tickets currently support Apple/Immich native adapters only.
+        Provider::Amazon => false,
     };
     if !current || snapshot.access == ScanAccess::Unavailable {
         return None;

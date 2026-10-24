@@ -92,15 +92,9 @@ final class ImmichLockedPhotosUITests: XCTestCase {
     }
 
     @MainActor private func submit(_ app: XCUIApplication, password: String? = nil, pin: String? = nil) {
-        let field = app.textFields["immichLockedEmail"]
-        field.tap()
-        field.typeText(email)
-        let secret = app.secureTextFields["immichLockedPassword"]
-        secret.tap()
-        secret.typeText(password ?? self.password)
-        let code = app.secureTextFields["immichLockedPIN"]
-        code.tap()
-        code.typeText(pin ?? self.pin)
+        app.textFields["immichLockedEmail"].typeTextWhenFocused(email)
+        app.secureTextFields["immichLockedPassword"].typeTextWhenFocused(password ?? self.password)
+        app.secureTextFields["immichLockedPIN"].typeTextWhenFocused(pin ?? self.pin)
         let login = app.buttons["openImmichLocked"]
         for _ in 0 ..< 5 {
             if login.isHittable {

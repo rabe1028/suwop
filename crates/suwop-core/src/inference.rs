@@ -1,11 +1,18 @@
-//! Local inference admission, model identity and bounded query projection.
+//! Local inference admission, model identity, tokenization and bounded query projection.
 use crate::analysis::AnalysisModel;
 use serde::{Deserialize, Serialize};
 
-pub const MODEL_SHA256: &str = "92dcbea108899e5d6e30d919b0744f90d9967e80c67a4ab5503ac16d54f62eb0";
-pub const MODEL_BYTES: u64 = 387_710_976;
-pub const MODEL_FILE: &str = "embeddinggemma-2-text-vision-440m.litertlm";
-pub const MODEL_URL: &str = "https://huggingface.co/litert-community/embeddinggemma-2-text-vision-440m-litert-lm/resolve/e301f74d5551b0c2641bd5cb4652a76239d5c5f8/embeddinggemma-2-text-vision-440m.litertlm";
+/// Identity of the bundled Core ML models produced by `make coreml-models`
+/// (`scripts/coreml/convert.py` verifies its output against this value).
+pub const COREML_MODEL_SHA256: &str =
+    "333a3a9037bc45895820324b4593f66aff2060e3f2f160d7c1f6ed8ca8a6f7e9";
+/// App bundle folder holding the compiled `.mlmodelc` directories.
+pub const COREML_MODEL_DIRECTORY: &str = "EmbeddingGemma2";
+const BOS: u32 = 2;
+const EOS: u32 = 1;
+const IMAGE_START: u32 = 255_999;
+const IMAGE_SOFT_TOKEN: u32 = 258_880;
+const IMAGE_END: u32 = 258_882;
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -29,14 +36,14 @@ pub struct InferenceStatus {
 #[serde(rename_all = "camelCase")]
 pub struct InferenceSpec {
     pub model: AnalysisModel,
-    pub url: String,
-    pub filename: String,
-    pub sha256: String,
-    pub bytes: u64,
+    pub model_directory: String,
+    /// Preview edge requested from photo sources before patch preparation.
     pub image_edge: u32,
+    pub max_patches: u32,
+    pub patch_size: u32,
+    pub pooling_kernel: u32,
     pub image_tokens: u32,
     pub text_tokens: u32,
-    pub threads: u32,
 }
 
 pub fn specification(dimensions: u32) -> Result<InferenceSpec, String> {
@@ -46,21 +53,20 @@ pub fn specification(dimensions: u32) -> Result<InferenceSpec, String> {
     Ok(InferenceSpec {
         model: AnalysisModel {
             name: "embeddinggemma-2-text-vision-440m".into(),
-            version: MODEL_SHA256.into(),
+            version: COREML_MODEL_SHA256.into(),
             preprocessing:
-                "litert-lm-0.18.0/cpu2/vision70/text128/current-preview-fit448/jpeg90/mrl-l2-v1"
+                "coreml-int8-ane/vision70-patch16-pool3-bicubic/text128/current-preview-fit448/mrl-l2-v1"
                     .into(),
             rendition: "current-preview".into(),
             dimensions,
         },
-        url: MODEL_URL.into(),
-        filename: MODEL_FILE.into(),
-        sha256: MODEL_SHA256.into(),
-        bytes: MODEL_BYTES,
+        model_directory: COREML_MODEL_DIRECTORY.into(),
         image_edge: 448,
+        max_patches: 630,
+        patch_size: 16,
+        pooling_kernel: 3,
         image_tokens: 70,
         text_tokens: 128,
-        threads: 2,
     })
 }
 
@@ -101,6 +107,26 @@ pub fn query(text: &str) -> Result<String, String> {
         return Err("Use a nonempty search query of at most 384 UTF-8 bytes".into());
     }
     Ok(format!("task: search query | text: {text}"))
+}
+
+/// Token IDs for a search query, including `<bos>`/`<eos>`; never truncated.
+pub fn query_tokens(text: &str) -> Result<Vec<u32>, String> {
+    let tokens = crate::tokenizer::encode(&query(text)?)?;
+    if tokens.len() > 128 {
+        return Err("検索語が長すぎます。短くしてください。".into());
+    }
+    Ok(tokens)
+}
+
+/// Token IDs for one image with `soft_tokens` vision embeddings in place of placeholders.
+pub fn image_tokens(soft_tokens: u32) -> Result<Vec<u32>, String> {
+    if !(1..=70).contains(&soft_tokens) {
+        return Err("Unexpected image token count".into());
+    }
+    let mut tokens = vec![BOS, IMAGE_START];
+    tokens.extend(std::iter::repeat_n(IMAGE_SOFT_TOKEN, soft_tokens as usize));
+    tokens.extend([IMAGE_END, EOS]);
+    Ok(tokens)
 }
 
 pub fn project(vector: &[f32], dimensions: u32) -> Result<Vec<f32>, String> {
@@ -146,6 +172,24 @@ mod tests {
         assert!(project(&[f32::NAN; 768], 256).is_err());
         assert!(project(&[0.0; 768], 256).is_err());
         assert_ne!(specification(256)?.model, specification(512)?.model);
+        Ok(())
+    }
+    #[test]
+    fn token_sequences_match_the_converted_encoder_inputs() -> Result<(), String> {
+        // Captured from transformers' EmbeddingGemma2Processor for the same inputs.
+        assert_eq!(
+            query_tokens("a dog")?,
+            [
+                2, 8071, 236_787, 3927, 7609, 1109, 1816, 236_787, 496, 4799, 1
+            ]
+        );
+        let image = image_tokens(56)?;
+        assert_eq!(image.len(), 60);
+        assert_eq!(image[..2], [2, 255_999]);
+        assert_eq!(image[58..], [258_882, 1]);
+        assert!(image[2..58].iter().all(|id| *id == 258_880));
+        assert!(image_tokens(0).is_err() && image_tokens(71).is_err());
+        assert!(query_tokens(&"写".repeat(128)).is_err());
         Ok(())
     }
 }
