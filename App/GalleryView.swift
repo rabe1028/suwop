@@ -6,6 +6,7 @@ struct GalleryView: View {
     private let sceneID: String
     @State private var showProtected = false
     @State private var showImmichLocked = false
+    @State private var showLiveReads = false
     @State private var showImmichArchive = false
     @State private var tab = 0
     @State private var filter: PhotoFilter = .all
@@ -74,6 +75,26 @@ struct GalleryView: View {
             ImmichArchiveViewScreen(session: model.immichArchive, sceneID: sceneID)
         }
         .sheet(isPresented: $showImmichLocked) { ImmichLockedPhotosView(session: model.immichLocked, sceneID: sceneID) }
+        .sheet(isPresented: $showLiveReads) {
+            NavigationStack {
+                List {
+                    LivePlacementCleanupPanel(cleanup: model.view?.livePlacementCleanup) {
+                        model.immichLocked.retryLivePlacementCleanup(captureID: $0)
+                    }
+                    OrdinaryLivePairImageCleanupPanel(session: model.ordinaryLivePairImages)
+                    OrdinaryLiveReadPanel(
+                        ordinary: model.view?.ordinaryLiveActions ?? [],
+                        progress: model.view?.ordinaryLiveProgress,
+                        discover: { model.immichLocked.discoverOrdinaryLivePairs() },
+                        cancel: { model.immichLocked.cancelOrdinaryLivePair(requestID: $0) },
+                        refresh: { model.immichLocked.ordinaryLivePair(type: "refreshOrdinaryLivePair", parent: $0) },
+                        play: { model.immichLocked.ordinaryLivePair(type: "playOrdinaryLivePair", parent: $0) },
+                        cleanup: { model.immichLocked.cleanupOrdinaryLivePair(requestID: $0) }
+                    )
+                }.navigationTitle("Live Photo の通常再生")
+                    .toolbar { Button("閉じる") { showLiveReads = false } }
+            }
+        }
         .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
         .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
         .alert("操作を完了できませんでした", isPresented: Binding(
@@ -211,6 +232,8 @@ struct GalleryView: View {
                 .accessibilityIdentifier("protectedPhotosHistory")
             Button("Immich のアーカイブ変更記録", systemImage: "archivebox") { showImmichArchive = true }
                 .accessibilityIdentifier("immichArchiveHistory")
+            Button("Live Photo の通常再生", systemImage: "livephoto") { showLiveReads = true }
+                .accessibilityIdentifier("ordinaryLivePairHistory")
             Button("Immich のロック写真", systemImage: "lock.rectangle") { showImmichLocked = true }
                 .accessibilityIdentifier("immichLockedPhotosHistory")
             Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)

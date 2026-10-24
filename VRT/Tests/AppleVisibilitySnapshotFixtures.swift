@@ -16,7 +16,7 @@ extension SnapshotFixtures {
             scope: "vrt",
             targets: [target]
         )
-        let state = SavedLibrary(appleScope: "vrt", appleVisibilityOperations: [operation], schemaVersion: 4)
+        let state = SavedLibrary(appleScope: "vrt", appleVisibilityOperations: [operation], schemaVersion: 9)
         let bridge = try CoreBridge()
         let read = try XCTUnwrap(bridge.call(0, input: .object([
             "type": .string("initialize"), "scope": .string("vrt"),

@@ -117,10 +117,9 @@ final class ImmichVisibilityUITests: XCTestCase {
         let lock = app.buttons["lockDisplayedImmichPhoto"]
         XCTAssertTrue(lock.exists)
         XCTAssertFalse(lock.isEnabled)
-        // SwiftUI Menu renders this read-only explanation as a native menu
-        // element, whose AX type is not necessarily StaticText.
+        // SwiftUI Menu AX explanations are native menu elements, not necessarily StaticText.
         let reasons = app.descendants(matching: .any).matching(NSPredicate(
-            format: "label == %@", "Live Photo の表示先変更には対応していません。"
+            format: "label == %@", "Live Photo の写真だけの表示先は変更できません。写真と付随動画は組で確認する必要があります。"
         ))
         let visibleReason = NSPredicate { _, _ in
             reasons.allElementsBoundByIndex.contains {
@@ -184,8 +183,7 @@ final class ImmichVisibilityUITests: XCTestCase {
             if copies.exists, copies.frame.maxY <= action.frame.minY - 24 {
                 break
             }
-            // AX exposes the full ScrollView frame, including the inset area.
-            // Begin inside the visible body, above the footer, rather than on a button.
+            // AX frames include insets; begin in the body above the footer and its buttons.
             let origin = app.coordinate(withNormalizedOffset: .zero)
             let start = origin.withOffset(CGVector(dx: app.frame.width / 2, dy: action.frame.minY - 40))
             let end = origin.withOffset(CGVector(dx: app.frame.width / 2, dy: max(160, scroll.frame.minY + 60)))

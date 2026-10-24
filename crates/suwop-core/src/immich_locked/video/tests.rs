@@ -33,7 +33,7 @@ fn model(raw: &Value) -> Result<Model, String> {
     let asset: Asset = serde_json::from_value(raw.clone()).map_err(|_| "fixture")?;
     let asset = asset.record("scope", None, None);
     let mut model = Model::default();
-    model.state.schema_version = 8;
+    model.state.schema_version = crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
     model.state.connection = Some(crate::app::ConnectionSettings {
         address: session.endpoint.clone(),
         allow_http: false,

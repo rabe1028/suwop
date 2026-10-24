@@ -40,6 +40,15 @@ public final class LocalStore: Sendable {
         _ = try await call(.object(["type": .string("persist"), "state": state]))
     }
 
+    public func readVersioned() async throws -> JSONValue {
+        try await call(.object(["type": .string("readVersioned")]))
+    }
+
+    public func persistIfCurrent(revision: String, state: JSONValue) async throws -> Bool {
+        try await call(.object(["type": .string("persistIfCurrent"), "revision": .string(revision), "state": state]))
+            .decode(Bool.self)
+    }
+
     public func register(model: AnalysisModel, budget: AnalysisBudget) async throws -> String {
         try await call(.object([
             "type": .string("register"), "model": .from(model), "budget": .from(budget),

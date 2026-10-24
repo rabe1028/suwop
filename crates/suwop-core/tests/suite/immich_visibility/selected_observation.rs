@@ -153,11 +153,24 @@ fn schema_seven_and_older_migrate_without_inventing_observation_or_changing_old_
     for version in 1..=7 {
         let mut raw = shell.disk.clone().ok_or("disk")?;
         raw["schemaVersion"] = json!(version);
+        for field in [
+            "immichLiveOperations",
+            "immichLiveUnstartedClosures",
+            "immichLiveLegacyReconciliations",
+        ] {
+            raw.as_object_mut().ok_or("object")?.remove(field);
+        }
         let expected = raw["immichVisibilityOperations"].clone();
         let mut expected_state = raw.clone();
-        expected_state["schemaVersion"] = json!(8);
+        expected_state["schemaVersion"] = json!(9);
+        expected_state["immichLiveOperations"] = json!([]);
+        expected_state["immichLiveUnstartedClosures"] = json!([]);
+        expected_state["immichLiveLegacyReconciliations"] = json!([]);
         let state = suwop_core::workflow::migrate(raw)?;
-        assert_eq!(state.schema_version, 8);
+        assert_eq!(
+            state.schema_version,
+            suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+        );
         assert!(
             state.immich_visibility_operations[0]
                 .selected_observation
@@ -181,6 +194,13 @@ fn selected_observation_requires_schema_eight_provenance() -> Result<(), String>
     assert!(suwop_core::workflow::migrate(raw.clone()).is_ok());
     let mut legacy = raw.clone();
     legacy["schemaVersion"] = json!(7);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        legacy.as_object_mut().ok_or("object")?.remove(field);
+    }
     assert!(suwop_core::workflow::migrate(legacy.clone()).is_err());
     assert_eq!(
         legacy["immichVisibilityOperations"],

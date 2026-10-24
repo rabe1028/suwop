@@ -24,6 +24,10 @@ struct ImmichLockedTimer: Sendable {
     @Published private(set) var error: String?
     @Published private(set) var connecting = false
     @Published private(set) var busy = false
+    @Published private(set) var livePlacementCleanup: LivePlacementCleanup?
+    @Published private(set) var livePlacementHistory = LivePlacementHistory()
+    @Published private(set) var ordinaryLiveProgress: OrdinaryLiveReadProgress?
+    @Published private(set) var ordinaryLiveActions: [OrdinaryLivePairAction] = []
     @Published private(set) var privateMediaCleanup: [PrivateMediaCleanupView] = []
     private var runtime: RustRuntime?
     private var shell: AppleShell?
@@ -36,6 +40,7 @@ struct ImmichLockedTimer: Sendable {
     private var liveSelectionRetirement: (id: UUID, task: Task<Void, Never>)?
     private var revision: UInt64 = 0
     private var coreBusy = false
+    var pendingPairLock: (key: AssetKey, sceneID: String)?
     private var pendingRefresh: (id: UUID, grantID: String)?
     private var expiryTask: Task<Void, Never>?
     private var checkTask: Task<Void, Never>?
@@ -61,6 +66,25 @@ struct ImmichLockedTimer: Sendable {
             return view(for: prompt.sceneID)?.grantID == current.grantID && live.state == .open
                 && live.sceneID == prompt.sceneID && live.grantID == current.grantID && live.generation == current
                 .generation
+        }
+        shell.livePlacementConfirmationCurrent = { [weak self] prompt in
+            guard let self, let runtime = self.runtime, let current = view(for: prompt.sceneID),
+                  current.grantID == prompt.grantID, current.generation == prompt.generation else { return false }
+            let snapshot = try await runtime.snapshot().view
+            guard let issued = snapshot.livePlacementPrompt else { return false }
+            return issued.batchID == prompt.batchID && issued.intentDigest == prompt.intentDigest
+                && issued.grantID == prompt.grantID && issued.generation == prompt.generation
+                && issued.sceneID == prompt.sceneID && view(for: prompt.sceneID)?.grantID == prompt.grantID
+                && snapshot.immichLockedView.state == .open
+        }
+        shell.liveKeepConfirmationCurrent = { [weak self] prompt in
+            guard let self, let runtime = self.runtime, let current = view(for: prompt.sceneID),
+                  current.grantID == prompt.grantID, current.generation == prompt.generation else { return false }
+            let snapshot = try await runtime.snapshot().view
+            guard let issued = snapshot.liveKeepPrompt else { return false }
+            return try Wire.encoder().encode(issued) == Wire.encoder().encode(prompt)
+                && view(for: prompt.sceneID)?.grantID == prompt.grantID
+                && snapshot.immichLockedView.state == .open
         }
         shell.immichLockedAccess.configure(runtime: runtime)
         shell.immichLockedVideoAccess.configure(runtime: runtime)
@@ -128,6 +152,7 @@ struct ImmichLockedTimer: Sendable {
             if expectedGrantID == id {
                 connecting = false
                 visibility.preparePending(sceneID: sceneID)
+                preparePendingPair(sceneID: sceneID)
             }
         }
     }
@@ -250,6 +275,10 @@ struct ImmichLockedTimer: Sendable {
         shielded = !mayRender
         shell?.immichLockedVideoAccess.receive(fresh)
         shell?.immichLockedLiveAccess.receive(fresh)
+        livePlacementCleanup = snapshot.view.livePlacementCleanup
+        livePlacementHistory = mayRender ? snapshot.view.livePlacementHistory : LivePlacementHistory()
+        ordinaryLiveActions = snapshot.view.ordinaryLiveActions
+        ordinaryLiveProgress = snapshot.view.ordinaryLiveProgress
         error = fresh.error
         visibility.receive(snapshot, sceneID: mayRender ? ownerSceneID : nil)
         if mayRender, let ownerSceneID {
@@ -258,6 +287,10 @@ struct ImmichLockedTimer: Sendable {
     }
 
     private func shield(preservePending: Bool = false) {
+        livePlacementHistory = LivePlacementHistory()
+        if !preservePending {
+            pendingPairLock = nil
+        }
         liveSelection.cancel()
         pendingRefresh = nil
         busy = coreBusy
@@ -300,7 +333,7 @@ struct ImmichLockedTimer: Sendable {
         ])
     }
 
-    private func send(_ event: [String: JSONValue]) {
+    func send(_ event: [String: JSONValue]) {
         guard let shell else { return }
         let context = shell.beginWorkflow()
         Task { await run(event, context: context) }

@@ -77,6 +77,11 @@ pub enum Command {
         source: String,
     },
     Read,
+    ReadVersioned,
+    PersistIfCurrent {
+        revision: String,
+        state: Box<SavedLibrary>,
+    },
     Persist {
         state: Box<SavedLibrary>,
     },
@@ -189,6 +194,10 @@ fn json(value: impl Serialize) -> Result<Value> {
 fn execute_analysis(store: &mut Store, command: Command) -> Result<Value> {
     let value = match command {
         Command::Read => json(store.read()?)?,
+        Command::ReadVersioned => json(store.read_versioned()?)?,
+        Command::PersistIfCurrent { revision, state } => {
+            json(store.persist_if_current(&revision, &state)?)?
+        }
         Command::Persist { state } => {
             store.persist(&state)?;
             Value::Null

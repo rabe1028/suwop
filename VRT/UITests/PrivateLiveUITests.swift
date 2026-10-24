@@ -149,8 +149,10 @@ final class PrivateLiveUITests: XCTestCase {
 
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
         var attempts: [String] = []
+        // The locked List also hosts the Live Photo read/history sections below the
+        // entries, so a full downward pass must still leave budget to return upward.
         for direction in [true, false] {
-            for _ in 0 ..< 8 {
+            for _ in 0 ..< 12 {
                 let authentication = app.collectionViews["immichLockedAuthenticationForm"]
                 let content = app.collectionViews["immichLockedContentList"]
                 let list = authentication.exists ? authentication : content

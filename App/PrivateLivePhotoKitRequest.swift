@@ -84,6 +84,9 @@ private final class PrivateLiveCallbackFence: Sendable {
     }
 
     enum Failure: Error { case unavailable, callbackContract, cleanupUnconfirmed }
+    /// The FIRST reason this exact request was quarantined. Only a timeout can still be
+    /// followed by this request's own terminal callback; the others never prove one.
+    enum QuarantineCause: Equatable { case timeout, invalidRequest, callbackContract }
 
     private let urls: [URL]
     private let targetSize: CGSize
@@ -98,7 +101,9 @@ private final class PrivateLiveCallbackFence: Sendable {
     private var terminalObserved = false
     private var cancelSent = false
     private var quarantined = false
+    private(set) var quarantineCause: QuarantineCause?
     private var joins: [UUID: CheckedContinuation<Void, Error>] = [:]
+    private var terminalWaiters: [UUID: CheckedContinuation<Void, Error>] = [:]
 
     init(
         urls: [URL],
@@ -164,7 +169,7 @@ private final class PrivateLiveCallbackFence: Sendable {
                 }
                 requestID = id
                 if id == PHLivePhotoRequestIDInvalid, !fulfilled, !terminalObserved {
-                    quarantined = true
+                    quarantine(.invalidRequest)
                     finish(.failure(Failure.cleanupUnconfirmed))
                 }
                 if fence.cancelled {
@@ -194,14 +199,14 @@ private final class PrivateLiveCallbackFence: Sendable {
             return
         }
         guard ContinuousClock.now < deadline else {
-            quarantined = true
+            quarantine(.timeout)
             throw Failure.cleanupUnconfirmed
         }
         let id = UUID()
         let timeoutTask = Task { @MainActor [weak self] in
             do { try await ContinuousClock().sleep(until: deadline) } catch { return }
             guard let self, let waiting = joins.removeValue(forKey: id) else { return }
-            quarantined = true
+            quarantine(.timeout)
             waiting.resume(throwing: Failure.cleanupUnconfirmed)
             checkJoins()
         }
@@ -213,6 +218,55 @@ private final class PrivateLiveCallbackFence: Sendable {
 
     var isQuarantined: Bool {
         quarantined || fence.violated
+    }
+
+    private func quarantine(_ cause: QuarantineCause) {
+        quarantined = true
+        if quarantineCause == nil {
+            quarantineCause = cause
+        }
+    }
+
+    /// Cleanup-only evidence after a timed-out JOIN: returns only once THIS request's own
+    /// later terminal callback (cancelled or full) was observed and every callback body
+    /// drained. It never clears quarantine, so `join()`/`isQuarantined` are unchanged.
+    /// Invalid request IDs and callback-contract violations fail immediately. There is
+    /// no internal deadline; cancelling the waiting task only stops this wait.
+    func awaitTerminalAfterTimeout() async throws {
+        if let result = terminalAfterTimeout {
+            return try result.get()
+        }
+        let id = UUID()
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                if Task.isCancelled {
+                    continuation.resume(throwing: CancellationError())
+                } else if let result = terminalAfterTimeout {
+                    continuation.resume(with: result)
+                } else {
+                    terminalWaiters[id] = continuation
+                }
+            }
+        } onCancel: {
+            Task { @MainActor [weak self] in
+                self?.terminalWaiters.removeValue(forKey: id)?.resume(throwing: CancellationError())
+            }
+        }
+    }
+
+    private var terminalAfterTimeout: Result<Void, Error>? {
+        guard quarantineCause == .timeout, !fence.violated else { return .failure(Failure.cleanupUnconfirmed) }
+        guard fence.drained, terminalObserved || fulfilled else { return nil }
+        return .success(())
+    }
+
+    private func resumeTerminalWaiters() {
+        guard !terminalWaiters.isEmpty, let result = terminalAfterTimeout else { return }
+        let waiting = Array(terminalWaiters.values)
+        terminalWaiters.removeAll()
+        for continuation in waiting {
+            continuation.resume(with: result)
+        }
     }
 
     private func receive(_ photo: PHLivePhoto?, cancelled: Bool, degraded: Bool, error: Error?) {
@@ -259,13 +313,14 @@ private final class PrivateLiveCallbackFence: Sendable {
     }
 
     private func callbackViolation() {
-        quarantined = true
+        quarantine(.callbackContract)
         finish(.failure(Failure.callbackContract))
         cancelLoading()
         checkJoins()
     }
 
     private func checkJoins() {
+        resumeTerminalWaiters()
         guard fence.drained else { return }
         guard quarantined || fence.violated || fulfilled || terminalObserved || !started else { return }
         let waiting = Array(joins.values)

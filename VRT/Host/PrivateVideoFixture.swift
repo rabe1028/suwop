@@ -56,7 +56,7 @@ import SuwopShell
         fields["exifInfo"] = expectedBytesKnown
             ? .object(["fileSizeInByte": .number(Double(media.count))]) : .object([:])
         server = try ImmichVisibilityFixtureServer(visibility: "locked", kind: .video, customRecord: .object(fields))
-        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 8)
+        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 9)
     }
 
     static func mediaURL(container: String = "mp4") throws -> URL {

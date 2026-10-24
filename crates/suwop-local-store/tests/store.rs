@@ -16,7 +16,7 @@ fn model() -> AnalysisModel {
 }
 fn state(count: u32) -> SavedLibrary {
     SavedLibrary {
-        schema_version: 2,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "test".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Apple,
@@ -579,7 +579,7 @@ fn protected_and_hidden_photos_never_enter_analysis_and_stale_results_fail() -> 
     library
         .protected_entries
         .push(suwop_core::protection::PersistentProtectedEntry {
-            id: "protected".into(),
+            id: "abababab-0000-4000-8000-000000000000".into(),
             key: library.snapshots[0].assets[2].key.clone(),
         });
     store.persist(&library)?;
@@ -902,6 +902,7 @@ fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
     let mut catalog = state(1);
     catalog.snapshots[0].provider = Provider::Immich;
     catalog.snapshots[0].assets[0].key.provider = Provider::Immich;
+    catalog.snapshots[0].assets[0].key.asset_id = "cccccccc-0000-4000-8000-000000000000".into();
     store.persist(&catalog)?;
     let key = store.register(&model(), &AnalysisBudget::default())?;
     supply(&mut store, &key)?;
@@ -916,7 +917,7 @@ fn immich_lock_intent_revokes_analysis_jobs_and_published_hits() -> Result {
     catalog
         .immich_visibility_operations
         .push(serde_json::from_value(serde_json::json!({
-            "id":"lock-intent", "scope":"test", "key":asset.key, "witnessDigest":"fixture",
+            "id":"dddddddd-0000-4000-8000-000000000000", "scope":"test", "key":asset.key, "witnessDigest":"a".repeat(64),
             "from":"timeline", "to":"locked", "outcome":"unknown"
         }))?);
     store.persist(&catalog)?;
@@ -1171,5 +1172,161 @@ fn explicit_exclusions_survive_visibility_refresh_until_revision_or_rebuild() ->
     store.rebuild(&key, &AnalysisBudget::default())?;
     assert_eq!(store.pending(&key, 1)?.len(), 1);
     assert_eq!(store.status()?[0].skipped, 0);
+    Ok(())
+}
+
+fn live_wire_library(
+    index: usize,
+) -> std::result::Result<SavedLibrary, Box<dyn std::error::Error>> {
+    let corpus: serde_json::Value = serde_json::from_str(include_str!(
+        "../../suwop-core/tests/fixtures/live-journal-wire.json"
+    ))?;
+    Ok(serde_json::from_value(
+        corpus["validStates"][index]["library"].clone(),
+    )?)
+}
+
+#[test]
+fn old_sqlite_row_versioned_read_cas_and_restart_preserve_raw_token() -> Result {
+    let root = tempfile::tempdir()?;
+    let mut first = Store::open(root.path())?;
+    first.persist(&state(2))?;
+    let mut legacy = serde_json::to_value(state(2))?;
+    legacy["schemaVersion"] = serde_json::json!(8);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        legacy.as_object_mut().ok_or("object")?.remove(field);
+    }
+    let raw = serde_json::to_string(&legacy)?;
+    let db = rusqlite::Connection::open(root.path().join("catalog.sqlite3"))?;
+    db.execute("UPDATE library_state SET json=?1 WHERE id=1", [&raw])?;
+    let mut second = Store::open(root.path())?;
+    let versioned = second.read_versioned()?;
+    let mut migrated = versioned.state.ok_or("state")?;
+    assert_eq!(
+        migrated.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
+    let untouched: String =
+        db.query_row("SELECT json FROM library_state WHERE id=1", [], |row| {
+            row.get(0)
+        })?;
+    assert_eq!(untouched, raw);
+    migrated.snapshots[0].scanned_at = Some(123.0);
+    assert!(second.persist_if_current(&versioned.revision, &migrated)?);
+    assert!(!second.persist_if_current(&versioned.revision, &migrated)?);
+    drop(second);
+    let mut restarted = Store::open(root.path())?;
+    assert_eq!(
+        restarted.read()?.ok_or("state")?.snapshots[0].scanned_at,
+        Some(123.0)
+    );
+    Ok(())
+}
+
+#[test]
+fn independent_writers_cas_and_stale_plain_persist_never_erase_live_history_or_outbox() -> Result {
+    for cas_first in [false, true] {
+        let root = tempfile::tempdir()?;
+        let mut first = Store::open(root.path())?;
+        let mut second = Store::open(root.path())?;
+        first.persist(&state(2))?;
+        let model_key = first.register(&model(), &AnalysisBudget::default())?;
+        let versioned = first.read_versioned()?;
+        let mut desired = versioned.state.ok_or("state")?;
+        desired.immich_live_operations = live_wire_library(0)?.immich_live_operations;
+        if cas_first {
+            assert!(first.persist_if_current(&versioned.revision, &desired)?);
+            let before = serde_json::to_value(first.pending(&model_key, 32)?)?;
+            assert!(second.persist(&state(0)).is_err());
+            assert_eq!(
+                serde_json::to_value(first.pending(&model_key, 32)?)?,
+                before
+            );
+            assert_eq!(
+                first.read()?.ok_or("state")?.immich_live_operations,
+                desired.immich_live_operations
+            );
+        } else {
+            second.persist(&state(3))?;
+            let before = serde_json::to_value(second.pending(&model_key, 32)?)?;
+            assert!(!first.persist_if_current(&versioned.revision, &desired)?);
+            assert_eq!(
+                serde_json::to_value(second.pending(&model_key, 32)?)?,
+                before
+            );
+            assert!(
+                second
+                    .read()?
+                    .ok_or("state")?
+                    .immich_live_operations
+                    .is_empty()
+            );
+            assert_eq!(second.read()?.ok_or("state")?.snapshots[0].assets.len(), 3);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn all_storage_writers_preserve_applied_and_unstarted_closure_history() -> Result {
+    use suwop_core::immich_live_writes as live;
+    let root = tempfile::tempdir()?;
+    let mut first = Store::open(root.path())?;
+    let mut second = Store::open(root.path())?;
+    let unknown = live_wire_library(0)?;
+    first.persist(&unknown)?;
+    let applied = live_wire_library(3)?;
+    first.persist(&applied)?;
+    assert!(second.persist(&unknown).is_err());
+    let mut closed = applied.clone();
+    let batch = &closed.immich_live_operations[0];
+    let live::Outcome::Applied { verified_post, .. } = &batch.steps[0].outcome else {
+        return Err("applied".into());
+    };
+    let mut closure = live::UnstartedClosure {
+        format_version: 1,
+        id: "abcdefab-0000-4000-8000-000000000000".into(),
+        references: vec![live::StepRef {
+            batch_id: batch.id.clone(),
+            step_id: batch.steps[1].id.clone(),
+            intent_digest: batch.intent.digest.clone(),
+            retired_outcomes_digest: live::retired_outcomes_digest(batch)?,
+        }],
+        current_graph: verified_post.resources.clone(),
+        digest: String::new(),
+    };
+    closure.digest = live::closure_digest(&closure)?;
+    closed.immich_live_unstarted_closures.push(closure);
+    let current = first.read_versioned()?;
+    assert!(first.persist_if_current(&current.revision, &closed)?);
+    assert!(second.persist(&applied).is_err());
+    let durable = second.read()?.ok_or("state")?;
+    assert_eq!(
+        durable.immich_live_operations,
+        applied.immich_live_operations
+    );
+    assert_eq!(
+        durable.immich_live_unstarted_closures,
+        closed.immich_live_unstarted_closures
+    );
+    let imported_root = tempfile::tempdir()?;
+    let legacy_file = imported_root.path().join("library-v1.json");
+    let original = serde_json::to_vec(&closed)?;
+    std::fs::write(&legacy_file, &original)?;
+    let mut imported = Store::open(imported_root.path())?;
+    let restored = imported.read()?.ok_or("imported state")?;
+    assert_eq!(
+        restored.immich_live_operations,
+        closed.immich_live_operations
+    );
+    assert_eq!(
+        restored.immich_live_unstarted_closures,
+        closed.immich_live_unstarted_closures
+    );
+    assert_eq!(std::fs::read(legacy_file)?, original);
     Ok(())
 }

@@ -145,7 +145,8 @@ impl Store {
             .optional()
             .map_err(error)?;
         if let Some(text) = text {
-            return serde_json::from_str(&text).map(Some).map_err(error);
+            return suwop_core::workflow::migrate(serde_json::from_str(&text).map_err(error)?)
+                .map(Some);
         }
         let path = self.root.join("library-v1.json");
         if !path.try_exists().map_err(error)? {
@@ -156,30 +157,87 @@ impl Store {
         }
         let raw = serde_json::from_slice(&std::fs::read(path).map_err(error)?).map_err(error)?;
         let state = suwop_core::workflow::migrate(raw)?;
-        self.save(&state, true)?;
+        self.save(&state, true, None)?;
         // A second process may have completed migration or persisted newer state.
         self.read()
     }
     /// Metadata and the analysis outbox commit together. Never opens Lance here.
     pub fn persist(&mut self, state: &SavedLibrary) -> Result<()> {
-        self.save(state, false)
+        self.save(state, false, None).map(|_| ())
     }
-    fn save(&mut self, state: &SavedLibrary, import_only: bool) -> Result<()> {
+    /// Token fingerprints the exact durable row bytes, never a migrated encoding.
+    /// State and token come from the same SELECT; reading does not rewrite that row.
+    pub fn read_versioned(&mut self) -> Result<VersionedLibrary> {
+        let mut text: Option<String> = self
+            .db
+            .query_row("SELECT json FROM library_state WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(error)?;
+        if text.is_none() {
+            self.read()?; // Only the absent-row path can import a legacy file.
+            text = self
+                .db
+                .query_row("SELECT json FROM library_state WHERE id=1", [], |row| {
+                    row.get(0)
+                })
+                .optional()
+                .map_err(error)?;
+        }
+        Ok(VersionedLibrary {
+            revision: row_revision(text.as_deref()),
+            state: text
+                .map(|text| {
+                    suwop_core::workflow::migrate(serde_json::from_str(&text).map_err(error)?)
+                })
+                .transpose()?,
+        })
+    }
+    pub fn persist_if_current(&mut self, revision: &str, state: &SavedLibrary) -> Result<bool> {
+        self.save(state, false, Some(revision))
+    }
+    fn save(
+        &mut self,
+        state: &SavedLibrary,
+        import_only: bool,
+        expected: Option<&str>,
+    ) -> Result<bool> {
         let text = serde_json::to_string(state).map_err(error)?;
         let tx = self
             .db
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(error)?;
-        if import_only
-            && tx
-                .query_row(
-                    "SELECT EXISTS(SELECT 1 FROM library_state WHERE id=1)",
-                    [],
-                    |r| r.get::<_, bool>(0),
-                )
-                .map_err(error)?
-        {
-            return Ok(());
+        let current: Option<String> = tx
+            .query_row("SELECT json FROM library_state WHERE id=1", [], |row| {
+                row.get(0)
+            })
+            .optional()
+            .map_err(error)?;
+        if import_only && current.is_some() {
+            return Ok(false);
+        }
+        if expected.is_some_and(|expected| expected != row_revision(current.as_deref())) {
+            return Ok(false);
+        }
+        if state.schema_version != suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION {
+            return Err("Catalog writes require the current schema".into());
+        }
+        // Every writer, including old non-CAS workflows, must preserve the
+        // durable journal. Reject stale state rather than silently merging it.
+        let before = current
+            .as_deref()
+            .map(|raw| suwop_core::workflow::migrate(serde_json::from_str(raw).map_err(error)?))
+            .transpose()?
+            .unwrap_or_else(|| SavedLibrary {
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
+                ..SavedLibrary::default()
+            });
+        if import_only {
+            // Historical backup import is not a newly issued provider attempt.
+            suwop_core::immich_live_writes::validate_library(state)?;
+        } else {
+            suwop_core::immich_live_writes::validate_transition(&before, state)?;
         }
         tx.execute("INSERT INTO library_state VALUES(1,?1) ON CONFLICT(id) DO UPDATE SET json=excluded.json", [&text]).map_err(error)?;
         tx.execute("DELETE FROM assets", []).map_err(error)?;
@@ -204,7 +262,8 @@ impl Store {
         super::presence::detach_confirmed_removed(&tx, state)?;
         super::jobs::enqueue_latest(&tx)?;
         tx.execute("DELETE FROM analysis_asset_keys WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=analysis_asset_keys.id) AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset=analysis_asset_keys.id AND j.shard IS NOT NULL)", []).map_err(error)?;
-        tx.commit().map_err(error)
+        tx.commit().map_err(error)?;
+        Ok(true)
     }
 }
 pub(crate) fn asset_id(asset: &StoredAsset) -> Result<String> {
@@ -220,7 +279,7 @@ mod tests {
         let root = tempfile::tempdir().map_err(error)?;
         let mut store = Store::open(root.path())?;
         let current = SavedLibrary {
-            schema_version: 2,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             apple_scope: "newer".into(),
             ..SavedLibrary::default()
         };
@@ -229,8 +288,21 @@ mod tests {
             apple_scope: "legacy".into(),
             ..current
         };
-        store.save(&old, true)?;
+        store.save(&old, true, None)?;
         assert_eq!(store.read()?.ok_or("missing library")?.apple_scope, "newer");
         Ok(())
+    }
+}
+
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VersionedLibrary {
+    pub revision: String,
+    pub state: Option<SavedLibrary>,
+}
+fn row_revision(raw: Option<&str>) -> String {
+    match raw {
+        Some(raw) => format!("row:{}", digest(raw)),
+        None => "absent:v1".into(),
     }
 }

@@ -30,6 +30,9 @@ impl VerifiedPresentation {
             scope: session.scope.clone(),
             asset_id: raw["id"].as_str().ok_or("写真を確認できません。")?.into(),
         };
+        if crate::immich_live_writes::fences(state, &key) {
+            return Err("Live Photo の変更記録を確認してください。".into());
+        }
         let records = state
             .immich_visibility_operations
             .iter()
@@ -112,6 +115,9 @@ impl VerifiedPresentation {
         })
     }
     pub(crate) fn same_records(&self, state: &SavedLibrary) -> bool {
+        if crate::immich_live_writes::fences(state, &self.asset.key) {
+            return false;
+        }
         let records = state
             .immich_visibility_operations
             .iter()

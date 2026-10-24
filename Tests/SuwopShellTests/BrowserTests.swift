@@ -15,7 +15,7 @@ import Testing
     )
     let state = SavedLibrary(
         appleScope: "fixture",
-        schemaVersion: 3,
+        schemaVersion: 9,
         snapshots: [LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)]
     )
     let effects = try bridge.call(0, input: .object(["type": .string("initialize"), "scope": .string("fixture")]))

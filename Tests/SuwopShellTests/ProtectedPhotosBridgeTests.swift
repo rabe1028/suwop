@@ -19,7 +19,7 @@ import Testing
         longitude: 139.12345
     )
 
-    init(protected: Bool, schema: Int64 = 5) {
+    init(protected: Bool, schema: Int64 = 9) {
         journal = SavedLibrary(
             appleScope: "protected-abi",
             protectedEntries: protected ? [PersistentProtectedEntry(id: Self.entry, key: asset.key)] : [],
@@ -104,10 +104,10 @@ import Testing
 @Test @MainActor func failedOSAuthenticationCannotCreateProtectedMembershipAcrossABI() async throws {
     for outcome in [ProtectedAuthOutcome.cancelled, .unavailable, .failed] {
         let runtime = try RustRuntime()
-        let effects = ProtectedBridgeEffects(protected: false, schema: 4)
+        let effects = ProtectedBridgeEffects(protected: false, schema: 9)
         effects.outcome = outcome
         try await effects.ready(runtime)
-        #expect(effects.journal.schemaVersion == 8)
+        #expect(effects.journal.schemaVersion == 9)
         try await effects.authenticate(runtime, purpose: .protect)
         try await effects.run(runtime, [
             "type": .string("protectPhotos"), "keys": .from([effects.asset.key]),

@@ -72,7 +72,7 @@ import SuwopShell
                     key: ImmichLockedFixtureData.key(ImmichLockedFixtureData.protectedID)
                 ),
             ] : [],
-            schemaVersion: 5
+            schemaVersion: 9
         )
     }
 

@@ -68,7 +68,7 @@ fn state(visibility: AppleVisibility) -> SavedLibrary {
     remote.longitude = None;
     remote.resources[0].name = "public-copy.jpg".into();
     SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         snapshots: vec![snapshot(apple.clone()), snapshot(remote.clone())],
         receipts: vec![TransferReceipt {
@@ -360,6 +360,13 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
     for version in [1, 2] {
         let mut old = serde_json::to_value(&canonical)?;
         old["schemaVersion"] = json!(version);
+        for field in [
+            "immichLiveOperations",
+            "immichLiveUnstartedClosures",
+            "immichLiveLegacyReconciliations",
+        ] {
+            old.as_object_mut().ok_or("object")?.remove(field);
+        }
         old["snapshots"][0]["assets"][0]
             .as_object_mut()
             .ok_or("asset")?
@@ -369,7 +376,10 @@ fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
             .ok_or("receipt")?
             .remove("appleVisibility");
         let migrated = migrate(old)?;
-        assert_eq!(migrated.schema_version, 8);
+        assert_eq!(
+            migrated.schema_version,
+            suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+        );
         assert_eq!(
             migrated.snapshots[0].assets[0].apple_visibility,
             AppleVisibility::Unknown
@@ -418,6 +428,13 @@ fn old_upload_intent_evidence_matches_fresh_visible_source_but_not_modified_orig
     };
     let mut raw = serde_json::to_value(state(AppleVisibility::Visible))?;
     raw["schemaVersion"] = json!(2);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        raw.as_object_mut().ok_or("object")?.remove(field);
+    }
     raw["uploadIntents"] = json!([intent]);
     raw["uploadIntents"][0]["source"]
         .as_object_mut()

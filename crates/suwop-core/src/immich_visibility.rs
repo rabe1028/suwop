@@ -360,6 +360,9 @@ pub fn validate_operation(operation: &ImmichVisibilityOperation) -> Result<(), S
 }
 #[must_use]
 pub fn fences(state: &crate::app::SavedLibrary, key: &AssetKey) -> bool {
+    if crate::immich_live_writes::fences(state, key) {
+        return true;
+    }
     let related = state
         .immich_visibility_operations
         .iter()
@@ -506,6 +509,12 @@ pub(crate) fn matches_original_image_identity(
         identity_digest(&operation.key, &checksum, IdentityMedia::Image)
             == operation.witness_digest,
     )
+}
+pub(crate) fn original_image_identity_digest(key: &AssetKey, checksum: &str) -> String {
+    identity_digest(key, checksum, IdentityMedia::Image)
+}
+pub(crate) fn original_video_identity_digest(key: &AssetKey, checksum: &str) -> String {
+    identity_digest(key, checksum, IdentityMedia::Video)
 }
 fn identity_digest(key: &AssetKey, checksum: &str, media: IdentityMedia) -> String {
     use sha2::Digest;
@@ -796,7 +805,8 @@ pub(crate) fn capture_authority(
 ) -> Option<crate::immich_archive::VisibilityAuthority> {
     if model.busy
         || !model.ready
-        || model.state.schema_version != 8
+        || model.state.schema_version != crate::immich_live_writes::CURRENT_SCHEMA_VERSION
+        || crate::immich_live_writes::fences(&model.state, key)
         || model.immich_visibility.persistence_uncertain
         || model.protection.membership_uncertain
     {
@@ -893,7 +903,10 @@ fn recover(
             crate::app::io(&ctx, crate::app::ShellOperation::ReadState).await;
         let state = raw
             .ok()
-            .filter(|v| v["schemaVersion"].as_u64() == Some(8))
+            .filter(|v| {
+                v["schemaVersion"].as_u64()
+                    == Some(u64::from(crate::immich_live_writes::CURRENT_SCHEMA_VERSION))
+            })
             .and_then(|v| crate::workflow::migrate(v).ok())
             .filter(|s| {
                 serde_json::to_value(&s.connection).ok()

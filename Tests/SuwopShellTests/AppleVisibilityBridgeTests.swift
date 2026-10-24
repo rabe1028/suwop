@@ -42,7 +42,7 @@ import Testing
     #expect(persist.effect["Io"]?.type == "persist")
     let canonical = try #require(persist.effect["Io"]?.data).decode(SavedLibrary.self)
     let original = try #require(canonical.snapshots.first?.assets.first)
-    #expect(canonical.schemaVersion == 8)
+    #expect(canonical.schemaVersion == 9)
     #expect(original.appleVisibility == .unknown)
     #expect(original.name == "private-original.jpg" && original.revision == "original-revision")
     #expect(original.resources.first?.name == "private-original.jpg")

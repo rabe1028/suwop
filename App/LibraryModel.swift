@@ -41,6 +41,7 @@ import SwiftUI
     let immichLocked = ImmichLockedLibrarySession()
     let immichArchive = ImmichArchiveSession()
     let ordinarySelected = OrdinarySelectedImageSession()
+    let ordinaryLivePairImages = OrdinaryLivePairImageSession()
 
     #if SUWOP_VRT
         private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
@@ -238,24 +239,6 @@ import SwiftUI
         }
     }
 
-    func play(_ photo: UnifiedPhoto) {
-        do {
-            try send([
-                "type": .string("play"),
-                "keys": .from(photo.assets.map(\.key)),
-                "id": .string(UUID().uuidString),
-            ])
-        } catch { errorMessage = error.localizedDescription }
-    }
-
-    var snapshots: [LibrarySnapshot] {
-        view?.state.snapshots ?? []
-    }
-
-    var receipts: [TransferReceipt] {
-        view?.state.receipts ?? []
-    }
-
     var pendingUploads: [PendingUpload] {
         view?.state.pendingUploads ?? []
     }
@@ -358,13 +341,13 @@ import SwiftUI
         work = Task {
             defer {
                 work = nil
-                if pendingRefresh, view?.state.schemaVersion == 8 {
+                if pendingRefresh, view?.state.schemaVersion == 9 {
                     pendingRefresh = false
                     refresh(preservingError: true)
-                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 8 {
+                } else if pendingAlbumsRefresh, view?.state.schemaVersion == 9 {
                     pendingAlbumsRefresh = false
                     refreshAlbums()
-                } else if pendingTrashRefresh, view?.state.schemaVersion == 8 {
+                } else if pendingTrashRefresh, view?.state.schemaVersion == 9 {
                     pendingTrashRefresh = false
                     refreshTrash()
                 }
@@ -417,7 +400,9 @@ extension LibraryModel {
         }
         if removed {
             let removedKeys = previousKeys.subtracting(currentKeys)
-            let priorReadOnly = Set(view?.ordinarySelectedPresentation.map(\.key) ?? [])
+            let priorReadOnly =
+                Set((view?.ordinarySelectedPresentation.map(\.key) ?? []) +
+                    (view?.ordinaryLivePairs.map(\.parentKey) ?? []))
             let priorOperations = operationKeyIndex
             let isolatedProofLoss = !contentChanged &&
                 view?.ordinarySelectedGeneration == snapshot.view.ordinarySelectedGeneration &&
@@ -428,12 +413,15 @@ extension LibraryModel {
                 shell?.invalidateContentPresentations()
             }
         }
+        let pairProofChanged = view?.ordinaryLivePairs.map { "\($0.proofID)|\($0.generation)" } != snapshot.view
+            .ordinaryLivePairs.map { "\($0.proofID)|\($0.generation)" }
         let replacedSource = view?.previewSources.contains { id, key in
             snapshot.view.previewSources[id] != key
         } ?? false
-        if contentChanged || removed || replacedSource {
+        if contentChanged || removed || replacedSource || pairProofChanged {
             invalidateThumbnails()
         }
+        ordinaryLivePairImages.receive(snapshot)
         operationKeyIndex = snapshot.presentationIndex.operationKeys
         presentationIndex = snapshot.presentationIndex
         view = snapshot.view
@@ -442,6 +430,7 @@ extension LibraryModel {
         immichLocked.receive(snapshot)
         immichArchive.receive(snapshot)
         ordinarySelected.receive(snapshot)
+        shell?.ordinaryLivePairEffects.reconcile(snapshot.view.ordinaryLivePairs)
         if let failure = view?.error {
             errorMessage = failure
         }
@@ -451,6 +440,21 @@ extension LibraryModel {
 private extension LibraryModel {
     func configurePrivateSessions(runtime: RustRuntime, shell: AppleShell) {
         shell.ordinaryContent.configure(runtime: runtime)
+        shell.ordinaryLivePairEffects.configure(currentPresentations: {
+            try await runtime.snapshot().view.ordinaryLivePairs
+        })
+        ordinaryLivePairImages.configure(
+            runtime: runtime,
+            access: shell.ordinaryLivePairImages,
+            beginWorkflow: { shell.beginWorkflow() },
+            run: { [weak self] event, context in
+                guard let self,
+                      let runtime = self.runtime else { throw CancellationError() }
+                let requests = try await runtime.update(.object(event))
+                try await readView()
+                try await resolveRequests(requests, context: context)
+            }
+        )
         ordinarySelected.configure(runtime: runtime, shell: shell) { [weak self] event, context in
             guard let self, let runtime = self.runtime else { throw CancellationError() }
             let requests = try await runtime.update(.object(event))

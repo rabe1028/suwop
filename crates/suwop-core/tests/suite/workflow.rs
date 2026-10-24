@@ -381,7 +381,7 @@ impl Shell {
 }
 fn core() -> Core<Suwop> {
     let state = SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         snapshots: vec![LibrarySnapshot {
             provider: Provider::Apple,
@@ -1020,7 +1020,10 @@ fn schema_migration_preserves_dates_and_disables_legacy_deletion() -> Result<(),
     let state = suwop_core::workflow::migrate(
         json!({"schemaVersion":1,"appleScope":"old","connection":null,"snapshots":[],"receipts":[]}),
     )?;
-    assert_eq!(state.schema_version, 8);
+    assert_eq!(
+        state.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(state.apple_scope, "old");
     assert!(suwop_core::workflow::migrate(json!({"schemaVersion":99})).is_err());
     Ok(())
@@ -1135,7 +1138,7 @@ fn pending_same_original_fences_new_apple_copy_and_move_before_any_journal_or_up
             let mut operation = pending_same_original("immich", SHA1);
             operation.action = action;
             let state = SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "apple".into(),
                 pending_trash: vec![operation],
                 ..SavedLibrary::default()
@@ -1169,7 +1172,7 @@ fn unrelated_originals_and_other_accounts_do_not_fence_transfers() -> Result<(),
     for (scope, checksum) in [("immich", "2".repeat(40)), ("other-account", SHA1.into())] {
         let mut shell = Shell::new();
         let restored = core_from_state(SavedLibrary {
-            schema_version: 8,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             apple_scope: "apple".into(),
             snapshots: vec![LibrarySnapshot {
                 provider: Provider::Apple,
@@ -1487,6 +1490,13 @@ fn schema2_upload_journals_resume_after_fresh_visible_scan_without_new_post() ->
         let mut old = serde_json::to_value(shell.journal.as_ref().ok_or("no journal")?)
             .map_err(|e| e.to_string())?;
         old["schemaVersion"] = json!(2);
+        for field in [
+            "immichLiveOperations",
+            "immichLiveUnstartedClosures",
+            "immichLiveLegacyReconciliations",
+        ] {
+            old.as_object_mut().ok_or("object")?.remove(field);
+        }
         for field in ["pendingUploads", "uploadIntents"] {
             for entry in old[field].as_array_mut().ok_or("journal array")? {
                 entry["source"]

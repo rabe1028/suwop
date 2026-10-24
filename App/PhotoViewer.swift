@@ -15,6 +15,7 @@ struct PhotoViewer: View {
     @State private var showVisibility = false
     @State private var protectedSource: AssetKey?
     @State private var lockingSource: AssetKey?
+    @State private var pairLockingSource: AssetKey?
     @State private var prefetchOwner = UUID().uuidString
     @Environment(\.dismiss) private var dismiss
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -84,6 +85,10 @@ struct PhotoViewer: View {
                         Text("表示のみ — この表示元の共有・編集・再生・転送はできません。")
                             .font(.caption).padding(.horizontal).accessibilityIdentifier("ordinarySelectedReadOnly")
                     }
+                    if model.pairedPresentation(photo) != nil {
+                        Text("表示と Live Photo の再生のみ。共有・編集・転送はできません。")
+                            .font(.caption).padding(.horizontal).accessibilityIdentifier("ordinaryLivePairReadOnly")
+                    }
                     actions(photo)
                 }
             } else {
@@ -107,6 +112,14 @@ struct PhotoViewer: View {
                 }
             }
             .sheet(isPresented: $showVisibility) { AppleVisibilityView(model: model) }
+            .sheet(item: $pairLockingSource) { key in
+                ImmichLockedPhotosView(
+                    session: model.immichLocked,
+                    sceneID: protectionOwner,
+                    lockingSource: key,
+                    pairedLock: true
+                )
+            }
             .sheet(item: $lockingSource) { key in
                 ImmichLockedPhotosView(session: model.immichLocked, sceneID: protectionOwner, lockingSource: key)
             }
@@ -203,7 +216,7 @@ struct PhotoViewer: View {
                 model.choosePreview(photo, key: chosen) { cursor.point(to: $0, in: photo) }
             }
             .disabled(model.isBusy)
-            if model.selectedPresentation(photo) == nil, Set(model.operationKeys(photo).map(\.provider)).count > 1 {
+            if !model.isReadOnlyPresentation(photo), Set(model.operationKeys(photo).map(\.provider)).count > 1 {
                 Text("お気に入りは Apple Photos・Immich の両方に反映します").font(.caption).foregroundStyle(.secondary)
             }
             Group {
@@ -256,10 +269,12 @@ struct PhotoViewer: View {
                 Image(systemName: kind == .live ? "livephoto.play" : "play.circle")
             }
             .disabled(model.isBusy || model.selectedPresentation(photo) != nil)
+            .accessibilityIdentifier(model
+                .pairedPresentation(photo) != nil ? "playDisplayedOrdinaryLivePair" : "playOriginal")
             .accessibilityLabel(kind == .live ? "Live Photo の原本を再生" : "動画の原本を再生")
         }
         Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
-            .disabled(model.isBusy || model.selectedPresentation(photo) != nil).accessibilityLabel("原本ファイルを共有")
+            .disabled(model.isBusy || model.isReadOnlyPresentation(photo)).accessibilityLabel("原本ファイルを共有")
         Menu {
             Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
             Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
@@ -294,12 +309,12 @@ struct PhotoViewer: View {
             }.disabled(model.displayedSource(photo) == nil)
                 .accessibilityIdentifier("protectDisplayedSource")
         } label: { Image(systemName: "slider.horizontal.3") }
-            .disabled(model.isBusy || model.selectedPresentation(photo) != nil).accessibilityLabel("写真を編集")
+            .disabled(model.isBusy || model.isReadOnlyPresentation(photo)).accessibilityLabel("写真を編集")
         Button { model.favorite([photo], value: !photo.isFavorite) } label: {
             Image(systemName: photo.isFavorite ? "heart.fill" : "heart")
         }
         .foregroundStyle(photo.isFavorite ? Color.red : .white)
-        .disabled(model.isBusy || model.selectedPresentation(photo) != nil)
+        .disabled(model.isBusy || model.isReadOnlyPresentation(photo))
         .accessibilityLabel(photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加")
         Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
     }
@@ -317,6 +332,10 @@ struct PhotoViewer: View {
 
     @ViewBuilder private func immichLockAction(_ photo: UnifiedPhoto) -> some View {
         if let source = model.displayedSource(photo), source.key.provider == .immich {
+            if model.view?.livePlacementCandidates.contains(source.key) == true {
+                Button("写真と付随動画を一緒にロック…", systemImage: "lock") { pairLockingSource = source.key }
+                    .accessibilityIdentifier("lockDisplayedImmichLivePair")
+            }
             let hint = model.view?.immichVisibilityActions.first { $0.key == source.key }
             let verificationRequired = hint?.writeAvailability == .verificationRequired
             Button(
@@ -370,6 +389,15 @@ private struct ZoomablePhoto: View {
                         renderedImage(image, size: geometry.size)
                             .accessibilityIdentifier("ordinarySelectedPreview")
                     }
+                } else if let proof = model.pairedPresentation(photo) {
+                    OrdinaryLivePairRasterView(
+                        session: model.ordinaryLivePairImages,
+                        key: proof.parentKey,
+                        sceneID: sceneID,
+                        kind: .preview
+                    ) { image in
+                        renderedImage(image, size: geometry.size).accessibilityIdentifier("ordinaryLivePairPreview")
+                    }
                 } else if let image, imageIdentifier == model.previewIdentifier(photo) {
                     renderedImage(image, size: geometry.size)
                 } else if let error {
@@ -389,7 +417,7 @@ private struct ZoomablePhoto: View {
         }.task(id: "\(model.previewIdentifier(photo))|\(retry)") {
             image = nil
             placeholder = nil
-            guard model.selectedPresentation(photo) == nil else { return }
+            guard !model.isReadOnlyPresentation(photo) else { return }
             let identifier = model.previewIdentifier(photo)
             error = nil
             scale = 1

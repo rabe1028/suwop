@@ -43,7 +43,7 @@ fn model() -> Result<Model, String> {
         session: Some(session),
         ready: true,
         state: SavedLibrary {
-            schema_version: 8,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             connection: Some(ConnectionSettings {
                 address: "https://fixture.example/api".into(),
                 allow_http: false,
@@ -452,9 +452,19 @@ fn link_stack_locked_and_unknown_facts_never_confirm() -> Result<(), String> {
 fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> Result<(), String> {
     let mut raw = serde_json::to_value(model()?.state).map_err(|e| e.to_string())?;
     raw["schemaVersion"] = json!(6);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        raw.as_object_mut().ok_or("object")?.remove(field);
+    }
     raw["immichVisibilityOperations"] = json!([{"id":ID,"scope":"scope","key":key(),"witnessDigest":"a".repeat(64),"from":"timeline","to":"locked","outcome":"unknown"}]);
     let migrated = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(migrated.schema_version, 8);
+    assert_eq!(
+        migrated.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         migrated.immich_visibility_operations[0].kind,
         ImmichVisibilityOperationKind::LockedTransition
@@ -465,6 +475,13 @@ fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> 
     raw["immichVisibilityOperations"][0]["kind"] = json!("ordinaryArchive");
     assert!(suwop_core::workflow::migrate(raw.clone()).is_err());
     raw["schemaVersion"] = json!(7);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        raw.as_object_mut().ok_or("object")?.remove(field);
+    }
     assert!(suwop_core::workflow::migrate(raw).is_err());
     Ok(())
 }

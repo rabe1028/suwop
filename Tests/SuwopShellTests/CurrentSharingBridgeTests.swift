@@ -11,7 +11,7 @@ import Testing
         revision: "original-revision",
         resources: [PhotoResource(id: "0", name: "original.jpg", role: .image)]
     )
-    let saved = SavedLibrary(appleScope: "library", schemaVersion: 3)
+    let saved = SavedLibrary(appleScope: "library", schemaVersion: 9)
     let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
     func update(_ event: [String: JSONValue]) throws -> [EffectRequest] {
         try bridge.call(0, input: .object(event)).decode([EffectRequest].self)

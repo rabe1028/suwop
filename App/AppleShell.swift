@@ -6,18 +6,25 @@ import SuwopShell
     let localStore: LocalStore
     var catalogChanged: (@MainActor () -> Void)?
     private var apple: ApplePhotosStore?
-    private let http = HTTPExecutor()
+    let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
+    let ordinaryLivePairEffects = OrdinaryLivePairEffects()
+    let ordinaryLivePairImages = OrdinaryLivePairImageAccess()
     let ordinarySelectedAccess = OrdinarySelectedNativeAccess()
     var ordinarySelectedInvalidated: (@MainActor () -> Void)?
     let archiveAccess = ImmichArchiveNativeAccess()
     let archiveConfirmation = ImmichArchiveConfirmation()
     private let sharing = SystemSharing()
-    private let playback = SystemPlayback()
+    let playback = SystemPlayback()
     private let imageEditing = SystemImageEditing()
     private let photoEditing = ApplePhotoEditing()
     private let confirmation = SystemConfirmation()
     private let visibilityConfirmation = ImmichVisibilityConfirmation()
+    let livePlacementConfirmation = ImmichLivePlacementConfirmation()
+    let liveKeepConfirmation = ImmichLiveKeepConfirmation()
+    var liveKeepConfirmationCurrent: (@MainActor (LiveKeepPrompt) async throws -> Bool)?
+    let privateMediaBatchScope = PrivateMediaConsumerRegistry.BatchWriteScope()
+    var livePlacementConfirmationCurrent: (@MainActor (LivePlacementPrompt) async throws -> Bool)?
     private let photoReversion = ApplePhotoReversion()
     let presentationEpoch = ContentPresentationEpoch()
     let protectedAccess = ProtectedNativeAccess()
@@ -36,6 +43,7 @@ import SuwopShell
         var inspectionEffect: (@MainActor (ShellOperation) async throws -> JSONValue)?
     #endif
     func invalidateContentPresentations() {
+        ordinaryLivePairImages.invalidate()
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
@@ -45,6 +53,8 @@ import SuwopShell
         playback.invalidateForContentChange()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
+        livePlacementConfirmation.invalidate()
+        liveKeepConfirmation.invalidate()
         archiveConfirmation.invalidate()
         sharing.invalidateForContentChange()
     }
@@ -55,9 +65,12 @@ import SuwopShell
         immichLockedLiveAccess.invalidate()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
+        livePlacementConfirmation.invalidate()
+        liveKeepConfirmation.invalidate()
     }
 
     func invalidateProtectedPresentations() {
+        ordinaryLivePairImages.invalidate()
         ordinarySelectedAccess.invalidate()
         ordinarySelectedInvalidated?()
         immichLockedVideoAccess.invalidate()
@@ -67,12 +80,14 @@ import SuwopShell
         playback.invalidateForProtection()
         confirmation.invalidateForContentChange()
         visibilityConfirmation.invalidate()
+        livePlacementConfirmation.invalidate()
+        liveKeepConfirmation.invalidate()
         archiveConfirmation.invalidate()
         sharing.invalidateForProtection()
     }
 
-    init() throws {
-        root = try FileManager.default.url(
+    init(root overrideRoot: URL? = nil) throws {
+        root = try overrideRoot ?? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
             appropriateFor: nil,
@@ -93,11 +108,18 @@ import SuwopShell
         try context.requireOwner(presentationEpoch)
         let data = operation.data ?? .null
         let completionEffects = [
-            "persist", "cleanup", "removeCredential", "appleEditClose", "appleTrashApply", "appleVisibilityApply",
+            "persist", "persistIfCurrent", "readStateVersioned", "endOrdinaryLivePairRead",
+            "releaseOrdinaryLivePairImage",
+            "cleanup",
+            "removeCredential",
+            "appleEditClose",
+            "appleTrashApply",
+            "appleVisibilityApply",
             "releaseProtectedImages", "releaseProtectedImage",
             "releaseOrdinarySelectedImage", "releaseOrdinarySelectedImages",
             "releaseImmichLockedImages", "releaseImmichLockedImage",
             "releaseImmichLockedLive", "releaseImmichLockedLives", "drainCapturedPrivateMedia",
+            "drainCapturedPrivateMediaBatch",
         ]
         if !completionEffects.contains(operation.type), !ImmichLockedVideoEffects.isCleanup(operation.type) {
             try Task.checkCancellation()
@@ -142,12 +164,12 @@ import SuwopShell
                 destination: requiredString(data, "destination")
             ))
         }
-        return try await dispatch(operation, data: data, context: context)
+        return try await livePairEffect(operation, data: data, context: context)
     }
 }
 
 extension AppleShell {
-    private func dispatch(
+    func dispatchOrdinary(
         _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         switch operation.type {
@@ -158,7 +180,9 @@ extension AppleShell {
                 data: data,
                 context: context
             )
-        case "readState", "persist", "authenticateProtected", "readProtectedImage", "publishProtectedImage",
+        case "readState", "readStateVersioned", "persist", "persistIfCurrent", "authenticateProtected",
+             "readProtectedImage",
+             "publishProtectedImage",
              "releaseProtectedImages", "releaseProtectedImage", "readImmichLockedImage", "publishImmichLockedImage",
              "releaseImmichLockedImages", "releaseImmichLockedImage", "scheduleImmichLockedExpiry",
              "scheduleImmichLockedCheck", "inspectImmichLockedVideoStorage", "readImmichLockedVideo",
@@ -384,15 +408,6 @@ private extension AppleShell {
         }
     }
 
-    func stateEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
-        if type == "readState" {
-            return try await localStore.read()
-        }
-        try await localStore.persist(data)
-        catalogChanged?()
-        return .null
-    }
-
     func appStateEffect(
         _ type: String,
         data: JSONValue,
@@ -403,7 +418,7 @@ private extension AppleShell {
                 type, data: data, access: ordinarySelectedAccess, http: http, context: context
             )
         }
-        if ["readState", "persist"].contains(type) {
+        if ["readState", "readStateVersioned", "persist", "persistIfCurrent"].contains(type) {
             return try await stateEffect(type, data: data)
         }
         if type == "capturePrivateMediaKey" || type == "drainCapturedPrivateMedia" || type.contains("ImmichLocked") {
@@ -484,11 +499,6 @@ private extension AppleShell {
         }
     }
 
-    private func requiredString(_ data: JSONValue, _ key: String) throws -> String {
-        guard let value = data[key].string else { throw SuwopError("入出力要求に \(key) がありません。") }
-        return value
-    }
-
     private func appleStore(scope: String) -> ApplePhotosStore {
         if let apple, apple.scope == scope {
             return apple
@@ -546,40 +556,6 @@ extension AppleShell {
 }
 
 private extension AppleShell {
-    func executeHTTP(_ request: HttpRequest) async throws -> HttpResponse {
-        let submission = try await submissionPermit(for: request)
-        #if SUWOP_VRT
-            if let httpTransportEffect {
-                try submission?.submit {}
-                return try await httpTransportEffect(request)
-            }
-        #endif
-        return try await http.execute(request, submission: submission)
-    }
-
-    func authorizedHTTP(_ request: HttpRequest, context: ContentPresentationContext) async throws -> JSONValue {
-        if request.immichVisibilityAuthorization != nil || request.immichArchiveAuthorization != nil {
-            return try await .from(executeHTTP(request))
-        }
-        guard let authorization = request.ordinaryContentAuthorization else {
-            return try await .from(executeHTTP(request))
-        }
-        _ = try await ordinaryContent.validate(
-            keys: authorization.sourceKeys,
-            context: context,
-            expectedRevision: authorization.expectedRevision,
-            purpose: authorization.purpose
-        )
-        let response = try await executeHTTP(request)
-        _ = try await ordinaryContent.validate(
-            keys: authorization.sourceKeys,
-            context: context,
-            expectedRevision: authorization.expectedRevision,
-            purpose: authorization.purpose
-        )
-        return try .from(response)
-    }
-
     func confirmImmichVisibility(
         _ prompt: ImmichVisibilityPrompt, context: ContentPresentationContext
     ) async throws -> Bool {

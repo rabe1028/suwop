@@ -29,7 +29,7 @@ private func load(
     update: (JSONValue) async throws -> [EffectRequest],
     resolve: (UInt32, JSONValue) async throws -> [EffectRequest]
 ) async throws {
-    let state = SavedLibrary(appleScope: "library", schemaVersion: 3, snapshots: [library])
+    let state = SavedLibrary(appleScope: "library", schemaVersion: 9, snapshots: [library])
     let initialize: JSONValue = .object(["type": .string("initialize"), "scope": .string("library")])
     let read = try #require(await update(initialize).first)
     let persist = try #require(await resolve(read.id, .from(state)).first)

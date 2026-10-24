@@ -53,7 +53,7 @@ fn model_denials(
     };
     let state = SavedLibrary {
         immich_visibility_operations: operations,
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: session.endpoint.clone(),
@@ -765,8 +765,18 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     shell.run(&c, prepare(OP, ImmichVisibility::Locked))?;
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        raw.as_object_mut().ok_or("object")?.remove(field);
+    }
     let state = suwop_core::workflow::migrate(raw.clone())?;
-    assert_eq!(state.schema_version, 8);
+    assert_eq!(
+        state.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
     assert!(suwop_core::immich_visibility::fences(&state, &key()));
     let record = raw["immichVisibilityOperations"][0].clone();
     raw["immichVisibilityOperations"]
@@ -1385,7 +1395,7 @@ fn same_session_refresh_recovers_known_unsubmitted_failure_but_not_unknown() -> 
     };
     shell.run(&c, open(GRANT))?;
     let before = SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         connection: Some(ConnectionSettings {
             address: "https://fixture.example/api".into(),
@@ -1655,7 +1665,7 @@ fn ordinary_unknown_does_not_deny_pin_reads_but_keeps_mutation_fence_after_resta
             let mut operations = vec![operation];
             if restart {
                 let persisted = SavedLibrary {
-                    schema_version: 8,
+                    schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                     immich_visibility_operations: operations,
                     ..SavedLibrary::default()
                 };
@@ -1907,3 +1917,5 @@ mod paired_read;
 
 #[path = "immich_visibility/private_media_capture.rs"]
 mod private_media_capture;
+
+mod live_placement;

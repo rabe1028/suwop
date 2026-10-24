@@ -10,10 +10,13 @@ use std::{
 use suwop_core::{
     app::{Event, Model, Suwop, ViewModel},
     domain::AssetKey,
+    immich_live_writes::{PairImagePhase, PairImageTicket, ordinary_live_image_ticket_issued},
 };
 
 pub enum Selection {
     Ordinary(Vec<AssetKey>),
+    /// Exact private paired raster ticket. Answers only issued/not issued.
+    PairImage(Box<PairImageTicket>, PairImagePhase),
     Progress,
     /// The full library view, re-encoded with a shared asset table.
     Compact,
@@ -52,6 +55,9 @@ pub enum Projection {
     Ordinary {
         keys: Vec<AssetKey>,
         revision: String,
+    },
+    PairImage {
+        issued: bool,
     },
 }
 impl App for ProjectionApp {
@@ -123,6 +129,9 @@ impl App for ProjectionApp {
                     revision: entry.revision.clone(),
                 }
             }
+            Some(Selection::PairImage(ticket, phase)) => Projection::PairImage {
+                issued: ordinary_live_image_ticket_issued(model, ticket, *phase),
+            },
             Some(Selection::Compact) => Projection::Compact(Box::new(
                 crate::compact::CompactLibrary::new(Suwop.view(model)),
             )),
@@ -243,6 +252,36 @@ mod tests {
             return Err("missing authority".into());
         };
         assert!(keys.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pair_image_query_answers_only_issued_and_rejects_unissued_ticket() -> Result<(), String> {
+        let ticket: PairImageTicket = serde_json::from_value(serde_json::json!({
+            "ownerID": "never-issued:1",
+            "requestID": "00000001-0000-4000-8000-000000000000",
+            "sceneID": "00000002-0000-4000-8000-000000000000",
+            "presentation": {
+                "parentKey": {"provider": "immich", "scope": "s", "assetID": "a"},
+                "motionKey": {"provider": "immich", "scope": "s", "assetID": "b"},
+                "proofID": "p",
+                "generation": 1,
+                "parentVisibility": "timeline",
+                "motionVisibility": "hidden"
+            },
+            "kind": "thumbnail",
+            "expectedRevision": "r",
+            "request": {"url": "https://fixture.invalid/api", "method": "GET", "headers": {},
+                "body": null, "fields": {}, "files": [], "downloadPath": null}
+        }))
+        .map_err(|e| e.to_string())?;
+        let app = ProjectionApp::new(Arc::new(Mutex::new(Some(Selection::PairImage(
+            Box::new(ticket),
+            PairImagePhase::Read,
+        )))));
+        let encoded =
+            serde_json::to_value(app.view(&Model::default())).map_err(|e| e.to_string())?;
+        assert_eq!(encoded, serde_json::json!({"issued": false}));
         Ok(())
     }
 }

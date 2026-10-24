@@ -7,6 +7,15 @@ extension LibraryModel {
         return ordinarySelected.descriptor(for: key)
     }
 
+    func pairedPresentation(_ photo: UnifiedPhoto) -> PairPresentation? {
+        guard let key = view?.previewSources[photo.id] else { return nil }
+        return ordinaryLivePairImages.descriptor(for: key)
+    }
+
+    func isReadOnlyPresentation(_ photo: UnifiedPhoto) -> Bool {
+        selectedPresentation(photo) != nil || pairedPresentation(photo) != nil
+    }
+
     func configureImageCaches() {
         thumbnails.countLimit = 300
         thumbnails.totalCostLimit = 96 * 1024 * 1024
@@ -98,7 +107,7 @@ extension LibraryModel {
     }
 
     private func prefetchable(_ photo: UnifiedPhoto) -> Bool {
-        view?.previewSources[photo.id] != nil && selectedPresentation(photo) == nil
+        view?.previewSources[photo.id] != nil && !isReadOnlyPresentation(photo)
     }
 
     private func ordinaryImage(_ photo: UnifiedPhoto, preview: Bool) async throws -> PlatformImage {

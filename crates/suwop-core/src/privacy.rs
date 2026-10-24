@@ -81,6 +81,7 @@ pub(crate) struct ContentAccess {
     hidden: BTreeSet<AssetKey>,
     protected: BTreeSet<AssetKey>,
     app_protected: BTreeSet<AssetKey>,
+    live_held: BTreeSet<AssetKey>,
 }
 impl ContentAccess {
     pub(crate) fn new(state: &SavedLibrary) -> Self {
@@ -120,6 +121,7 @@ impl ContentAccess {
         });
         hidden.retain(|k| !duplicates.contains(k));
         Self {
+            live_held: crate::immich_live_writes::held_keys(state),
             app_protected: state
                 .protected_entries
                 .iter()
@@ -131,6 +133,7 @@ impl ContentAccess {
                 .protected_entries
                 .iter()
                 .map(|e| e.key.clone())
+                .chain(crate::immich_live_writes::held_keys(state))
                 .chain(
                     state
                         .immich_visibility_operations
@@ -150,7 +153,9 @@ impl ContentAccess {
     }
 
     pub(crate) fn can_present(&self, key: &AssetKey, presentation: &BTreeSet<AssetKey>) -> bool {
-        !self.app_protected.contains(key) && (self.can_operate(key) || presentation.contains(key))
+        !self.app_protected.contains(key)
+            && !self.live_held.contains(key)
+            && (self.can_operate(key) || presentation.contains(key))
     }
     pub(crate) fn protected(&self, key: &AssetKey) -> bool {
         self.protected.contains(key)
