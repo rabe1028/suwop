@@ -1169,3 +1169,32 @@ fn lance_file_cleanup_is_retried_until_it_completes() -> Result {
     assert_eq!(std::fs::read_dir(&analysis)?.count(), 0);
     Ok(())
 }
+
+#[test]
+fn former_litert_files_are_removed_and_other_model_files_kept() -> Result {
+    let root = tempfile::tempdir()?;
+    let models = root.path().join("models");
+    std::fs::create_dir_all(&models)?;
+    let model = "embeddinggemma-2-text-vision-440m.litertlm";
+    let owned = [
+        model.to_owned(),
+        "embeddinggemma-2.installing".to_owned(),
+        format!("{model}_1792777662_387710976.vision_encoder.xnnpack_cache"),
+    ];
+    for name in owned.iter().chain(
+        [
+            "inference.lock".to_owned(),
+            "other.xnnpack_cache".to_owned(),
+        ]
+        .iter(),
+    ) {
+        std::fs::write(models.join(name), b"fixture")?;
+    }
+    drop(Store::open(root.path())?);
+    for name in &owned {
+        assert!(!models.join(name).exists(), "{name} kept");
+    }
+    assert!(models.join("inference.lock").exists());
+    assert!(models.join("other.xnnpack_cache").exists());
+    Ok(())
+}

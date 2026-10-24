@@ -91,9 +91,10 @@ final class VisualRegressionTests: XCTestCase {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: root) }
         let store = try LocalStore(root: root)
-        let search = SemanticSearchModel(store: store) { _ in
+        // Snapshot an inference-capable device; the simulator has no Neural Engine.
+        let search = SemanticSearchModel(store: store, prepareModel: {}, image: { _ in
             throw SuwopError("This fixture must never request image inference")
-        }
+        })
         let library = try SnapshotFixtures.model()
         try await capture("semantic-search", view: SemanticSearchView(search: search, library: library, open: { _ in }))
         let configured = try await store.configureInference(dimensions: 256, budget: 1536 << 20)

@@ -15,10 +15,9 @@ let package = Package(
     name: "Suwop",
     platforms: [.iOS(.v17), .macOS(.v14)],
     products: [.library(name: "SuwopShell", targets: ["SuwopShell"])],
-    dependencies: [.package(url: "https://github.com/google-ai-edge/LiteRT-LM.git", exact: "0.18.0")],
     targets: [
         nativeTarget,
-        .target(name: "SuwopShell", dependencies: ["CSuwop", .product(name: "LiteRTLM", package: "LiteRT-LM")], linkerSettings: linkSettings),
+        .target(name: "SuwopShell", dependencies: ["CSuwop"], linkerSettings: linkSettings),
         .testTarget(name: "SuwopShellTests", dependencies: ["SuwopShell"], resources: [.copy("Fixtures")]),
     ]
 )

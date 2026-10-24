@@ -14,7 +14,7 @@ final class SemanticSearchUITests: XCTestCase {
         XCTAssertFalse(app.buttons["pauseInference"].exists)
         app.buttons["semanticDimensions"].tap()
         app.buttons["512次元・情報量を優先"].tap()
-        XCTAssertTrue(app.buttons["モデルを保存して解析を開始"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["解析を開始"].waitForExistence(timeout: 5))
         XCTAssertFalse(app.buttons["semanticSearch"].isEnabled)
         app.buttons["semanticDimensions"].tap()
         app.buttons["256次元・容量を節約"].tap()

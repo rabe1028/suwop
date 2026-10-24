@@ -85,6 +85,7 @@ impl Store {
                 |r| r.get(0),
             )
             .map_err(error)?;
+        reclaim_litert_files(&root.join("models"));
         if pending && reclaim_lance_files(&root.join("analysis")) {
             db.execute("DELETE FROM pending_cleanup WHERE name='lance-files'", [])
                 .map_err(error)?;
@@ -191,6 +192,26 @@ impl Store {
         super::jobs::enqueue_latest(&tx)?;
         tx.execute("DELETE FROM analysis_asset_keys WHERE NOT EXISTS (SELECT 1 FROM assets a WHERE a.id=analysis_asset_keys.id) AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.asset=analysis_asset_keys.id AND j.shard IS NOT NULL)", []).map_err(error)?;
         tx.commit().map_err(error)
+    }
+}
+/// The former LiteRT-LM weights, partial download and XNNPACK caches. Their names are
+/// fixed and never recreated, so each open removes only these files; others are kept.
+fn reclaim_litert_files(directory: &Path) {
+    const MODEL: &str = "embeddinggemma-2-text-vision-440m.litertlm";
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let owned = name == MODEL
+            || name == "embeddinggemma-2.installing"
+            || (name.starts_with(&format!("{MODEL}_")) && name.ends_with(".xnnpack_cache"));
+        if owned && entry.file_type().is_ok_and(|kind| kind.is_file()) {
+            let _ = std::fs::remove_file(entry.path());
+        }
     }
 }
 /// Former Lance index files are unreadable derived data. Keep the directory itself:

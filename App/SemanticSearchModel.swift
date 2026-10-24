@@ -20,10 +20,12 @@ import SwiftUI
     @Published private(set) var status: AnalysisStatus?
     @Published private(set) var inference: InferenceStatus?
     @Published private(set) var busy = false
-    @Published private(set) var message = "写真の内容から検索できます。モデルは端末に保存します。"
+    @Published private(set) var message = "写真の内容から検索できます。解析は端末内で行います。"
+    /// Set when this device or build cannot run the bundled models; journals stay untouched.
+    @Published private(set) var unavailable: String?
     private let store: LocalStore
     private let runtime = EmbeddingRuntime()
-    private let image: @MainActor (EmbeddingJob) async throws -> Data
+    private let image: @MainActor (EmbeddingJob) async throws -> EmbeddingPatches
     private let prepareModel: (@MainActor () async throws -> Void)?
     private var task: Task<Void, Never>?
     private var loaded = false
@@ -37,7 +39,7 @@ import SwiftUI
     init(
         store: LocalStore,
         prepareModel: (@MainActor () async throws -> Void)? = nil,
-        image: @escaping @MainActor (EmbeddingJob) async throws -> Data
+        image: @escaping @MainActor (EmbeddingJob) async throws -> EmbeddingPatches
     ) {
         self.store = store
         self.prepareModel = prepareModel
@@ -57,6 +59,11 @@ import SwiftUI
     }
 
     func restore() async {
+        let spec = prepareModel == nil ? try? await store.inferenceSpec(dimensions: dimensions) : nil
+        if let spec, !EmbeddingRuntime.hasNeuralEngine || EmbeddingRuntime.bundledModels(spec) == nil {
+            unavailable = Self.unavailableMessage
+            message = Self.unavailableMessage
+        }
         guard task == nil, selectionTask == nil, !pausing else { return }
         let revision = selectionRevision
         guard let selection = try? await store.selectedInference(),
@@ -194,8 +201,8 @@ import SwiftUI
             guard let self else { return }
             busy = true
             defer { finishOperation() }
-            let text: String
-            do { text = try await store.queryText(query) } catch {
+            let tokens: [Int32]
+            do { tokens = try await store.queryTokens(query) } catch {
                 if !Task.isCancelled {
                     message = error.localizedDescription
                 }
@@ -204,7 +211,7 @@ import SwiftUI
             do {
                 try await store.setInferenceBudget(key: key, budget: UInt64(budgetMiB) << 20)
                 try await loadIfAdmitted(key: key, query: true)
-                let vector = try await runtime.embedding(Data(text.utf8), image: false)
+                let vector = try await runtime.embedding(tokens: tokens)
                 try Task.checkCancellation()
                 guard try await store.admitInference(key: key, runtime: runtime, loaded: true, query: true) else {
                     throw SuwopError("メモリ予算に達しました。")
@@ -278,38 +285,33 @@ import SwiftUI
 
 /// Native execution and checkpoint scheduling; all job decisions are persisted by Rust.
 extension SemanticSearchModel {
-    private func ensureModel() async throws -> String {
+    static let unavailableMessage = "この端末またはビルドでは写真の内容検索を利用できません。Neural Engine と同梱モデルが必要です。"
+
+    /// The bundled models, or nil when an injected preparation stands in for them.
+    private func ensureModel() async throws -> URL? {
         try Task.checkCancellation()
         if let prepareModel {
             try await prepareModel()
-            return ""
-        }
-        if let path = await (try? store.modelPath()) {
-            return path
+            return nil
         }
         let spec = try await store.inferenceSpec(dimensions: dimensions)
-        guard let url = URL(string: spec.url) else { throw SuwopError("モデルのURLが不正です。") }
-        message = "検索モデルをダウンロード中（約388 MB）…"
-        let (file, response) = try await URLSession.shared.download(
-            from: url,
-            delegate: ModelDownloadLimit(bytes: spec.bytes)
-        )
-        defer { try? FileManager.default.removeItem(at: file) }
-        guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw SuwopError("モデルを取得できません。") }
-        try Task.checkCancellation()
-        return try await store.installModel(from: file)
+        guard EmbeddingRuntime.hasNeuralEngine, let directory = EmbeddingRuntime.bundledModels(spec) else {
+            unavailable = Self.unavailableMessage
+            throw SuwopError(Self.unavailableMessage)
+        }
+        return directory
     }
 
     private func loadIfAdmitted(key: String, query: Bool = false) async throws {
         if !loaded {
-            let spec = try await store.inferenceSpec(dimensions: dimensions)
-            let path = try await ensureModel()
+            let directory = try await ensureModel()
             try Task.checkCancellation()
-            // Verification/download streams to disk; reserve native working memory immediately before loading.
+            // Reserve native working memory immediately before loading.
             guard try await store.admitInference(key: key, runtime: runtime, loaded: false, query: query) else {
                 throw SuwopError("メモリ予算またはメモリ不足のため停止しました。")
             }
-            try await runtime.load(path: path, spec: spec)
+            guard let directory else { throw SuwopError("モデルを読み込めません。") }
+            try await runtime.load(models: directory, lockDirectory: store.inferenceLockDirectory)
             loaded = true
         }
         guard try await store.admitInference(key: key, runtime: runtime, loaded: true, query: query) else {
@@ -328,9 +330,10 @@ extension SemanticSearchModel {
             try await loadIfAdmitted(key: key)
             message = "写真を1枚ずつ解析しています…"
             let proceed = try await perform(job: job) {
-                let bytes = try await self.image(job)
+                let patches = try await self.image(job)
                 try Task.checkCancellation()
-                let vector = try await self.runtime.embedding(bytes, image: true)
+                let tokens = try await self.store.imageTokens(softTokens: patches.softTokens)
+                let vector = try await self.runtime.embedding(patches: patches, tokens: tokens)
                 try Task.checkCancellation()
                 guard try await self.store.admitInference(key: key, runtime: self.runtime, loaded: true) else { return }
                 let projected = try await self.store.projectEmbedding(vector, dimensions: self.dimensions)

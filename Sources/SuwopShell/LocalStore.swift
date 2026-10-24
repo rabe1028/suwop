@@ -12,6 +12,11 @@ public final class LocalStore: Sendable {
         self.root = root.path
     }
 
+    /// Holds the cross-process inference lease, shared by every window of this catalog.
+    public var inferenceLockDirectory: URL {
+        URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent("models", isDirectory: true)
+    }
+
     /// Native backup attributes apply only to reproducible files, never the catalog root.
     private static func prepareDerivedDirectories(root: URL) throws {
         let manager = FileManager.default

@@ -1620,25 +1620,23 @@ public struct InferenceSelection: Codable, Sendable {
 }
 
 public struct InferenceSpec: Codable, Sendable {
-    public var bytes: Int64
-    public var filename: String
     public var imageEdge: Int64
     public var imageTokens: Int64
+    public var maxPatches: Int64
     public var model: AnalysisModel
-    public var sha256: String
+    public var modelDirectory: String
+    public var patchSize: Int64
+    public var poolingKernel: Int64
     public var textTokens: Int64
-    public var threads: Int64
-    public var url: String
-    public init(bytes: Int64, filename: String, imageEdge: Int64, imageTokens: Int64, model: AnalysisModel, sha256: String, textTokens: Int64, threads: Int64, url: String) {
-        self.bytes = bytes
-        self.filename = filename
+    public init(imageEdge: Int64, imageTokens: Int64, maxPatches: Int64, model: AnalysisModel, modelDirectory: String, patchSize: Int64, poolingKernel: Int64, textTokens: Int64) {
         self.imageEdge = imageEdge
         self.imageTokens = imageTokens
+        self.maxPatches = maxPatches
         self.model = model
-        self.sha256 = sha256
+        self.modelDirectory = modelDirectory
+        self.patchSize = patchSize
+        self.poolingKernel = poolingKernel
         self.textTokens = textTokens
-        self.threads = threads
-        self.url = url
     }
 }
 

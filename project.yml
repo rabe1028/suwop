@@ -2,12 +2,14 @@ name: Suwop
 options:
   minimumXcodeGenVersion: 2.38.0
   createIntermediateGroups: true
+  # Xcode copies the model folder even when empty; without models, content search is disabled.
+  preGenCommand: mkdir -p Generated/CoreMLModels/EmbeddingGemma2
 settings:
   base:
     SWIFT_VERSION: '6.0'
     # Supported platforms: Apple Silicon Mac, ARM64 iOS devices and simulators.
     ARCHS: arm64
-    # LiteRT-LM 0.18.0 ships its iOS simulator binary for Apple Silicon only.
+    # The Rust core builds only the arm64 iOS simulator slice.
     EXCLUDED_ARCHS[sdk=iphonesimulator*]: x86_64
     SWIFT_STRICT_CONCURRENCY: complete
     SWIFT_TREAT_WARNINGS_AS_ERRORS: YES
@@ -21,7 +23,13 @@ targets:
     type: application
     platform: iOS
     deploymentTarget: '17.0'
-    sources: [App]
+    sources:
+      - App
+      # Compiled models from `make coreml-models`; builds without them disable content search.
+      - path: Generated/CoreMLModels/EmbeddingGemma2
+        type: folder
+        optional: true
+        buildPhase: resources
     dependencies:
       - package: SuwopShell
         product: SuwopShell
@@ -47,7 +55,13 @@ targets:
     type: application
     platform: macOS
     deploymentTarget: '14.0'
-    sources: [App]
+    sources:
+      - App
+      # Compiled models from `make coreml-models`; builds without them disable content search.
+      - path: Generated/CoreMLModels/EmbeddingGemma2
+        type: folder
+        optional: true
+        buildPhase: resources
     dependencies:
       - package: SuwopShell
         product: SuwopShell
