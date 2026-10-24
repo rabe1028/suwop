@@ -9,7 +9,7 @@ expected=$(grep -A1 'pub const COREML_MODEL_SHA256' crates/suwop-core/src/infere
 uv venv --allow-existing --quiet --python 3.12 "$venv"
 uv pip install --quiet --python "$venv/bin/python" -r scripts/coreml/requirements.txt
 rm -rf "$out"
-"$venv/bin/python" scripts/coreml/convert.py "$out/packages" --verify "$expected"
+uv run --no-project --python "$venv/bin/python" python scripts/coreml/convert.py "$out/packages" --verify "$expected"
 mkdir -p "$out/EmbeddingGemma2"
 for model in VisionEncoder VisionHead Tokens Encoder; do
     xcrun coremlcompiler compile "$out/packages/$model.mlpackage" "$out/EmbeddingGemma2" > /dev/null

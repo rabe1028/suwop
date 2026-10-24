@@ -2,6 +2,8 @@ name: Suwop
 options:
   minimumXcodeGenVersion: 2.38.0
   createIntermediateGroups: true
+  # Xcode copies the model folder even when empty; without models, content search is disabled.
+  preGenCommand: mkdir -p Generated/CoreMLModels/EmbeddingGemma2
 settings:
   base:
     SWIFT_VERSION: '6.0'
