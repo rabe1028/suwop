@@ -1,10 +1,11 @@
-use super::{Runtime, ShellOperation, io};
+use super::Runtime;
 use crate::{
     albums::{
-        AlbumAction, AlbumEdit, AlbumKey, AlbumPermissions, AlbumSnapshot, StoredAlbum,
-        validate_edit, validate_snapshot, validate_title,
+        AlbumAction, AlbumEdit, AlbumKey, AlbumSnapshot, validate_edit, validate_snapshot,
+        validate_title,
     },
-    domain::{AssetKey, Provider, ScanAccess},
+    domain::{Provider, ScanAccess},
+    provider::{Ability, PROVIDERS, offers, unsupported},
 };
 
 impl Runtime<'_> {
@@ -14,8 +15,9 @@ impl Runtime<'_> {
             self.invalidate_albums(Provider::Immich);
             errors.push(error);
         }
-        for provider in [Provider::Apple, Provider::Immich] {
-            if provider == Provider::Immich && self.session.is_none() {
+        let registry = self.registry();
+        for provider in PROVIDERS {
+            if registry.album_reader(provider).is_none() {
                 continue;
             }
             if let Err(error) = self.reload_albums(provider).await {
@@ -57,81 +59,13 @@ impl Runtime<'_> {
     }
 
     async fn read_albums(&self, provider: Provider) -> Result<AlbumSnapshot, String> {
-        let snapshot = match provider {
-            Provider::Amazon => {
-                return Err("Amazon Photosのアルバム操作には対応していません。".into());
-            }
-            Provider::Apple => {
-                io(
-                    self.ctx,
-                    ShellOperation::AppleAlbums {
-                        scope: self.state.apple_scope.clone(),
-                    },
-                )
-                .await?
-            }
-            Provider::Immich => {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-                let mut albums = Vec::new();
-                for album in session
-                    .albums(self.ctx)
-                    .await?
-                    .into_iter()
-                    .filter(|a| a.owned_by(&session.user_id))
-                {
-                    let members = session
-                        .album_members(self.ctx, &album.id)
-                        .await?
-                        .into_iter()
-                        .map(|a| AssetKey {
-                            provider,
-                            scope: session.scope.clone(),
-                            asset_id: a.id,
-                        })
-                        .collect();
-                    albums.push(StoredAlbum {
-                        key: AlbumKey {
-                            provider,
-                            scope: session.scope.clone(),
-                            album_id: album.id,
-                        },
-                        title: album.album_name,
-                        members,
-                        permissions: AlbumPermissions {
-                            add: true,
-                            remove: true,
-                            rename: true,
-                            delete: true,
-                        },
-                    });
-                }
-                AlbumSnapshot {
-                    provider,
-                    scope: session.scope.clone(),
-                    albums,
-                    access: ScanAccess::Full,
-                }
-            }
-        };
-        validate_snapshot(&snapshot, provider, self.album_scope(provider)?)?;
+        let registry = self.registry();
+        let albums = registry
+            .album_reader(provider)
+            .ok_or_else(|| registry.missing(provider, Ability::AlbumRead))?;
+        let snapshot = albums.read_albums(self.read_io()).await?;
+        validate_snapshot(&snapshot, provider, albums.album_scope())?;
         Ok(snapshot)
-    }
-
-    fn album_scope(&self, provider: Provider) -> Result<&str, String> {
-        match provider {
-            Provider::Amazon => Ok(&self
-                .state
-                .amazon_connection
-                .as_ref()
-                .ok_or("Amazon Photosに接続してください。")?
-                .scope),
-            Provider::Apple => Ok(&self.state.apple_scope),
-            Provider::Immich => Ok(&self
-                .session
-                .as_ref()
-                .ok_or("Immich に接続してください。")?
-                .scope),
-        }
     }
 
     pub(super) async fn create_album(
@@ -140,42 +74,21 @@ impl Runtime<'_> {
         title: &str,
     ) -> Result<String, String> {
         validate_title(title)?;
-        if provider == Provider::Immich {
-            self.ensure_session().await?;
+        if !offers(provider, Ability::AlbumCreate) {
+            return Err(unsupported(provider, Ability::AlbumCreate));
         }
-        let scope = self.album_scope(provider)?.to_owned();
+        self.ensure_connections([provider]).await?;
+        let registry = self.registry();
+        let creator = registry
+            .album_creator(provider)
+            .ok_or_else(|| registry.missing(provider, Ability::AlbumCreate))?;
+        let scope = registry
+            .album_reader(provider)
+            .ok_or_else(|| registry.missing(provider, Ability::AlbumRead))?
+            .album_scope()
+            .to_owned();
         let title = title.trim();
-        let result: Result<StoredAlbum, String> = match provider {
-            Provider::Amazon => {
-                return Err("Amazon Photosのアルバム作成には対応していません。".into());
-            }
-            Provider::Apple => {
-                io(
-                    self.ctx,
-                    ShellOperation::AppleAlbumCreate {
-                        scope: scope.clone(),
-                        title: title.into(),
-                    },
-                )
-                .await
-            }
-            Provider::Immich => {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-                session
-                    .create_album(self.ctx, title)
-                    .await
-                    .map(|a| StoredAlbum {
-                        key: AlbumKey {
-                            provider,
-                            scope: scope.clone(),
-                            album_id: a.id,
-                        },
-                        title: a.album_name,
-                        members: Vec::new(),
-                        permissions: AlbumPermissions::default(),
-                    })
-            }
-        };
+        let result = creator.create_album(self.read_io(), title).await;
         // A failed callback can still have committed. Never silently retry creation.
         self.invalidate_albums(provider);
         let created = result?;
@@ -206,13 +119,21 @@ impl Runtime<'_> {
         key: &AlbumKey,
         edit: &AlbumEdit,
     ) -> Result<String, String> {
-        if key.provider == Provider::Immich {
-            self.ensure_session().await?;
+        if !offers(key.provider, Ability::AlbumEdit) {
+            return Err(unsupported(key.provider, Ability::AlbumEdit));
         }
+        self.ensure_connections([key.provider]).await?;
         if !edit.keys.is_empty() {
             self.check_keys(&edit.keys)?;
         }
-        if key.scope != self.album_scope(key.provider)? {
+        let registry = self.registry();
+        let albums = registry
+            .album_editor(key.provider)
+            .ok_or_else(|| registry.missing(key.provider, Ability::AlbumEdit))?;
+        let reader = registry
+            .album_reader(key.provider)
+            .ok_or_else(|| registry.missing(key.provider, Ability::AlbumRead))?;
+        if key.scope != reader.album_scope() {
             return Err("アルバムの保存先が変わっています。".into());
         }
         // Capabilities and membership must be fresh before each mutation.
@@ -241,58 +162,13 @@ impl Runtime<'_> {
         {
             return Err("選択した写真を確認できません。一覧を更新してください。".into());
         }
-        let result = self.perform_album_edit(key, &edit).await;
+        let result = albums.edit_album(self.read_io(), key, &edit).await;
         self.invalidate_albums(key.provider);
         result?;
         self.reload_albums(key.provider).await?;
         self.verify_album_edit(key, &edit)?;
         self.persist().await?;
         Ok("アルバムを変更しました。写真の原本は残っています。".into())
-    }
-
-    async fn perform_album_edit(&self, key: &AlbumKey, edit: &AlbumEdit) -> Result<(), String> {
-        match key.provider {
-            Provider::Amazon => Err("Amazon Photosのアルバム変更には対応していません。".into()),
-            Provider::Apple => io::<serde_json::Value>(
-                self.ctx,
-                ShellOperation::AppleAlbumEdit {
-                    key: key.clone(),
-                    edit: edit.clone(),
-                },
-            )
-            .await
-            .map(|_| ()),
-            Provider::Immich => {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-                match edit.action {
-                    AlbumAction::Rename => {
-                        session
-                            .rename_album(
-                                self.ctx,
-                                &key.album_id,
-                                edit.title.as_deref().ok_or("名前がありません。")?,
-                            )
-                            .await
-                    }
-                    AlbumAction::Delete => session.delete_album(self.ctx, &key.album_id).await,
-                    AlbumAction::Add | AlbumAction::Remove => {
-                        let ids = edit
-                            .keys
-                            .iter()
-                            .map(|k| k.asset_id.clone())
-                            .collect::<Vec<_>>();
-                        session
-                            .change_album_members(
-                                self.ctx,
-                                &key.album_id,
-                                &ids,
-                                matches!(edit.action, AlbumAction::Add),
-                            )
-                            .await
-                    }
-                }
-            }
-        }
     }
 
     fn verify_album_edit(&mut self, key: &AlbumKey, edit: &AlbumEdit) -> Result<(), String> {

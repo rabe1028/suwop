@@ -25,6 +25,9 @@
 
 PoC では Crux の `JsonFfiFormat` を小さな C ABI で公開します。Rust の JSON Schema から Swift DTO を生成し、生成差分と実ライブラリをリンクしたテストを CI に含めます。FFI の unsafe は `suwop-ffi` の ABI 境界に限定します。原本のハッシュ計算は Rust の atomic なキャンセル状態を各読み取り前後に確認し、Swift の Task キャンセルを停止要求へ伝えます。PhotoKit 原本はキャンセル可能な `requestData` でチャンクごとに書き込み、停止時には native request の停止と途中ファイルの削除を行います。Swift 側は actor を使います。PhotoKit の画像キャンセル用ゲートはロック、編集入力は読取専用の callback から MainActor への移譲、編集出力は構築完了後に不変・1回の変更キューで読取という不変条件と寿命を明記した private `@unchecked Sendable` に限定します。CI の Swift 6 strict concurrency と警告のエラー化は維持します。
 
+接続先ごとの能力と共通転送処理の分離は [provider-abilities.md](provider-abilities.md)、
+移動ライフサイクルの形式モデルと検査範囲は [formal/README.md](../formal/README.md) に記載します。
+
 ## 写真と保存先
 
 `AssetKey = provider + scope + assetID`。Apple の scope はアプリデータ生成時の UUID、Immich は正規化した API URL と利用者 ID です。別アカウントの照合を流用しません。

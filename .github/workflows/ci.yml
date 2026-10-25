@@ -51,7 +51,7 @@ jobs:
           # evicted main's caches, so every PR started cold.
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Enforce Rust, script, workflow and architecture rules
-        run: make lint-common
+        run: make lint-common check-transfer-model
       - name: Stop CI resource metrics
         if: always()
         uses: ./.github/actions/ci-metrics

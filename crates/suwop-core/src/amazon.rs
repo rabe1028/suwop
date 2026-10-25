@@ -12,7 +12,7 @@ use crate::{
         AppleVisibility, AssetKey, FileSignature, ImmichStackState, PhotoResource, Provider,
         ResourceRole, StoredAsset,
     },
-    immich::{HttpRequest, UploadPart},
+    transport::{HttpRequest, OrdinaryContentAuthorization, OrdinarySessionGuard, UploadPart},
 };
 
 pub mod formats;
@@ -25,10 +25,10 @@ pub const PAGE_SIZE: usize = 200;
 pub struct Connection {
     #[serde(skip)]
     #[schemars(skip)]
-    pub(crate) content_authorization: Option<crate::immich::OrdinaryContentAuthorization>,
+    pub(crate) content_authorization: Option<OrdinaryContentAuthorization>,
     #[serde(skip)]
     #[schemars(skip)]
-    pub(crate) ordinary_guard: Option<crate::immich::OrdinarySessionGuard>,
+    pub(crate) ordinary_guard: Option<OrdinarySessionGuard>,
     #[serde(rename = "credentialID")]
     pub credential_id: String,
     pub owner_id: String,
@@ -47,6 +47,29 @@ pub struct UploadRecord {
     pub md5: String,
     pub node_id: Option<String>,
     pub verified: bool,
+}
+
+/// The explicit journal phase of one upload, derived from the saved fields
+/// so the persisted format is unchanged.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadRecordPhase {
+    /// Saved before the POST; the outcome may be unknown. A fence.
+    Submitting,
+    /// The POST returned this node ID; its original is not yet read back.
+    Created,
+    /// The returned original was read back and matched.
+    Verified,
+}
+
+impl UploadRecord {
+    #[must_use]
+    pub fn phase(&self) -> UploadRecordPhase {
+        match (&self.node_id, self.verified) {
+            (_, true) => UploadRecordPhase::Verified,
+            (Some(_), false) => UploadRecordPhase::Created,
+            (None, false) => UploadRecordPhase::Submitting,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -428,11 +451,7 @@ impl Connection {
     }
 
     fn check_guard(&self) -> Result<(), String> {
-        if self
-            .ordinary_guard
-            .as_ref()
-            .is_some_and(|g| g.generation.load(std::sync::atomic::Ordering::SeqCst) != g.expected)
-        {
+        if self.ordinary_guard.as_ref().is_some_and(|g| !g.current()) {
             Err("写真へのアクセスが変わりました。Amazon Photosの処理を止めました。".into())
         } else {
             Ok(())

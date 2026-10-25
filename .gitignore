@@ -9,3 +9,4 @@ xcuserdata/
 /.tools/
 /.tools
 __pycache__/
+/_apalache-out/

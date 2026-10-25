@@ -38,11 +38,24 @@ impl Version {
         format!("{}.{}.{}", self.major, self.minor, self.patch)
     }
 }
-#[derive(Debug, Clone)]
-pub struct OrdinarySessionGuard {
-    pub generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
-    pub expected: u64,
+use crate::transport::Access;
+pub use crate::transport::{
+    HttpRequest, HttpResponse, OrdinaryContentAuthorization, OrdinaryContentPurpose,
+    OrdinarySessionGuard, UploadPart,
+};
+
+/// Immich routes that only observe state, including its POST searches.
+/// Every other route may change the library.
+#[must_use]
+pub fn access(path: &str, method: &str) -> Access {
+    let route = path.split('?').next().unwrap_or(path);
+    match method {
+        "GET" => Access::Read,
+        "POST" if matches!(route, "search/metadata" | "assets/bulk-upload-check") => Access::Read,
+        _ => Access::Mutation,
+    }
 }
+
 #[derive(Debug, Clone)]
 pub struct Session {
     pub ordinary_content_guard: Option<OrdinarySessionGuard>,
@@ -52,53 +65,6 @@ pub struct Session {
     pub user_id: String,
     pub scope: String,
     pub version: Version,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct UploadPart {
-    pub field: String,
-    pub path: String,
-    pub filename: String,
-}
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub enum OrdinaryContentPurpose {
-    Read,
-    DestinationReadback,
-    VisibilityReconciliation,
-    SelectedPresentationMetadata,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct OrdinaryContentAuthorization {
-    pub source_keys: Vec<AssetKey>,
-    pub expected_revision: String,
-    pub purpose: OrdinaryContentPurpose,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct HttpRequest {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub immich_archive_authorization: Option<crate::immich_archive::ImmichArchiveAuthorization>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub immich_visibility_authorization:
-        Option<crate::immich_visibility::ImmichVisibilityAuthorization>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub ordinary_content_authorization: Option<OrdinaryContentAuthorization>,
-    pub url: String,
-    pub method: String,
-    pub headers: BTreeMap<String, String>,
-    pub body: Option<Value>,
-    pub fields: BTreeMap<String, String>,
-    pub files: Vec<UploadPart>,
-    pub download_path: Option<String>,
-}
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct HttpResponse {
-    pub status: u16,
-    pub body: Value,
-    pub path: Option<String>,
 }
 pub fn endpoint(address: &str, allow_http: bool) -> Result<String, String> {
     // Check segments before Url normalizes away dot segments.
@@ -156,7 +122,7 @@ impl Session {
         if self
             .ordinary_content_guard
             .as_ref()
-            .is_some_and(|g| g.generation.load(std::sync::atomic::Ordering::SeqCst) != g.expected)
+            .is_some_and(|g| !g.current())
         {
             return Err("写真へのアクセスが変わりました。処理を中止しました。".into());
         }
@@ -198,7 +164,7 @@ impl Session {
         HttpRequest {
             immich_archive_authorization: None,
             immich_visibility_authorization: None,
-            ordinary_content_authorization: (method == "GET")
+            ordinary_content_authorization: (access(path, method) == Access::Read)
                 .then(|| self.content_authorization(path))
                 .flatten(),
             url: format!("{}/{path}", self.endpoint),
@@ -223,7 +189,9 @@ impl Session {
         self.check_content_guard()?;
         let response: HttpResponse =
             io(ctx, ShellOperation::Http(self.request(path, method, body))).await?;
-        if method == "GET" || method == "POST" && path == "search/metadata" {
+        // A read across an access change is never used. A write cannot be
+        // recalled, so its answer is still interpreted.
+        if access(path, method) == Access::Read {
             self.check_content_guard()?;
         }
         check_status(response.status)?;
@@ -414,21 +382,36 @@ impl Session {
         check_status(response.status)
     }
     pub async fn trash(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
+        self.submit_trash(ctx, ids, false).await
+    }
+
+    /// Explicit Move only: the native shell retains the original workflow
+    /// context and gates the actual network submission against revocation.
+    pub(crate) async fn trash_move(&self, ctx: &Context, ids: &[String]) -> Result<(), String> {
+        self.submit_trash(ctx, ids, true).await
+    }
+
+    async fn submit_trash(
+        &self,
+        ctx: &Context,
+        ids: &[String],
+        native_gate: bool,
+    ) -> Result<(), String> {
         if ids.is_empty() {
             return Err("削除対象がありません。".into());
         }
         for id in ids {
             valid_id(id)?;
         }
-        let _: Value = self
-            .json(
-                ctx,
-                "assets",
-                "DELETE",
-                Some(json!({"ids":ids,"force":false})),
-            )
-            .await?;
-        Ok(())
+        self.check_content_guard()?;
+        let request = self.request("assets", "DELETE", Some(json!({"ids":ids,"force":false})));
+        let operation = if native_gate {
+            ShellOperation::HttpDeletion(request)
+        } else {
+            ShellOperation::Http(request)
+        };
+        let response: HttpResponse = io(ctx, operation).await?;
+        check_status(response.status)
     }
 }
 pub async fn connect(

@@ -36,6 +36,8 @@ enum UploadFault {
 enum ObserveWrite {
     Post,
     Put,
+    /// Apple access changes right after `DeletingSource` is saved.
+    Deletion,
 }
 struct Shell {
     source: TransferBundle,
@@ -57,6 +59,8 @@ struct Shell {
     uploaded_marker: Value,
     observe_write: Option<ObserveWrite>,
     reconciliation: Option<Value>,
+    /// Native facts returned by the fake Immich inventory.
+    remote_listing: Vec<Value>,
 }
 impl Shell {
     fn new() -> Self {
@@ -119,6 +123,7 @@ impl Shell {
             uploaded_marker: Value::Null,
             observe_write: None,
             reconciliation: None,
+            remote_listing: Vec::new(),
         }
     }
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
@@ -182,6 +187,10 @@ impl Shell {
                     Ok(Value::Null)
                 }
             }
+            ShellOperation::AppleImport(_) => {
+                self.order.push("import");
+                Ok(json!([self.source.assets[0].key]))
+            }
             ShellOperation::HashFile { .. } => serde_json::to_value(HashResult {
                 sha1: SHA1.into(),
                 signature: FileSignature {
@@ -195,6 +204,17 @@ impl Shell {
             })
             .map_err(|e| e.to_string()),
             ShellOperation::Http(request) => self.http(request),
+            ShellOperation::HttpDeletion(request) => {
+                assert_eq!(request.method, "DELETE");
+                let saved = self.journal.as_ref().ok_or("no deletion journal")?;
+                assert!(
+                    saved
+                        .receipts
+                        .iter()
+                        .any(|r| r.phase == TransferPhase::DeletingSource)
+                );
+                self.http(request)
+            }
             _ => Err("unexpected effect".into()),
         }
     }
@@ -311,24 +331,21 @@ impl Shell {
                 json!([])
             }
         } else if request.url.ends_with("/search/metadata") {
-            json!({"assets":{"items":[],"nextCursor":null}})
+            json!({"assets":{"items":self.remote_listing,"nextCursor":null}})
+        } else if request.method == "DELETE" {
+            self.order.push("trash");
+            self.deleted += 1;
+            if self.uncertain_delete {
+                return Err("lost response".into());
+            }
+            Value::Null
         } else if request.download_path.is_some() {
             Value::Null
         } else {
             if matches!(self.upload_fault, UploadFault::Read) {
                 return Err("read failed".into());
             }
-            let date = if matches!(self.upload_fault, UploadFault::Wait | UploadFault::Expired) {
-                None
-            } else {
-                Some(&self.capture_date)
-            };
-            let checksum = if matches!(self.upload_fault, UploadFault::WrongIdentity) {
-                "b".repeat(40)
-            } else {
-                SHA1.into()
-            };
-            json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":self.uploaded_name,"checksum":checksum,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":date,"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
+            self.remote_asset()
         };
         serde_json::to_value(HttpResponse {
             status: 200,
@@ -336,6 +353,19 @@ impl Shell {
             path: request.download_path,
         })
         .map_err(|e| e.to_string())
+    }
+    fn remote_asset(&self) -> Value {
+        let date = if matches!(self.upload_fault, UploadFault::Wait | UploadFault::Expired) {
+            None
+        } else {
+            Some(&self.capture_date)
+        };
+        let checksum = if matches!(self.upload_fault, UploadFault::WrongIdentity) {
+            "b".repeat(40)
+        } else {
+            SHA1.into()
+        };
+        json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":self.uploaded_name,"checksum":checksum,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":date,"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
     }
     fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
         let mut effects = core.process_event(event);
@@ -364,6 +394,10 @@ impl Shell {
                     .pending_uploads
                     .iter()
                     .any(|p| p.phase == suwop_core::immich::UploadPhase::MetadataStarted),
+                (ShellOperation::Persist(saved), Some(ObserveWrite::Deletion)) => saved
+                    .receipts
+                    .iter()
+                    .any(|r| r.phase == TransferPhase::DeletingSource),
                 _ => false,
             };
             if observed {
@@ -395,13 +429,16 @@ fn core() -> Core<Suwop> {
     core_from_state(state)
 }
 fn core_from_state(state: SavedLibrary) -> Core<Suwop> {
+    core_connected_to(state, "immich")
+}
+fn core_connected_to(state: SavedLibrary, scope: &str) -> Core<Suwop> {
     let session = Session {
         ordinary_content_guard: None,
         ordinary_content_context: None,
         endpoint: "https://test/api".into(),
         key: "test".into(),
         user_id: OWNER.into(),
-        scope: "immich".into(),
+        scope: scope.into(),
         version: Version {
             major: 3,
             minor: 2,
@@ -975,6 +1012,93 @@ fn journal_failure_before_import_or_trash_stops_remote_mutation() -> Result<(), 
     }
     Ok(())
 }
+fn copy_with_id(shell: &Shell, intent: TransferIntent, id: &str) -> Event {
+    Event::Copy {
+        keys: shell.source.assets.iter().map(|a| a.key.clone()).collect(),
+        intent,
+        id: id.into(),
+        now: 10.0,
+    }
+}
+
+/// Two distinct Copied Move receipts of one source; the first deletion's
+/// outcome is lost.
+fn second_move_after_unknown_deletion(shell: &mut Shell) -> Result<Core<Suwop>, String> {
+    let core = core();
+    for id in ["receipt", "receipt-2"] {
+        let event = copy_with_id(shell, TransferIntent::Move, id);
+        shell.run(&core, event)?;
+    }
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    let phases: Vec<_> = core.view().state.receipts.iter().map(|r| r.phase).collect();
+    assert_eq!(phases, [TransferPhase::Copied, TransferPhase::Copied]);
+    shell.uncertain_delete = true;
+    shell.run(&core, move_event())?;
+    shell.uncertain_delete = false;
+    assert_eq!(shell.deleted, 1);
+    Ok(core)
+}
+
+fn complete_second_move() -> Event {
+    Event::CompleteMove {
+        id: "receipt-2".into(),
+        workspace: "work-2".into(),
+    }
+}
+
+#[test]
+fn another_receipt_never_retries_an_unknown_deletion_of_the_same_source() -> Result<(), String> {
+    for reload in [false, true] {
+        let mut shell = Shell::new();
+        let first = second_move_after_unknown_deletion(&mut shell)?;
+        let core = if reload {
+            restored_upload(&shell)?
+        } else {
+            first
+        };
+        let (order, requests) = (shell.order.len(), shell.http_requests);
+        shell.run(&core, complete_second_move())?;
+        assert!(core.view().error.is_some());
+        // Rejected before any export, save or deletion.
+        assert_eq!((shell.order.len(), shell.http_requests), (order, requests));
+        assert_eq!(shell.deleted, 1);
+        let phases: Vec<_> = core.view().state.receipts.iter().map(|r| r.phase).collect();
+        assert_eq!(
+            phases,
+            [TransferPhase::DeletionUncertain, TransferPhase::Copied]
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn a_source_with_an_unknown_deletion_can_be_copied_but_not_moved_again() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let core = second_move_after_unknown_deletion(&mut shell)?;
+    let (order, writes) = (shell.order.len(), shell.writes);
+    shell.run(
+        &core,
+        copy_with_id(&shell, TransferIntent::Move, "receipt-3"),
+    )?;
+    assert!(core.view().error.is_some());
+    assert_eq!((shell.order.len(), shell.writes), (order, writes));
+    assert!(
+        core.view()
+            .state
+            .receipts
+            .iter()
+            .all(|r| r.id != "receipt-3")
+    );
+    shell.run(
+        &core,
+        copy_with_id(&shell, TransferIntent::Copy, "receipt-4"),
+    )?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert_eq!(shell.writes, writes + 1);
+    assert_eq!(shell.deleted, 1);
+    Ok(())
+}
+
 #[test]
 fn uncertain_delete_can_never_be_retried() -> Result<(), String> {
     let core = core();
@@ -1462,7 +1586,13 @@ fn failed_reconciliation_promotion_rolls_back_before_metadata_or_unrelated_save(
     assert_eq!(state.upload_intents.len(), 1);
     assert!(state.pending_uploads.is_empty());
     let restarted = restored_upload(&shell)?;
-    shell.run(&restarted, retry_copy_event(&shell))?;
+    // A new user command gets a fresh receipt ID; the previous failed Copying
+    // receipt remains intact while its upload intent is reconciled read-only.
+    let mut retry = retry_copy_event(&shell);
+    if let Event::Copy { id, .. } = &mut retry {
+        *id = "retry-after-reload".into();
+    }
+    shell.run(&restarted, retry)?;
     assert!(
         restarted.view().error.is_none(),
         "{:?}",
@@ -1543,6 +1673,265 @@ fn apple_change_after_upload_intent_persist_prevents_the_post() -> Result<(), St
             .len(),
         1
     );
+    Ok(())
+}
+
+/// Answer effects until native deletion is requested, then stop as a crash or
+/// cancellation would: the deletion request is never answered.
+fn run_until_trash(shell: &mut Shell, core: &Core<Suwop>, event: Event) -> Result<bool, String> {
+    let mut effects = core.process_event(event);
+    let mut n = 0;
+    while !effects.is_empty() {
+        n += 1;
+        if n > 500 {
+            return Err("effect loop did not terminate".into());
+        }
+        let Effect::Io(mut request) = effects.remove(0);
+        if matches!(request.operation, ShellOperation::AppleTrash { .. }) {
+            return Ok(true);
+        }
+        let response = match shell.handle(request.operation.clone()) {
+            Ok(value) => ShellResponse {
+                value: Some(value),
+                error: None,
+            },
+            Err(e) => ShellResponse {
+                value: None,
+                error: Some(e),
+            },
+        };
+        effects.extend(
+            core.resolve(&mut request, response)
+                .map_err(|e| e.to_string())?,
+        );
+    }
+    Ok(false)
+}
+
+#[test]
+fn a_deletion_stage_saved_before_a_crash_is_never_deleted_again_after_restart() -> Result<(), String>
+{
+    let mut shell = Shell::new();
+    {
+        let first = core();
+        shell.run(&first, copy_event(&shell, TransferIntent::Move))?;
+        assert!(run_until_trash(&mut shell, &first, move_event())?);
+    }
+    assert_eq!(shell.deleted, 0);
+    let saved = shell.journal.as_ref().ok_or("no journal")?;
+    assert_eq!(saved.receipts[0].phase, TransferPhase::DeletingSource);
+    let restarted = restored_upload(&shell)?;
+    // Without a live attempt the saved phase is only recovered to uncertainty.
+    for _ in 0..2 {
+        shell.run(&restarted, move_event())?;
+        assert!(restarted.view().error.is_some());
+        assert_eq!(shell.deleted, 0);
+        assert!(!shell.order.contains(&"trash"));
+        assert_eq!(
+            restarted.view().state.receipts[0].phase,
+            TransferPhase::DeletionUncertain
+        );
+    }
+    let saved = shell.journal.as_ref().ok_or("no journal")?;
+    assert_eq!(saved.receipts[0].phase, TransferPhase::DeletionUncertain);
+    Ok(())
+}
+
+/// An Immich original listed by a refresh and copied into Apple Photos with
+/// an explicit Move.
+fn immich_to_apple_copied(shell: &mut Shell) -> Result<Core<Suwop>, String> {
+    shell.remote_listing = vec![shell.remote_asset()];
+    let core = core();
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 10.0,
+        },
+    )?;
+    let key = core
+        .view()
+        .state
+        .snapshots
+        .iter()
+        .filter(|s| s.provider == Provider::Immich)
+        .flat_map(|s| s.assets.iter())
+        .map(|a| a.key.clone())
+        .next()
+        .ok_or("no Immich asset")?;
+    shell.run(
+        &core,
+        Event::CopyTo {
+            keys: vec![key],
+            destination: Provider::Apple,
+            intent: TransferIntent::Move,
+            id: "receipt".into(),
+            now: 10.0,
+        },
+    )?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert_eq!(core.view().state.receipts[0].phase, TransferPhase::Copied);
+    Ok(core)
+}
+
+#[test]
+fn an_immich_to_apple_move_deletes_the_immich_source_after_its_saved_stage() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let core = immich_to_apple_copied(&mut shell)?;
+    shell.order.clear();
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert_eq!(shell.deleted, 1);
+    let index = shell
+        .order
+        .iter()
+        .position(|op| *op == "trash")
+        .ok_or("trash missing")?;
+    assert_eq!(shell.order[index - 1], "persist");
+    assert_eq!(core.view().state.receipts[0].phase, TransferPhase::Moved);
+    Ok(())
+}
+
+#[test]
+fn an_apple_destination_change_revokes_an_immich_source_deletion() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let core = immich_to_apple_copied(&mut shell)?;
+    // Apple access changes after the destination was verified and the
+    // deletion stage was saved, while the Immich re-reads are in flight.
+    shell.observe_write = Some(ObserveWrite::Deletion);
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_some());
+    assert_eq!(shell.deleted, 0);
+    assert!(!shell.order.contains(&"trash"));
+    let saved = shell.journal.as_ref().ok_or("no journal")?;
+    assert_eq!(saved.receipts[0].phase, TransferPhase::Copied);
+    Ok(())
+}
+
+#[test]
+fn a_lost_immich_delete_response_is_never_retried_after_reload() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let core = immich_to_apple_copied(&mut shell)?;
+    shell.uncertain_delete = true;
+    shell.run(&core, move_event())?;
+    assert_eq!(shell.deleted, 1);
+    assert_eq!(
+        core.view().state.receipts[0].phase,
+        TransferPhase::DeletionUncertain
+    );
+    shell.uncertain_delete = false;
+    let restarted = restored_upload(&shell)?;
+    shell.run(&restarted, move_event())?;
+    assert!(restarted.view().error.is_some());
+    assert_eq!(shell.deleted, 1);
+    Ok(())
+}
+
+#[test]
+fn an_unsaved_deletion_stage_issues_no_delete_and_leaves_the_move_retryable() -> Result<(), String>
+{
+    let core = core();
+    let mut shell = Shell::new();
+    shell.run(&core, copy_event(&shell, TransferIntent::Move))?;
+    shell.fail_phase = Some(TransferPhase::DeletingSource);
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_some());
+    assert_eq!(shell.deleted, 0);
+    // Memory matches the durable journal: the unsaved phase is not kept.
+    assert_eq!(core.view().state.receipts[0].phase, TransferPhase::Copied);
+    shell.fail_phase = None;
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    assert_eq!(shell.deleted, 1);
+    assert_eq!(core.view().state.receipts[0].phase, TransferPhase::Moved);
+    Ok(())
+}
+
+#[test]
+fn an_access_change_after_the_deletion_stage_stops_before_native_deletion() -> Result<(), String> {
+    let core = core();
+    let mut shell = Shell::new();
+    shell.run(&core, copy_event(&shell, TransferIntent::Move))?;
+    shell.observe_write = Some(ObserveWrite::Deletion);
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_some());
+    assert_eq!(shell.deleted, 0);
+    assert!(!shell.order.contains(&"trash"));
+    // Provably never submitted: the durable receipt returns to Copied rather
+    // than becoming DeletionUncertain.
+    let saved = shell.journal.as_ref().ok_or("no journal")?;
+    assert_eq!(saved.receipts[0].phase, TransferPhase::Copied);
+    Ok(())
+}
+
+#[test]
+fn a_move_cannot_complete_against_another_immich_account() -> Result<(), String> {
+    let mut shell = Shell::new();
+    shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+    let state = shell.journal.clone().ok_or("no journal")?;
+    let other = core_connected_to(state, "another-server#another-owner");
+    let requests = shell.http_requests;
+    shell.run(&other, move_event())?;
+    assert!(other.view().error.is_some());
+    assert_eq!(shell.deleted, 0);
+    assert_eq!(shell.http_requests, requests);
+    assert_eq!(other.view().state.receipts[0].phase, TransferPhase::Copied);
+    Ok(())
+}
+
+#[test]
+fn identical_independent_originals_copy_but_never_authorize_a_move() -> Result<(), String> {
+    let mut shell = Shell::new();
+    let mut twin = shell.source.assets[0].clone();
+    twin.key.asset_id = "twin".into();
+    twin.resources[0].id = "1".into();
+    let mut file = shell.source.files[0].clone();
+    file.resource = twin.resources[0].clone();
+    shell.source.assets.push(twin);
+    shell.source.files.push(file);
+    let core = core_from_state(SavedLibrary {
+        schema_version: 8,
+        apple_scope: "apple".into(),
+        snapshots: vec![LibrarySnapshot {
+            provider: Provider::Apple,
+            scope: "apple".into(),
+            assets: shell.source.assets.clone(),
+            access: ScanAccess::Full,
+            scanned_at: Some(1.0),
+        }],
+        ..SavedLibrary::default()
+    });
+    shell.run(&core, copy_event(&shell, TransferIntent::Move))?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    let receipt = core.view().state.receipts[0].clone();
+    assert_eq!(receipt.phase, TransferPhase::Copied);
+    assert!(!receipt.move_blockers().is_empty());
+    shell.run(&core, move_event())?;
+    assert!(core.view().error.is_some());
+    assert_eq!(shell.deleted, 0);
+    Ok(())
+}
+
+#[test]
+fn migrated_legacy_receipts_never_authorize_deletion() -> Result<(), String> {
+    for version in [1, 8] {
+        let mut shell = Shell::new();
+        shell.run(&core(), copy_event(&shell, TransferIntent::Move))?;
+        let mut raw = serde_json::to_value(shell.journal.as_ref().ok_or("no journal")?)
+            .map_err(|e| e.to_string())?;
+        raw["schemaVersion"] = json!(version);
+        for receipt in raw["receipts"].as_array_mut().ok_or("receipts")? {
+            receipt.as_object_mut().ok_or("receipt")?.remove("intent");
+        }
+        let restored = core_from_state(suwop_core::workflow::migrate(raw)?);
+        assert_eq!(
+            restored.view().state.receipts[0].intent,
+            TransferIntent::Copy
+        );
+        shell.run(&restored, move_event())?;
+        assert!(restored.view().error.is_some());
+        assert_eq!(shell.deleted, 0);
+    }
     Ok(())
 }
 

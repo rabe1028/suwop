@@ -218,7 +218,10 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     #expect(!first.trace.contains { $0.hasPrefix("PUT ") })
     var restarted = try UploadRecoveryABI(state: first.state)
     try restarted.initializeAndRefresh()
-    try restarted.run(copy)
+    // Each explicit user retry uses a fresh receipt ID, as the app does.
+    var retry = copy
+    retry["id"] = .string("retry")
+    try restarted.run(retry)
     #expect(restarted.trace.contains("confirmUploadResume"))
     #expect(!restarted.trace.contains { $0.hasPrefix("POST ") || $0.hasPrefix("PUT ") })
     #expect(restarted.state.pendingUploads.first?.phase == .metadataPending)
@@ -247,7 +250,10 @@ private func uploadNative(id: String, owner: String) -> JSONValue {
     var restarted = try UploadRecoveryABI(state: first.state)
     restarted.origin = first.origin
     try restarted.initializeAndRefresh()
-    try restarted.run(copy)
+    // Each explicit user retry uses a fresh receipt ID, as the app does.
+    var retry = copy
+    retry["id"] = .string("retry")
+    try restarted.run(retry)
     #expect(restarted.trace.contains("POST https://photos.example/api/assets/bulk-upload-check"))
     #expect(restarted.trace
         .contains("GET https://photos.example/api/assets/\(first.id)/metadata/suwop.upload-origin.v1"))

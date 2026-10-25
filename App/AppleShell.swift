@@ -6,7 +6,7 @@ import SuwopShell
     let localStore: LocalStore
     var catalogChanged: (@MainActor () -> Void)?
     private var apple: ApplePhotosStore?
-    private let http = HTTPExecutor()
+    let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
     let ordinarySelectedAccess = OrdinarySelectedNativeAccess()
     var ordinarySelectedInvalidated: (@MainActor () -> Void)?
@@ -95,6 +95,9 @@ import SuwopShell
     }
 
     func execute(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
+        if operation.type == "httpDeletion" {
+            return try await transferDeletion(operation.data ?? .null, context: context)
+        }
         if operation.type == "amazonUpload" {
             // Makes the same owner/cancellation checks, reporting them as unsent.
             return try await amazonUpload(operation.data ?? .null, context: context)
@@ -540,40 +543,6 @@ extension AppleShell {
 }
 
 private extension AppleShell {
-    func executeHTTP(_ request: HttpRequest) async throws -> HttpResponse {
-        let submission = try await submissionPermit(for: request)
-        #if SUWOP_VRT
-            if let httpTransportEffect {
-                try submission?.submit {}
-                return try await httpTransportEffect(request)
-            }
-        #endif
-        return try await http.execute(request, submission: submission)
-    }
-
-    func authorizedHTTP(_ request: HttpRequest, context: ContentPresentationContext) async throws -> JSONValue {
-        if request.immichVisibilityAuthorization != nil || request.immichArchiveAuthorization != nil {
-            return try await .from(executeHTTP(request))
-        }
-        guard let authorization = request.ordinaryContentAuthorization else {
-            return try await .from(executeHTTP(request))
-        }
-        _ = try await ordinaryContent.validate(
-            keys: authorization.sourceKeys,
-            context: context,
-            expectedRevision: authorization.expectedRevision,
-            purpose: authorization.purpose
-        )
-        let response = try await executeHTTP(request)
-        _ = try await ordinaryContent.validate(
-            keys: authorization.sourceKeys,
-            context: context,
-            expectedRevision: authorization.expectedRevision,
-            purpose: authorization.purpose
-        )
-        return try .from(response)
-    }
-
     func confirmImmichVisibility(
         _ prompt: ImmichVisibilityPrompt, context: ContentPresentationContext
     ) async throws -> Bool {
