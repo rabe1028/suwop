@@ -1,7 +1,7 @@
 use crux_core::Core;
 use serde_json::{Value, json};
 use suwop_core::{
-    amazon::{Connection, Node, UploadRecord, admit_url, formats},
+    amazon::{Connection, Node, UploadRecord, UploadRecordPhase, admit_url, formats},
     app::{Effect, Event, Model, SavedLibrary, ShellOperation, ShellResponse, Suwop},
     domain::{
         AppleVisibility, AssetKey, FileSignature, LibrarySnapshot, Presence, Provider,
@@ -41,6 +41,11 @@ fn source(name: &str) -> Result<StoredAsset, String> {
     asset.deletion_blockers.clear();
     asset.resources[0].name = name.into();
     asset.resources[0].sha1 = Some(SHA1.into());
+    Ok(asset)
+}
+fn twin() -> Result<StoredAsset, String> {
+    let mut asset = source("photo.jpg")?;
+    asset.key.asset_id = "twin".into();
     Ok(asset)
 }
 fn state(name: &str) -> Result<SavedLibrary, String> {
@@ -199,6 +204,8 @@ struct Shell {
     interrupt_search: bool,
     /// Whether the published view already held Amazon assets at each persist.
     amazon_visible_at_persist: Vec<bool>,
+    /// Export a second, independent asset with identical bytes and name.
+    twins: bool,
 }
 impl Shell {
     fn upload(&mut self, request: &suwop_core::amazon::Request) -> Result<Value, String> {
@@ -267,19 +274,22 @@ impl Shell {
             .map_err(|e| e.to_string()),
             ShellOperation::AppleExport { .. } => {
                 self.apple_exports += 1;
-                let asset = source("photo.jpg")?;
-                serde_json::to_value(TransferBundle {
-                    files: vec![TransferFile {
+                let mut assets = vec![source("photo.jpg")?];
+                if self.twins {
+                    assets.push(twin()?);
+                }
+                let files = assets
+                    .iter()
+                    .map(|asset| TransferFile {
                         resource: asset.resources[0].clone(),
                         path: "/test/source".into(),
                         signature: FileSignature {
                             sha256: SHA256.into(),
                             bytes: 3,
                         },
-                    }],
-                    assets: vec![asset],
-                })
-                .map_err(|e| e.to_string())
+                    })
+                    .collect();
+                serde_json::to_value(TransferBundle { files, assets }).map_err(|e| e.to_string())
             }
             ShellOperation::AmazonHashFile { .. } => Ok(
                 json!({"sha1":SHA1,"md5":if self.fault == Fault::CorruptOriginal {"00000000000000000000000000000000"}else{MD5},"signature":{"sha256": if self.fault == Fault::CorruptSha256 && self.posts > 0 { "0000000000000000000000000000000000000000000000000000000000000000" } else { SHA256 },"bytes":3}}),
@@ -1122,6 +1132,118 @@ fn adopted_connection_without_an_inventory_is_unavailable_not_absent() -> Result
                 .all(|p| p.presence != Presence::AppleOnly)
         );
     }
+    Ok(())
+}
+
+#[test]
+fn upload_record_phases_are_explicit() -> Result<(), String> {
+    let mut record = UploadRecord {
+        receipt_id: "copy".into(),
+        scope: connection()?.scope,
+        name: "photo.jpg".into(),
+        signature: FileSignature {
+            sha256: SHA256.into(),
+            bytes: 3,
+        },
+        md5: MD5.into(),
+        node_id: None,
+        verified: false,
+    };
+    assert_eq!(record.phase(), UploadRecordPhase::Submitting);
+    record.node_id = Some("photo".into());
+    assert_eq!(record.phase(), UploadRecordPhase::Created);
+    record.verified = true;
+    assert_eq!(record.phase(), UploadRecordPhase::Verified);
+    Ok(())
+}
+
+#[test]
+fn a_saved_receipt_id_is_never_reused_and_uploads_name_their_own_receipt() -> Result<(), String> {
+    let mut library = state("photo.jpg")?;
+    let earlier = TransferReceipt {
+        id: "copy".into(),
+        created_at: 0.5,
+        phase: TransferPhase::Copying,
+        intent: TransferIntent::Copy,
+        source: vec![source("photo.jpg")?],
+        destination: vec![],
+        destination_provider: Provider::Amazon,
+        destination_scope: connection()?.scope,
+        signatures: [FileSignature {
+            sha256: SHA256.into(),
+            bytes: 3,
+        }]
+        .into(),
+    };
+    library.receipts = vec![earlier];
+    let core = core_from(library);
+    let mut shell = Shell::default();
+    // Reusing a saved receipt ID would overwrite its record: refused before IO.
+    shell.run(&core, copy_event()?)?;
+    assert!(core.view().error.is_some());
+    assert_eq!((shell.attempts, shell.apple_exports), (0, 0));
+    assert!(shell.saved.is_none());
+    shell.run(&core, copy_event_id("next")?)?;
+    assert_eq!(shell.posts, 1);
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert_eq!(saved.amazon_uploads.len(), 1);
+    assert_eq!(saved.amazon_uploads[0].receipt_id, "next");
+    let phase = |id: &str| saved.receipts.iter().find(|r| r.id == id).map(|r| r.phase);
+    assert_eq!(phase("copy"), Some(TransferPhase::Copying));
+    assert_eq!(phase("next"), Some(TransferPhase::Copied));
+    Ok(())
+}
+
+#[test]
+fn identical_originals_in_one_amazon_copy_stop_before_any_post() -> Result<(), String> {
+    let mut state = state("photo.jpg")?;
+    state.snapshots[0].assets.push(twin()?);
+    let core = core_from(state);
+    let mut shell = Shell {
+        twins: true,
+        ..Shell::default()
+    };
+    shell.run(
+        &core,
+        Event::CopyTo {
+            keys: vec![source("photo.jpg")?.key, twin()?.key],
+            destination: Provider::Amazon,
+            intent: TransferIntent::Copy,
+            id: "copy".into(),
+            now: 1.0,
+        },
+    )?;
+    assert_eq!((shell.attempts, shell.posts), (0, 0));
+    assert!(core.view().error.is_some());
+    let saved = shell.saved.as_ref().ok_or("missing saved state")?;
+    assert!(saved.amazon_uploads.is_empty());
+    assert!(
+        saved
+            .receipts
+            .iter()
+            .all(|r| r.phase == TransferPhase::Copying)
+    );
+    Ok(())
+}
+
+#[test]
+fn a_move_with_amazon_on_either_side_is_refused_before_any_io() -> Result<(), String> {
+    let core = core("photo.jpg")?;
+    let mut shell = Shell::default();
+    shell.run(
+        &core,
+        Event::CopyTo {
+            keys: vec![source("photo.jpg")?.key],
+            destination: Provider::Amazon,
+            intent: TransferIntent::Move,
+            id: "move".into(),
+            now: 1.0,
+        },
+    )?;
+    assert!(core.view().error.is_some_and(|e| e.contains("移動")));
+    assert_eq!((shell.attempts, shell.apple_exports), (0, 0));
+    assert!(shell.saved.is_none());
     Ok(())
 }
 

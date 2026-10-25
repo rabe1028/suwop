@@ -6,7 +6,8 @@ use crate::{
     domain::{
         LibrarySnapshot, Provider, ScanAccess, TransferIntent, TransferReceipt, UnifiedPhoto,
     },
-    immich::{HttpRequest, Session},
+    immich::Session,
+    transport::HttpRequest,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -473,6 +474,9 @@ pub enum ShellOperation {
         edit: crate::albums::AlbumEdit,
     },
     Http(HttpRequest),
+    /// A prepared source deletion. Native execution must recheck the original
+    /// workflow context and submit under the shared revocation gate.
+    HttpDeletion(HttpRequest),
     HashFile {
         path: String,
     },

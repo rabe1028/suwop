@@ -60,6 +60,11 @@ test-swift:
 check: lint
 	@if [ "$${SUWOP_CLEAN_CHECK:-0}" = "1" ]; then cargo clean; fi
 	$(MAKE) test
+	$(MAKE) check-transfer-model
+
+.PHONY: check-transfer-model
+check-transfer-model:
+	uv run --no-project python -B scripts/check-transfer-model.py
 
 generate-types:
 	cargo run --locked --quiet -p suwop-core --bin schema > /tmp/suwop-schema.json

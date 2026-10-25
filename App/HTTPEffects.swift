@@ -1,9 +1,23 @@
-import Foundation
 import SuwopShell
 
 extension AppleShell {
-    func executeHTTP(_ request: HttpRequest) async throws -> HttpResponse {
-        let submission = try await submissionPermit(for: request)
+    func transferDeletion(_ data: JSONValue, context: ContentPresentationContext) async throws -> JSONValue {
+        let request = try data.decode(HttpRequest.self)
+        let permit = try TransferSubmission.permit(
+            request: request, context: context, owner: presentationEpoch, gate: amazonSubmission
+        )
+        return try await .from(executeHTTP(request, preparedSubmission: permit))
+    }
+
+    func executeHTTP(
+        _ request: HttpRequest,
+        preparedSubmission: NativeSubmissionPermit? = nil
+    ) async throws -> HttpResponse {
+        let submission: NativeSubmissionPermit? = if let preparedSubmission {
+            preparedSubmission
+        } else {
+            try await submissionPermit(for: request)
+        }
         #if SUWOP_VRT
             if let httpTransportEffect {
                 try submission?.submit {}

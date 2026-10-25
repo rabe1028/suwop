@@ -8,6 +8,12 @@ pub const COREML_MODEL_SHA256: &str =
     "333a3a9037bc45895820324b4593f66aff2060e3f2f160d7c1f6ed8ca8a6f7e9";
 /// App bundle folder holding the compiled `.mlmodelc` directories.
 pub const COREML_MODEL_DIRECTORY: &str = "EmbeddingGemma2";
+/// Unprojected embedding of the Swift canary image (`EmbeddingCanary.swift`) computed by
+/// these models on the Neural Engine. Little-endian f32, 768 values.
+const CANARY_EMBEDDING: &[u8] = include_bytes!("../data/embeddinggemma2-coreml-canary.f32");
+/// The int8 models give cosine above 0.999 on the Neural Engine and about 0.6 on the CPU,
+/// where Core ML can silently fall back; below this, loading fails before any photo.
+pub const CANARY_MIN_COSINE: f32 = 0.98;
 const BOS: u32 = 2;
 const EOS: u32 = 1;
 const IMAGE_START: u32 = 255_999;
@@ -44,6 +50,9 @@ pub struct InferenceSpec {
     pub pooling_kernel: u32,
     pub image_tokens: u32,
     pub text_tokens: u32,
+    /// Expected embedding of the canary image; see `CANARY_EMBEDDING`.
+    pub canary_embedding: Vec<f32>,
+    pub canary_min_cosine: f32,
 }
 
 pub fn specification(dimensions: u32) -> Result<InferenceSpec, String> {
@@ -67,6 +76,11 @@ pub fn specification(dimensions: u32) -> Result<InferenceSpec, String> {
         pooling_kernel: 3,
         image_tokens: 70,
         text_tokens: 128,
+        canary_embedding: CANARY_EMBEDDING
+            .chunks_exact(4)
+            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
+            .collect(),
+        canary_min_cosine: CANARY_MIN_COSINE,
     })
 }
 
@@ -153,6 +167,15 @@ pub fn project(vector: &[f32], dimensions: u32) -> Result<Vec<f32>, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canary_is_a_recorded_embedding() -> Result<(), String> {
+        let spec = specification(256)?;
+        assert_eq!(spec.canary_embedding.len(), 768);
+        assert!(spec.canary_embedding.iter().all(|v| v.is_finite()));
+        let norm: f32 = spec.canary_embedding.iter().map(|v| v * v).sum();
+        assert!(norm > 1.0, "the canary must not be the zero placeholder");
+        Ok(())
+    }
     #[test]
     fn budget_covers_startup_pressure_and_loaded_checkpoints() {
         assert!(admit(1024 << 20, 200 << 20, 1024 << 20, false, false).is_ok());

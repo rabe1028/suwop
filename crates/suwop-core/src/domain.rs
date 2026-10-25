@@ -472,7 +472,7 @@ pub enum TransferPhase {
     Moved,
     DeletionUncertain,
 }
-#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TransferReceipt {
     pub id: String,

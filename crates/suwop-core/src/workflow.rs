@@ -1,13 +1,19 @@
 use crate::{
     app::{ConnectionSettings, Context, Event, SavedLibrary, ShellOperation, io},
     domain::{
-        AssetKey, LibrarySnapshot, Provider, ResourceRole, ScanAccess, StoredAsset, TransferBundle,
-        TransferFile, TransferIntent, TransferPhase, TransferReceipt, allow_deletion,
-        apple_import_plan, verify_destination, verify_source,
+        AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferBundle,
+        TransferIntent, TransferPhase, TransferReceipt,
     },
     immich::{Asset, Session, connect},
+    provider::{
+        Ability, AmazonBackend, AppleBackend, CreatedCopies, DeletionOutcome, ExportRequest,
+        ImmichBackend, ImportRequest, ListRequest, Listing, OriginalImport, ReadIo, Registry,
+    },
+    transfer_lifecycle::{DeletionAuthority, LifecycleEffect, LifecycleEvent},
+    transport::OrdinarySessionGuard,
 };
 use futures::StreamExt;
+use journal::JournalChange;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 mod albums;
@@ -19,8 +25,11 @@ mod current_sharing;
 mod edit_paste;
 mod editing;
 mod favorites;
+pub(crate) mod journal;
 mod media;
 mod metadata;
+#[cfg(test)]
+mod registry_tests;
 mod reversion;
 mod sharing;
 mod status;
@@ -60,6 +69,8 @@ struct Runtime<'a> {
     session: Option<Session>,
     workspace: Option<String>,
     editing_token: Option<String>,
+    /// Abilities installed in place of the real services (test seam).
+    injected_registry: Option<Registry>,
 }
 
 /// Standalone contract runners have no concurrent Apple observer.
@@ -132,6 +143,7 @@ pub async fn run_guarded(
         session,
         workspace: None,
         editing_token: None,
+        injected_registry: None,
     };
     let metadata_change = metadata_event(&event);
     let sharing = matches!(event, Event::Share { .. } | Event::ShareCurrentImage { .. });
@@ -200,6 +212,48 @@ pub async fn run_guarded(
         },
     }
 }
+impl<'a> Runtime<'a> {
+    /// Read authority bound to the access generations captured at start.
+    fn read_io(&self) -> ReadIo<'a> {
+        ReadIo::new(
+            self.ctx,
+            (
+                self.ordinary_generation.clone(),
+                self.started_ordinary_generation,
+            ),
+            (self.apple_generation.clone(), self.started_generation),
+        )
+    }
+
+    /// Backends for the current immutable connection settings.
+    fn registry(&self) -> Registry {
+        if let Some(registry) = &self.injected_registry {
+            return registry.clone();
+        }
+        Registry::services(
+            AppleBackend::new(self.state.apple_scope.clone()),
+            self.session.clone().map(ImmichBackend::new),
+            self.amazon_backend().ok(),
+        )
+    }
+
+    fn amazon_backend(&self) -> Result<AmazonBackend, String> {
+        let connection = self
+            .state
+            .amazon_connection
+            .clone()
+            .ok_or("Amazon Photosに接続してください。")?;
+        Ok(AmazonBackend::new(
+            connection,
+            self.ordinary_revision.clone(),
+            OrdinarySessionGuard {
+                generation: self.ordinary_generation.clone(),
+                expected: self.started_ordinary_generation,
+            },
+        ))
+    }
+}
+
 impl Runtime<'_> {
     async fn initialize(&mut self, scope: String) -> Result<String, String> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
@@ -214,6 +268,13 @@ impl Runtime<'_> {
         };
         for s in &mut self.state.snapshots {
             s.access = ScanAccess::Unavailable;
+        }
+        // No deletion attempt survives a restart: a saved DeletingSource may
+        // already have deleted and is never issued again.
+        for receipt in &mut self.state.receipts {
+            if let Some(step) = crate::transfer_lifecycle::recover(receipt) {
+                *receipt = step.receipt;
+            }
         }
         for s in &mut self.state.albums {
             s.access = ScanAccess::Unavailable;
@@ -553,16 +614,17 @@ impl Runtime<'_> {
         self.ctx.send_event(Event::FetchProgress {
             status: "Apple Photos の一覧を確認中…".into(),
         });
-        match io::<LibrarySnapshot>(
-            self.ctx,
-            ShellOperation::AppleScan {
-                scope: self.state.apple_scope.clone(),
-                permission,
-            },
-        )
-        .await
-        {
-            Ok(mut snapshot) => {
+        let registry = self.registry();
+        let listing = match registry.listing(Provider::Apple) {
+            Some(apple) => {
+                apple
+                    .list(self.read_io(), ListRequest { permission, now })
+                    .await
+            }
+            None => Err(registry.missing(Provider::Apple, Ability::Listing)),
+        };
+        match listing.map(Listing::into_snapshot) {
+            Ok((mut snapshot, _)) => {
                 // Reuse hashes only for the exact same revision and resource inventory.
                 let previous: BTreeMap<_, _> = self
                     .state
@@ -779,26 +841,13 @@ impl Runtime<'_> {
                 return Ok(None);
             }
         }
-        let files = if session.version.uses_cursor() {
-            session.files(self.ctx, &asset.id).await.ok()
-        } else {
-            None
-        };
-        self.check_content_generation(&[])?;
-        let mut hydrated = asset.clone();
-        session.hydrate_stack(self.ctx, &mut hydrated).await;
-        self.check_content_generation(&[])?;
-        Ok(Some((
-            hydrated.record(
-                &session.scope,
-                asset
-                    .live_photo_video_id
-                    .as_ref()
-                    .and_then(|id| by_id.get(id).copied()),
-                files.as_deref(),
-            ),
-            None,
-        )))
+        let companion = asset
+            .live_photo_video_id
+            .as_ref()
+            .and_then(|id| by_id.get(id).copied());
+        let record =
+            crate::provider::hydrate_immich(session, &self.read_io(), asset, companion).await?;
+        Ok(Some((record, None)))
     }
     async fn selected_candidate(
         &self,
@@ -910,28 +959,21 @@ impl Runtime<'_> {
         self.check_identity_keys(keys)
     }
     fn check_ordinary_generation(&self) -> Result<(), String> {
-        if self.started_ordinary_generation
-            != self
-                .ordinary_generation
-                .load(std::sync::atomic::Ordering::SeqCst)
-        {
-            return Err("写真へのアクセスが変わりました。処理を中止しました。".into());
-        }
-        Ok(())
+        self.read_io().check_ordinary()
     }
     fn check_content_generation(&self, keys: &[AssetKey]) -> Result<(), String> {
-        self.check_ordinary_generation()?;
-        if keys.iter().any(|k| k.provider == Provider::Apple)
-            && self.started_generation
-                != self
-                    .apple_generation
-                    .load(std::sync::atomic::Ordering::Relaxed)
-        {
-            return Err(
-                "読み出し中に Apple Photos のアクセスが変わりました。処理を中止しました。".into(),
-            );
+        self.read_io().check(keys)
+    }
+    /// Immich is the only provider whose session is established lazily.
+    async fn ensure_connections(
+        &mut self,
+        providers: impl IntoIterator<Item = Provider>,
+    ) -> Result<(), String> {
+        if providers.into_iter().any(|p| p == Provider::Immich) {
+            self.ensure_session().await
+        } else {
+            Ok(())
         }
-        Ok(())
     }
     fn check_content_keys(&self, keys: &[AssetKey]) -> Result<(), String> {
         self.check_ordinary_generation()?;
@@ -1006,24 +1048,10 @@ impl Runtime<'_> {
         Ok(first.provider)
     }
     async fn immich_record(&self, asset: &Asset) -> Result<StoredAsset, String> {
-        let mut session = self.session.clone().ok_or("Immich に接続してください。")?;
-        if let Some(context) = &mut session.ordinary_content_context {
-            context.source_keys = vec![AssetKey {
-                provider: Provider::Immich,
-                scope: session.scope.clone(),
-                asset_id: asset.id.clone(),
-            }];
-        }
-        let companion = match &asset.live_photo_video_id {
-            Some(id) => Some(session.asset(self.ctx, id).await?),
-            None => None,
-        };
-        let files = if session.version.uses_cursor() {
-            session.files(self.ctx, &asset.id).await.ok()
-        } else {
-            None
-        };
-        Ok(asset.record(&session.scope, companion.as_ref(), files.as_deref()))
+        let session = self.session.clone().ok_or("Immich に接続してください。")?;
+        ImmichBackend::new(session)
+            .record(&self.read_io(), asset)
+            .await
     }
     async fn export(&self, keys: &[AssetKey], name: &str) -> Result<TransferBundle, String> {
         self.check_content_keys(keys)?;
@@ -1053,58 +1081,22 @@ impl Runtime<'_> {
     ) -> Result<TransferBundle, String> {
         let provider = self.check_identity_keys(keys)?;
         let directory = self.directory(name)?;
-        let bundle = match provider {
-            Provider::Amazon => self.export_amazon(keys, &directory, purpose).await?,
-            Provider::Apple => {
-                io(
-                    self.ctx,
-                    ShellOperation::AppleExport {
-                        keys: keys.to_vec(),
-                        directory,
-                    },
-                )
-                .await?
-            }
-            Provider::Immich => {
-                let mut session = self.session.clone().ok_or("Immich に接続してください。")?;
-                if let Some(context) = &mut session.ordinary_content_context {
-                    context.source_keys = keys.to_vec();
-                    context.purpose = purpose;
-                }
-                let mut assets = Vec::new();
-                let mut files = Vec::new();
-                for (n, key) in keys.iter().enumerate() {
-                    let native = session.asset(self.ctx, &key.asset_id).await?;
-                    let mut record = self.immich_record(&native).await?;
-                    for (i, resource) in record
-                        .resources
-                        .iter_mut()
-                        .enumerate()
-                        .filter(|(_, r)| r.role.is_original())
-                    {
-                        let path = format!("{directory}/{n}-{i}");
-                        session.download(self.ctx, &resource.id, &path).await?;
-                        let hash: HashResult =
-                            io(self.ctx, ShellOperation::HashFile { path: path.clone() }).await?;
-                        if Some(&hash.sha1) != resource.sha1.as_ref() {
-                            return Err("Immich の原本とチェックサムが一致しません。".into());
-                        }
-                        resource.bytes = Some(hash.signature.bytes);
-                        files.push(TransferFile {
-                            resource: resource.clone(),
-                            path,
-                            signature: hash.signature,
-                        });
-                    }
-                    let after = session.asset(self.ctx, &key.asset_id).await?;
-                    if native.updated_at != after.updated_at || native.checksum != after.checksum {
-                        return Err("読み出し中に写真が変更されました。".into());
-                    }
-                    assets.push(record);
-                }
-                TransferBundle { assets, files }
-            }
-        };
+        let registry = self.registry();
+        let exporter = registry
+            .export(provider)
+            .ok_or_else(|| registry.missing(provider, Ability::OriginalExport))?;
+        let bundle = exporter
+            .export(
+                self.read_io(),
+                ExportRequest {
+                    keys,
+                    directory: &directory,
+                    purpose,
+                },
+            )
+            .await?;
+        // Completeness and identity of originals are checked here, in common
+        // code, whichever service produced them.
         bundle.validate()?;
         if bundle.assets.iter().any(|a| !a.content_visible()) {
             return Err("読み出し中に Apple Photos の可視性が変わりました。".into());
@@ -1121,95 +1113,51 @@ impl Runtime<'_> {
         self.check_content_generation(keys)?;
         Ok(bundle)
     }
+    /// Lend the journal to one destination import, after the source fences.
     async fn import(
         &mut self,
-        bundle: &TransferBundle,
-        provider: Provider,
-        now: f64,
-    ) -> Result<Vec<AssetKey>, String> {
-        self.check_content_generation(
-            &bundle
-                .assets
-                .iter()
-                .map(|a| a.key.clone())
-                .collect::<Vec<_>>(),
-        )?;
-        self.check_transfer_trash(&bundle.assets)?;
-        if provider == Provider::Apple {
-            return io(
-                self.ctx,
-                ShellOperation::AppleImport(apple_import_plan(bundle)?),
-            )
-            .await;
-        }
-        if provider == Provider::Amazon {
-            return self.import_amazon(bundle).await;
-        }
-        let session = self.session.clone().ok_or("Immich に接続してください。")?;
-        let mut seen = BTreeSet::new();
-        let files: Vec<_> = bundle
-            .files
+        importer: &dyn OriginalImport,
+        request: ImportRequest<'_>,
+    ) -> Result<CreatedCopies, String> {
+        let keys: Vec<_> = request
+            .bundle
+            .assets
             .iter()
-            .filter(|f| seen.insert(f.signature.clone()))
+            .map(|a| a.key.clone())
             .collect();
-        let metadata = bundle.assets.first().ok_or("転送元がありません。")?;
-        let live: Vec<_> = files
-            .iter()
-            .filter(|f| f.resource.role == ResourceRole::LiveVideo)
-            .collect();
-        if live.len() > 1
-            || !live.is_empty()
-                && files
-                    .iter()
-                    .filter(|f| f.resource.role == ResourceRole::Image)
-                    .count()
-                    != 1
-        {
-            return Err("複数の Live Photo を一つの転送として扱えません。".into());
-        }
-        let live_id = match live.first() {
-            Some(file) => Some(
-                self.upload_file(&session, file, metadata, now, None)
-                    .await?,
-            ),
-            None => None,
-        };
-        let mut keys = BTreeSet::new();
-        for file in files
-            .iter()
-            .filter(|f| f.resource.role != ResourceRole::LiveVideo)
-        {
-            let attach = if file.resource.role == ResourceRole::Image {
-                live_id.as_deref()
-            } else {
-                None
-            };
-            let id = self
-                .upload_file(&session, file, metadata, now, attach)
-                .await?;
-            if attach.is_some()
-                && session
-                    .asset(self.ctx, &id)
-                    .await?
-                    .live_photo_video_id
-                    .as_deref()
-                    != attach
-            {
-                return Err("Live Photo の関連づけを確認できません。元データは残します。".into());
-            }
-            keys.insert(AssetKey {
-                provider,
-                scope: session.scope.clone(),
-                asset_id: id,
-            });
-        }
-        Ok(keys.into_iter().collect())
+        self.check_content_generation(&keys)?;
+        self.check_transfer_trash(&request.bundle.assets)?;
+        let io = self.read_io();
+        importer.import(io, self, request).await
     }
-    fn save_receipt(&mut self, receipt: TransferReceipt) {
-        if let Some(index) = self.state.receipts.iter().position(|r| r.id == receipt.id) {
-            self.state.receipts[index] = receipt;
+    /// Verified copies are published as a Limited view: their own originals
+    /// were read back, but concurrent catalog membership was not.
+    fn publish_copies(
+        &mut self,
+        provider: Provider,
+        scope: &str,
+        assets: &[StoredAsset],
+        now: f64,
+    ) {
+        if let Some(snapshot) = self
+            .state
+            .snapshots
+            .iter_mut()
+            .find(|s| s.provider == provider && s.scope == scope)
+        {
+            for asset in assets {
+                snapshot.assets.retain(|a| a.key != asset.key);
+                snapshot.assets.push(asset.clone());
+            }
+            snapshot.access = ScanAccess::Limited;
         } else {
-            self.state.receipts.push(receipt);
+            self.state.snapshots.push(LibrarySnapshot {
+                provider,
+                scope: scope.into(),
+                assets: assets.to_vec(),
+                access: ScanAccess::Limited,
+                scanned_at: Some(now),
+            });
         }
     }
     async fn copy(
@@ -1231,45 +1179,38 @@ impl Runtime<'_> {
         id: &str,
         now: f64,
     ) -> Result<(), String> {
-        if destination == Provider::Immich || keys.iter().any(|k| k.provider == Provider::Immich) {
-            self.ensure_session().await?;
-        }
+        self.ensure_connections(keys.iter().map(|k| k.provider).chain([destination]))
+            .await?;
         let provider = self.check_keys(keys)?;
         if provider == destination {
             return Err("転送元と別の保存先を選択してください。".into());
         }
-        if (provider == Provider::Amazon || destination == Provider::Amazon)
-            && intent == TransferIntent::Move
+        let registry = self.registry();
+        let importer = registry
+            .import(destination)
+            .ok_or_else(|| registry.missing(destination, Ability::OriginalImport))?;
+        if intent == TransferIntent::Move
+            && let Some(blocker) = registry.move_blocker(provider, destination)
         {
+            return Err(blocker);
+        }
+        importer.admit(&*self, keys)?;
+        // A saved receipt is never overwritten: its deletion safety is per ID.
+        if self.state.receipts.iter().any(|r| r.id == id) {
             return Err(
-                "Amazon Photosとの移動は原本保持の検証が未対応です。コピーを選択してください。"
-                    .into(),
+                "同じ転送IDの記録が既にあります。新しい操作として開始してください。".into(),
             );
         }
-        if destination == Provider::Amazon {
-            self.preflight_amazon(keys)?;
+        // A Move would later delete a source another receipt may have deleted.
+        if intent == TransferIntent::Move {
+            trash_fence::uncertain_source_fence(&self.state.receipts, keys)?;
         }
         self.workspace(id).await?;
         let mut bundle = self.export(keys, "source").await?;
         self.check_transfer_trash(&bundle.assets)?;
         bundle.block_duplicates();
-        let scope = if destination == Provider::Apple {
-            self.state.apple_scope.clone()
-        } else if destination == Provider::Amazon {
-            self.state
-                .amazon_connection
-                .as_ref()
-                .ok_or("Amazon Photosに接続してください。")?
-                .scope
-                .clone()
-        } else {
-            self.session
-                .as_ref()
-                .ok_or("Immich に接続してください。")?
-                .scope
-                .clone()
-        };
-        let mut receipt = TransferReceipt {
+        // The reducer admits the receipt; its save must complete before import.
+        let step = crate::transfer_lifecycle::start(TransferReceipt {
             id: id.into(),
             created_at: now,
             phase: TransferPhase::Copying,
@@ -1277,121 +1218,129 @@ impl Runtime<'_> {
             source: bundle.assets.clone(),
             destination: Vec::new(),
             destination_provider: destination,
-            destination_scope: scope,
+            destination_scope: importer.scope().into(),
             signatures: bundle.signatures(),
-        };
-        self.save_receipt(receipt.clone());
-        self.persist().await?;
-        let imported = self.import(&bundle, destination, now).await?;
-        let verification = self.export_readback(&imported, "verify").await?;
-        receipt.destination = verification.assets.clone();
-        verify_destination(&receipt, &verification)?;
-        receipt.phase = TransferPhase::Copied;
+        })?;
+        let stage = self
+            .persist_stage(JournalChange::Receipt(step.receipt.clone()))
+            .await?;
+        let created = self
+            .import(
+                importer,
+                ImportRequest {
+                    receipt: &step.receipt,
+                    stage,
+                    bundle: &bundle,
+                    now,
+                },
+            )
+            .await?;
+        let verification = self.export_readback(&created.0, "verify").await?;
+        let verified =
+            crate::transfer_lifecycle::verify_copy(&step.receipt, &created.0, &verification)?;
+        let step = crate::transfer_lifecycle::reduce(
+            &step.receipt,
+            LifecycleEvent::CopyVerified(verified),
+        )?;
         self.replace_records(bundle.assets);
-        if destination == Provider::Amazon {
-            self.publish_amazon_copies(&verification.assets, now);
+        if importer.publishes_copies() {
+            self.publish_copies(destination, importer.scope(), &verification.assets, now);
         }
-        self.save_receipt(receipt);
-        self.persist().await
+        self.persist_stage(JournalChange::Receipt(step.receipt))
+            .await
+            .map(|_| ())
     }
     async fn complete_move(&mut self, id: &str, workspace: &str) -> Result<(), String> {
-        self.ensure_session().await?;
-        let mut receipt = self
+        let receipt = self
             .state
             .receipts
             .iter()
             .find(|r| r.id == id)
             .cloned()
             .ok_or("移動記録がありません。")?;
+        // No live attempt can exist at the start of an operation: a saved
+        // DeletingSource may already have deleted and is never issued again.
+        if let Some(step) = crate::transfer_lifecycle::recover(&receipt) {
+            self.persist_stage(JournalChange::Receipt(step.receipt))
+                .await?;
+            return Err(
+                "前回の削除結果を確認できません。自動再試行はしません。転送元を確認してください。"
+                    .into(),
+            );
+        }
+        // Copy, legacy, partial and already finished receipts stop here.
         if !receipt.move_blockers().is_empty() {
             return Err(receipt.move_blockers().join(" / "));
         }
-        self.check_transfer_trash(&receipt.source)?;
-        self.check_transfer_trash(&receipt.destination)?;
-        self.check_keys(
-            &receipt
+        // Another receipt's possibly issued deletion of the same source is
+        // never retried through this one. This receipt is Copied here.
+        let source_keys: Vec<_> = receipt.source.iter().map(|a| a.key.clone()).collect();
+        trash_fence::uncertain_source_fence(&self.state.receipts, &source_keys)?;
+        self.ensure_connections(
+            receipt
                 .source
                 .iter()
-                .map(|a| a.key.clone())
-                .collect::<Vec<_>>(),
-        )?;
-        self.check_keys(
-            &receipt
-                .destination
-                .iter()
-                .map(|a| a.key.clone())
-                .collect::<Vec<_>>(),
-        )?;
+                .map(|a| a.key.provider)
+                .chain([receipt.destination_provider]),
+        )
+        .await?;
+        self.check_transfer_trash(&receipt.source)?;
+        self.check_transfer_trash(&receipt.destination)?;
+        let destination_keys: Vec<_> = receipt.destination.iter().map(|a| a.key.clone()).collect();
+        let provider = self.check_keys(&source_keys)?;
+        self.check_keys(&destination_keys)?;
+        let registry = self.registry();
+        let deleter = registry
+            .deletion(provider)
+            .ok_or_else(|| registry.missing(provider, Ability::SourceDeletion))?;
         self.workspace(workspace).await?;
-        let mut source = self
-            .export(
-                &receipt
-                    .source
-                    .iter()
-                    .map(|a| a.key.clone())
-                    .collect::<Vec<_>>(),
-                "source",
-            )
-            .await?;
-        verify_source(&receipt, &mut source)?;
-        let destination = self
-            .export(
-                &receipt
-                    .destination
-                    .iter()
-                    .map(|a| a.key.clone())
-                    .collect::<Vec<_>>(),
-                "target",
-            )
-            .await?;
-        verify_destination(&receipt, &destination)?;
-        // Persist first: a failed write must never be followed by deletion.
-        receipt.phase = TransferPhase::DeletingSource;
-        self.save_receipt(receipt.clone());
-        self.persist().await?;
-        let result = self.trash(&source.assets).await;
-        receipt.phase = if result.is_ok() {
-            TransferPhase::Moved
-        } else {
-            TransferPhase::DeletionUncertain
+        let mut source = self.export(&source_keys, "source").await?;
+        let source = crate::transfer_lifecycle::verify_source_evidence(&receipt, &mut source)?;
+        let destination = self.export(&destination_keys, "target").await?;
+        let destination =
+            crate::transfer_lifecycle::verify_destination_evidence(&receipt, &destination)?;
+        let authority = DeletionAuthority::new(&receipt, source, destination)?;
+        let step = crate::transfer_lifecycle::reduce(
+            &receipt,
+            LifecycleEvent::AuthorizeDeletion(authority),
+        )?;
+        let LifecycleEffect::PersistThenDelete(attempt) = step.effect else {
+            return Err("移動の削除段階を確認できません。元データは残します。".into());
         };
-        self.save_receipt(receipt);
-        self.persist().await?;
-        result.map_err(|e| format!("削除結果を確認してください。自動再試行はしません。{e}"))
-    }
-    async fn trash(&self, assets: &[StoredAsset]) -> Result<(), String> {
-        allow_deletion(assets)?;
-        if assets[0].key.provider == Provider::Apple {
-            let _: Value = io(
-                self.ctx,
-                ShellOperation::AppleTrash {
-                    assets: assets.to_vec(),
-                },
-            )
+        // Persist first: a failed save must never be followed by deletion.
+        // An unacknowledged save stops here; the attempt is dropped unsent.
+        let stage = self
+            .persist_stage(JournalChange::Receipt(step.receipt.clone()))
             .await?;
-            return Ok(());
+        let (event, error) = deletion_event(deleter.delete(self.read_io(), stage, attempt).await);
+        let next = crate::transfer_lifecycle::reduce(&step.receipt, event)?;
+        // A failed save keeps the durable DeletingSource, which is never retried.
+        self.persist_stage(JournalChange::Receipt(next.receipt))
+            .await?;
+        if let Some(error) = error {
+            return Err(error);
         }
-        let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-        for saved in assets {
-            let current = self
-                .immich_record(&session.asset(self.ctx, &saved.key.asset_id).await?)
-                .await?;
-            allow_deletion(std::slice::from_ref(&current))?;
-            if current.revision != saved.revision {
-                return Err("削除直前に写真の状態が変わりました。".into());
-            }
-        }
-        session
-            .trash(
-                self.ctx,
-                &assets
-                    .iter()
-                    .map(|a| a.key.asset_id.clone())
-                    .collect::<Vec<_>>(),
-            )
-            .await
+        Ok(())
     }
 }
+/// The reducer event of one native deletion outcome, bound to its attempt.
+fn deletion_event(outcome: DeletionOutcome) -> (LifecycleEvent, Option<String>) {
+    match outcome {
+        DeletionOutcome::NotSubmitted(attempt, error) => {
+            (LifecycleEvent::DeletionNotSubmitted(attempt), Some(error))
+        }
+        DeletionOutcome::Submitted(submitted, Ok(())) => {
+            (LifecycleEvent::DeletionSucceeded(submitted), None)
+        }
+        DeletionOutcome::Submitted(submitted, Err(error)) => (
+            LifecycleEvent::DeletionUnknown(submitted),
+            Some(format!(
+                "削除結果を確認してください。自動再試行はしません。{error}"
+            )),
+        ),
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 pub struct HashResult {
     pub sha1: String,

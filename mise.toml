@@ -15,3 +15,7 @@ swiftformat = "0.63.1"
 xcodegen = { version = "2.46.0", os = ["macos"] }
 # VRT and PhotoKit simulator profiles; must match VRT/environment.json.
 "github:MobAI-App/simslim" = { version = "0.12.2", os = ["macos"] }
+# Quint translates this task's finite lifecycle model to TLA+ for TLC.
+node = "24.18.0"
+java = "temurin-21.0.13+9.0.LTS"
+"npm:@informalsystems/quint" = "0.33.0"

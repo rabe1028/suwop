@@ -110,6 +110,9 @@ import SuwopShell
     }
 
     func execute(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
+        if operation.type == "httpDeletion" {
+            return try await transferDeletion(operation.data ?? .null, context: context)
+        }
         if operation.type == "amazonUpload" {
             // Makes the same owner/cancellation checks, reporting them as unsent.
             return try await amazonUpload(operation.data ?? .null, context: context)

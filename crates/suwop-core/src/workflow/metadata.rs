@@ -1,7 +1,7 @@
 use crate::{
-    app::{ShellOperation, io},
-    domain::{AssetKey, Provider, StoredAsset},
+    domain::{AssetKey, StoredAsset},
     metadata::{MetadataInput, prepare, verify},
+    provider::{Ability, offers, unsupported},
 };
 
 use super::Runtime;
@@ -12,8 +12,11 @@ impl Runtime<'_> {
         keys: &[AssetKey],
         input: &MetadataInput,
     ) -> Result<String, String> {
-        if keys.iter().any(|key| key.provider == Provider::Amazon) {
-            return Err("Amazon Photosの日時・位置情報の変更には対応していません。別の保存先を選択してください。".into());
+        if let Some(key) = keys
+            .iter()
+            .find(|key| !offers(key.provider, Ability::Metadata))
+        {
+            return Err(unsupported(key.provider, Ability::Metadata));
         }
         let (target, change) = prepare(
             &self.state.presentation_snapshots(),
@@ -21,30 +24,16 @@ impl Runtime<'_> {
             keys,
             input,
         )?;
-        if target.provider == Provider::Immich {
-            self.ensure_session().await?;
-        }
+        self.ensure_connections([target.provider]).await?;
         self.check_keys(&target.keys)?;
+        let registry = self.registry();
+        let writer = registry
+            .metadata(target.provider)
+            .ok_or_else(|| registry.missing(target.provider, Ability::Metadata))?;
         let result: Result<Vec<StoredAsset>, String> = async {
-            let fresh = if target.provider == Provider::Apple {
-                io(
-                    self.ctx,
-                    ShellOperation::AppleMetadata {
-                        keys: target.keys.clone(),
-                        change: change.clone(),
-                    },
-                )
-                .await?
-            } else {
-                let session = self.session.as_ref().ok_or("Immich に接続してください。")?;
-                let ids: Vec<_> = target.keys.iter().map(|k| k.asset_id.clone()).collect();
-                let assets = session.metadata(self.ctx, &ids, &change).await?;
-                let mut records = Vec::new();
-                for asset in assets {
-                    records.push(self.immich_record(&asset).await?);
-                }
-                records
-            };
+            let fresh = writer
+                .change_metadata(self.read_io(), &target.keys, &change)
+                .await?;
             verify(&fresh, &target.keys, &change)?;
             Ok(fresh)
         }
