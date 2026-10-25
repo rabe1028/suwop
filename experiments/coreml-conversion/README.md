@@ -26,9 +26,10 @@ Feasible. Measurements are in `docs/evidence/coreml-20261024/`.
   6-bit palettes (iOS 17 allows per-tensor only) give ≥ 0.992 at 317 MB; 4-bit
   is too lossy. These are model-file sizes only: see the specialization cache below.
 - Retrieval on 1,000 COCO photos is not significantly different from LiteRT-LM.
-- With tokens on the CPU, peak memory footprint was 142 MB, against ~950 MiB RSS
-  for LiteRT-LM. Latency was ~110 ms per image and ~8 ms per query, against ~0.7 s
-  per image for LiteRT-LM on CPU (M1 Max).
+- On an M1 Max with the same 20 inputs (`mac-bench/`), int8 on the Neural Engine
+  took a median 110 ms per image and 8–9 ms per query, against 498 ms and 87 ms
+  for LiteRT-LM. Peak memory footprint was 82 MB against ~305 MB, and maximum RSS
+  ~105 MB against ~650 MB. See `docs/evidence/coreml-20261024/mac-benchmark.md`.
 
 On the iOS Simulator (no Neural Engine; the Core ML GPU backend was rejected),
 Core ML was slower than LiteRT-LM: ~1.55 s per image on the CPU with corrupted fp16
@@ -44,8 +45,10 @@ Blocking issues before integration:
 - Measure on a device: Neural Engine load time on first and later launches, and the
   size of the specialization cache. If it also stores expanded weights, Core ML does
   not reduce storage.
-- Neural Engine model loading took ~43 s on every process start of the macOS CLI
-  benchmark. Whether iOS reuses the compiled plan per app is unmeasured.
+- The first Neural Engine load after installing models compiles them (~42 s on
+  the Mac); later process starts loaded in 0.2–0.3 s. An earlier 43 s on every start
+  came from also placing the 262k-row token table on the Neural Engine. Load models
+  in the background, and measure the first compilation on a device.
 - fp16 models computed on the CPU are corrupted (image cosine 0.63–0.70). Request
   `.cpuAndNeuralEngine`, and fall back to fp32 models or decline when it is
   unavailable; never `.all` with silent CPU execution.
@@ -80,4 +83,10 @@ runtime. Generate it with `xcodegen generate`, build for a simulator, then launc
 `SIMCTL_CHILD_BENCH_DIR` (holding `fixture.json`, `litert/model.litertlm`,
 `compiled/` and `benchin/`) and `SIMCTL_CHILD_BENCH_MODE` (`litert`, `cpu`, `gpu`,
 `ane` or `all`).
+
+`mac-bench/` runs LiteRT-LM (through `SuwopShell`) and every Core ML configuration
+in separate processes under `/usr/bin/time -l`. Build it from a checkout directory
+named `suwop` with `swift build -c release`, copy `libCLiteRTLM_mac.dylib` next to
+the binary, and run `MacBench <bench-dir> litert` or
+`MacBench <bench-dir> coreml <int8|pal6|fp16|fp32> <ane|gpu|cpu|all>`.
 
