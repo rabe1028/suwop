@@ -93,6 +93,12 @@ class ModelVerdictTests(unittest.TestCase):
         modeled = set(re.findall(r'"(\w+)"', phase_set))
         self.assertEqual(modeled, actual)
 
+    def test_metadata_control_and_positive_witness_are_distinct(self):
+        source = MODEL.METADATA_MODEL.read_text()
+        self.assertIn("action unsafeFirstSourceStep =", source)
+        self.assertIn("val everyOriginalPreserved =", source)
+        self.assertIn("val differingSourcesNeverAuthorized =", source)
+
     def test_tool_failure_is_not_a_counterexample(self):
         for output in (
             "error: parsing failed",
