@@ -28,6 +28,7 @@ mod immich_locked;
 mod immich_visibility;
 mod media;
 mod metadata;
+mod move_metadata;
 mod preview;
 mod privacy;
 mod reversion;

@@ -563,28 +563,39 @@ pub fn verify_destination(saved: &TransferReceipt, fresh: &TransferBundle) -> Re
     if expected != actual || !saved.signatures.is_subset(&fresh.signatures()) {
         return Err("転送先の原本を再確認できません。元データは残します。".into());
     }
-    // Library-level location must survive a move, including an explicit absence.
+    // Every source original must retain its own library-level metadata. A
+    // merged RAW/JPEG destination cannot represent conflicting source values.
+    // Match by original checksum rather than asset order or a shared first asset;
+    // the signature check above independently verifies the actual original bytes.
     if saved.intent == TransferIntent::Move {
-        let Some(source) = saved.source.first() else {
+        if saved.source.is_empty() {
             return Err("転送元がありません。".into());
-        };
-        if fresh.assets.iter().any(|a| !same_location(source, a)) {
-            return Err("転送先の位置情報が一致しません。元データは残します。".into());
         }
-        if fresh.assets.iter().any(|a| {
-            a.is_favorite != source.is_favorite
-                || !match (source.captured_at, a.captured_at) {
-                    (Some(date), Some(target)) => same_capture_date(date, target),
-                    (None, None) => true,
-                    _ => false,
-                }
-        }) {
-            return Err(
-                "転送先の撮影日時またはお気に入りが一致しません。元データは残します。".into(),
-            );
+        for source in &saved.source {
+            let preserved: BTreeSet<_> = fresh
+                .assets
+                .iter()
+                .filter(|target| same_transfer_metadata(source, target))
+                .flat_map(StoredAsset::checksums)
+                .collect();
+            if !source.fingerprints_complete() || !source.checksums().is_subset(&preserved) {
+                return Err(
+                    "転送元すべての撮影日時・位置情報・お気に入りを転送先で保持できません。元データは残します。".into(),
+                );
+            }
         }
     }
     Ok(())
+}
+
+fn same_transfer_metadata(source: &StoredAsset, target: &StoredAsset) -> bool {
+    source.is_favorite == target.is_favorite
+        && same_location(source, target)
+        && match (source.captured_at, target.captured_at) {
+            (Some(date), Some(target)) => same_capture_date(date, target),
+            (None, None) => true,
+            _ => false,
+        }
 }
 #[must_use]
 pub fn same_location(a: &StoredAsset, b: &StoredAsset) -> bool {

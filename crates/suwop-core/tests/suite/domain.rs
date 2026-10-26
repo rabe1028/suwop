@@ -288,6 +288,85 @@ fn move_preserves_capture_date_and_favorite() {
     fresh.assets[0].captured_at = Some(20.0);
     assert!(verify_source(&saved, &mut fresh).is_err());
 }
+
+fn metadata_profile(asset: &mut StoredAsset, profile: u8) {
+    asset.captured_at = match profile {
+        1 => Some(11.0),
+        4 => None,
+        _ => Some(10.0),
+    };
+    asset.is_favorite = profile == 2;
+    asset.latitude = (profile == 3).then_some(35.0);
+    asset.longitude = (profile == 3).then_some(139.0);
+}
+
+#[test]
+fn every_original_requires_its_own_metadata_independent_of_asset_order() {
+    // 625 assignments: date, favorite, location and explicit missing date are
+    // distinct metadata classes. This exercises the production predicate.
+    for a in 0..5 {
+        for b in 0..5 {
+            for x in 0..5 {
+                for y in 0..5 {
+                    let mut source = bundle(vec![
+                        asset(Provider::Apple, "a", &[JPEG]),
+                        asset(Provider::Apple, "b", &[RAW]),
+                    ]);
+                    let mut target = bundle(vec![
+                        asset(Provider::Immich, "x", &[JPEG]),
+                        asset(Provider::Immich, "y", &[RAW]),
+                    ]);
+                    metadata_profile(&mut source.assets[0], a);
+                    metadata_profile(&mut source.assets[1], b);
+                    metadata_profile(&mut target.assets[0], x);
+                    metadata_profile(&mut target.assets[1], y);
+                    let saved = receipt(TransferIntent::Move, &source, &target);
+                    for reverse in [false, true] {
+                        if reverse {
+                            target.assets.reverse();
+                        }
+                        assert_eq!(
+                            verify_destination(&saved, &target).is_ok(),
+                            a == x && b == y,
+                            "source=({a},{b}), destination=({x},{y}), reverse={reverse}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn merged_originals_must_preserve_every_source_but_copy_remains_available() {
+    let mut source = bundle(vec![
+        asset(Provider::Immich, "a", &[JPEG]),
+        asset(Provider::Immich, "b", &[RAW]),
+    ]);
+    let target = bundle(vec![asset(Provider::Apple, "pair", &[JPEG, RAW])]);
+    for profile in 0..5 {
+        metadata_profile(&mut source.assets[1], profile);
+        let saved = receipt(TransferIntent::Move, &source, &target);
+        assert_eq!(verify_destination(&saved, &target).is_ok(), profile == 0);
+        let copy = receipt(TransferIntent::Copy, &source, &target);
+        assert!(verify_destination(&copy, &target).is_ok());
+    }
+}
+
+#[test]
+fn partial_source_metadata_coverage_cannot_authorize_a_move() {
+    let mut source = bundle(vec![asset(Provider::Apple, "pair", &[JPEG, RAW])]);
+    let mut target = bundle(vec![
+        asset(Provider::Immich, "a", &[JPEG]),
+        asset(Provider::Immich, "b", &[RAW]),
+    ]);
+    target.assets[1].is_favorite = true;
+    let saved = receipt(TransferIntent::Move, &source, &target);
+    assert!(verify_destination(&saved, &target).is_err());
+    source.assets[0].resources.clear();
+    let saved = receipt(TransferIntent::Move, &source, &target);
+    assert!(verify_destination(&saved, &target).is_err());
+}
 #[test]
 fn missing_capture_date_cannot_be_invented_or_removed_during_move() {
     let mut source = bundle(vec![asset(Provider::Apple, "a", &[JPEG])]);

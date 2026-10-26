@@ -47,6 +47,38 @@ between durable acknowledgments, native submission and the modeled actions.
 
 ## Executable correspondence checks
 
+### Metadata preservation across merged and split originals
+
+`move_metadata.qnt` checks the metadata obligation that the lifecycle model
+abstracts as verified evidence. Two distinct originals have independently chosen
+source metadata, and two destinations can each contain either, both, or neither
+original. Five metadata labels stand for different date/location/favorite states;
+they are equality classes, not a model of floating-point tolerance.
+
+For each source, the implementation unions the checksums of destinations whose
+metadata matches that source, then requires coverage of all its originals.
+The independent model invariant requires a matching destination for each original.
+The old first-source-only predicate is a negative control; it must allow a trace
+that loses the second original's metadata. A positive reachability witness also
+requires that different source metadata can be authorized when separate copies
+preserve it, so rejecting every multi-source Move cannot pass unnoticed.
+
+`make check-transfer-model` checks all three cases with the existing pinned
+Quint/TLC tools. `move-metadata-witness.json` retains the original Z3 witness:
+JPEG at 11 seconds and RAW at 10 seconds, merged into an Apple asset at 11 seconds.
+The Rust `move_metadata` suite replays it through `apple_import_plan`, the shared
+verifier, new-copy evidence and the real `CompleteMove` workflow with fake I/O.
+It requires zero DELETE requests and a receipt that remains `Copied` on refusal.
+The `domain` suite additionally checks 625 metadata assignments in both destination
+orders, merged conflicts, partial resource coverage, and explicit Copy behavior.
+
+The fix verifies every source original, including receipts persisted by older
+versions. Byte signatures, identity checks, metadata tolerances and the durable
+deletion protocol remain separate obligations. Copy may still merge differing
+metadata; a requested Move that cannot retain it fails verification and keeps the
+source originals. This check does not assert native PhotoKit behavior or eliminate
+the gap between a separate model and actual service operations.
+
 The offline shell harness in
 [`tests/suite/workflow.rs`](../crates/suwop-core/tests/suite/workflow.rs) drives the
 real Crux workflow and records persistence/native effects. It checks the durable

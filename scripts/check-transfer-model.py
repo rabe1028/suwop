@@ -15,6 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = ROOT / "formal/transfer_lifecycle.qnt"
 OVERLAP_MODEL = ROOT / "formal/overlapping_moves.qnt"
+METADATA_MODEL = ROOT / "formal/move_metadata.qnt"
 CONFIG = ROOT / "formal/tlc.json"
 QUINT_VERSION = "0.33.0"
 APALACHE_VERSION = "0.62.1"
@@ -152,11 +153,29 @@ def main() -> int:
 
     def fingerprint() -> str:
         return hashlib.sha256(
-            MODEL.read_bytes() + OVERLAP_MODEL.read_bytes() + CONFIG.read_bytes()
+            MODEL.read_bytes()
+            + OVERLAP_MODEL.read_bytes()
+            + METADATA_MODEL.read_bytes()
+            + CONFIG.read_bytes()
         ).hexdigest()
 
     before = fingerprint()
     cases = [
+        (METADATA_MODEL, "step", "everyOriginalPreserved", "passed", "safety"),
+        (
+            METADATA_MODEL,
+            "unsafeFirstSourceStep",
+            "everyOriginalPreserved",
+            "counterexample",
+            "control",
+        ),
+        (
+            METADATA_MODEL,
+            "step",
+            "differingSourcesNeverAuthorized",
+            "counterexample",
+            "positive_witness",
+        ),
         (MODEL, "step", "safety", "passed", "safety"),
         *((MODEL, step, invariant, "counterexample", "control") for step, invariant in CONTROLS),
         (OVERLAP_MODEL, "step", "safety", "passed", "safety"),
