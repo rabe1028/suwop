@@ -15,7 +15,7 @@ extension ImmichVisibility {
 extension ImmichVisibilityUnsupportedReason {
     var explanation: String {
         switch self {
-        case .live: "Live Photo の表示先変更には対応していません。"
+        case .live: "Live Photo の写真だけの表示先は変更できません。写真と付随動画は組で確認する必要があります。"
         case .video: "動画の表示先変更には対応していません。"
         case .stack: "まとめられた写真の表示先変更には対応していません。"
         case .unknown: "原本の種類と関連する写真を確認できないため、変更できません。"

@@ -54,7 +54,7 @@ fn scan_with_peak(
         Suwop,
         Model {
             state: SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "apple".into(),
                 ..SavedLibrary::default()
             },

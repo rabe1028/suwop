@@ -259,7 +259,7 @@ impl Runtime<'_> {
         let raw: Value = io(self.ctx, ShellOperation::ReadState).await?;
         self.state = if raw.is_null() {
             SavedLibrary {
-                schema_version: 9,
+                schema_version: crate::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: scope,
                 ..SavedLibrary::default()
             }
@@ -321,9 +321,21 @@ impl Runtime<'_> {
     {
         match event {
             Event::Initialize { scope } => Box::pin(async move { self.initialize(scope).await }),
-            _ if ![8, 9].contains(&self.state.schema_version) => Box::pin(async move {
-                Err("ローカル記録が利用できません。転送は無効です。".into())
-            }),
+            _ if self.state.schema_version != crate::immich_live_writes::CURRENT_SCHEMA_VERSION => {
+                Box::pin(async move {
+                    Err("ローカル記録が利用できません。転送は無効です。".into())
+                })
+            }
+            event => self.execute_ready(event),
+        }
+    }
+
+    fn execute_ready(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        match event {
             event @ (Event::ConfigureAmazon { .. }
             | Event::DisconnectAmazon
             | Event::ResolveAmazonUploads { .. }
@@ -1339,8 +1351,30 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     let version = raw["schemaVersion"]
         .as_u64()
         .ok_or("カタログ形式が不正です。既存ファイルは変更しません。")?;
-    if ![1, 2, 3, 4, 5, 6, 7, 8, 9].contains(&version) {
+    if !(1..=u64::from(crate::immich_live_writes::CURRENT_SCHEMA_VERSION)).contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
+    }
+    let live_fields = [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ];
+    let live_since = u64::from(crate::immich_live_writes::LIVE_JOURNAL_SCHEMA_VERSION);
+    if version < live_since
+        && live_fields
+            .iter()
+            .any(|field| raw.get(field).is_some_and(|v| !v.is_null()))
+    {
+        return Err(
+            "旧形式に未対応の Live 変更記録があります。既存ファイルは変更しません。".into(),
+        );
+    }
+    for field in live_fields {
+        if version < live_since {
+            raw[field] = serde_json::json!([]);
+        } else if !raw.get(field).is_some_and(Value::is_array) {
+            return Err("Live 変更記録の構成が不正です。既存ファイルは変更しません。".into());
+        }
     }
     if version == 1 {
         convert_dates(&mut raw);
@@ -1373,7 +1407,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     {
         return Err("旧形式に未対応の観測があります。既存ファイルは変更しません。".into());
     }
-    raw["schemaVersion"] = Value::from(9);
+    raw["schemaVersion"] = Value::from(crate::immich_live_writes::CURRENT_SCHEMA_VERSION);
     let state: SavedLibrary = serde_json::from_value(raw)
         .map_err(|e| format!("カタログを読み出せません。既存ファイルは変更しません。{e}"))?;
     let mut ids = BTreeSet::new();
@@ -1390,6 +1424,7 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
         }
     }
     crate::protection::validate_membership(&state)?;
+    crate::immich_live_writes::validate_library(&state)?;
     Ok(state)
 }
 fn convert_dates(value: &mut Value) {

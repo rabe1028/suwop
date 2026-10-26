@@ -35,7 +35,7 @@ fn state(trashed: bool) -> Result<SavedLibrary, String> {
     apple.is_offline = false;
     apple.deletion_blockers.clear();
     Ok(SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         snapshots: vec![
             LibrarySnapshot {

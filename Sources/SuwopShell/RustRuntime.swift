@@ -79,6 +79,15 @@ public actor RustRuntime {
         return current
     }
 
+    /// Whether `ticket` is byte-for-byte the private ticket Core issued to the current
+    /// paired raster owner, for `phase` ("read" or "publish"). Request bytes never
+    /// appear in the public view, so native adapters ask this instead of routes.
+    public func ordinaryLivePairImageTicketIssued(_ ticket: PairImageTicket, phase: String) throws -> Bool {
+        let projection = try bridge.call(19, input: .object(["ticket": .from(ticket), "phase": .string(phase)]))
+        guard case .bool(true) = projection["issued"] else { return false }
+        return true
+    }
+
     public func progress() throws -> RuntimeProgress {
         try bridge.callDecoded(17, as: RuntimeProgress.self)
     }

@@ -133,12 +133,6 @@ pub(crate) fn images(model: &crate::app::Model) -> Vec<OrdinarySelectedImageAcce
         .cloned()
         .collect()
 }
-pub(crate) fn public_library(model: &crate::app::Model) -> crate::privacy::PublishedLibrary {
-    let ordinary = crate::protection::ordinary_state_view(model);
-    let public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
-    public_library_from(model, &ordinary, public)
-}
-
 pub(crate) fn public_library_from(
     model: &crate::app::Model,
     ordinary: &crate::app::SavedLibrary,
@@ -220,8 +214,9 @@ pub(crate) fn security_differs(
     before: &crate::app::SavedLibrary,
     after: &crate::app::SavedLibrary,
 ) -> bool {
-    serde_json::to_value(&before.protected_entries).ok()
-        != serde_json::to_value(&after.protected_entries).ok()
+    crate::immich_live_writes::security_differs(before, after)
+        || serde_json::to_value(&before.protected_entries).ok()
+            != serde_json::to_value(&after.protected_entries).ok()
         || serde_json::to_value(&before.immich_visibility_operations).ok()
             != serde_json::to_value(&after.immich_visibility_operations).ok()
 }

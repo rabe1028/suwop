@@ -227,6 +227,164 @@ final class PrivateMediaCapturedDrainTests: XCTestCase {
         )
         XCTAssertEqual(state.unlinks, 2)
     }
+}
+
+extension PrivateMediaCapturedDrainTests {
+    @MainActor func testBatchDeduplicatesSharedOwnersAndBindsExactSetBeforeAnySuspension() async throws {
+        let registry = PrivateMediaConsumerRegistry(), scope = PrivateMediaConsumerRegistry.BatchWriteScope()
+        let gate = CapturedDrainGate(), state = CapturedDrainState()
+        defer { gate.open() }
+        let keys = [key("P"), key("M")], ids = [UUID(), UUID()]
+        for (index, id) in ids.enumerated() {
+            _ = try registry.register(ownerID: id, resources: index == 0 ? keys : [keys[1]]) {
+                state.revoked.insert(id)
+                state.captures += 1
+                return Task { @MainActor in
+                    XCTAssertEqual(state.revoked, Set(ids))
+                    await gate.wait()
+                }
+            }
+        }
+        try registry.captureForBatchWrite(keys: keys + keys, captureID: captureID(1), scope: scope)
+        XCTAssertEqual(state.captures, 2)
+        try registry.validateBatchWrite(keys: keys.reversed(), captureID: captureID(1), scope: scope, ownership: Data())
+        XCTAssertThrowsError(try registry.validateBatchWrite(
+            keys: [keys[0]], captureID: captureID(1), scope: scope, ownership: Data()
+        ))
+        XCTAssertThrowsError(try registry.validateBatchWrite(
+            keys: keys, captureID: captureID(1), scope: scope, ownership: Data([1])
+        ))
+        let late = try registry.register(ownerID: UUID(), resources: keys) {
+            XCTFail("Batch retry cannot adopt a late replacement")
+            return Task {}
+        }
+        let retained = try registry.prepareBatchDrain(captureID: captureID(1), scope: scope)
+        let drain = Task { @MainActor in
+            try await registry.drainBatchWrite(retained, deadline: .now.advanced(by: .seconds(1)))
+        }
+        drain.cancel()
+        await Task.yield()
+        XCTAssertEqual(state.captures, 2)
+        gate.open()
+        _ = try await drain.value
+        _ = try await registry.drainBatchWrite(
+            captureID: captureID(1),
+            scope: scope,
+            deadline: .now.advanced(by: .seconds(1))
+        )
+        XCTAssertTrue(registry.registered(late))
+        XCTAssertEqual(state.captures, 2)
+    }
+
+    @MainActor func testBatchSealRejectsLateCaptureAndScopesHaveIndependentNonces() throws {
+        let registry = PrivateMediaConsumerRegistry(), batch = PrivateMediaConsumerRegistry.BatchWriteScope()
+        let selected = PrivateMediaConsumerRegistry.SelectedWriteScope(), keys = [key("P"), key("M")]
+        try registry.captureForSelectedWrite(key: keys[0], captureID: captureID(1), scope: selected)
+        let id = String(repeating: "b", count: 32) + ":1"
+        try registry.sealBatchWrite(keys: keys, captureID: id, scope: batch, ownership: Data([1]))
+        XCTAssertThrowsError(try registry.captureForBatchWrite(
+            keys: keys, captureID: id, scope: batch, ownership: Data([1])
+        ))
+        XCTAssertThrowsError(try registry.prepareBatchDrain(captureID: id, scope: batch, ownership: Data([1])))
+        _ = try registry.prepareBatchDrain(captureID: id, scope: batch, ownership: Data([1]), cancelBeforeCapture: true)
+    }
+
+    @MainActor func testBatchPartialUnlinkFailureNeedsFreshExplicitRetryAndNeverAdoptsNewFailure() async throws {
+        let registry = PrivateMediaConsumerRegistry(), scope = PrivateMediaConsumerRegistry.BatchWriteScope()
+        let state = CapturedDrainState(), keys = [key("P"), key("M")]
+        let owner = try registry.register(ownerID: UUID(), resources: keys, revokeAndCaptureCleanup: {
+            .init(joinedWork: Task {}, unlink: {
+                state.unlinks += 1
+                if state.unlinks == 1 {
+                    throw CancellationError()
+                }
+            })
+        })
+        let clean = try registry.register(ownerID: UUID(), resources: [keys[1]]) { Task {} }
+        try registry.captureForBatchWrite(keys: keys, captureID: captureID(1), scope: scope)
+        let frozen = try registry.prepareBatchDrain(captureID: captureID(1), scope: scope, retryCleanup: true)
+        let automatic = try registry.captureOwnerWithoutRetry(owner: owner)
+        do { try await automatic(.now.advanced(by: .seconds(1)))
+            XCTFail("First unlink fails")
+        } catch {}
+        do {
+            _ = try await registry.drainBatchWrite(frozen, deadline: .now.advanced(by: .seconds(1)))
+            XCTFail("Frozen retry intent cannot adopt a new failure")
+        } catch {}
+        XCTAssertEqual(state.unlinks, 1)
+        XCTAssertTrue(registry.registered(owner))
+        XCTAssertFalse(registry.registered(clean), "One failed unlink cannot skip other captured owners")
+        do {
+            _ = try await registry.drainBatchWrite(
+                captureID: captureID(1),
+                scope: scope,
+                deadline: .now.advanced(by: .seconds(1))
+            )
+            XCTFail("Automatic observation cannot retry")
+        } catch {}
+        XCTAssertEqual(state.unlinks, 1)
+        _ = try await registry.drainBatchWrite(
+            captureID: captureID(1),
+            scope: scope,
+            retryCleanup: true,
+            deadline: .now.advanced(by: .seconds(1))
+        )
+        XCTAssertEqual(state.unlinks, 2)
+        XCTAssertFalse(registry.registered(owner))
+    }
+
+    @MainActor func testBatchTimeoutRetainsOriginalWorkersUntilActualJoin() async throws {
+        let registry = PrivateMediaConsumerRegistry(), scope = PrivateMediaConsumerRegistry.BatchWriteScope()
+        let gate = CapturedDrainGate(), state = CapturedDrainState(), keys = [key("P"), key("M")]
+        defer { gate.open() }
+        let owner = try registry.register(ownerID: UUID(), resources: keys, revokeAndCaptureCleanup: {
+            state.captures += 1
+            return .init(joinedWork: Task { await gate.wait() }, unlink: { state.unlinks += 1 })
+        })
+        try registry.captureForBatchWrite(keys: keys, captureID: captureID(1), scope: scope)
+        do {
+            _ = try await registry.drainBatchWrite(
+                captureID: captureID(1),
+                scope: scope,
+                deadline: .now.advanced(by: .milliseconds(20))
+            )
+            XCTFail("Timeout cannot acknowledge cleanup")
+        } catch {}
+        XCTAssertTrue(registry.registered(owner))
+        XCTAssertEqual(state.unlinks, 0)
+        gate.open()
+        _ = try await registry.drainBatchWrite(
+            captureID: captureID(1),
+            scope: scope,
+            deadline: .now.advanced(by: .seconds(1))
+        )
+        XCTAssertEqual(state.captures, 1)
+        XCTAssertEqual(state.unlinks, 1)
+        XCTAssertFalse(registry.registered(owner))
+    }
+
+    @MainActor func testBatchEvictionAndCapacityPreserveReplayProtection() async throws {
+        let registry = PrivateMediaConsumerRegistry(), scope = PrivateMediaConsumerRegistry.BatchWriteScope()
+        let keys = [key("P"), key("M")]
+        for sequence in 1 ... 65 {
+            try registry.captureForBatchWrite(keys: keys, captureID: captureID(sequence), scope: scope)
+            _ = try await registry.drainBatchWrite(
+                captureID: captureID(sequence),
+                scope: scope,
+                deadline: .now.advanced(by: .seconds(1))
+            )
+        }
+        XCTAssertThrowsError(try registry.captureForBatchWrite(keys: keys, captureID: captureID(1), scope: scope))
+        XCTAssertThrowsError(try registry.captureForBatchWrite(
+            keys: keys, captureID: String(repeating: "b", count: 32) + ":66", scope: scope
+        ))
+        let full = PrivateMediaConsumerRegistry.BatchWriteScope()
+        for sequence in 1 ... 64 {
+            try registry.captureForBatchWrite(keys: keys, captureID: captureID(sequence), scope: full)
+        }
+        XCTAssertThrowsError(try registry.captureForBatchWrite(keys: keys, captureID: captureID(65), scope: full))
+        XCTAssertThrowsError(try registry.captureForBatchWrite(keys: [], captureID: captureID(66), scope: full))
+    }
 
     private func key(_ id: String) -> AssetKey {
         AssetKey(provider: .immich, scope: "capture-test", assetID: id)

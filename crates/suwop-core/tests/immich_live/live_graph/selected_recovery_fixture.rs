@@ -10,6 +10,9 @@ pub(in super::super) struct Fixture {
     albums: Vec<String>,
 }
 impl Fixture {
+    pub fn setup_paired_visibility(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
+        Self::setup_with_prefix(agent, directory, "paired-visibility")
+    }
     pub fn setup_private_live(agent: &ureq::Agent, directory: &Path) -> Result<Self, String> {
         Self::setup_with_prefix(agent, directory, "private-live-read")
     }

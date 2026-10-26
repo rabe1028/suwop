@@ -56,7 +56,7 @@ impl Runtime<'_> {
         }
         let old = self.state.clone();
         self.state.amazon_connection = Some(connection);
-        self.state.schema_version = 9;
+        self.state.schema_version = crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
         self.state
             .snapshots
             .retain(|s| s.provider != Provider::Amazon);

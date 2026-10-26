@@ -25,7 +25,7 @@ import Testing
             ])).decode([EffectRequest].self)
         }
         let read = try update(["type": .string("initialize"), "scope": .string("library")])
-        let initial = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 3)))
+        let initial = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 10)))
             .first)
         _ = try resolve(initial, value: .null)
         let scan = try update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)])

@@ -35,7 +35,7 @@ private final class ArchiveABI {
         self.saved = saved ?? SavedLibrary(
             appleScope: "archive-library",
             connection: ConnectionSettings(address: endpoint, allowHTTP: false, credentialID: "ordinary"),
-            schemaVersion: 6
+            schemaVersion: 10
         )
         rawState = try .from(self.saved)
         self.visibility = visibility
@@ -233,7 +233,7 @@ private final class ArchiveABI {
 @Test func ordinaryArchiveABIUsesOnlyAPIKeyAndPersistsExactIntentBeforeBothDirections() throws {
     let fixture = try ArchiveABI()
     try fixture.ready()
-    #expect(fixture.saved.schemaVersion == 9)
+    #expect(fixture.saved.schemaVersion == 10)
     #expect(try fixture.view().immichArchiveActions.first?.to == .archive)
     try fixture.prepare(.archive)
     let prompt = try #require(fixture.prompts.first)

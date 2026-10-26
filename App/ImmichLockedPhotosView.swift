@@ -17,6 +17,7 @@ import SwiftUI
 struct ImmichLockedPhotosView: View {
     @ObservedObject var session: ImmichLockedLibrarySession
     let sceneID: String
+    let pairedLock: Bool
     @State private var lockingSource: AssetKey?
     @Environment(\.dismiss) private var dismiss
     @Environment(\.scenePhase) private var phase
@@ -24,9 +25,15 @@ struct ImmichLockedPhotosView: View {
     @State private var password = ""
     @State private var pinCode = ""
 
-    init(session: ImmichLockedLibrarySession, sceneID: String, lockingSource: AssetKey? = nil) {
+    init(
+        session: ImmichLockedLibrarySession,
+        sceneID: String,
+        lockingSource: AssetKey? = nil,
+        pairedLock: Bool = false
+    ) {
         self.session = session
         self.sceneID = sceneID
+        self.pairedLock = pairedLock
         _lockingSource = State(initialValue: lockingSource)
     }
 
@@ -61,8 +68,12 @@ struct ImmichLockedPhotosView: View {
         .onAppear {
             if let lockingSource {
                 self.lockingSource = nil
-                session.visibility.stageLock(key: lockingSource, sceneID: sceneID)
-                session.visibility.preparePending(sceneID: sceneID)
+                if pairedLock {
+                    session.stagePairedLock(key: lockingSource, sceneID: sceneID)
+                } else {
+                    session.visibility.stageLock(key: lockingSource, sceneID: sceneID)
+                    session.visibility.preparePending(sceneID: sceneID)
+                }
             }
         }
         .onChange(of: phase) { _, phase in
@@ -164,6 +175,7 @@ struct ImmichLockedPhotosView: View {
                 ForEach(view.entries ?? [], id: \.id) { entry in
                     VStack(alignment: .leading, spacing: 10) {
                         Text(entry.asset.name).font(.headline)
+                        pairedDestinations(entry)
                         ImmichVisibilityDestinations(
                             presentation: session.visibility,
                             hint: entry.visibilityAction,
@@ -191,13 +203,56 @@ struct ImmichLockedPhotosView: View {
                 }
             }
             ImmichVisibilityHistoryView(presentation: session.visibility, sceneID: sceneID)
+            // After the existing visibility history, so adding the Live sections does
+            // not move earlier rows or their accessibility reachability.
+            placementHistory
             if let error = session.error {
                 Text(error).foregroundStyle(.red)
             }
         }.accessibilityIdentifier("immichLockedContentList")
     }
 
-    private var cleanupNotice: some View {
+    @ViewBuilder private func pairedDestinations(_ entry: ImmichLockedEntry) -> some View {
+        if entry.liveDiscovery == .observedLinked {
+            Menu("写真と付随動画の表示先を確認…") {
+                Button("タイムラインへ戻す") {
+                    session.prepareLivePlacement(
+                        parent: entry.asset.key,
+                        destination: .timeline,
+                        sceneID: sceneID
+                    )
+                }
+                Button("アーカイブへ戻す") {
+                    session.prepareLivePlacement(
+                        parent: entry.asset.key,
+                        destination: .archive,
+                        sceneID: sceneID
+                    )
+                }
+            }.disabled(session.busy)
+        }
+    }
+
+    private var placementHistory: some View {
+        LivePlacementHistoryPanel(
+            history: session.livePlacementHistory,
+            ordinary: session.ordinaryLiveActions,
+            progress: session.ordinaryLiveProgress,
+            discover: { session.discoverOrdinaryLivePairs() },
+            cancel: { session.cancelOrdinaryLivePair(requestID: $0) },
+            inspect: { session.inspectLivePlacement(batchID: $0, sceneID: sceneID) },
+            keep: { session.keepLivePlacement(batchID: $0, stepIDs: $1, sceneID: sceneID) },
+            newIntent: { session.newLivePlacement(batchID: $0, destinations: $1, sceneID: sceneID) },
+            refresh: { session.ordinaryLivePair(type: "refreshOrdinaryLivePair", parent: $0) },
+            play: { session.ordinaryLivePair(type: "playOrdinaryLivePair", parent: $0) },
+            cleanup: { session.cleanupOrdinaryLivePair(requestID: $0) }
+        )
+    }
+
+    @ViewBuilder private var cleanupNotice: some View {
+        LivePlacementCleanupPanel(cleanup: session.livePlacementCleanup) {
+            session.retryLivePlacementCleanup(captureID: $0)
+        }
         ForEach(Array(session.privateMediaCleanup.enumerated()), id: \.offset) { index, recovery in
             Section {
                 Text(recovery.state == .joining ? "表示用ファイルの解放を確認しています" : "表示用ファイルの解放を確認できませんでした")

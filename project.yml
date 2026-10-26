@@ -201,6 +201,9 @@ targets:
       - path: App/NativeSceneAnchorChanges.swift
       - path: App/ImmichVisibilityPresentation.swift
       - path: App/MacImmichVisibilityConfirmation.swift
+      - path: App/ImmichLiveKeepConfirmation.swift
+      - path: App/MacImmichLivePlacementConfirmation.swift
+      - path: App/ImmichLivePlacementConfirmationSheet.swift
       - path: App/MacImmichArchiveConfirmation.swift
       - path: App/ImmichArchivePresentationText.swift
       - path: NativeAcceptance/SharingTests

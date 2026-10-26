@@ -68,10 +68,11 @@ import os
 from pathlib import Path
 
 names = [line.removesuffix(": test") for line in Path(os.environ["SUWOP_NATIVE_LIVE_EVIDENCE_DIR"], "applicable-tests.txt").read_text().splitlines() if line.endswith(": test")]
-expected = 15 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 17
+expected = 16 if os.environ["IMMICH_VERSION"] == "v3.2.4" else 18
 required = {"real_exact_release_native_image_write_gate_preserves_related_resources", "real_private_video_originals_are_pin_bound_read_only_and_cleanup_drift"}
 required.add("real_selected_video_pin_writes_preserve_nonselected_native_graph_and_originals")
 required.add("real_private_live_pair_originals_are_pin_bound_read_only_and_reject_drift")
+required.add("real_paired_visibility_lock_restore_preserves_graph_and_originals")
 if os.environ["IMMICH_VERSION"] == "v3.3.3":
     required.add("real_live_resource_plan_observes_shared_motion_without_mutation_authority")
 if len(names) != expected or not all(any(name.endswith(case) for name in names) for case in required):

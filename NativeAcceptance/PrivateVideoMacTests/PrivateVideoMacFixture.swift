@@ -10,7 +10,7 @@ import SuwopShell
     let playback = ImmichLockedVideoPlayer()
     let server: ImmichVisibilityFixtureServer
     let transport: PrivateVideoHTTPServer
-    private var saved = SavedLibrary(appleScope: "mac-private-video-fixture", schemaVersion: 8)
+    private var saved = SavedLibrary(appleScope: "mac-private-video-fixture", schemaVersion: 10)
     private var projection: ImmichLockedView?
     private var timers: [UUID: Task<Void, Never>] = [:]
     private(set) var effectTypes: [String] = []

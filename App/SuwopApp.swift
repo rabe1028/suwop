@@ -43,6 +43,7 @@ private struct LibrarySceneRoot: View {
                 model.immichLocked.sceneChanged(sceneID: sceneID, phase: value)
                 model.immichArchive.sceneChanged(sceneID: sceneID, phase: value)
                 model.ordinarySelected.sceneChanged(sceneID: sceneID, phase: value)
+                model.ordinaryLivePairImages.sceneChanged(sceneID: sceneID, phase: value)
             }
             .onDisappear {
                 model.semanticSearch?.scene(id: sceneID, active: false)
@@ -50,6 +51,7 @@ private struct LibrarySceneRoot: View {
                 model.immichLocked.close(sceneID: sceneID)
                 model.immichArchive.close(sceneID: sceneID)
                 model.ordinarySelected.close(sceneID: sceneID)
+                model.ordinaryLivePairImages.close(sceneID: sceneID)
             }
     }
 }

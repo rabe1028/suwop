@@ -23,11 +23,18 @@ pub(crate) fn admit_envelope(action: u32, bytes: usize) -> Result<(), String> {
 }
 
 pub(crate) fn admit_catalog(value: &Value, bytes: usize) -> Result<(), String> {
-    require(bytes <= ORDINARY || value["command"]["type"] == "persist")
+    require(
+        bytes <= CATALOG
+            && (bytes <= ORDINARY
+                || matches!(
+                    value["command"]["type"].as_str(),
+                    Some("persist" | "persistIfCurrent")
+                )),
+    )
 }
 
 pub(crate) fn admit_reply(ids: &BTreeSet<u32>, id: u32, bytes: usize) -> Result<(), String> {
-    require(bytes <= ORDINARY || ids.contains(&id))
+    require(bytes <= CATALOG && (bytes <= ORDINARY || ids.contains(&id)))
 }
 
 pub(crate) fn remember_replies(ids: &mut BTreeSet<u32>, value: &Value) {
@@ -35,7 +42,7 @@ pub(crate) fn remember_replies(ids: &mut BTreeSet<u32>, value: &Value) {
         for effect in effects {
             if matches!(
                 effect["effect"]["Io"]["type"].as_str(),
-                Some("appleScan" | "readState")
+                Some("appleScan" | "readState" | "readStateVersioned")
             ) && let Some(id) = effect["id"].as_u64().and_then(|id| u32::try_from(id).ok())
             {
                 ids.insert(id);
@@ -70,5 +77,34 @@ mod tests {
         assert!(admit_envelope(15, CATALOG + 1).is_err());
         assert!(admit_catalog(&json!({"command":{"type":"persist"}}), ORDINARY + 1).is_ok());
         assert!(admit_catalog(&json!({"command":{"type":"search"}}), ORDINARY + 1).is_err());
+    }
+    #[test]
+    fn versioned_local_io_keeps_finite_bulk_budget_without_network_authority() {
+        let mut ids = BTreeSet::new();
+        remember_replies(
+            &mut ids,
+            &json!([
+                {"id":41,"effect":{"Io":{"type":"readStateVersioned"}}},
+                {"id":42,"effect":{"Io":{"type":"http"}}}
+            ]),
+        );
+        assert!(admit_reply(&ids, 41, ORDINARY + 1).is_ok());
+        assert!(admit_reply(&ids, 41, CATALOG + 1).is_err());
+        assert!(admit_reply(&ids, 42, ORDINARY + 1).is_err());
+        assert!(admit_reply(&ids, 99, ORDINARY + 1).is_err());
+        ids.remove(&41);
+        assert!(admit_reply(&ids, 41, ORDINARY + 1).is_err());
+        assert!(
+            admit_catalog(
+                &json!({"command":{"type":"persistIfCurrent"}}),
+                ORDINARY + 1
+            )
+            .is_ok()
+        );
+        assert!(admit_envelope(15, CATALOG + 1).is_err());
+        assert!(
+            admit_catalog(&json!({"command":{"type":"persistIfCurrent"}}), CATALOG + 1).is_err()
+        );
+        assert!(admit_catalog(&json!({"command":{"type":"readVersioned"}}), ORDINARY + 1).is_err());
     }
 }

@@ -103,6 +103,16 @@ pub(super) fn legacy(key: &AssetKey, session: &Session, outcome: &str) -> Result
         ..SavedLibrary::default()
     };
     let mut raw = serde_json::to_value(state).map_err(|_| "legacy state encode")?;
+    // The current struct serializes schema-9 Live journal fields; an actual
+    // schema-7 file never contained them, and migration rejects them below 9.
+    let object = raw.as_object_mut().ok_or("legacy state object")?;
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        object.remove(field).ok_or("legacy fixture field shape")?;
+    }
     raw["immichVisibilityOperations"] = json!([operation]);
     Ok(raw)
 }
@@ -146,7 +156,7 @@ fn exercise(
             scope: "apple".into(),
         },
     )?;
-    assert_eq!(host.raw()?["schemaVersion"], 9);
+    assert_eq!(host.raw()?["schemaVersion"], 10);
     assert_eq!(host.operation()?, old);
     evidence(&format!("{outcome}-migrated-before"), &host.raw()?)?;
     host.authenticate(&core, &fixture.email, GRANT)?;

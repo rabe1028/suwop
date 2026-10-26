@@ -47,7 +47,7 @@ fn snapshot() -> AlbumSnapshot {
 }
 fn fixture_state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         albums: vec![snapshot()],
         snapshots: vec![LibrarySnapshot {

@@ -173,7 +173,7 @@ fn browsing_remains_available_while_native_work_is_running() {
         Model {
             busy: true,
             state: SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "library".into(),
                 snapshots: vec![LibrarySnapshot {
                     provider: Provider::Apple,

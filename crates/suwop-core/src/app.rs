@@ -23,6 +23,12 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub immich_live_operations: Vec<crate::immich_live_writes::Batch>,
+    #[serde(default)]
+    pub immich_live_unstarted_closures: Vec<crate::immich_live_writes::UnstartedClosure>,
+    #[serde(default)]
+    pub immich_live_legacy_reconciliations: Vec<crate::immich_live_writes::LegacyReconciliation>,
+    #[serde(default)]
     pub amazon_connection: Option<crate::amazon::Connection>,
     #[serde(default)]
     pub amazon_uploads: Vec<crate::amazon::UploadRecord>,
@@ -60,6 +66,44 @@ pub struct SavedLibrary {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", content = "data", rename_all = "camelCase")]
 pub enum ShellOperation {
+    ReadOrdinaryLivePairImage {
+        ticket: crate::immich_live_writes::ordinary_images::PairImageTicket,
+    },
+    PublishOrdinaryLivePairImage {
+        ticket: crate::immich_live_writes::ordinary_images::PairImageTicket,
+        #[serde(rename = "stagedID")]
+        staged_id: String,
+    },
+    ReleaseOrdinaryLivePairImage {
+        #[serde(rename = "ownerID")]
+        owner_id: String,
+    },
+    ConfirmImmichLiveKeep {
+        prompt: crate::immich_live_writes::LiveKeepPrompt,
+    },
+    BeginOrdinaryLivePairRead {
+        #[serde(rename = "scopeID")]
+        scope_id: String,
+        keys: Vec<crate::domain::AssetKey>,
+        workspace: String,
+        presentation: crate::immich_live_writes::ordinary::PairPresentation,
+    },
+    OrdinaryLivePairReadHttp {
+        #[serde(rename = "scopeID")]
+        scope_id: String,
+        request: crate::immich::HttpRequest,
+    },
+    PlayOrdinaryLivePairRead {
+        #[serde(rename = "scopeID")]
+        scope_id: String,
+        plan: crate::media::PlaybackPlan,
+    },
+    EndOrdinaryLivePairRead {
+        #[serde(rename = "scopeID")]
+        scope_id: String,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+    },
     AmazonHttp {
         request: crate::amazon::Request,
     },
@@ -131,6 +175,32 @@ pub enum ShellOperation {
         generation: u64,
         #[serde(rename = "retryCleanup")]
         retry_cleanup: bool,
+    },
+    CapturePrivateMediaBatch {
+        keys: Vec<crate::domain::AssetKey>,
+        #[serde(rename = "captureID")]
+        capture_id: String,
+        #[serde(rename = "intentDigest")]
+        intent_digest: String,
+        #[serde(rename = "livePending")]
+        live_pending: Vec<crate::immich_locked::live::ImmichLockedLivePending>,
+        #[serde(rename = "videoPending")]
+        video_pending: Vec<crate::immich_locked::video::ImmichLockedVideoPending>,
+    },
+    DrainCapturedPrivateMediaBatch {
+        keys: Vec<crate::domain::AssetKey>,
+        #[serde(rename = "captureID")]
+        capture_id: String,
+        #[serde(rename = "intentDigest")]
+        intent_digest: String,
+        #[serde(rename = "cancelBeforeCapture")]
+        cancel_before_capture: bool,
+        #[serde(rename = "retryCleanup")]
+        retry_cleanup: bool,
+        #[serde(rename = "livePending")]
+        live_pending: Vec<crate::immich_locked::live::ImmichLockedLivePending>,
+        #[serde(rename = "videoPending")]
+        video_pending: Vec<crate::immich_locked::video::ImmichLockedVideoPending>,
     },
     CapturePrivateMediaKey {
         key: crate::domain::AssetKey,
@@ -273,6 +343,14 @@ pub enum ShellOperation {
         asset: crate::domain::StoredAsset,
     },
     ReadState,
+    ReadStateVersioned,
+    ConfirmImmichLivePlacement {
+        prompt: crate::immich_live_writes::LivePlacementPrompt,
+    },
+    PersistIfCurrent {
+        revision: String,
+        state: Box<SavedLibrary>,
+    },
     RandomId,
     Wait {
         milliseconds: u32,
@@ -420,6 +498,93 @@ pub type Context = CommandContext<Effect, Event>;
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
+    RequestOrdinaryLivePairImage {
+        #[serde(rename = "parentKey")]
+        parent_key: crate::domain::AssetKey,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        kind: crate::ordinary_selected::OrdinarySelectedImageKind,
+    },
+    CancelOrdinaryLivePairImage {
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+        #[serde(rename = "requestID")]
+        request_id: Option<String>,
+    },
+    #[serde(skip)]
+    OrdinaryLivePairImageCompleted {
+        completion: crate::immich_live_writes::ordinary_images::Completion,
+    },
+    RefreshOrdinaryLivePairs {
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    PrepareImmichLiveResourcePlacements {
+        parents: Vec<crate::domain::AssetKey>,
+        destinations: Vec<crate::immich_live_writes::LiveResourceDestination>,
+        #[serde(rename = "batchID")]
+        batch_id: String,
+        #[serde(rename = "predecessorBatchID")]
+        predecessor_batch_id: Option<String>,
+        #[serde(rename = "supersedesStepIDs")]
+        supersedes_step_ids: Vec<String>,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    InspectImmichLivePlacement {
+        #[serde(rename = "batchID")]
+        batch_id: String,
+        #[serde(rename = "requestID")]
+        request_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    KeepImmichLivePlacement {
+        #[serde(rename = "batchID")]
+        batch_id: String,
+        #[serde(rename = "closureID")]
+        closure_id: String,
+        #[serde(rename = "stepIDs")]
+        step_ids: Vec<String>,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    #[serde(skip)]
+    ImmichLiveRecoveryCompleted {
+        completion: crate::immich_live_writes::runtime::recovery::Completion,
+    },
+    RefreshOrdinaryLivePair {
+        #[serde(rename = "parentKey")]
+        parent_key: crate::domain::AssetKey,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    PlayOrdinaryLivePair {
+        #[serde(rename = "parentKey")]
+        parent_key: crate::domain::AssetKey,
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    CancelOrdinaryLivePair {
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    RetryOrdinaryLivePairCleanup {
+        #[serde(rename = "requestID")]
+        request_id: String,
+    },
+    #[serde(skip)]
+    OrdinaryLivePairCompleted {
+        completion: crate::immich_live_writes::ordinary_runtime::Completion,
+    },
     ConfigureAmazon {
         credential_id: String,
         now: f64,
@@ -497,6 +662,24 @@ pub enum Event {
     CloseImmichArchive {
         #[serde(rename = "sceneID")]
         scene_id: String,
+    },
+    PrepareImmichLivePlacement {
+        parents: Vec<crate::domain::AssetKey>,
+        destination: crate::immich_live_writes::LivePlacementDestination,
+        #[serde(rename = "batchID")]
+        batch_id: String,
+        #[serde(rename = "grantID")]
+        grant_id: String,
+        #[serde(rename = "sceneID")]
+        scene_id: String,
+    },
+    RetryImmichLiveCleanup {
+        #[serde(rename = "captureID")]
+        capture_id: String,
+    },
+    #[serde(skip)]
+    ImmichLivePlacementCompleted {
+        completion: crate::immich_live_writes::runtime::Completion,
     },
     PrepareImmichVisibility {
         key: crate::domain::AssetKey,
@@ -967,6 +1150,9 @@ pub enum Event {
 }
 #[derive(Debug, Default)]
 pub struct Model {
+    pub ordinary_live_images: crate::immich_live_writes::ordinary_images::State,
+    pub ordinary_live: crate::immich_live_writes::ordinary_runtime::State,
+    pub live_placement: crate::immich_live_writes::runtime::State,
     pub private_media_capture: crate::private_media_capture::State,
     pub immich_live_resources: crate::immich_live_resources::LiveResourcesModel,
     pub ordinary_selected: crate::ordinary_selected::OrdinarySelectedModel,
@@ -992,6 +1178,19 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub ordinary_live_image_pending:
+        Vec<crate::immich_live_writes::ordinary_images::PairImagePending>,
+    pub ordinary_live_images: Vec<crate::immich_live_writes::ordinary_images::PairImageAccess>,
+    pub live_placement_cleanup: Option<crate::immich_live_writes::LivePlacementCleanup>,
+    pub ordinary_live_progress:
+        Option<crate::immich_live_writes::ordinary_runtime::OrdinaryLiveReadProgress>,
+    pub live_placement_candidates: Vec<crate::domain::AssetKey>,
+    pub ordinary_live_actions:
+        Vec<crate::immich_live_writes::ordinary_runtime::OrdinaryLivePairAction>,
+    pub live_placement_history: crate::immich_live_writes::LivePlacementHistory,
+    pub live_keep_prompt: Option<crate::immich_live_writes::LiveKeepPrompt>,
+    pub ordinary_live_pairs: Vec<crate::immich_live_writes::ordinary::PairPresentation>,
+    pub live_placement_prompt: Option<crate::immich_live_writes::LivePlacementPrompt>,
     pub private_media_cleanup: Vec<crate::private_media_cleanup::PrivateMediaCleanupView>,
     pub immich_live_resources: Option<crate::immich_live_resources::ImmichLiveResourcesView>,
     pub ordinary_selected_presentation: Vec<crate::ordinary_selected::OrdinarySelectedPresentation>,
@@ -1033,6 +1232,20 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
+        Self::reduce(event, model).and(crate::immich_live_writes::ordinary_images::reconcile(model))
+    }
+    fn view(&self, model: &Model) -> ViewModel {
+        Self::library_view(model)
+    }
+}
+impl Suwop {
+    fn reduce(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Some(command) = crate::immich_live_writes::ordinary_images::update(&event, model) {
+            return command;
+        }
+        if let Some(command) = crate::immich_live_writes::runtime::update(&event, model) {
+            return command;
+        }
         // Internal count-only notifications cannot change catalog or authority.
         if let Event::FetchProgress { status } = event {
             model.fetch_status = Some(status);
@@ -1053,11 +1266,7 @@ impl crux_core::App for Suwop {
         // an old cancellation/Finished event must never be re-enqueued behind new work.
         cleanup.and(Self::update_after_capture(event, model))
     }
-    fn view(&self, model: &Model) -> ViewModel {
-        Self::library_view(model)
-    }
-}
-impl Suwop {
+
     /// Ordinary membership has no clock-dependent grants. Native callers still
     /// validate their presentation context before and after every read.
     #[must_use]
@@ -1087,6 +1296,9 @@ impl Suwop {
     }
 
     fn update_after_capture(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if let Some(command) = crate::immich_live_writes::ordinary_runtime::update(&event, model) {
+            return command;
+        }
         if let Some(command) = crate::immich_live_resources::update(&event, model) {
             return command;
         }
@@ -1243,7 +1455,8 @@ impl Suwop {
                 model.error = error;
                 model.busy = false;
                 model.fetch_status = None;
-                model.ready = [8, 9].contains(&model.state.schema_version);
+                model.ready =
+                    model.state.schema_version == crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
                 update_preview_preferences(model, preview_to_select);
                 crate::protection::reconcile(model)
             }
@@ -1321,27 +1534,9 @@ impl Suwop {
         let ordinary = crate::protection::ordinary_state_view(model);
         let move_blockers = public_move_blockers(model, can_transfer, &ordinary);
         let operation_public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
-        let public = crate::ordinary_selected::public_library_from(
-            model,
-            &ordinary,
-            operation_public.clone(),
-        );
+        let public = paired_public_library(model, &ordinary, &operation_public);
         let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
-        let preview_access = crate::media::PreviewAccess::with_amazon(
-            &public.snapshots,
-            &model.state.apple_scope,
-            model.session.as_ref(),
-            amazon_scope(model),
-        );
-        let preview_choices: std::collections::BTreeMap<_, _> = photos
-            .iter()
-            .map(|p| {
-                (
-                    crate::browser::photo_id(p),
-                    preview_access.choices(p, &model.preview_preferences),
-                )
-            })
-            .collect();
+        let preview_choices = photo_preview_choices(model, &public, &photos);
         let displayed_dates = displayed_dates(&preview_choices);
         let editing_access = crate::editing::EditingAccess::new(
             &operation_public.snapshots,
@@ -1352,6 +1547,18 @@ impl Suwop {
             ordinary_projection(model, &operation_public);
         let (status, error) = public_messages(model, &ordinary);
         ViewModel {
+            live_placement_cleanup: crate::immich_live_writes::runtime::cleanup(model),
+            ordinary_live_image_pending: crate::immich_live_writes::ordinary_images::pending(model),
+            ordinary_live_images: crate::immich_live_writes::ordinary_images::images(model),
+            ordinary_live_progress: crate::immich_live_writes::ordinary_runtime::progress(model),
+            live_placement_candidates: crate::immich_live_writes::runtime::history::candidates(
+                &operation_public,
+            ),
+            ordinary_live_actions: crate::immich_live_writes::ordinary_runtime::actions(model),
+            live_placement_history: crate::immich_live_writes::runtime::history::view(model),
+            live_keep_prompt: crate::immich_live_writes::runtime::recovery::prompt(model),
+            ordinary_live_pairs: crate::immich_live_writes::ordinary_runtime::presentations(model),
+            live_placement_prompt: crate::immich_live_writes::runtime::prompt(model),
             private_media_cleanup: crate::private_media_cleanup::projection(model),
             ordinary_selected_presentation: crate::ordinary_selected::presentations(model),
             ordinary_selected_images: crate::ordinary_selected::images(model),
@@ -1527,7 +1734,11 @@ fn choose_preview(
     if model.protection.denied.contains(anchor) || model.protection.denied.contains(&key) {
         return Err("保護した写真を通常の一覧から表示できません。".into());
     }
-    let public = crate::ordinary_selected::public_library(model);
+    // The same display set the view built the photo from, including fresh pair
+    // proofs. A preview preference is display-only and grants no operation.
+    let ordinary = crate::protection::ordinary_state_view(model);
+    let operation_public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+    let public = paired_public_library(model, &ordinary, &operation_public);
     let present = |key: &crate::domain::AssetKey| {
         public
             .snapshots
@@ -1675,4 +1886,49 @@ fn can_transfer(model: &Model) -> bool {
         && !model.busy
         && !model.protection.membership_uncertain
         && !model.immich_visibility.persistence_uncertain
+}
+
+fn paired_public_library(
+    model: &Model,
+    ordinary: &SavedLibrary,
+    operation_public: &crate::privacy::PublishedLibrary,
+) -> crate::privacy::PublishedLibrary {
+    let mut public =
+        crate::ordinary_selected::public_library_from(model, ordinary, operation_public.clone());
+    // Fresh pair proofs extend display only. Operation permissions continue
+    // to use canonical operation_public and its historical mutation fences.
+    for asset in crate::immich_live_writes::ordinary_runtime::assets(model) {
+        if let Some(snapshot) = public.snapshots.iter_mut().find(|snapshot| {
+            snapshot.provider == asset.key.provider
+                && snapshot.scope == asset.key.scope
+                && snapshot.access == crate::domain::ScanAccess::Full
+        }) {
+            snapshot.assets.retain(|prior| prior.key != asset.key);
+            snapshot.assets.push(asset);
+        }
+    }
+    public
+}
+
+fn photo_preview_choices(
+    model: &Model,
+    public: &crate::privacy::PublishedLibrary,
+    photos: &[UnifiedPhoto],
+) -> std::collections::BTreeMap<String, Vec<crate::media::PreviewChoice>> {
+    let preview_access = crate::media::PreviewAccess::with_amazon(
+        &public.snapshots,
+        &model.state.apple_scope,
+        model.session.as_ref(),
+        amazon_scope(model),
+    );
+    let choices: std::collections::BTreeMap<_, _> = photos
+        .iter()
+        .map(|p| {
+            (
+                crate::browser::photo_id(p),
+                preview_access.choices(p, &model.preview_preferences),
+            )
+        })
+        .collect();
+    choices
 }

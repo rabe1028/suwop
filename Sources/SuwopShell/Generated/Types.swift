@@ -1,6 +1,46 @@
 // Generated from Rust schema. Run make generate-types; do not edit.
 import Foundation
 
+private struct GeneratedSchemaKey: CodingKey {
+    let stringValue: String
+    var intValue: Int? { nil }
+    init?(stringValue: String) { self.stringValue = stringValue }
+    init?(intValue: Int) { return nil }
+}
+private func requireSchemaKeys(_ decoder: any Decoder, allowed: Set<String>) throws {
+    let values = try decoder.container(keyedBy: GeneratedSchemaKey.self)
+    guard Set(values.allKeys.map(\.stringValue)).isSubset(of: allowed) else {
+        throw DecodingError.dataCorrupted(.init(
+            codingPath: decoder.codingPath, debugDescription: "Unknown object field"
+        ))
+    }
+}
+
+public struct Accepted204: Codable, Sendable {
+    public var attemptId: String
+    public var batchId: String
+    public var intentDigest: String
+    public var key: AssetKey
+    public var stepId: String
+    public init(attemptId: String, batchId: String, intentDigest: String, key: AssetKey, stepId: String) {
+        self.attemptId = attemptId
+        self.batchId = batchId
+        self.intentDigest = intentDigest
+        self.key = key
+        self.stepId = stepId
+    }
+    private enum CodingKeys: String, CodingKey { case attemptId, batchId, intentDigest, key, stepId }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["attemptId", "batchId", "intentDigest", "key", "stepId"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attemptId = try values.decode(String.self, forKey: .attemptId)
+        batchId = try values.decode(String.self, forKey: .batchId)
+        intentDigest = try values.decode(String.self, forKey: .intentDigest)
+        key = try values.decode(AssetKey.self, forKey: .key)
+        stepId = try values.decode(String.self, forKey: .stepId)
+    }
+}
+
 public enum AdjustmentBase: String, Codable, CaseIterable, Sendable {
     case `original`
     case `rendered`
@@ -86,6 +126,21 @@ public struct AlbumView: Codable, Sendable {
         self.album = album
         self.candidates = candidates
         self.photoIDs = photoIDs
+    }
+}
+
+public struct Alias: Codable, Sendable {
+    public var destination: Placement
+    public var edgeId: String
+    public var id: String
+    public var resourceId: String
+    public var role: Role
+    public init(destination: Placement, edgeId: String, id: String, resourceId: String, role: Role) {
+        self.destination = destination
+        self.edgeId = edgeId
+        self.id = id
+        self.resourceId = resourceId
+        self.role = role
     }
 }
 
@@ -479,6 +534,21 @@ public struct AssetKey: Codable, Sendable {
     }
 }
 
+public struct Batch: Codable, Sendable {
+    public var formatVersion: Int64
+    public var id: String
+    public var intent: Intent
+    public var latestObservations: [MemberObservation]
+    public var steps: [Step]
+    public init(formatVersion: Int64, id: String, intent: Intent, latestObservations: [MemberObservation] = [], steps: [Step] = []) {
+        self.formatVersion = formatVersion
+        self.id = id
+        self.intent = intent
+        self.latestObservations = latestObservations
+        self.steps = steps
+    }
+}
+
 public struct BrowserOptions: Codable, Sendable {
     public var filter: PhotoFilter
     public var presence: Presence?
@@ -627,6 +697,34 @@ public struct CurrentImageRenderResult: Codable, Sendable {
     }
 }
 
+public struct Dependency: Codable, Sendable {
+    public var after: String
+    public var before: String
+    public init(after: String, before: String) {
+        self.after = after
+        self.before = before
+    }
+}
+
+public enum Direction: String, Codable, CaseIterable, Sendable {
+    case `lock`
+    case `restore`
+    case `reposition`
+}
+
+public struct Edge: Codable, Sendable {
+    public var id: String
+    public var motionResource: String
+    public var parentResource: String
+    public var selectionId: String
+    public init(id: String, motionResource: String, parentResource: String, selectionId: String) {
+        self.id = id
+        self.motionResource = motionResource
+        self.parentResource = parentResource
+        self.selectionId = selectionId
+    }
+}
+
 public struct EditClipboard: Codable, Sendable {
     public var dimensions: PixelSize
     public var options: EditCopyOptions
@@ -728,12 +826,82 @@ public struct EmbeddingJob: Codable, Sendable {
     }
 }
 
+public struct Fact: Codable, Sendable {
+    public var checksum: String
+    public var forward: Forward
+    public var key: AssetKey
+    public var media: Media
+    public var offline: Bool
+    public var ownerId: String
+    public var placement: Placement
+    public var revision: String
+    public var trashed: Bool
+    public var unstacked: Bool
+    public init(checksum: String, forward: Forward, key: AssetKey, media: Media, offline: Bool, ownerId: String, placement: Placement, revision: String, trashed: Bool, unstacked: Bool) {
+        self.checksum = checksum
+        self.forward = forward
+        self.key = key
+        self.media = media
+        self.offline = offline
+        self.ownerId = ownerId
+        self.placement = placement
+        self.revision = revision
+        self.trashed = trashed
+        self.unstacked = unstacked
+    }
+    private enum CodingKeys: String, CodingKey { case checksum, forward, key, media, offline, ownerId, placement, revision, trashed, unstacked }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["checksum", "forward", "key", "media", "offline", "ownerId", "placement", "revision", "trashed", "unstacked"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        checksum = try values.decode(String.self, forKey: .checksum)
+        forward = try values.decode(Forward.self, forKey: .forward)
+        key = try values.decode(AssetKey.self, forKey: .key)
+        media = try values.decode(Media.self, forKey: .media)
+        offline = try values.decode(Bool.self, forKey: .offline)
+        ownerId = try values.decode(String.self, forKey: .ownerId)
+        placement = try values.decode(Placement.self, forKey: .placement)
+        revision = try values.decode(String.self, forKey: .revision)
+        trashed = try values.decode(Bool.self, forKey: .trashed)
+        unstacked = try values.decode(Bool.self, forKey: .unstacked)
+    }
+}
+
 public struct FileSignature: Codable, Sendable {
     public var bytes: Int64
     public var sha256: String
     public init(bytes: Int64, sha256: String) {
         self.bytes = bytes
         self.sha256 = sha256
+    }
+}
+
+public enum Forward: Codable, Sendable {
+    case `unlinked`
+    case `linked`(AssetKey)
+    private enum CodingKeys: String, CodingKey { case type, data }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .type) {
+        case "unlinked":
+            try requireSchemaKeys(decoder, allowed: ["type"])
+            self = .unlinked
+        case "linked":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .linked(try values.decode(AssetKey.self, forKey: .data))
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: values,
+                debugDescription: "Unknown enum tag")
+        }
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .unlinked:
+            try values.encode("unlinked", forKey: .type)
+        case let .linked(data):
+            try values.encode("linked", forKey: .type)
+            try values.encode(data, forKey: .data)
+        }
     }
 }
 
@@ -1659,6 +1827,89 @@ public struct InferenceStatus: Codable, Sendable {
     }
 }
 
+public struct Intent: Codable, Sendable {
+    public var aliases: [Alias]
+    public var dependencies: [Dependency]
+    public var digest: String
+    public var direction: Direction
+    public var edges: [Edge]
+    public var encodingVersion: Int64
+    public var observedAdditionalParents: [AssetKey]
+    public var orderedStepIds: [String]
+    public var ownerId: String
+    public var resources: [Resource]
+    public var scope: String
+    public var selections: [Selection]
+    public var sharedReferenceLimitationsAcknowledged: Bool
+    public var supersedes: [StepRef]
+    public init(aliases: [Alias] = [], dependencies: [Dependency] = [], digest: String, direction: Direction, edges: [Edge] = [], encodingVersion: Int64, observedAdditionalParents: [AssetKey] = [], orderedStepIds: [String] = [], ownerId: String, resources: [Resource] = [], scope: String, selections: [Selection] = [], sharedReferenceLimitationsAcknowledged: Bool, supersedes: [StepRef] = []) {
+        self.aliases = aliases
+        self.dependencies = dependencies
+        self.digest = digest
+        self.direction = direction
+        self.edges = edges
+        self.encodingVersion = encodingVersion
+        self.observedAdditionalParents = observedAdditionalParents
+        self.orderedStepIds = orderedStepIds
+        self.ownerId = ownerId
+        self.resources = resources
+        self.scope = scope
+        self.selections = selections
+        self.sharedReferenceLimitationsAcknowledged = sharedReferenceLimitationsAcknowledged
+        self.supersedes = supersedes
+    }
+}
+
+public struct LegacyReconciliation: Codable, Sendable {
+    public var confirmedGraph: [ResourceObservation]
+    public var digest: String
+    public var formatVersion: Int64
+    public var id: String
+    public var legacy: [LegacyRef]
+    public var parent: AssetKey
+    public init(confirmedGraph: [ResourceObservation] = [], digest: String, formatVersion: Int64, id: String, legacy: [LegacyRef] = [], parent: AssetKey) {
+        self.confirmedGraph = confirmedGraph
+        self.digest = digest
+        self.formatVersion = formatVersion
+        self.id = id
+        self.legacy = legacy
+        self.parent = parent
+    }
+}
+
+public struct LegacyRef: Codable, Sendable {
+    public var acknowledgedAlbums: AlbumMembershipObservation
+    public var acknowledgedObservation: ImmichVisibility?
+    public var acknowledgedSelected: SelectedVisibilityObservation?
+    public var operationId: String
+    public var recordDigest: String
+    public init(acknowledgedAlbums: AlbumMembershipObservation, acknowledgedObservation: ImmichVisibility? = nil, acknowledgedSelected: SelectedVisibilityObservation? = nil, operationId: String, recordDigest: String) {
+        self.acknowledgedAlbums = acknowledgedAlbums
+        self.acknowledgedObservation = acknowledgedObservation
+        self.acknowledgedSelected = acknowledgedSelected
+        self.operationId = operationId
+        self.recordDigest = recordDigest
+    }
+    private enum CodingKeys: String, CodingKey { case acknowledgedAlbums, acknowledgedObservation, acknowledgedSelected, operationId, recordDigest }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["acknowledgedAlbums", "acknowledgedObservation", "acknowledgedSelected", "operationId", "recordDigest"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        acknowledgedAlbums = try values.decode(AlbumMembershipObservation.self, forKey: .acknowledgedAlbums)
+        acknowledgedObservation = try values.decodeIfPresent(ImmichVisibility.self, forKey: .acknowledgedObservation)
+        acknowledgedSelected = try values.decodeIfPresent(SelectedVisibilityObservation.self, forKey: .acknowledgedSelected)
+        operationId = try values.decode(String.self, forKey: .operationId)
+        recordDigest = try values.decode(String.self, forKey: .recordDigest)
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(acknowledgedAlbums, forKey: .acknowledgedAlbums)
+        try values.encode(acknowledgedObservation, forKey: .acknowledgedObservation)
+        try values.encode(acknowledgedSelected, forKey: .acknowledgedSelected)
+        try values.encode(operationId, forKey: .operationId)
+        try values.encode(recordDigest, forKey: .recordDigest)
+    }
+}
+
 public struct LibrarySnapshot: Codable, Sendable {
     public var provider: Provider
     public var scope: String
@@ -1697,6 +1948,40 @@ public enum LiveDiscoveryTermination: String, Codable, CaseIterable, Sendable {
     case `unavailable`
 }
 
+public struct LiveKeepPrompt: Codable, Sendable {
+    public var aliases: [LivePlacementPromptAlias]
+    public var batchID: String
+    public var closureID: String
+    public var explanation: String
+    public var generation: Int64
+    public var grantID: String
+    public var resources: [LivePlacementPromptResource]
+    public var sceneID: String
+    public var targets: [LiveKeepTarget]
+    public init(aliases: [LivePlacementPromptAlias] = [], batchID: String, closureID: String, explanation: String, generation: Int64, grantID: String, resources: [LivePlacementPromptResource] = [], sceneID: String, targets: [LiveKeepTarget] = []) {
+        self.aliases = aliases
+        self.batchID = batchID
+        self.closureID = closureID
+        self.explanation = explanation
+        self.generation = generation
+        self.grantID = grantID
+        self.resources = resources
+        self.sceneID = sceneID
+        self.targets = targets
+    }
+}
+
+public struct LiveKeepTarget: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public var stepID: String
+    public init(key: AssetKey, name: String, stepID: String) {
+        self.key = key
+        self.name = name
+        self.stepID = stepID
+    }
+}
+
 public enum LiveObservedVisibility: String, Codable, CaseIterable, Sendable {
     case `timeline`
     case `archive`
@@ -1723,6 +2008,132 @@ public struct LiveParentObservation: Codable, Sendable {
     }
 }
 
+public struct LivePlacementCleanup: Codable, Sendable {
+    public var canRetry: Bool
+    public var captureID: String
+    public var status: String
+    public init(canRetry: Bool, captureID: String, status: String) {
+        self.canRetry = canRetry
+        self.captureID = captureID
+        self.status = status
+    }
+}
+
+public enum LivePlacementDestination: String, Codable, CaseIterable, Sendable {
+    case `locked`
+    case `timeline`
+    case `archive`
+}
+
+public struct LivePlacementHistory: Codable, Sendable {
+    public var batches: [LivePlacementHistoryBatch]
+    public init(batches: [LivePlacementHistoryBatch] = []) {
+        self.batches = batches
+    }
+}
+
+public struct LivePlacementHistoryBatch: Codable, Sendable {
+    public var batchID: String
+    public var canInspect: Bool
+    public var canNewIntent: Bool
+    public var parentKeys: [AssetKey]
+    public var resources: [LivePlacementHistoryResource]
+    public var retired: Bool
+    public var supersedesStepIDs: [String]
+    public init(batchID: String, canInspect: Bool, canNewIntent: Bool, parentKeys: [AssetKey] = [], resources: [LivePlacementHistoryResource] = [], retired: Bool, supersedesStepIDs: [String] = []) {
+        self.batchID = batchID
+        self.canInspect = canInspect
+        self.canNewIntent = canNewIntent
+        self.parentKeys = parentKeys
+        self.resources = resources
+        self.retired = retired
+        self.supersedesStepIDs = supersedesStepIDs
+    }
+}
+
+public struct LivePlacementHistoryResource: Codable, Sendable {
+    public var allowedDestinations: [Placement]
+    public var canKeep: Bool
+    public var currentObservation: String
+    public var historicalOutcome: String
+    public var key: AssetKey
+    public var name: String
+    public var proposedDestination: Placement
+    public var stepID: String?
+    public init(allowedDestinations: [Placement] = [], canKeep: Bool, currentObservation: String, historicalOutcome: String, key: AssetKey, name: String, proposedDestination: Placement, stepID: String? = nil) {
+        self.allowedDestinations = allowedDestinations
+        self.canKeep = canKeep
+        self.currentObservation = currentObservation
+        self.historicalOutcome = historicalOutcome
+        self.key = key
+        self.name = name
+        self.proposedDestination = proposedDestination
+        self.stepID = stepID
+    }
+}
+
+public struct LivePlacementPrompt: Codable, Sendable {
+    public var aliases: [LivePlacementPromptAlias]
+    public var batchID: String
+    public var continuingAccessDisclosure: String
+    public var generation: Int64
+    public var grantID: String
+    public var intentDigest: String
+    public var resources: [LivePlacementPromptResource]
+    public var sceneID: String
+    public var sharedReferenceLimitationsAcknowledged: Bool
+    public init(aliases: [LivePlacementPromptAlias] = [], batchID: String, continuingAccessDisclosure: String, generation: Int64, grantID: String, intentDigest: String, resources: [LivePlacementPromptResource] = [], sceneID: String, sharedReferenceLimitationsAcknowledged: Bool) {
+        self.aliases = aliases
+        self.batchID = batchID
+        self.continuingAccessDisclosure = continuingAccessDisclosure
+        self.generation = generation
+        self.grantID = grantID
+        self.intentDigest = intentDigest
+        self.resources = resources
+        self.sceneID = sceneID
+        self.sharedReferenceLimitationsAcknowledged = sharedReferenceLimitationsAcknowledged
+    }
+}
+
+public struct LivePlacementPromptAlias: Codable, Sendable {
+    public var motionKey: AssetKey
+    public var parentKey: AssetKey
+    public init(motionKey: AssetKey, parentKey: AssetKey) {
+        self.motionKey = motionKey
+        self.parentKey = parentKey
+    }
+}
+
+public struct LivePlacementPromptResource: Codable, Sendable {
+    public var albumCount: Int64
+    public var from: Placement
+    public var key: AssetKey
+    public var name: String
+    public var removesAllAlbumMembership: Bool
+    public var role: Role
+    public var to: Placement
+    public var unchanged: Bool
+    public init(albumCount: Int64, from: Placement, key: AssetKey, name: String, removesAllAlbumMembership: Bool, role: Role, to: Placement, unchanged: Bool) {
+        self.albumCount = albumCount
+        self.from = from
+        self.key = key
+        self.name = name
+        self.removesAllAlbumMembership = removesAllAlbumMembership
+        self.role = role
+        self.to = to
+        self.unchanged = unchanged
+    }
+}
+
+public struct LiveResourceDestination: Codable, Sendable {
+    public var destination: Placement
+    public var key: AssetKey
+    public init(destination: Placement, key: AssetKey) {
+        self.destination = destination
+        self.key = key
+    }
+}
+
 public struct LiveResourceReadFact: Codable, Sendable {
     public var checksum: String
     public var key: AssetKey
@@ -1741,6 +2152,20 @@ public struct LiveResourceReadFact: Codable, Sendable {
 public enum LiveResourceRole: String, Codable, CaseIterable, Sendable {
     case `parent`
     case `motion`
+}
+
+public enum Media: String, Codable, CaseIterable, Sendable {
+    case `image`
+    case `video`
+}
+
+public struct MemberObservation: Codable, Sendable {
+    public var key: AssetKey
+    public var state: ObservedState
+    public init(key: AssetKey, state: ObservedState) {
+        self.key = key
+        self.state = state
+    }
 }
 
 public enum MetadataAction: String, Codable, CaseIterable, Sendable {
@@ -1815,6 +2240,76 @@ public struct NativeColorPlan: Codable, Sendable {
     }
 }
 
+public struct NoSubmissionRecord: Codable, Sendable {
+    public var attemptId: String
+    public var batchId: String
+    public var intentDigest: String
+    public var key: AssetKey
+    public var stepId: String
+    public init(attemptId: String, batchId: String, intentDigest: String, key: AssetKey, stepId: String) {
+        self.attemptId = attemptId
+        self.batchId = batchId
+        self.intentDigest = intentDigest
+        self.key = key
+        self.stepId = stepId
+    }
+    private enum CodingKeys: String, CodingKey { case attemptId, batchId, intentDigest, key, stepId }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["attemptId", "batchId", "intentDigest", "key", "stepId"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attemptId = try values.decode(String.self, forKey: .attemptId)
+        batchId = try values.decode(String.self, forKey: .batchId)
+        intentDigest = try values.decode(String.self, forKey: .intentDigest)
+        key = try values.decode(AssetKey.self, forKey: .key)
+        stepId = try values.decode(String.self, forKey: .stepId)
+    }
+}
+
+public enum ObservationFailure: String, Codable, CaseIterable, Sendable {
+    case `denied`
+    case `unavailable`
+    case `identityMismatch`
+    case `unsupported`
+    case `malformed`
+}
+
+public enum ObservedState: Codable, Sendable {
+    case `notObserved`
+    case `own`(Fact)
+    case `unavailable`(ObservationFailure)
+    private enum CodingKeys: String, CodingKey { case type, data }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .type) {
+        case "notObserved":
+            try requireSchemaKeys(decoder, allowed: ["type"])
+            self = .notObserved
+        case "own":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .own(try values.decode(Fact.self, forKey: .data))
+        case "unavailable":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .unavailable(try values.decode(ObservationFailure.self, forKey: .data))
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: values,
+                debugDescription: "Unknown enum tag")
+        }
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .notObserved:
+            try values.encode("notObserved", forKey: .type)
+        case let .own(data):
+            try values.encode("own", forKey: .type)
+            try values.encode(data, forKey: .data)
+        case let .unavailable(data):
+            try values.encode("unavailable", forKey: .type)
+            try values.encode(data, forKey: .data)
+        }
+    }
+}
+
 public struct OrdinaryContentAuthorization: Codable, Sendable {
     public var expectedRevision: String
     public var purpose: OrdinaryContentPurpose
@@ -1831,6 +2326,30 @@ public enum OrdinaryContentPurpose: String, Codable, CaseIterable, Sendable {
     case `destinationReadback`
     case `visibilityReconciliation`
     case `selectedPresentationMetadata`
+}
+
+public struct OrdinaryLivePairAction: Codable, Sendable {
+    public var canPlay: Bool
+    public var canRefresh: Bool
+    public var cleanupRequestID: String?
+    public var parentKey: AssetKey
+    public init(canPlay: Bool, canRefresh: Bool, cleanupRequestID: String? = nil, parentKey: AssetKey) {
+        self.canPlay = canPlay
+        self.canRefresh = canRefresh
+        self.cleanupRequestID = cleanupRequestID
+        self.parentKey = parentKey
+    }
+}
+
+public struct OrdinaryLiveReadProgress: Codable, Sendable {
+    public var canCancel: Bool
+    public var phase: String
+    public var requestID: String
+    public init(canCancel: Bool, phase: String, requestID: String) {
+        self.canCancel = canCancel
+        self.phase = phase
+        self.requestID = requestID
+    }
 }
 
 public struct OrdinarySelectedImageAccess: Codable, Sendable {
@@ -1920,6 +2439,183 @@ public struct OrdinarySelectedPresentation: Codable, Sendable {
 public enum OrdinarySelectedVisibility: String, Codable, CaseIterable, Sendable {
     case `timeline`
     case `archive`
+}
+
+public struct OutcomeUnknownData: Codable, Sendable {
+    public var accepted: Accepted204?
+    public var attempt_id: String
+    public init(accepted: Accepted204? = nil, attempt_id: String) {
+        self.accepted = accepted
+        self.attempt_id = attempt_id
+    }
+    private enum CodingKeys: String, CodingKey { case accepted, attempt_id }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["accepted", "attempt_id"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        accepted = try values.decodeIfPresent(Accepted204.self, forKey: .accepted)
+        attempt_id = try values.decode(String.self, forKey: .attempt_id)
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(accepted, forKey: .accepted)
+        try values.encode(attempt_id, forKey: .attempt_id)
+    }
+}
+
+public struct OutcomeAppliedData: Codable, Sendable {
+    public var accepted: Accepted204
+    public var attempt_id: String
+    public var verified_post: PostFacts
+    public init(accepted: Accepted204, attempt_id: String, verified_post: PostFacts) {
+        self.accepted = accepted
+        self.attempt_id = attempt_id
+        self.verified_post = verified_post
+    }
+    private enum CodingKeys: String, CodingKey { case accepted, attempt_id, verified_post }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["accepted", "attempt_id", "verified_post"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        accepted = try values.decode(Accepted204.self, forKey: .accepted)
+        attempt_id = try values.decode(String.self, forKey: .attempt_id)
+        verified_post = try values.decode(PostFacts.self, forKey: .verified_post)
+    }
+}
+
+public struct OutcomeNotAppliedData: Codable, Sendable {
+    public var attempt_id: String
+    public var no_submission: NoSubmissionRecord
+    public init(attempt_id: String, no_submission: NoSubmissionRecord) {
+        self.attempt_id = attempt_id
+        self.no_submission = no_submission
+    }
+    private enum CodingKeys: String, CodingKey { case attempt_id, no_submission }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["attempt_id", "no_submission"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attempt_id = try values.decode(String.self, forKey: .attempt_id)
+        no_submission = try values.decode(NoSubmissionRecord.self, forKey: .no_submission)
+    }
+}
+
+public enum Outcome: Codable, Sendable {
+    case `notStarted`
+    case `unknown`(OutcomeUnknownData)
+    case `applied`(OutcomeAppliedData)
+    case `notApplied`(OutcomeNotAppliedData)
+    private enum CodingKeys: String, CodingKey { case type, data }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .type) {
+        case "notStarted":
+            try requireSchemaKeys(decoder, allowed: ["type"])
+            self = .notStarted
+        case "unknown":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .unknown(try values.decode(OutcomeUnknownData.self, forKey: .data))
+        case "applied":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .applied(try values.decode(OutcomeAppliedData.self, forKey: .data))
+        case "notApplied":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .notApplied(try values.decode(OutcomeNotAppliedData.self, forKey: .data))
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: values,
+                debugDescription: "Unknown enum tag")
+        }
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case .notStarted:
+            try values.encode("notStarted", forKey: .type)
+        case let .unknown(data):
+            try values.encode("unknown", forKey: .type)
+            try values.encode(data, forKey: .data)
+        case let .applied(data):
+            try values.encode("applied", forKey: .type)
+            try values.encode(data, forKey: .data)
+        case let .notApplied(data):
+            try values.encode("notApplied", forKey: .type)
+            try values.encode(data, forKey: .data)
+        }
+    }
+}
+
+public struct PairImageAccess: Codable, Sendable {
+    public var kind: OrdinarySelectedImageKind
+    public var ownerID: String
+    public var presentation: PairPresentation
+    public var requestID: String
+    public var sceneID: String
+    public var stagedID: String
+    public init(kind: OrdinarySelectedImageKind, ownerID: String, presentation: PairPresentation, requestID: String, sceneID: String, stagedID: String) {
+        self.kind = kind
+        self.ownerID = ownerID
+        self.presentation = presentation
+        self.requestID = requestID
+        self.sceneID = sceneID
+        self.stagedID = stagedID
+    }
+}
+
+public struct PairImagePending: Codable, Sendable {
+    public var kind: OrdinarySelectedImageKind
+    public var ownerID: String
+    public var presentation: PairPresentation
+    public var requestID: String
+    public var sceneID: String
+    public init(kind: OrdinarySelectedImageKind, ownerID: String, presentation: PairPresentation, requestID: String, sceneID: String) {
+        self.kind = kind
+        self.ownerID = ownerID
+        self.presentation = presentation
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public struct PairImageResult: Codable, Sendable {
+    public var requestID: String
+    public var stagedID: String
+    public init(requestID: String, stagedID: String) {
+        self.requestID = requestID
+        self.stagedID = stagedID
+    }
+}
+
+public struct PairImageTicket: Codable, Sendable {
+    public var expectedRevision: String
+    public var kind: OrdinarySelectedImageKind
+    public var ownerID: String
+    public var presentation: PairPresentation
+    public var request: HttpRequest
+    public var requestID: String
+    public var sceneID: String
+    public init(expectedRevision: String, kind: OrdinarySelectedImageKind, ownerID: String, presentation: PairPresentation, request: HttpRequest, requestID: String, sceneID: String) {
+        self.expectedRevision = expectedRevision
+        self.kind = kind
+        self.ownerID = ownerID
+        self.presentation = presentation
+        self.request = request
+        self.requestID = requestID
+        self.sceneID = sceneID
+    }
+}
+
+public struct PairPresentation: Codable, Sendable {
+    public var generation: Int64
+    public var motionKey: AssetKey
+    public var motionVisibility: Placement
+    public var parentKey: AssetKey
+    public var parentVisibility: Placement
+    public var proofID: String
+    public init(generation: Int64, motionKey: AssetKey, motionVisibility: Placement, parentKey: AssetKey, parentVisibility: Placement, proofID: String) {
+        self.generation = generation
+        self.motionKey = motionKey
+        self.motionVisibility = motionVisibility
+        self.parentKey = parentKey
+        self.parentVisibility = parentVisibility
+        self.proofID = proofID
+    }
 }
 
 public struct PasteEditsPrompt: Codable, Sendable {
@@ -2028,6 +2724,13 @@ public struct PixelSize: Codable, Sendable {
     }
 }
 
+public enum Placement: String, Codable, CaseIterable, Sendable {
+    case `timeline`
+    case `archive`
+    case `hidden`
+    case `locked`
+}
+
 public enum PlaybackKind: String, Codable, CaseIterable, Sendable {
     case `video`
     case `live`
@@ -2043,6 +2746,37 @@ public struct PlaybackPlan: Codable, Sendable {
         self.kind = kind
         self.name = name
         self.sourceKeys = sourceKeys
+    }
+}
+
+public struct PostFacts: Codable, Sendable {
+    public var attemptId: String
+    public var batchId: String
+    public var digest: String
+    public var encodingVersion: Int64
+    public var intentDigest: String
+    public var resources: [ResourceObservation]
+    public var stepId: String
+    public init(attemptId: String, batchId: String, digest: String, encodingVersion: Int64, intentDigest: String, resources: [ResourceObservation] = [], stepId: String) {
+        self.attemptId = attemptId
+        self.batchId = batchId
+        self.digest = digest
+        self.encodingVersion = encodingVersion
+        self.intentDigest = intentDigest
+        self.resources = resources
+        self.stepId = stepId
+    }
+    private enum CodingKeys: String, CodingKey { case attemptId, batchId, digest, encodingVersion, intentDigest, resources, stepId }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["attemptId", "batchId", "digest", "encodingVersion", "intentDigest", "resources", "stepId"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        attemptId = try values.decode(String.self, forKey: .attemptId)
+        batchId = try values.decode(String.self, forKey: .batchId)
+        digest = try values.decode(String.self, forKey: .digest)
+        encodingVersion = try values.decode(Int64.self, forKey: .encodingVersion)
+        intentDigest = try values.decode(String.self, forKey: .intentDigest)
+        resources = try values.decode([ResourceObservation].self, forKey: .resources)
+        stepId = try values.decode(String.self, forKey: .stepId)
     }
 }
 
@@ -2286,6 +3020,55 @@ public enum RenderFormat: String, Codable, CaseIterable, Sendable {
     case `heic`
 }
 
+public struct Resource: Codable, Sendable {
+    public var destination: Placement
+    public var id: String
+    public var initial: Fact
+    public var initialAlbums: [String]
+    public var stepId: String?
+    public init(destination: Placement, id: String, initial: Fact, initialAlbums: [String] = [], stepId: String? = nil) {
+        self.destination = destination
+        self.id = id
+        self.initial = initial
+        self.initialAlbums = initialAlbums
+        self.stepId = stepId
+    }
+    private enum CodingKeys: String, CodingKey { case destination, id, initial, initialAlbums, stepId }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["destination", "id", "initial", "initialAlbums", "stepId"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        destination = try values.decode(Placement.self, forKey: .destination)
+        id = try values.decode(String.self, forKey: .id)
+        initial = try values.decode(Fact.self, forKey: .initial)
+        initialAlbums = try values.decode([String].self, forKey: .initialAlbums)
+        stepId = try values.decodeIfPresent(String.self, forKey: .stepId)
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(destination, forKey: .destination)
+        try values.encode(id, forKey: .id)
+        try values.encode(initial, forKey: .initial)
+        try values.encode(initialAlbums, forKey: .initialAlbums)
+        try values.encode(stepId, forKey: .stepId)
+    }
+}
+
+public struct ResourceObservation: Codable, Sendable {
+    public var albums: [String]
+    public var fact: Fact
+    public init(albums: [String] = [], fact: Fact) {
+        self.albums = albums
+        self.fact = fact
+    }
+    private enum CodingKeys: String, CodingKey { case albums, fact }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["albums", "fact"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        albums = try values.decode([String].self, forKey: .albums)
+        fact = try values.decode(Fact.self, forKey: .fact)
+    }
+}
+
 public enum ResourceRole: String, Codable, CaseIterable, Sendable {
     case `image`
     case `rawImage`
@@ -2303,6 +3086,11 @@ public struct ReversionPrompt: Codable, Sendable {
     }
 }
 
+public enum Role: String, Codable, CaseIterable, Sendable {
+    case `parent`
+    case `motion`
+}
+
 public struct SavedLibrary: Codable, Sendable {
     public var albums: [AlbumSnapshot]
     public var amazonConnection: AmazonConnection?
@@ -2311,6 +3099,9 @@ public struct SavedLibrary: Codable, Sendable {
     public var appleVisibilityOperations: [AppleVisibilityOperation]
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
+    public var immichLiveLegacyReconciliations: [LegacyReconciliation]
+    public var immichLiveOperations: [Batch]
+    public var immichLiveUnstartedClosures: [UnstartedClosure]
     public var immichVisibilityOperations: [ImmichVisibilityOperation]
     public var pendingAppleTrash: [AppleTrashOperation]
     public var pendingEditPastes: [PendingEditPaste]
@@ -2322,7 +3113,7 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichLiveLegacyReconciliations: [LegacyReconciliation] = [], immichLiveOperations: [Batch] = [], immichLiveUnstartedClosures: [UnstartedClosure] = [], immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.amazonConnection = amazonConnection
         self.amazonUploads = amazonUploads
@@ -2330,6 +3121,9 @@ public struct SavedLibrary: Codable, Sendable {
         self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
         self.editClipboard = editClipboard
+        self.immichLiveLegacyReconciliations = immichLiveLegacyReconciliations
+        self.immichLiveOperations = immichLiveOperations
+        self.immichLiveUnstartedClosures = immichLiveUnstartedClosures
         self.immichVisibilityOperations = immichVisibilityOperations
         self.pendingAppleTrash = pendingAppleTrash
         self.pendingEditPastes = pendingEditPastes
@@ -2379,6 +3173,15 @@ public struct SelectedVisibilitySummary: Codable, Sendable {
     }
 }
 
+public struct Selection: Codable, Sendable {
+    public var id: String
+    public var parent: AssetKey
+    public init(id: String, parent: AssetKey) {
+        self.id = id
+        self.parent = parent
+    }
+}
+
 public struct ShareFile: Codable, Sendable {
     public var name: String
     public var path: String
@@ -2405,6 +3208,30 @@ public struct SimilarityHit: Codable, Sendable {
         self.asset = asset
         self.distance = distance
         self.revision = revision
+    }
+}
+
+public struct Step: Codable, Sendable {
+    public var id: String
+    public var outcome: Outcome
+    public var resourceId: String
+    public init(id: String, outcome: Outcome, resourceId: String) {
+        self.id = id
+        self.outcome = outcome
+        self.resourceId = resourceId
+    }
+}
+
+public struct StepRef: Codable, Sendable {
+    public var batchId: String
+    public var intentDigest: String
+    public var retiredOutcomesDigest: String
+    public var stepId: String
+    public init(batchId: String, intentDigest: String, retiredOutcomesDigest: String, stepId: String) {
+        self.batchId = batchId
+        self.intentDigest = intentDigest
+        self.retiredOutcomesDigest = retiredOutcomesDigest
+        self.stepId = stepId
     }
 }
 
@@ -2593,6 +3420,21 @@ public struct UnifiedPhoto: Codable, Sendable {
     }
 }
 
+public struct UnstartedClosure: Codable, Sendable {
+    public var currentGraph: [ResourceObservation]
+    public var digest: String
+    public var formatVersion: Int64
+    public var id: String
+    public var references: [StepRef]
+    public init(currentGraph: [ResourceObservation] = [], digest: String, formatVersion: Int64, id: String, references: [StepRef] = []) {
+        self.currentGraph = currentGraph
+        self.digest = digest
+        self.formatVersion = formatVersion
+        self.id = id
+        self.references = references
+    }
+}
+
 public struct UploadForgetPrompt: Codable, Sendable {
     public var key: AssetKey
     public var name: String
@@ -2682,10 +3524,20 @@ public struct ViewModel: Codable, Sendable {
     public var immichLockedView: ImmichLockedView
     public var immichVisibilityActions: [ImmichVisibilityActionHint]
     public var immichVisibilityView: ImmichVisibilityView
+    public var liveKeepPrompt: LiveKeepPrompt?
+    public var livePlacementCandidates: [AssetKey]
+    public var livePlacementCleanup: LivePlacementCleanup?
+    public var livePlacementHistory: LivePlacementHistory
+    public var livePlacementPrompt: LivePlacementPrompt?
     public var media: [String: PlaybackKind]
     public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
     public var ordinaryContentKeys: [AssetKey]
+    public var ordinaryLiveActions: [OrdinaryLivePairAction]
+    public var ordinaryLiveImagePending: [PairImagePending]
+    public var ordinaryLiveImages: [PairImageAccess]
+    public var ordinaryLivePairs: [PairPresentation]
+    public var ordinaryLiveProgress: OrdinaryLiveReadProgress?
     public var ordinarySelectedGeneration: Int64
     public var ordinarySelectedImages: [OrdinarySelectedImageAccess]
     public var ordinarySelectedPending: [OrdinarySelectedImageRequest]
@@ -2701,7 +3553,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, liveKeepPrompt: LiveKeepPrompt? = nil, livePlacementCandidates: [AssetKey] = [], livePlacementCleanup: LivePlacementCleanup? = nil, livePlacementHistory: LivePlacementHistory, livePlacementPrompt: LivePlacementPrompt? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinaryLiveActions: [OrdinaryLivePairAction] = [], ordinaryLiveImagePending: [PairImagePending] = [], ordinaryLiveImages: [PairImageAccess] = [], ordinaryLivePairs: [PairPresentation] = [], ordinaryLiveProgress: OrdinaryLiveReadProgress? = nil, ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -2715,10 +3567,20 @@ public struct ViewModel: Codable, Sendable {
         self.immichLockedView = immichLockedView
         self.immichVisibilityActions = immichVisibilityActions
         self.immichVisibilityView = immichVisibilityView
+        self.liveKeepPrompt = liveKeepPrompt
+        self.livePlacementCandidates = livePlacementCandidates
+        self.livePlacementCleanup = livePlacementCleanup
+        self.livePlacementHistory = livePlacementHistory
+        self.livePlacementPrompt = livePlacementPrompt
         self.media = media
         self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers
         self.ordinaryContentKeys = ordinaryContentKeys
+        self.ordinaryLiveActions = ordinaryLiveActions
+        self.ordinaryLiveImagePending = ordinaryLiveImagePending
+        self.ordinaryLiveImages = ordinaryLiveImages
+        self.ordinaryLivePairs = ordinaryLivePairs
+        self.ordinaryLiveProgress = ordinaryLiveProgress
         self.ordinarySelectedGeneration = ordinarySelectedGeneration
         self.ordinarySelectedImages = ordinarySelectedImages
         self.ordinarySelectedPending = ordinarySelectedPending

@@ -9,6 +9,13 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    pair_image_ticket: suwop_core::immich_live_writes::PairImageTicket,
+    pair_image_result: suwop_core::immich_live_writes::PairImageResult,
+    live_resource_destination: suwop_core::immich_live_writes::LiveResourceDestination,
+    live_keep_prompt: suwop_core::immich_live_writes::LiveKeepPrompt,
+    pair_presentation: suwop_core::immich_live_writes::PairPresentation,
+    live_placement_prompt: suwop_core::immich_live_writes::LivePlacementPrompt,
+    live_placement_destination: suwop_core::immich_live_writes::LivePlacementDestination,
     amazon_request: suwop_core::amazon::Request,
     amazon_response: suwop_core::amazon::Response,
     amazon_upload_submission: suwop_core::amazon::UploadSubmission,

@@ -51,7 +51,7 @@ fn twin() -> Result<StoredAsset, String> {
 fn state(name: &str) -> Result<SavedLibrary, String> {
     let asset = source(name)?;
     Ok(SavedLibrary {
-        schema_version: 9,
+        schema_version: 10,
         apple_scope: "apple".into(),
         amazon_connection: Some(connection()?),
         snapshots: vec![LibrarySnapshot {
@@ -1264,5 +1264,179 @@ fn connected_library_whose_root_read_fails_never_claims_apple_only() -> Result<(
             .iter()
             .all(|p| p.presence != Presence::AppleOnly)
     );
+    Ok(())
+}
+
+/// Live journal corpus shared with the Swift wire tests; `validStates[0]` holds
+/// an uncertain Live batch over Immich originals in `wire-owner-scope`.
+fn live_library() -> Result<SavedLibrary, String> {
+    let corpus: Value = serde_json::from_str(include_str!("../fixtures/live-journal-wire.json"))
+        .map_err(|e| e.to_string())?;
+    serde_json::from_value(corpus["validStates"][0]["library"].clone()).map_err(|e| e.to_string())
+}
+fn live_held_key() -> Result<AssetKey, String> {
+    let library = live_library()?;
+    let batch = library.immich_live_operations.first().ok_or("batch")?;
+    Ok(batch
+        .intent
+        .resources
+        .first()
+        .ok_or("resource")?
+        .initial
+        .key
+        .clone())
+}
+/// The upstream Amazon catalog (schema 9) never contains Live journal fields.
+fn amazon_v9_catalog() -> Result<Value, String> {
+    amazon_v9_from(&state("photo.jpg")?)
+}
+fn amazon_v9_from(library: &SavedLibrary) -> Result<Value, String> {
+    let mut raw = serde_json::to_value(library).map_err(|e| e.to_string())?;
+    raw["schemaVersion"] = json!(9);
+    let object = raw.as_object_mut().ok_or("object")?;
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        object.remove(field).ok_or("live field")?;
+    }
+    Ok(raw)
+}
+
+#[test]
+fn amazon_schema_nine_catalog_migrates_to_live_schema_ten_keeping_amazon_fields()
+-> Result<(), String> {
+    // A real verified Amazon copy journal, as an upstream build would have saved it.
+    let core = core("photo.jpg")?;
+    let mut shell = Shell::default();
+    shell.run(&core, copy_event()?)?;
+    let copied = shell.saved.ok_or("missing saved state")?;
+    assert!(!copied.amazon_uploads.is_empty());
+    let raw = amazon_v9_from(&copied)?;
+    let expected_connection = raw["amazonConnection"].clone();
+    let expected_uploads = raw["amazonUploads"].clone();
+    let migrated = suwop_core::workflow::migrate(raw)?;
+    assert_eq!(
+        migrated.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
+    assert_eq!(migrated.schema_version, 10);
+    assert_eq!(
+        serde_json::to_value(&migrated.amazon_connection).map_err(|e| e.to_string())?,
+        expected_connection
+    );
+    assert_eq!(
+        serde_json::to_value(&migrated.amazon_uploads).map_err(|e| e.to_string())?,
+        expected_uploads
+    );
+    assert!(migrated.immich_live_operations.is_empty());
+    assert!(migrated.immich_live_unstarted_closures.is_empty());
+    assert!(migrated.immich_live_legacy_reconciliations.is_empty());
+    Ok(())
+}
+
+#[test]
+fn schema_nine_with_live_fields_and_malformed_schema_ten_are_rejected() -> Result<(), String> {
+    let live = serde_json::to_value(live_library()?).map_err(|e| e.to_string())?;
+    for field in [
+        "immichLiveOperations",
+        "immichLiveUnstartedClosures",
+        "immichLiveLegacyReconciliations",
+    ] {
+        // Schema 9 is the Amazon catalog: any Live record there is not ours to interpret.
+        let mut raw = amazon_v9_catalog()?;
+        raw[field] = if field == "immichLiveOperations" {
+            live[field].clone()
+        } else {
+            json!([])
+        };
+        assert!(suwop_core::workflow::migrate(raw).is_err(), "{field}");
+        let mut current = serde_json::to_value(state("photo.jpg")?).map_err(|e| e.to_string())?;
+        suwop_core::workflow::migrate(current.clone())?;
+        current[field] = json!({});
+        assert!(suwop_core::workflow::migrate(current).is_err(), "{field}");
+    }
+    Ok(())
+}
+
+#[test]
+fn configuring_amazon_persists_schema_ten_and_keeps_the_live_journal() -> Result<(), String> {
+    let mut library = state("photo.jpg")?;
+    library.amazon_connection = None;
+    library.immich_live_operations = live_library()?.immich_live_operations;
+    let core = core_from(library.clone());
+    let mut shell = Shell::default();
+    shell.run(&core, configure_event("credential"))?;
+    assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    let saved = shell.saved.ok_or("missing saved state")?;
+    assert_eq!(
+        saved.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
+    assert!(saved.amazon_connection.is_some());
+    assert_eq!(saved.immich_live_operations, library.immich_live_operations);
+    Ok(())
+}
+
+#[test]
+fn live_held_immich_original_cannot_be_copied_to_amazon() -> Result<(), String> {
+    let held = live_held_key()?;
+    let held_core = |journal: bool| -> Result<Core<Suwop>, String> {
+        let mut library = state("photo.jpg")?;
+        let mut asset = source("held.jpg")?;
+        asset.key = held.clone();
+        library.snapshots.push(LibrarySnapshot {
+            provider: Provider::Immich,
+            scope: held.scope.clone(),
+            assets: vec![asset],
+            access: ScanAccess::Full,
+            scanned_at: Some(1.0),
+        });
+        if journal {
+            library.immich_live_operations = live_library()?.immich_live_operations;
+        }
+        Ok(Core::new_with(
+            Suwop,
+            Model {
+                state: library,
+                session: Some(suwop_core::immich::Session {
+                    ordinary_content_guard: None,
+                    ordinary_content_context: None,
+                    endpoint: "https://test/api".into(),
+                    key: "test".into(),
+                    user_id: "owner".into(),
+                    scope: held.scope.clone(),
+                    version: suwop_core::immich::Version {
+                        major: 3,
+                        minor: 3,
+                        patch: 3,
+                    },
+                }),
+                ready: true,
+                ..Model::default()
+            },
+        ))
+    };
+    let copy = || Event::CopyTo {
+        keys: vec![held.clone()],
+        destination: Provider::Amazon,
+        intent: TransferIntent::Copy,
+        id: "copy".into(),
+        now: 1.0,
+    };
+    let refusal = "Apple Photos の可視性を確認して一覧を更新してください。";
+    let core = held_core(true)?;
+    let mut shell = Shell::default();
+    shell.run(&core, copy())?;
+    assert_eq!(core.view().error.as_deref(), Some(refusal));
+    assert_eq!((shell.attempts, shell.posts), (0, 0));
+    assert!(shell.methods.is_empty());
+    assert!(shell.saved.is_none());
+    // Control: without the Live journal the same key passes the content check.
+    let control = held_core(false)?;
+    let mut shell = Shell::default();
+    shell.run(&control, copy())?;
+    assert_ne!(control.view().error.as_deref(), Some(refusal));
     Ok(())
 }

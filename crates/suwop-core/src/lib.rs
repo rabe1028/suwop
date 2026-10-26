@@ -36,3 +36,5 @@ mod private_media_capture;
 mod private_media_cleanup;
 
 pub mod display_catalog;
+
+pub mod immich_live_writes;

@@ -81,7 +81,7 @@ mod selected_read_resume_tests {
             asset_id: "33333333-3333-4333-8333-333333333333".into(),
         };
         let mut state = SavedLibrary {
-            schema_version: 8,
+            schema_version: crate::immich_live_writes::CURRENT_SCHEMA_VERSION,
             apple_scope: "apple".into(),
             ..SavedLibrary::default()
         };

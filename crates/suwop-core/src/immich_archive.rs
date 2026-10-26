@@ -159,7 +159,7 @@ pub fn view(model: &Model) -> ImmichArchiveView {
 // Busy/scene ownership and operation IDs remain request-specific.
 fn durable_state_available(model: &Model) -> bool {
     model.ready
-        && [8, 9].contains(&model.state.schema_version)
+        && model.state.schema_version == crate::immich_live_writes::CURRENT_SCHEMA_VERSION
         && !model.immich_visibility.persistence_uncertain
         && !model.protection.membership_uncertain
 }
@@ -767,7 +767,7 @@ mod recovery_tests {
     fn recovery_accepts_only_exact_transaction_candidates() -> Result<(), serde_json::Error> {
         let before = crate::app::SavedLibrary::default();
         let mut desired = before.clone();
-        desired.schema_version = 8;
+        desired.schema_version = crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
         assert_ne!(
             serde_json::to_value(&before)?,
             serde_json::to_value(&desired)?

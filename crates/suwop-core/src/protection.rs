@@ -256,6 +256,7 @@ pub(crate) fn ordinary_state_view(model: &Model) -> std::borrow::Cow<'_, SavedLi
         .denied
         .iter()
         .chain(&model.immich_visibility.denied)
+        .chain(&model.live_placement.held)
     {
         if !state.protected_entries.iter().any(|e| e.key == *key) {
             state
@@ -897,7 +898,10 @@ fn reconcile_durable(model: &mut Model, grant_id: &str) -> Command<crate::app::E
         let read: Result<serde_json::Value, _> = io(&ctx, ShellOperation::ReadState).await;
         let state = read
             .ok()
-            .filter(|value| matches!(value["schemaVersion"].as_u64(), Some(8 | 9)))
+            .filter(|value| {
+                value["schemaVersion"].as_u64()
+                    == Some(u64::from(crate::immich_live_writes::CURRENT_SCHEMA_VERSION))
+            })
             .and_then(|value| crate::workflow::migrate(value).ok())
             .filter(|state| {
                 state.apple_scope == expected_scope

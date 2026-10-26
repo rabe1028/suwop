@@ -316,7 +316,10 @@ async fn cleanup(ctx: &Context, session: &DedicatedSession) -> bool {
     locked || logout
 }
 pub(crate) fn live_metadata_denied(model: &Model, key: &AssetKey) -> bool {
-    denied(model, key) || model.immich_visibility.persistence_uncertain
+    model.live_placement.held.contains(key)
+        || model.live_placement.persistence_uncertain
+        || denied(model, key)
+        || model.immich_visibility.persistence_uncertain
 }
 fn denied(model: &Model, key: &AssetKey) -> bool {
     model.state.immich_visibility_operations.iter().any(|o| {
@@ -1471,7 +1474,7 @@ mod tests {
         use crux_core::App;
         let mut model = pending_refresh_model();
         model.ready = true;
-        model.state.schema_version = 8;
+        model.state.schema_version = crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
         model.busy = false;
         model.immich_locked.refresh_busy = false;
         model.immich_locked.scene_id = Some("scene".into());
@@ -1789,6 +1792,41 @@ impl VisibilitySession {
             .map_err(|_| ERROR)?
             .as_millis();
         u64::try_from(deadline).map_err(|_| ERROR.into())
+    }
+    pub(crate) async fn submit_live_visibility(
+        &self,
+        ctx: &Context,
+        permit: &crate::immich_live_writes::runtime::executor::Submission,
+    ) -> crate::immich_live_writes::runtime::executor::SubmissionResult {
+        use crate::immich_live_writes::runtime::executor::SubmissionResult;
+        let request = (|| {
+            permit.verify(self)?;
+            let proof = self.session.write_contract.as_ref().ok_or(ERROR)?;
+            if !proof.valid() {
+                return Err(ERROR.to_owned());
+            }
+            let mut request = self.session.request(
+                "assets",
+                "PUT",
+                Some(json!({"ids":[permit.key().asset_id],"visibility":permit.destination()})),
+            );
+            request.immich_visibility_authorization =
+                Some(crate::immich_visibility::ImmichVisibilityAuthorization {
+                    deadline_unix_milliseconds: self.visibility_deadline()?,
+                    operation_id: permit.step_id().into(),
+                    grant_id: self.grant_id.clone(),
+                    scene_id: self.scene_id.clone(),
+                    generation: self.expected,
+                });
+            permit.verify(self)?;
+            Ok::<_, String>(request)
+        })();
+        let Ok(request) = request else {
+            return SubmissionResult::NotSubmitted;
+        };
+        SubmissionResult::Response(
+            crate::app::io(ctx, crate::app::ShellOperation::Http(request)).await,
+        )
     }
     pub(crate) async fn mutate_visibility(
         &self,

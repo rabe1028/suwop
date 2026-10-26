@@ -268,7 +268,7 @@ fn reducer_model() -> Model {
     };
     Model {
         state: SavedLibrary {
-            schema_version: 8,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             connection: Some(ConnectionSettings {
                 address: session.endpoint.clone(),
                 allow_http: false,

@@ -29,7 +29,7 @@ final class LockedSessionABI {
         saved = SavedLibrary(
             appleScope: "library",
             connection: ConnectionSettings(address: endpoint, allowHTTP: false, credentialID: "ordinary"),
-            schemaVersion: 5
+            schemaVersion: 10
         )
     }
 

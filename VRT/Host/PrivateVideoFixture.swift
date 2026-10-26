@@ -56,7 +56,7 @@ import SuwopShell
         fields["exifInfo"] = expectedBytesKnown
             ? .object(["fileSizeInByte": .number(Double(media.count))]) : .object([:])
         server = try ImmichVisibilityFixtureServer(visibility: "locked", kind: .video, customRecord: .object(fields))
-        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 8)
+        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 10)
     }
 
     static func mediaURL(container: String = "mp4") throws -> URL {
@@ -84,9 +84,9 @@ import SuwopShell
         library.immichLocked.timerEffect = { [timerBarrier] in await timerBarrier.wait($0) }
         model = library
         library.send(["type": .string("initialize"), "scope": .string(saved.appleScope)])
-        try await settle { library.view != nil && !library.isBusy }
+        try await settle(stage: "initialize") { library.view != nil && !library.isBusy }
         library.refresh()
-        try await settle { !library.isBusy && library.canTransfer }
+        try await settle(stage: "refresh") { !library.isBusy && library.canTransfer }
         library.immichLocked.sceneChanged(sceneID: ImmichLockedFixtureData.sceneID, phase: .active)
         return library
     }
@@ -209,7 +209,7 @@ import SuwopShell
             password: ImmichLockedFixtureData.password,
             pinCode: ImmichLockedFixtureData.pin
         )
-        try await settle {
+        try await settle(stage: "open") {
             session.view(for: ImmichLockedFixtureData.sceneID)?.entries?.contains(where: \.canPlayVideo) == true
                 && !session.busy
         }
@@ -243,6 +243,29 @@ import SuwopShell
         timerBarrier.releaseAll()
     }
 
+    /// Static effect names, booleans and counts only: never include provider data or credentials.
+    private var settleDiagnostics: String {
+        let projection = model?.immichLocked.projection
+        let state = [
+            "view=\(model?.view != nil)",
+            "busy=\(model?.isBusy == true)",
+            "privateBusy=\(model?.immichLocked.busy == true)",
+            "canTransfer=\(model?.canTransfer == true)",
+            "acquisition=\(projection?.videoAcquisition != nil)",
+            "video=\(projection?.video != nil)",
+            "readFailure=\(videoReadFailure != nil)",
+            "libraryError=\(model?.errorMessage != nil)",
+            "privateError=\(model?.immichLocked.error != nil)",
+            "originals=\(issuedOriginals)",
+            "requests=\(transport.requests)",
+            "completed=\(completedReadResults)",
+            "preparations=\(preparationRequests)",
+            "renewalsApplied=\(appliedRenewals)",
+            "renewalsRejected=\(rejectedRenewals)",
+        ]
+        return state.joined(separator: ",") + "; effects=" + safeEffectTrace.joined(separator: ",")
+    }
+
     func settle(stage: String = "unspecified", _ condition: () -> Bool) async throws {
         for _ in 0 ..< 500 {
             if condition() {
@@ -250,6 +273,6 @@ import SuwopShell
             }
             try await Task.sleep(for: .milliseconds(10))
         }
-        throw SuwopError("Private VIDEO fixture did not settle: \(stage)")
+        throw SuwopError("Private VIDEO fixture did not settle: \(stage); \(settleDiagnostics)")
     }
 }

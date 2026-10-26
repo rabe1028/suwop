@@ -112,7 +112,7 @@ final class PrivateVideoRenewalOrderingTests: XCTestCase {
             manager.hashBarrier = { _ in await withCheckedContinuation { hash = $0 } }
             fixture.renewalStartBarrier = { await withCheckedContinuation { renewal = $0 } }
             try fixture.play()
-            try await fixture.settle { hash != nil }
+            try await fixture.settle(stage: "replacement-initial-hash") { hash != nil }
             let originalRequest = try XCTUnwrap(manager.latestVideoRequestID)
             try await wait { renewal != nil }
             try fixture.play()
@@ -123,12 +123,14 @@ final class PrivateVideoRenewalOrderingTests: XCTestCase {
             let pendingRenewal = renewal
             renewal = nil
             pendingRenewal?.resume()
-            try await fixture.settle { fixture.rejectedRenewals == 1 }
+            try await fixture.settle(stage: "replacement-late-renewal-rejected") { fixture.rejectedRenewals == 1 }
             XCTAssertNil(model.immichLocked.projection?.video)
             let pendingHash = hash
             hash = nil
             pendingHash?.resume()
-            try await fixture.settle { model.immichLocked.projection?.video != nil }
+            try await fixture.settle(stage: "replacement-fresh-video-published") {
+                model.immichLocked.projection?.video != nil
+            }
             XCTAssertEqual(model.immichLocked.projection?.video?.pending.requestID, freshRequest)
             XCTAssertEqual(fixture.appliedRenewals, 0)
             XCTAssertEqual(fixture.transport.requests, 2)

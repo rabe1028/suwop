@@ -22,7 +22,7 @@ import Testing
     let state = SavedLibrary(
         albums: [snapshot],
         appleScope: "library",
-        schemaVersion: 3,
+        schemaVersion: 10,
         snapshots: [library]
     )
     func resolve(_ request: EffectRequest, value: JSONValue) throws -> [EffectRequest] {

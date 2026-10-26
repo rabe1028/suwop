@@ -134,7 +134,8 @@ import SuwopShell
             return metadata
         }
         if path == "albums" || path.hasPrefix("albums?"), request.method == "GET" {
-            return response(.array(albums(forAsset: path.contains("assetId="))))
+            let asset = URLComponents(string: "/" + path)?.queryItems?.first { $0.name == "assetId" }?.value
+            return response(.array(albums(forAsset: asset)))
         }
         throw SuwopError("Unexpected C2 protocol route")
     }
@@ -229,9 +230,10 @@ import SuwopShell
         record = .object(fields)
     }
 
-    private func albums(forAsset: Bool) -> [JSONValue] {
+    /// Membership of the exact queried asset; a paired motion is not implied by its parent.
+    private func albums(forAsset asset: String?) -> [JSONValue] {
         albumMembers.keys.sorted()
-            .filter { !forAsset || albumMembers[$0]?.contains(ImmichVisibilityFixtureData.sourceID) == true }
+            .filter { album in asset.map { albumMembers[album]?.contains($0) == true } ?? true }
             .map { .object([
                 "id": .string($0), "albumName": .string("C2 fixture album"),
                 "ownerId": .string(ImmichLockedFixtureData.ownerID),

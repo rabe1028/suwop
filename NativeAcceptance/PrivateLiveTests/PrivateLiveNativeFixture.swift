@@ -9,7 +9,7 @@ import SuwopShell
     let server: ImmichVisibilityFixtureServer
     let transport: PrivateVideoHTTPServer
     let sceneID = ImmichLockedFixtureData.sceneID
-    private var saved = SavedLibrary(appleScope: "private-live-native", schemaVersion: 8)
+    private var saved = SavedLibrary(appleScope: "private-live-native", schemaVersion: 10)
     private var projection: ImmichLockedView?
     private var timers: [UUID: Task<Void, Never>] = [:]
     private var requestID: String?

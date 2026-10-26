@@ -9,7 +9,7 @@ extension AppleShell {
         return try await .from(executeHTTP(request, preparedSubmission: permit))
     }
 
-    private func executeHTTP(
+    func executeHTTP(
         _ request: HttpRequest,
         preparedSubmission: NativeSubmissionPermit? = nil
     ) async throws -> HttpResponse {

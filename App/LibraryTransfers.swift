@@ -20,7 +20,8 @@ extension LibraryModel {
     }
 
     var libraryReady: Bool {
-        [8, 9].contains(view?.state.schemaVersion ?? 0)
+        // Mirrors Rust `immich_live_writes::CURRENT_SCHEMA_VERSION`; Rust still gates every write.
+        view?.state.schemaVersion == 10
     }
 
     func copy(_ photo: UnifiedPhoto, from provider: Provider, to destination: Provider? = nil, move: Bool = false) {

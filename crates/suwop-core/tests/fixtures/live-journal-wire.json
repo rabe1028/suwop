@@ -1,0 +1,1315 @@
+{
+  "formatVersion": 1,
+  "scalarLegacyRefs": [
+    {
+      "acknowledgedAlbums": "notChecked",
+      "acknowledgedObservation": null,
+      "acknowledgedSelected": null,
+      "operationId": "000001f5-0000-4000-8000-000000000000",
+      "recordDigest": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    },
+    {
+      "acknowledgedAlbums": "noAccessibleMemberships",
+      "acknowledgedObservation": "locked",
+      "acknowledgedSelected": {
+        "configuration": "linked",
+        "configurationDigest": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "selectedIdentityDigest": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "visibility": "locked"
+      },
+      "operationId": "000001f6-0000-4000-8000-000000000000",
+      "recordDigest": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+    }
+  ],
+  "validStates": [
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [
+                {
+                  "after": "00000016-0000-4000-8000-000000000000",
+                  "before": "00000015-0000-4000-8000-000000000000"
+                }
+              ],
+              "digest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000015-0000-4000-8000-000000000000",
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000015-0000-4000-8000-000000000000"
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [
+              {
+                "key": {
+                  "assetID": "00000001-0000-4000-8000-000000000000",
+                  "provider": "immich",
+                  "scope": "wire-owner-scope"
+                },
+                "state": {
+                  "data": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "type": "own"
+                }
+              },
+              {
+                "key": {
+                  "assetID": "00000002-0000-4000-8000-000000000000",
+                  "provider": "immich",
+                  "scope": "wire-owner-scope"
+                },
+                "state": {
+                  "data": "denied",
+                  "type": "unavailable"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "id": "00000015-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "accepted": null,
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000"
+                  },
+                  "type": "unknown"
+                },
+                "resourceId": "0000000b-0000-4000-8000-000000000000"
+              },
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "type": "notStarted"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [],
+        "immichVisibilityOperations": [],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "unknown-null"
+    },
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [
+                {
+                  "after": "00000016-0000-4000-8000-000000000000",
+                  "before": "00000015-0000-4000-8000-000000000000"
+                }
+              ],
+              "digest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000015-0000-4000-8000-000000000000",
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000015-0000-4000-8000-000000000000"
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [
+              {
+                "key": {
+                  "assetID": "00000001-0000-4000-8000-000000000000",
+                  "provider": "immich",
+                  "scope": "wire-owner-scope"
+                },
+                "state": {
+                  "type": "notObserved"
+                }
+              },
+              {
+                "key": {
+                  "assetID": "00000002-0000-4000-8000-000000000000",
+                  "provider": "immich",
+                  "scope": "wire-owner-scope"
+                },
+                "state": {
+                  "type": "notObserved"
+                }
+              }
+            ],
+            "steps": [
+              {
+                "id": "00000015-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "accepted": {
+                      "attemptId": "000000c9-0000-4000-8000-000000000000",
+                      "batchId": "00000065-0000-4000-8000-000000000000",
+                      "intentDigest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+                      "key": {
+                        "assetID": "00000001-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "stepId": "00000015-0000-4000-8000-000000000000"
+                    },
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000"
+                  },
+                  "type": "unknown"
+                },
+                "resourceId": "0000000b-0000-4000-8000-000000000000"
+              },
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "type": "notStarted"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [],
+        "immichVisibilityOperations": [],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "unknown-accepted"
+    },
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [
+                {
+                  "after": "00000016-0000-4000-8000-000000000000",
+                  "before": "00000015-0000-4000-8000-000000000000"
+                }
+              ],
+              "digest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000015-0000-4000-8000-000000000000",
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000015-0000-4000-8000-000000000000"
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [],
+            "steps": [
+              {
+                "id": "00000015-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000",
+                    "no_submission": {
+                      "attemptId": "000000c9-0000-4000-8000-000000000000",
+                      "batchId": "00000065-0000-4000-8000-000000000000",
+                      "intentDigest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+                      "key": {
+                        "assetID": "00000001-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "stepId": "00000015-0000-4000-8000-000000000000"
+                    }
+                  },
+                  "type": "notApplied"
+                },
+                "resourceId": "0000000b-0000-4000-8000-000000000000"
+              },
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "type": "notStarted"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [],
+        "immichVisibilityOperations": [],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "not-applied"
+    },
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [
+                {
+                  "after": "00000016-0000-4000-8000-000000000000",
+                  "before": "00000015-0000-4000-8000-000000000000"
+                }
+              ],
+              "digest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000015-0000-4000-8000-000000000000",
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000015-0000-4000-8000-000000000000"
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [],
+            "steps": [
+              {
+                "id": "00000015-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "accepted": {
+                      "attemptId": "000000c9-0000-4000-8000-000000000000",
+                      "batchId": "00000065-0000-4000-8000-000000000000",
+                      "intentDigest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+                      "key": {
+                        "assetID": "00000001-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "stepId": "00000015-0000-4000-8000-000000000000"
+                    },
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000",
+                    "verified_post": {
+                      "attemptId": "000000c9-0000-4000-8000-000000000000",
+                      "batchId": "00000065-0000-4000-8000-000000000000",
+                      "digest": "1c07a40832eb7459e51fb8ea80fa42586a92de8109931b61c9ac98685c91866a",
+                      "encodingVersion": 1,
+                      "intentDigest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+                      "resources": [
+                        {
+                          "albums": [],
+                          "fact": {
+                            "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "forward": {
+                              "data": {
+                                "assetID": "00000002-0000-4000-8000-000000000000",
+                                "provider": "immich",
+                                "scope": "wire-owner-scope"
+                              },
+                              "type": "linked"
+                            },
+                            "key": {
+                              "assetID": "00000001-0000-4000-8000-000000000000",
+                              "provider": "immich",
+                              "scope": "wire-owner-scope"
+                            },
+                            "media": "image",
+                            "offline": false,
+                            "ownerId": "00002328-0000-4000-8000-000000000000",
+                            "placement": "locked",
+                            "revision": "wire-after-accepted",
+                            "trashed": false,
+                            "unstacked": true
+                          }
+                        },
+                        {
+                          "albums": [
+                            "00000052-0000-4000-8000-000000000000"
+                          ],
+                          "fact": {
+                            "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                            "forward": {
+                              "type": "unlinked"
+                            },
+                            "key": {
+                              "assetID": "00000002-0000-4000-8000-000000000000",
+                              "provider": "immich",
+                              "scope": "wire-owner-scope"
+                            },
+                            "media": "video",
+                            "offline": false,
+                            "ownerId": "00002328-0000-4000-8000-000000000000",
+                            "placement": "hidden",
+                            "revision": "wire-revision-2",
+                            "trashed": false,
+                            "unstacked": true
+                          }
+                        }
+                      ],
+                      "stepId": "00000015-0000-4000-8000-000000000000"
+                    }
+                  },
+                  "type": "applied"
+                },
+                "resourceId": "0000000b-0000-4000-8000-000000000000"
+              },
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "type": "notStarted"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [],
+        "immichVisibilityOperations": [],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "applied-prefix"
+    },
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [],
+              "digest": "72e718be93e4bc9f78069b714e9563db3cf005001429c2bbbde86f4fa418dcb2",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "locked",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": null
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [],
+            "steps": [
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "accepted": null,
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000"
+                  },
+                  "type": "unknown"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [],
+        "immichVisibilityOperations": [],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "unchanged-parent-null-step"
+    },
+    {
+      "library": {
+        "albums": [],
+        "amazonConnection": null,
+        "amazonUploads": [],
+        "appleScope": "wire-apple",
+        "appleVisibilityOperations": [],
+        "connection": null,
+        "editClipboard": null,
+        "immichLiveLegacyReconciliations": [
+          {
+            "confirmedGraph": [
+              {
+                "albums": [
+                  "00000051-0000-4000-8000-000000000000"
+                ],
+                "fact": {
+                  "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "forward": {
+                    "data": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "type": "linked"
+                  },
+                  "key": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  },
+                  "media": "image",
+                  "offline": false,
+                  "ownerId": "00002328-0000-4000-8000-000000000000",
+                  "placement": "timeline",
+                  "revision": "wire-revision-1",
+                  "trashed": false,
+                  "unstacked": true
+                }
+              },
+              {
+                "albums": [
+                  "00000052-0000-4000-8000-000000000000"
+                ],
+                "fact": {
+                  "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "forward": {
+                    "type": "unlinked"
+                  },
+                  "key": {
+                    "assetID": "00000002-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  },
+                  "media": "video",
+                  "offline": false,
+                  "ownerId": "00002328-0000-4000-8000-000000000000",
+                  "placement": "hidden",
+                  "revision": "wire-revision-2",
+                  "trashed": false,
+                  "unstacked": true
+                }
+              }
+            ],
+            "digest": "54f335d9c45ea73955d0c08374e0acd60d62e6ca0ca95552823a35d31d9ef8b6",
+            "formatVersion": 1,
+            "id": "000001f6-0000-4000-8000-000000000000",
+            "legacy": [
+              {
+                "acknowledgedAlbums": "noAccessibleMemberships",
+                "acknowledgedObservation": "locked",
+                "acknowledgedSelected": null,
+                "operationId": "000001f5-0000-4000-8000-000000000000",
+                "recordDigest": "e68d9821f49d94988feae3c0c59b4c19e5735791c27cc592a32382580bc4a37f"
+              }
+            ],
+            "parent": {
+              "assetID": "00000001-0000-4000-8000-000000000000",
+              "provider": "immich",
+              "scope": "wire-owner-scope"
+            }
+          }
+        ],
+        "immichLiveOperations": [
+          {
+            "formatVersion": 1,
+            "id": "00000065-0000-4000-8000-000000000000",
+            "intent": {
+              "aliases": [
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000033-0000-4000-8000-000000000000",
+                  "resourceId": "0000000b-0000-4000-8000-000000000000",
+                  "role": "parent"
+                },
+                {
+                  "destination": "locked",
+                  "edgeId": "00000029-0000-4000-8000-000000000000",
+                  "id": "00000034-0000-4000-8000-000000000000",
+                  "resourceId": "0000000c-0000-4000-8000-000000000000",
+                  "role": "motion"
+                }
+              ],
+              "dependencies": [
+                {
+                  "after": "00000016-0000-4000-8000-000000000000",
+                  "before": "00000015-0000-4000-8000-000000000000"
+                }
+              ],
+              "digest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+              "direction": "lock",
+              "edges": [
+                {
+                  "id": "00000029-0000-4000-8000-000000000000",
+                  "motionResource": "0000000c-0000-4000-8000-000000000000",
+                  "parentResource": "0000000b-0000-4000-8000-000000000000",
+                  "selectionId": "0000001f-0000-4000-8000-000000000000"
+                }
+              ],
+              "encodingVersion": 1,
+              "observedAdditionalParents": [],
+              "orderedStepIds": [
+                "00000015-0000-4000-8000-000000000000",
+                "00000016-0000-4000-8000-000000000000"
+              ],
+              "ownerId": "00002328-0000-4000-8000-000000000000",
+              "resources": [
+                {
+                  "destination": "locked",
+                  "id": "0000000b-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "data": {
+                        "assetID": "00000002-0000-4000-8000-000000000000",
+                        "provider": "immich",
+                        "scope": "wire-owner-scope"
+                      },
+                      "type": "linked"
+                    },
+                    "key": {
+                      "assetID": "00000001-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "image",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "timeline",
+                    "revision": "wire-revision-1",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000051-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000015-0000-4000-8000-000000000000"
+                },
+                {
+                  "destination": "locked",
+                  "id": "0000000c-0000-4000-8000-000000000000",
+                  "initial": {
+                    "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "forward": {
+                      "type": "unlinked"
+                    },
+                    "key": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "media": "video",
+                    "offline": false,
+                    "ownerId": "00002328-0000-4000-8000-000000000000",
+                    "placement": "hidden",
+                    "revision": "wire-revision-2",
+                    "trashed": false,
+                    "unstacked": true
+                  },
+                  "initialAlbums": [
+                    "00000052-0000-4000-8000-000000000000"
+                  ],
+                  "stepId": "00000016-0000-4000-8000-000000000000"
+                }
+              ],
+              "scope": "wire-owner-scope",
+              "selections": [
+                {
+                  "id": "0000001f-0000-4000-8000-000000000000",
+                  "parent": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  }
+                }
+              ],
+              "sharedReferenceLimitationsAcknowledged": true,
+              "supersedes": []
+            },
+            "latestObservations": [],
+            "steps": [
+              {
+                "id": "00000015-0000-4000-8000-000000000000",
+                "outcome": {
+                  "data": {
+                    "accepted": null,
+                    "attempt_id": "000000c9-0000-4000-8000-000000000000"
+                  },
+                  "type": "unknown"
+                },
+                "resourceId": "0000000b-0000-4000-8000-000000000000"
+              },
+              {
+                "id": "00000016-0000-4000-8000-000000000000",
+                "outcome": {
+                  "type": "notStarted"
+                },
+                "resourceId": "0000000c-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichLiveUnstartedClosures": [
+          {
+            "currentGraph": [
+              {
+                "albums": [
+                  "00000051-0000-4000-8000-000000000000"
+                ],
+                "fact": {
+                  "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "forward": {
+                    "data": {
+                      "assetID": "00000002-0000-4000-8000-000000000000",
+                      "provider": "immich",
+                      "scope": "wire-owner-scope"
+                    },
+                    "type": "linked"
+                  },
+                  "key": {
+                    "assetID": "00000001-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  },
+                  "media": "image",
+                  "offline": false,
+                  "ownerId": "00002328-0000-4000-8000-000000000000",
+                  "placement": "timeline",
+                  "revision": "wire-revision-1",
+                  "trashed": false,
+                  "unstacked": true
+                }
+              },
+              {
+                "albums": [
+                  "00000052-0000-4000-8000-000000000000"
+                ],
+                "fact": {
+                  "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "forward": {
+                    "type": "unlinked"
+                  },
+                  "key": {
+                    "assetID": "00000002-0000-4000-8000-000000000000",
+                    "provider": "immich",
+                    "scope": "wire-owner-scope"
+                  },
+                  "media": "video",
+                  "offline": false,
+                  "ownerId": "00002328-0000-4000-8000-000000000000",
+                  "placement": "hidden",
+                  "revision": "wire-revision-2",
+                  "trashed": false,
+                  "unstacked": true
+                }
+              }
+            ],
+            "digest": "18168af70e28cb5d090f146f351c975c8216b88c53d8a2135604e9cf64a63b3e",
+            "formatVersion": 1,
+            "id": "00000191-0000-4000-8000-000000000000",
+            "references": [
+              {
+                "batchId": "00000065-0000-4000-8000-000000000000",
+                "intentDigest": "9f5d6b5d9a19fa72ebccd912ee24c65fdadf6bd76ef87e63fd5e71375aa95989",
+                "retiredOutcomesDigest": "8b6ede143c0f308332c1816ff65bde1b13e9850c8c679e2ddc8efca7b992074a",
+                "stepId": "00000016-0000-4000-8000-000000000000"
+              }
+            ]
+          }
+        ],
+        "immichVisibilityOperations": [
+          {
+            "albumMembershipObservation": "noAccessibleMemberships",
+            "from": "timeline",
+            "id": "000001f5-0000-4000-8000-000000000000",
+            "key": {
+              "assetID": "00000001-0000-4000-8000-000000000000",
+              "provider": "immich",
+              "scope": "wire-owner-scope"
+            },
+            "kind": "lockedTransition",
+            "observation": "locked",
+            "outcome": "applied",
+            "scope": "wire-owner-scope",
+            "to": "locked",
+            "witnessDigest": "d9d8591eb16e0f53a8a1aee5d638d3312d4697f611593929cbb4ea69aac0a4bf"
+          }
+        ],
+        "pendingAppleTrash": [],
+        "pendingEditPastes": [],
+        "pendingTrash": [],
+        "pendingUploads": [],
+        "protectedEntries": [],
+        "receipts": [],
+        "schemaVersion": 10,
+        "snapshots": [],
+        "trash": null,
+        "uploadIntents": []
+      },
+      "name": "closed-not-started-with-unknown-and-legacy-reconciliation"
+    }
+  ]
+}

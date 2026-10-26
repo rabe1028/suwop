@@ -25,6 +25,8 @@ use suwop_core::workflow::HashResult;
 
 mod compact;
 mod input_limits;
+#[cfg(test)]
+mod live_journal_tests;
 mod projection;
 #[cfg(test)]
 mod snapshot_tests;
@@ -276,6 +278,19 @@ fn execute_core(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String
             let keys = serde_json::from_str(input).map_err(|e| e.to_string())?;
             *runtime.query.lock().map_err(|e| e.to_string())? =
                 Some(projection::Selection::Ordinary(keys));
+            let result = bridge.view(&mut output);
+            *runtime.query.lock().map_err(|e| e.to_string())? = None;
+            result.map_err(|e| e.to_string())?;
+        }
+        19 => {
+            #[derive(serde::Deserialize)]
+            struct Query {
+                ticket: Box<suwop_core::immich_live_writes::PairImageTicket>,
+                phase: suwop_core::immich_live_writes::PairImagePhase,
+            }
+            let query: Query = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            *runtime.query.lock().map_err(|e| e.to_string())? =
+                Some(projection::Selection::PairImage(query.ticket, query.phase));
             let result = bridge.view(&mut output);
             *runtime.query.lock().map_err(|e| e.to_string())? = None;
             result.map_err(|e| e.to_string())?;

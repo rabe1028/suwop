@@ -60,15 +60,20 @@ import SuwopShell
         fileprivate var completed: [String] = []
     }
 
+    /// Batch and selected writes use independent Rust nonce streams and replay windows.
+    final class BatchWriteScope {
+        fileprivate let storage = SelectedWriteScope()
+    }
+
     fileprivate final class SelectedWriteCapture {
-        let key: AssetKey
+        let keys: Set<AssetKey>
         let ownership: Data
         let cancelledBeforeCapture: Bool
         var owners: [Capture] = []
         var failure: Error?
         var completed = false
-        init(key: AssetKey, ownership: Data, cancelledBeforeCapture: Bool = false) {
-            self.key = key
+        init(keys: Set<AssetKey>, ownership: Data, cancelledBeforeCapture: Bool = false) {
+            self.keys = keys
             self.ownership = ownership
             self.cancelledBeforeCapture = cancelledBeforeCapture
         }
@@ -82,32 +87,11 @@ import SuwopShell
         scope: SelectedWriteScope,
         ownership: Data = Data()
     ) throws {
-        if let retained = scope.records[captureID] {
-            guard retained.key == key, retained.ownership == ownership,
-                  !retained.cancelledBeforeCapture else { throw Failure.invalidCapture }
-            if let failure = retained.failure {
-                throw failure
-            }
-            return
-        }
-        try admitCaptureID(captureID, scope: scope)
-        let record = SelectedWriteCapture(key: key, ownership: ownership)
-        scope.records[captureID] = record
-        let selected = entries.values.filter { $0.resources.contains(key) }.map(\.handle)
-        // No await: all current matching owners are captured/revoked synchronously.
-        for owner in selected {
-            do {
-                let captured = try capture(owner)
-                record.owners.append(Capture(owner: captured.owner, work: captured.work, retryAttempt: nil))
-            } catch { record.failure = record.failure ?? error }
-        }
-        if let failure = record.failure {
-            throw failure
-        }
+        try captureWrite(keys: Set([key]), captureID: captureID, scope: scope, ownership: ownership)
     }
 
     func validateSelectedWrite(key: AssetKey, captureID: String, scope: SelectedWriteScope, ownership: Data) throws {
-        guard let record = scope.records[captureID], record.key == key, record.ownership == ownership else {
+        guard let record = scope.records[captureID], record.keys == Set([key]), record.ownership == ownership else {
             throw Failure.invalidCapture
         }
     }
@@ -116,11 +100,15 @@ import SuwopShell
     /// cannot select a replacement; this alone is NOT worker JOIN or a write receipt.
     func sealSelectedWrite(key: AssetKey, captureID: String, scope: SelectedWriteScope, ownership: Data) throws {
         if let record = scope.records[captureID] {
-            guard record.key == key, record.ownership == ownership else { throw Failure.invalidCapture }
+            guard record.keys == Set([key]), record.ownership == ownership else { throw Failure.invalidCapture }
             return
         }
         try admitCaptureID(captureID, scope: scope)
-        scope.records[captureID] = SelectedWriteCapture(key: key, ownership: ownership, cancelledBeforeCapture: true)
+        scope.records[captureID] = SelectedWriteCapture(
+            keys: Set([key]),
+            ownership: ownership,
+            cancelledBeforeCapture: true
+        )
     }
 
     private func admitCaptureID(_ captureID: String, scope: SelectedWriteScope) throws {
@@ -356,6 +344,114 @@ import SuwopShell
     private func exact(_ owner: Handle) -> Entry? {
         guard let entry = entries[owner.ownerID], entry.handle == owner else { return nil }
         return entry
+    }
+}
+
+extension PrivateMediaConsumerRegistry {
+    /// One physical-key set uses the batch scope's independent replay window and capacity limit.
+    /// Set identity canonicalizes order and duplicate aliases without inventing display identity.
+    func captureForBatchWrite(
+        keys: [AssetKey], captureID: String, scope: BatchWriteScope, ownership: Data = Data()
+    ) throws {
+        try captureWrite(keys: Set(keys), captureID: captureID, scope: scope.storage, ownership: ownership)
+    }
+
+    private func captureWrite(
+        keys: Set<AssetKey>, captureID: String, scope: SelectedWriteScope, ownership: Data
+    ) throws {
+        guard !keys.isEmpty else { throw Failure.invalidResources }
+        if let retained = scope.records[captureID] {
+            guard retained.keys == keys, retained.ownership == ownership,
+                  !retained.cancelledBeforeCapture else { throw Failure.invalidCapture }
+            if let failure = retained.failure {
+                throw failure
+            }
+            return
+        }
+        try admitCaptureID(captureID, scope: scope)
+        let record = SelectedWriteCapture(keys: keys, ownership: ownership)
+        scope.records[captureID] = record
+        // Freeze exact registrations once; an owner spanning both keys is captured once.
+        let selected = entries.values.filter { !$0.resources.isDisjoint(with: keys) }.map(\.handle)
+        for owner in selected {
+            do {
+                let captured = try capture(owner)
+                record.owners.append(Capture(owner: captured.owner, work: captured.work, retryAttempt: nil))
+            } catch { record.failure = record.failure ?? error }
+        }
+        if let failure = record.failure {
+            throw failure
+        }
+    }
+
+    func validateBatchWrite(
+        keys: [AssetKey], captureID: String, scope: BatchWriteScope, ownership: Data
+    ) throws {
+        guard !keys.isEmpty, let record = scope.storage.records[captureID], record.keys == Set(keys),
+              record.ownership == ownership else { throw Failure.invalidCapture }
+    }
+
+    func sealBatchWrite(
+        keys: [AssetKey], captureID: String, scope: BatchWriteScope, ownership: Data
+    ) throws {
+        guard !keys.isEmpty else { throw Failure.invalidResources }
+        if scope.storage.records[captureID] != nil {
+            try validateBatchWrite(keys: keys, captureID: captureID, scope: scope, ownership: ownership)
+            return
+        }
+        try admitCaptureID(captureID, scope: scope.storage)
+        scope.storage.records[captureID] = SelectedWriteCapture(
+            keys: Set(keys), ownership: ownership, cancelledBeforeCapture: true
+        )
+    }
+
+    struct BatchWriteDrain {
+        fileprivate let retained: SelectedWriteDrain
+    }
+
+    func prepareBatchDrain(
+        captureID: String,
+        scope: BatchWriteScope,
+        ownership: Data = Data(),
+        cancelBeforeCapture: Bool = false,
+        retryCleanup: Bool = false
+    ) throws -> BatchWriteDrain {
+        let retained = try prepareSelectedDrain(
+            captureID: captureID,
+            scope: scope.storage,
+            ownership: ownership,
+            cancelBeforeCapture: cancelBeforeCapture,
+            retryCleanup: retryCleanup
+        )
+        return BatchWriteDrain(retained: retained)
+    }
+
+    func drainBatchWrite(
+        captureID: String,
+        scope: BatchWriteScope,
+        ownership: Data = Data(),
+        cancelBeforeCapture: Bool = false,
+        retryCleanup: Bool = false,
+        deadline: ContinuousClock.Instant
+    ) async throws -> Bool {
+        let retained = try prepareBatchDrain(
+            captureID: captureID,
+            scope: scope,
+            ownership: ownership,
+            cancelBeforeCapture: cancelBeforeCapture,
+            retryCleanup: retryCleanup
+        )
+        return try await drainBatchWrite(retained, deadline: deadline)
+    }
+
+    /// Caller cancellation cannot cancel owned JOIN. The receipt proves cleanup only;
+    /// Rust cursor/reservation cancellation independently prevents write admission.
+    func drainBatchWrite(
+        _ retained: BatchWriteDrain,
+        deadline: ContinuousClock.Instant,
+        pendingCleanup: @MainActor () async throws -> Void = {}
+    ) async throws -> Bool {
+        try await drainSelectedWrite(retained.retained, deadline: deadline, pendingCleanup: pendingCleanup)
     }
 }
 

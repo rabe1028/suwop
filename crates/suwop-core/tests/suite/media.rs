@@ -107,7 +107,7 @@ fn core(kind: PlaybackKind) -> Core<Suwop> {
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(asset(kind), ScanAccess::Limited)],
                 ..SavedLibrary::default()
@@ -237,7 +237,7 @@ fn live_parent_is_selected_before_its_standalone_companion_regardless_of_ids() -
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "apple".into(),
                 snapshots: snapshots.clone(),
                 ..SavedLibrary::default()
@@ -427,7 +427,7 @@ fn remote_playback_reads_the_authenticated_original_and_never_mutates_the_server
         Model {
             ready: true,
             state: SavedLibrary {
-                schema_version: 8,
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
                 apple_scope: "apple".into(),
                 snapshots: vec![snapshot(video, ScanAccess::Full)],
                 ..SavedLibrary::default()

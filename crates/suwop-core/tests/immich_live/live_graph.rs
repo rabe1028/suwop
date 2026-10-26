@@ -968,3 +968,6 @@ fn drive_setup(agent: &ureq::Agent, command: &mut Command<Effect, Event>) -> Res
 
 #[path = "live_graph/private_live.rs"]
 mod private_live;
+
+#[path = "live_graph/paired_visibility.rs"]
+mod paired_visibility;

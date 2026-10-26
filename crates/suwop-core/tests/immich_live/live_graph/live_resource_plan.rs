@@ -29,7 +29,7 @@ fn real_live_resource_plan_observes_shared_motion_without_mutation_authority() -
         credential_id: "live-plan-fixture".into(),
     };
     let state = SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         connection: Some(connection),
         ..SavedLibrary::default()
     };

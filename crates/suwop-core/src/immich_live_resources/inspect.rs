@@ -22,7 +22,7 @@ pub(super) fn begin(
 ) -> Command<crate::app::Effect, Event> {
     if model.busy
         || !model.ready
-        || ![8, 9].contains(&model.state.schema_version)
+        || model.state.schema_version != crate::immich_live_writes::CURRENT_SCHEMA_VERSION
         || model.immich_visibility.persistence_uncertain
         || model.protection.membership_uncertain
         || read_denied(model, &key)

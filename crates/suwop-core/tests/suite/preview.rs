@@ -71,7 +71,7 @@ fn session() -> Session {
 }
 fn state() -> SavedLibrary {
     SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         snapshots: vec![
             snapshot(

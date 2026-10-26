@@ -190,6 +190,19 @@ struct PhotoTile: View {
                             width: geometry.size.width, height: geometry.size.height
                         ).clipped()
                     }
+                } else if let proof = model.pairedPresentation(photo), let sceneID {
+                    OrdinaryLivePairRasterView(
+                        session: model.ordinaryLivePairImages,
+                        key: proof.parentKey,
+                        sceneID: sceneID,
+                        kind: .thumbnail
+                    ) { image in
+                        platformImage(image).resizable().scaledToFill().frame(
+                            width: geometry.size.width,
+                            height: geometry.size.height
+                        ).clipped()
+                            .accessibilityIdentifier("ordinaryLivePairThumbnail")
+                    }
                 } else if let image, imageIdentifier == model.previewIdentifier(photo) {
                     platformImage(image).resizable().scaledToFill().frame(
                         width: geometry.size.width,
@@ -211,7 +224,7 @@ struct PhotoTile: View {
                     if let format = photo.rawFormatTitle {
                         Text(format).bold()
                     }
-                    if model.selectedPresentation(photo) != nil {
+                    if model.isReadOnlyPresentation(photo) {
                         Text("表示のみ")
                     }
                     Spacer()
@@ -231,7 +244,7 @@ struct PhotoTile: View {
             .contentShape(Rectangle())
             .task(id: model.previewIdentifier(photo)) {
                 image = nil
-                guard model.selectedPresentation(photo) == nil else { return }
+                guard !model.isReadOnlyPresentation(photo) else { return }
                 let identifier = model.previewIdentifier(photo)
                 let loaded = try? await model.thumbnail(photo)
                 if !Task.isCancelled, identifier == model.previewIdentifier(photo) {

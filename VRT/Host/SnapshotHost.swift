@@ -34,6 +34,16 @@ import SwiftUI
                 ImmichArchiveHistoryRecoveryHost()
             } else if CommandLine.arguments.contains("--immich-archive-fixture") {
                 InteractiveImmichArchiveHost()
+            } else if CommandLine.arguments.contains("--returned-live-pair-fixture") {
+                InteractiveReturnedLivePairHost()
+            } else if CommandLine.arguments.contains("--live-placement-cleanup-fixture") {
+                InteractiveLivePlacementCleanupHost()
+            } else if CommandLine.arguments.contains("--live-placement-history-fixture") {
+                InteractiveLivePlacementHistoryHost()
+            } else if CommandLine.arguments.contains("--immich-live-keep-confirmation-fixture") {
+                InteractiveImmichLiveKeepHost()
+            } else if CommandLine.arguments.contains("--immich-live-placement-confirmation-fixture") {
+                InteractiveImmichLivePlacementHost()
             } else if CommandLine.arguments.contains("--immich-visibility-fixture") {
                 InteractiveImmichVisibilityHost()
             } else if CommandLine.arguments.contains("--immich-locked-fixture") {

@@ -168,7 +168,7 @@ fn trusted_finished_reset_then_new_workflow_owns_busy_against_late_capture_ack()
     let held = c.process_event(prepare(OP, ImmichVisibility::Locked));
     let reset = c.process_event(Event::Finished {
         state: SavedLibrary {
-            schema_version: 8,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             ..SavedLibrary::default()
         },
         session: None,

@@ -97,7 +97,7 @@ fn start<'a>(
     directory: &'a Path,
 ) -> Result<(Core<Suwop>, Shell<'a>), String> {
     let state = SavedLibrary {
-        schema_version: 8,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         connection: Some(ConnectionSettings {
             address: fixture.elevated.ordinary.endpoint.clone(),
             allow_http: true,

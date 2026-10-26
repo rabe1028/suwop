@@ -14,9 +14,14 @@ import SwiftUI
 /// have stopped using them, including when the operation is cancelled.
 @MainActor final class SystemPlayback {
     private var active: NativeMediaPresentation?
+    // Failed callback joins retain the exact request and its resource ownership.
+    // They are quarantined rather than treating cancellation as native completion.
+    // Only a timed-out request's own later terminal callback releases its entry.
+    private var quarantined: [NativeMediaPresentation] = []
     private var sourceKeys: [AssetKey] = []
     #if SUWOP_VRT
         var preparationBarrier: (@MainActor () async throws -> Void)?
+        var liveRequestDriver: PrivateLivePhotoKitRequest.Driver = .system
     #endif
 
     func invalidateForContentChange() {
@@ -30,11 +35,25 @@ import SwiftUI
     }
 
     func present(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
+        try await present(plan, context: context, requireJoinedLive: false)
+    }
+
+    func presentJoined(_ plan: PlaybackPlan, context: ContentPresentationContext) async throws {
+        try await present(plan, context: context, requireJoinedLive: true)
+    }
+
+    private func present(
+        _ plan: PlaybackPlan,
+        context: ContentPresentationContext,
+        requireJoinedLive: Bool
+    ) async throws {
         try context.requireCurrent(sourceKeys: plan.sourceKeys)
         guard active == nil else { throw SuwopError("再生がすでに進行中です。") }
         let presentation = NativeMediaPresentation()
+        presentation.requireJoinedLive = requireJoinedLive
         #if SUWOP_VRT
             presentation.preparationBarrier = preparationBarrier
+            presentation.liveRequestDriver = liveRequestDriver
         #endif
         active = presentation
         sourceKeys = plan.sourceKeys
@@ -42,7 +61,20 @@ import SwiftUI
             active = nil
             sourceKeys = []
         }
-        try await presentation.present(plan, context: context)
+        do {
+            try await presentation.present(plan, context: context)
+        } catch {
+            if presentation.hasUnconfirmedJoin {
+                quarantined.append(presentation)
+                if let proof = presentation.terminalProof {
+                    Task { @MainActor [weak self] in
+                        do { try await proof.wait() } catch { return }
+                        self?.quarantined.removeAll { $0 === presentation }
+                    }
+                }
+            }
+            throw error
+        }
     }
 }
 
@@ -51,6 +83,12 @@ import SwiftUI
     private var player: AVPlayer?
     private var preparing: Task<Void, Error>?
     private var content: NativeMediaContent?
+    var requireJoinedLive = false
+    var liveRequestDriver: PrivateLivePhotoKitRequest.Driver = .system
+    private var liveRequest: PrivateLivePhotoKitRequest?
+    private var loadedLive: PHLivePhoto?
+    private(set) var hasUnconfirmedJoin = false
+    private(set) var terminalProof: NativeTerminalProof?
     private var invalidated = false
     private var closing = false
     #if SUWOP_VRT
@@ -130,42 +168,84 @@ import SwiftUI
             return .video(player)
         case .live:
             guard urls.count == 2 else { throw SuwopError("Live Photo の原本を確認できません。") }
-            // Older PhotoKit SDKs do not mark PHLivePhoto Sendable. Move a
-            // secure value archive across executors, then restore on MainActor.
-            let gate = ImageRequestGate<Data>()
-            let archive = try await withTaskCancellationHandler {
-                try Task.checkCancellation()
-                return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
-                    gate.install(continuation)
-                    let id = PHLivePhoto.request(
-                        withResourceFileURLs: urls,
-                        placeholderImage: nil,
-                        targetSize: .zero,
-                        contentMode: .aspectFit
-                    ) { @Sendable live, info in
-                        if (info[PHLivePhotoInfoIsDegradedKey] as? Bool) == true {
-                            return
-                        }
-                        if let live {
-                            do {
-                                try gate.finish(.success(NSKeyedArchiver.archivedData(
-                                    withRootObject: live, requiringSecureCoding: true
-                                )))
-                            } catch { gate.finish(.failure(error)) }
-                        } else {
-                            gate
-                                .finish(.failure((info[PHLivePhotoInfoErrorKey] as? Error) ??
-                                        SuwopError("Live Photo を読み込めません。")))
-                        }
-                    }
-                    gate.setRequest(id)
-                }
-            } onCancel: { gate.cancel() }
-            guard let live = try NSKeyedUnarchiver.unarchivedObject(ofClass: PHLivePhoto.self, from: archive) else {
-                throw SuwopError("Live Photo を復元できません。")
+            if requireJoinedLive {
+                return try await loadJoinedLive(urls)
             }
-            return .live(live)
+            return try await loadLegacyLive(urls)
         }
+    }
+
+    private func loadLegacyLive(_ urls: [URL]) async throws -> NativeMediaContent {
+        // Older PhotoKit SDKs do not mark PHLivePhoto Sendable. Move a
+        // secure value archive across executors, then restore on MainActor.
+        let gate = ImageRequestGate<Data>()
+        let archive = try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            return try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                gate.install(continuation)
+                let id = PHLivePhoto.request(
+                    withResourceFileURLs: urls,
+                    placeholderImage: nil,
+                    targetSize: .zero,
+                    contentMode: .aspectFit
+                ) { @Sendable live, info in
+                    if (info[PHLivePhotoInfoIsDegradedKey] as? Bool) == true {
+                        return
+                    }
+                    if let live {
+                        do {
+                            try gate.finish(.success(NSKeyedArchiver.archivedData(
+                                withRootObject: live, requiringSecureCoding: true
+                            )))
+                        } catch { gate.finish(.failure(error)) }
+                    } else {
+                        gate
+                            .finish(.failure((info[PHLivePhotoInfoErrorKey] as? Error) ??
+                                    SuwopError("Live Photo を読み込めません。")))
+                    }
+                }
+                gate.setRequest(id)
+            }
+        } onCancel: { gate.cancel() }
+        guard let live = try NSKeyedUnarchiver.unarchivedObject(ofClass: PHLivePhoto.self, from: archive) else {
+            throw SuwopError("Live Photo を復元できません。")
+        }
+        return .live(live)
+    }
+
+    private func loadJoinedLive(_ urls: [URL]) async throws -> NativeMediaContent {
+        let request = try PrivateLivePhotoKitRequest(
+            urls: urls,
+            targetSize: CGSize(width: 2048, height: 2048),
+            driver: liveRequestDriver,
+            acceptFull: { [weak self] photo in
+                guard let self, !invalidated else { return false }
+                loadedLive = photo
+                return true
+            }
+        )
+        liveRequest = request
+        do {
+            try await request.run()
+            try await request.joinFulfilled(deadline: .now.advanced(by: .seconds(5)))
+            try Task.checkCancellation()
+        } catch {
+            do {
+                try await request.cancelAndJoin(deadline: .now.advanced(by: .seconds(5)))
+                liveRequest = nil
+                loadedLive = nil
+            } catch {
+                hasUnconfirmedJoin = true
+                // nil unless this exact request timed out; other causes never prove a terminal.
+                terminalProof = NativeTerminalProof(timedOut: request)
+                throw OrdinaryLivePairEffects.Failure.nativeJoinUnconfirmed(terminalProof)
+            }
+            throw error
+        }
+        guard let live = loadedLive else { throw SuwopError("Live Photo を読み込めません。") }
+        liveRequest = nil
+        loadedLive = nil
+        return .live(live)
     }
 
     private func open(_ content: NativeMediaContent, name: String) throws {

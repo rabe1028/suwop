@@ -137,7 +137,7 @@ impl OriginalImport for FakeDestination {
 
 fn runtime(ctx: &Context, registry: Registry) -> Runtime<'_> {
     let mut state = SavedLibrary {
-        schema_version: 9,
+        schema_version: crate::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         ..SavedLibrary::default()
     };
