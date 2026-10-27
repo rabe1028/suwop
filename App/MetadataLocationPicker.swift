@@ -1,4 +1,12 @@
-import MapKit
+#if compiler(>=6.2)
+    import MapKit
+#else
+    // SDK 18 does not annotate MKLocalSearch.Response for Swift concurrency.
+    // This view consumes each native result only on MainActor after the exact
+    // request/freshness check; no response is sent to another Swift actor.
+    // Remove this bridge when SDK 18 support ends.
+    @preconcurrency import MapKit
+#endif
 import SwiftUI
 
 /// Apple map UI selects coordinates only; Rust validates and authorizes the edit.
@@ -15,11 +23,15 @@ struct MetadataLocationPicker: View {
     @State private var failure: String?
 
     private func coordinate(_ item: MKMapItem) -> CLLocationCoordinate2D {
-        if #available(iOS 26.0, macOS 26.0, *) {
-            item.location.coordinate
-        } else {
-            item.placemark.coordinate
-        }
+        #if compiler(>=6.2)
+            if #available(iOS 26.0, macOS 26.0, *) {
+                return item.location.coordinate
+            } else {
+                return item.placemark.coordinate
+            }
+        #else
+            return item.placemark.coordinate
+        #endif
     }
 
     var body: some View {
