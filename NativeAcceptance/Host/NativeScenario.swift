@@ -13,11 +13,16 @@ import UIKit
         let driver = AcceptanceDriver(keys: manifest
             .keys + (visibility.map { [$0.key] } ?? []) + (product.map { [$0.key] } ?? []))
         _ = try await driver.event("initialize", ["scope": .string(FixtureLibrary.scope)])
+        if phase == "seed" {
+            try await verifyFreshSeedStore(driver)
+        }
         _ = try await driver.event(
             "refresh",
             ["permission": .bool(false), "now": .number(Date().timeIntervalSince1970)]
         )
-        if let product {
+        if phase.hasPrefix("metadata-") {
+            try await NativeMetadataScenario.run(phase)
+        } else if let product {
             try await ProductVisibilityScenario.run(phase, driver: driver, fixture: product)
         } else if phase.hasPrefix("visibility-") {
             try await runVisibility(phase, driver: driver, fixture: visibility)
@@ -25,6 +30,22 @@ import UIKit
             try await dispatch(phase, driver: driver, manifest: manifest)
         }
         try await verifyOriginals(manifest, keys: remainingKeys(phase, manifest))
+    }
+
+    private static func verifyFreshSeedStore(_ driver: AcceptanceDriver) async throws {
+        guard let shell = driver.shell else { throw SuwopError("Missing generated fixture store.") }
+        let raw = try await shell.localStore.read()
+        if case .null = raw {
+            return
+        }
+        let saved = try raw.decode(SavedLibrary.self)
+        guard saved.pendingAppleTrash.isEmpty, saved.pendingTrash.isEmpty,
+              saved.receipts.isEmpty, saved.pendingEditPastes.isEmpty,
+              saved.appleVisibilityOperations.isEmpty, saved.metadataOperations.isEmpty,
+              saved.editClipboard == nil
+        else {
+            throw SuwopError("Seed retained a previous fixture's durable journal instead of starting a fresh catalog.")
+        }
     }
 
     private static func dispatch(
@@ -40,9 +61,28 @@ import UIKit
         case "pasted": try await pasted(driver, manifest)
         case "revert": try await revert(driver, manifest)
         case "original": try await original(driver, manifest)
+        case "import-formats", "import-create", "import-restart", "import-lost", "import-lost-restart", "collections",
+             "current-media":
+            try await runAdditionalMedia(phase, driver: driver, manifest: manifest)
         case "trash-cancel", "trash-native-cancel", "trash", "trash-lost", "trash-inspect":
             try await NativeTrashScenario.run(phase, driver: driver, manifest: manifest)
         default: throw SuwopError("Unknown acceptance phase.")
+        }
+    }
+
+    private static func runAdditionalMedia(
+        _ phase: String,
+        driver: AcceptanceDriver,
+        manifest: FixtureManifest
+    ) async throws {
+        if phase == "import-formats" {
+            try await NativeImportFormatsScenario.run(manifest: manifest)
+        } else if phase.hasPrefix("import-") {
+            try await NativeImportScenario.run(phase, manifest: manifest)
+        } else if phase == "collections" {
+            try await NativeCollectionScenario.run(driver: driver, manifest: manifest)
+        } else {
+            try await NativeCurrentMediaScenario.run()
         }
     }
 

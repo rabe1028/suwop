@@ -23,7 +23,9 @@ pub(crate) fn initial_status(event: &Event) -> &'static str {
         Event::ResolveEditPaste { .. } => "編集の適用結果を確認中…",
         Event::RevertImage { .. } => "写真の編集を元に戻しています…",
         Event::Share { .. } => "原本の共有用ファイルを準備中…",
-        Event::ShareCurrentImage { .. } => "現在の静止画の共有用ファイルを準備中…",
+        Event::ShareCurrentImage { .. } | Event::ShareCurrentImages { .. } => {
+            "現在の静止画の共有用ファイルを準備中…"
+        }
         Event::Play { .. } => "再生用の原本を準備中…",
         Event::RefreshAlbums => "アルバムの一覧を更新中…",
         Event::RefreshTrash { .. } => "ゴミ箱の一覧を更新中…",

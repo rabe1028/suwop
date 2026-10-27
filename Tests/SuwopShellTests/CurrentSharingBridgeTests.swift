@@ -11,7 +11,7 @@ import Testing
         revision: "original-revision",
         resources: [PhotoResource(id: "0", name: "original.jpg", role: .image)]
     )
-    let saved = SavedLibrary(appleScope: "library", schemaVersion: 10)
+    let saved = SavedLibrary(appleScope: "library", schemaVersion: 11)
     let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
     func update(_ event: [String: JSONValue]) throws -> [EffectRequest] {
         try bridge.call(0, input: .object(event)).decode([EffectRequest].self)
@@ -37,7 +37,7 @@ import Testing
         asset: asset,
         freshAsset: asset,
         image: CurrentImageFacts(contentType: "public.png", frames: 1, height: 4000, orientation: 1, width: 6000),
-        path: "/tmp/current-workspace/share-current/current-image"
+        path: "/tmp/current-workspace/share-current-0/current-image"
     )
     let originalHash = try #require(resolve(current, value: .from(export)).first)
     #expect(originalHash.effect["Io"]?.type == "hashFile")

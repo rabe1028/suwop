@@ -151,6 +151,10 @@ targets:
       - path: App
         excludes: [SuwopApp.swift]
       - path: NativeAcceptance/Host
+      - path: Tests/fixtures/native_live_pair/media/synthetic-still.jpg
+        buildPhase: resources
+      - path: Tests/fixtures/native_live_pair/media/synthetic-motion.mov
+        buildPhase: resources
     dependencies:
       - package: SuwopShell
         product: SuwopShell

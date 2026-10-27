@@ -117,7 +117,7 @@ impl Native {
                 })
                 .map_err(|e| e.to_string())
             }
-            ShellOperation::Workspace { .. } => Ok(json!("/tmp/share-workspace")),
+            ShellOperation::SharingWorkspace { .. } => Ok(json!("/tmp/share-workspace")),
             ShellOperation::AppleExport { keys, directory } => {
                 if matches!(self.fault, Fault::Cancel) {
                     return Err("cancelled".into());

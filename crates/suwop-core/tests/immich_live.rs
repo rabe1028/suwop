@@ -92,6 +92,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
         .duration_since(std::time::UNIX_EPOCH)
         .map_err(|e| e.to_string())?
         .as_secs_f64();
+    Box::pin(external_import::exercise(ctx, &session, directory)).await?;
     let mut ids = Vec::new();
     for (i, pixel) in PIXELS.iter().enumerate() {
         let bytes = base64::engine::general_purpose::STANDARD
@@ -148,7 +149,7 @@ async fn exercise(ctx: &Context, address: &str, key: &str, directory: &Path) -> 
     wait_metadata_queues(ctx, &session).await?;
     assert!(session.favorite(ctx, &ids[0], true).await?.is_favorite);
     assert!(!session.favorite(ctx, &ids[0], false).await?.is_favorite);
-    exercise_metadata(ctx, &session, &ids[..2]).await?;
+    Box::pin(exercise_metadata(ctx, &session, &ids[..2])).await?;
     exercise_albums(ctx, &session, &ids[..2]).await?;
     ids.push(exercise_edited_preview(ctx, &session, directory, now).await?);
     ids.extend(exercise_adjusted_dates(ctx, &session, directory, now).await?);
@@ -668,6 +669,12 @@ async fn exercise_albums(ctx: &Context, session: &Session, ids: &[String]) -> Re
         .rename_album(ctx, &album.id, "Suwop renamed album")
         .await?;
     session
+        .set_album_date_order(ctx, &album.id, suwop_core::albums::AlbumDateOrder::Asc)
+        .await?;
+    session
+        .set_album_date_order(ctx, &album.id, suwop_core::albums::AlbumDateOrder::Desc)
+        .await?;
+    session
         .change_album_members(ctx, &album.id, ids, true)
         .await?;
     let members = session.album_members(ctx, &album.id).await?;
@@ -743,6 +750,7 @@ async fn exercise_metadata(ctx: &Context, session: &Session, ids: &[String]) -> 
         assert_eq!(asset.is_favorite, before.is_favorite);
         assert_eq!(asset.is_trashed, before.is_trashed);
     }
+    Box::pin(metadata_extended::exercise(ctx, session, &ids[0])).await?;
     Ok(())
 }
 
@@ -1282,3 +1290,9 @@ mod archive;
 
 #[path = "immich_live/live_graph.rs"]
 mod live_graph;
+
+#[path = "immich_live/metadata_extended.rs"]
+mod metadata_extended;
+
+#[path = "immich_live/external_import.rs"]
+mod external_import;

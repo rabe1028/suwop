@@ -322,6 +322,8 @@ fn schema_three_migrates_without_swallowing_journal_and_summary_hides_inventory(
     let mut raw = serde_json::to_value(&state).map_err(|e| e.to_string())?;
     raw["schemaVersion"] = json!(3);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",

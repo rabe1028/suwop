@@ -11,13 +11,7 @@ extension ApplePhotosStore {
         let scope = scope
         let full = status == .authorized
         let worker = Task.detached(priority: .userInitiated) {
-            let fetched = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: nil)
-            var albums: [StoredAlbum] = []
-            for index in 0 ..< fetched.count {
-                try Task.checkCancellation()
-                albums.append(Self.describeAlbum(fetched.object(at: index), scope: scope, full: full))
-            }
-            return AlbumSnapshot(access: full ? .full : .limited, albums: albums, provider: .apple, scope: scope)
+            try Self.collectionSnapshot(scope: scope, full: full)
         }
         return try await withTaskCancellationHandler { try await worker.value } onCancel: { worker.cancel() }
     }
@@ -115,7 +109,7 @@ extension ApplePhotosStore {
         return album
     }
 
-    private nonisolated static func describeAlbum(
+    nonisolated static func describeAlbum(
         _ album: PHAssetCollection,
         scope: String,
         full: Bool

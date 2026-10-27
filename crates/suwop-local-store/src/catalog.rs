@@ -372,7 +372,7 @@ mod tests {
             scanned_at: Some(1.0),
         };
         let state = SavedLibrary {
-            schema_version: 10,
+            schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
             apple_scope: "apple".into(),
             snapshots: vec![
                 snapshot(Provider::Apple, "apple", apple),

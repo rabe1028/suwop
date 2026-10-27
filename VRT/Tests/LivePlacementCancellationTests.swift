@@ -17,7 +17,7 @@ final class LivePlacementCancellationTests: XCTestCase {
             shell.httpTransportEffect = nil
             shell.livePlacementConfirmationCurrent = nil
         }
-        try await shell.localStore.persist(.from(SavedLibrary(appleScope: "before-cancel", schemaVersion: 10)))
+        try await shell.localStore.persist(.from(SavedLibrary(appleScope: "before-cancel", schemaVersion: 11)))
         let path = root.appendingPathComponent("synthetic-worker.bin")
         try Data([1]).write(to: path)
         let key = AssetKey(provider: .immich, scope: "synthetic-cancellation", assetID: "motion")

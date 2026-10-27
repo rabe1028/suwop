@@ -11,6 +11,7 @@ mod apple_visibility;
 mod browser;
 mod browser_dates;
 mod browser_live;
+mod current_media;
 mod current_render_plan;
 mod current_sharing;
 mod display_catalog;
@@ -37,3 +38,6 @@ mod transfer_lifecycle;
 mod trash;
 mod upload_dates;
 mod workflow;
+
+mod collection_contract;
+mod collections;

@@ -217,6 +217,24 @@ impl AlbumCreator for AppleBackend {
 }
 
 impl AlbumEditor for AppleBackend {
+    fn edit_collection<'a>(
+        &'a self,
+        io: ReadIo<'a>,
+        edit: &'a crate::albums::CollectionEdit,
+        expected: &'a AlbumSnapshot,
+    ) -> Io<'a, ()> {
+        Box::pin(async move {
+            shell::<()>(
+                io.ctx(),
+                ShellOperation::AppleCollectionEdit {
+                    scope: self.scope.clone(),
+                    edit: edit.clone(),
+                    expected: expected.clone(),
+                },
+            )
+            .await
+        })
+    }
     fn edit_album<'a>(
         &'a self,
         io: ReadIo<'a>,

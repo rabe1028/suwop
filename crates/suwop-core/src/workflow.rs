@@ -20,20 +20,28 @@ mod albums;
 mod amazon;
 mod apple_trash;
 mod apple_visibility;
+mod collections;
+mod current_media;
 mod current_rendering;
 mod current_sharing;
 mod edit_paste;
 mod editing;
+mod external_import;
 mod favorites;
 pub(crate) mod journal;
 mod media;
 mod metadata;
+mod metadata_admission;
+mod metadata_extended;
 #[cfg(test)]
 mod registry_tests;
 mod reversion;
 mod sharing;
 mod status;
 pub(crate) use status::initial_status;
+pub(crate) fn metadata_event_blocked(event: &Event, state: &SavedLibrary) -> bool {
+    metadata_admission::blocked(event, state)
+}
 mod trash;
 mod trash_fence;
 mod upload_intents;
@@ -146,18 +154,13 @@ pub async fn run_guarded(
         injected_registry: None,
     };
     let metadata_change = metadata_event(&event);
-    let sharing = matches!(event, Event::Share { .. } | Event::ShareCurrentImage { .. });
+    let sharing = matches!(
+        event,
+        Event::Share { .. } | Event::ShareCurrentImage { .. } | Event::ShareCurrentImages { .. }
+    );
     let playback = matches!(event, Event::Play { .. });
     let reverting = matches!(event, Event::RevertImage { .. });
-    let editing = matches!(
-        event,
-        Event::EditImage { .. }
-            | Event::RevertImage { .. }
-            | Event::CopyPhotoEdits { .. }
-            | Event::PastePhotoEdits { .. }
-            | Event::PasteSelectedPhotoEdits { .. }
-            | Event::ResolveEditPaste { .. }
-    );
+    let editing = editing_event(&event);
     let mut result = runtime.execute(event).await;
     if let Some(token) = runtime.editing_token.take() {
         let close: Result<Value, _> = io(ctx, ShellOperation::AppleEditClose { token }).await;
@@ -319,6 +322,11 @@ impl Runtime<'_> {
         event: Event,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
     {
+        if metadata_admission::blocked(&event, &self.state) {
+            return Box::pin(async {
+                Err("この写真には結果不明の情報変更があります。変更履歴で保存先の状態を確認してください。自動再送は行いません。".into())
+            });
+        }
         match event {
             Event::Initialize { scope } => Box::pin(async move { self.initialize(scope).await }),
             _ if self.state.schema_version != crate::immich_live_writes::CURRENT_SCHEMA_VERSION => {
@@ -327,6 +335,94 @@ impl Runtime<'_> {
                 })
             }
             event => self.execute_ready(event),
+        }
+    }
+
+    fn execute_import_share(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        match event {
+            Event::InspectImport { id } => Box::pin(async move {
+                self.inspect_import(&id).await?;
+                Ok("取り込み先の確認を完了しました。".into())
+            }),
+            Event::ImportStaged {
+                id,
+                destination,
+                items,
+                now,
+            } => Box::pin(async move {
+                self.import_staged(&id, destination, items, now).await?;
+                Ok("取り込み結果を記録しました。".into())
+            }),
+            Event::Duplicate {
+                keys,
+                destination,
+                current,
+                id,
+                now,
+            } => Box::pin(async move {
+                self.duplicate(&keys, destination, current, &id, now)
+                    .await?;
+                Ok("複製結果を記録しました。".into())
+            }),
+            Event::ShareCurrentImages {
+                keys,
+                id,
+                remove_location,
+            } => Box::pin(
+                async move { self.share_current_images(&keys, &id, remove_location).await },
+            ),
+            Event::ShareCurrentImage { key, id } => {
+                Box::pin(async move { self.share_current_image(&key, &id).await })
+            }
+            _ => Box::pin(async { Err("不正な操作です。".into()) }),
+        }
+    }
+
+    fn execute_metadata_event(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        match event {
+            Event::EditMetadata { keys, edit, id } => {
+                Box::pin(async move { self.edit_metadata(&keys, &edit, &id, None).await })
+            }
+            Event::InspectMetadata { operation_id } => {
+                Box::pin(async move { self.inspect_metadata(&operation_id).await })
+            }
+            Event::RestoreMetadata {
+                id,
+                operation_id,
+                original,
+            } => Box::pin(async move { self.restore_metadata(&id, &operation_id, original).await }),
+            _ => Box::pin(async { Err("不正な操作です。".into()) }),
+        }
+    }
+
+    fn execute_transfer_event(
+        &mut self,
+        event: Event,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + '_>>
+    {
+        match event {
+            Event::Copy {
+                keys,
+                intent,
+                id,
+                now,
+            } => Box::pin(async move {
+                self.copy(&keys, intent, &id, now).await?;
+                Ok("コピーを検証しました。元データは残っています。".into())
+            }),
+            Event::CompleteMove { id, workspace } => Box::pin(async move {
+                self.complete_move(&id, &workspace).await?;
+                Ok("移動が完了しました。転送元のゴミ箱を確認してください。".into())
+            }),
+            _ => Box::pin(async { Err("不正な操作です。".into()) }),
         }
     }
 
@@ -371,6 +467,12 @@ impl Runtime<'_> {
             Event::SetFavorite { keys, value } => {
                 Box::pin(async move { self.favorite(&keys, value).await })
             }
+            event @ (Event::EditMetadata { .. }
+            | Event::InspectMetadata { .. }
+            | Event::RestoreMetadata { .. }) => self.execute_metadata_event(event),
+            Event::EditCollection { provider, edit } => {
+                Box::pin(async move { self.edit_collection(provider, &edit).await })
+            }
             Event::SetMetadata { keys, input } => {
                 Box::pin(async move { self.change_metadata(&keys, &input).await })
             }
@@ -394,9 +496,11 @@ impl Runtime<'_> {
                 Box::pin(async move { self.revert_image(&key, &id).await })
             }
             Event::Share { keys, id } => Box::pin(async move { self.share(&keys, &id).await }),
-            Event::ShareCurrentImage { key, id } => {
-                Box::pin(async move { self.share_current_image(&key, &id).await })
-            }
+            event @ (Event::InspectImport { .. }
+            | Event::ImportStaged { .. }
+            | Event::Duplicate { .. }
+            | Event::ShareCurrentImages { .. }
+            | Event::ShareCurrentImage { .. }) => self.execute_import_share(event),
             Event::Play { keys, id } => Box::pin(async move { self.play(&keys, &id).await }),
             Event::RefreshAlbums => Box::pin(async move { self.refresh_albums().await }),
             Event::RefreshTrash { now } => Box::pin(async move { self.refresh_trash(now).await }),
@@ -416,19 +520,9 @@ impl Runtime<'_> {
             Event::EditAlbum { key, edit } => {
                 Box::pin(async move { self.edit_album(&key, &edit).await })
             }
-            Event::Copy {
-                keys,
-                intent,
-                id,
-                now,
-            } => Box::pin(async move {
-                self.copy(&keys, intent, &id, now).await?;
-                Ok("コピーを検証しました。元データは残っています。".into())
-            }),
-            Event::CompleteMove { id, workspace } => Box::pin(async move {
-                self.complete_move(&id, &workspace).await?;
-                Ok("移動が完了しました。転送元のゴミ箱を確認してください。".into())
-            }),
+            event @ (Event::Copy { .. } | Event::CompleteMove { .. }) => {
+                self.execute_transfer_event(event)
+            }
             _ => Box::pin(async move { Err("不正な操作です。".into()) }),
         }
     }
@@ -1354,6 +1448,20 @@ pub fn migrate(mut raw: Value) -> Result<SavedLibrary, String> {
     if !(1..=u64::from(crate::immich_live_writes::CURRENT_SCHEMA_VERSION)).contains(&version) {
         return Err("未対応のカタログ形式です。既存ファイルは変更しません。".into());
     }
+    crate::metadata::migrate_journal(&mut raw, version)?;
+    if version < 11 {
+        if raw
+            .get("externalImports")
+            .is_some_and(|value| !value.is_null())
+        {
+            return Err(
+                "旧形式に未対応の取り込み記録があります。既存ファイルは変更しません。".into(),
+            );
+        }
+        raw["externalImports"] = serde_json::json!([]);
+    } else if !raw.get("externalImports").is_some_and(Value::is_array) {
+        return Err("取り込み記録の構成が不正です。既存ファイルは変更しません。".into());
+    }
     let live_fields = [
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
@@ -1471,10 +1579,24 @@ fn metadata_event(event: &Event) -> bool {
         event,
         Event::SetFavorite { .. }
             | Event::SetMetadata { .. }
+            | Event::EditMetadata { .. }
+            | Event::RestoreMetadata { .. }
             | Event::CreateAlbum { .. }
             | Event::EditAlbum { .. }
             | Event::EditImage { .. }
             | Event::RevertImage { .. }
+            | Event::PastePhotoEdits { .. }
+            | Event::PasteSelectedPhotoEdits { .. }
+            | Event::ResolveEditPaste { .. }
+    )
+}
+
+fn editing_event(event: &Event) -> bool {
+    matches!(
+        event,
+        Event::EditImage { .. }
+            | Event::RevertImage { .. }
+            | Event::CopyPhotoEdits { .. }
             | Event::PastePhotoEdits { .. }
             | Event::PasteSelectedPhotoEdits { .. }
             | Event::ResolveEditPaste { .. }

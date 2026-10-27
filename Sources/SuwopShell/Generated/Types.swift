@@ -62,6 +62,11 @@ public struct AlbumCandidate: Codable, Sendable {
     }
 }
 
+public enum AlbumDateOrder: String, Codable, CaseIterable, Sendable {
+    case `asc`
+    case `desc`
+}
+
 public struct AlbumEdit: Codable, Sendable {
     public var action: AlbumAction
     public var keys: [AssetKey]
@@ -106,11 +111,13 @@ public struct AlbumPermissions: Codable, Sendable {
 public struct AlbumSnapshot: Codable, Sendable {
     public var access: ScanAccess
     public var albums: [StoredAlbum]
+    public var collections: [StoredCollection]
     public var provider: Provider
     public var scope: String
-    public init(access: ScanAccess, albums: [StoredAlbum] = [], provider: Provider, scope: String) {
+    public init(access: ScanAccess, albums: [StoredAlbum] = [], collections: [StoredCollection] = [], provider: Provider, scope: String) {
         self.access = access
         self.albums = albums
+        self.collections = collections
         self.provider = provider
         self.scope = scope
     }
@@ -581,6 +588,55 @@ public struct BrowserView: Codable, Sendable {
     }
 }
 
+public enum CollectionAbility: String, Codable, CaseIterable, Sendable {
+    case `createChild`
+    case `removeChild`
+    case `rename`
+    case `delete`
+    case `move`
+    case `reorderChildren`
+    case `reorderPhotos`
+    case `dateOrder`
+}
+
+public enum CollectionAction: String, Codable, CaseIterable, Sendable {
+    case `createFolder`
+    case `renameFolder`
+    case `deleteFolder`
+    case `move`
+    case `reorderChildren`
+    case `reorderPhotos`
+    case `setDateOrder`
+}
+
+public struct CollectionEdit: Codable, Sendable {
+    public var action: CollectionAction
+    public var collections: [AlbumKey]
+    public var index: Int64
+    public var key: AlbumKey?
+    public var order: AlbumDateOrder?
+    public var parent: AlbumKey?
+    public var photos: [AssetKey]
+    public var title: String?
+    public init(action: CollectionAction, collections: [AlbumKey] = [], index: Int64, key: AlbumKey? = nil, order: AlbumDateOrder? = nil, parent: AlbumKey? = nil, photos: [AssetKey] = [], title: String? = nil) {
+        self.action = action
+        self.collections = collections
+        self.index = index
+        self.key = key
+        self.order = order
+        self.parent = parent
+        self.photos = photos
+        self.title = title
+    }
+}
+
+public enum CollectionKind: String, Codable, CaseIterable, Sendable {
+    case `album`
+    case `folder`
+    case `shared`
+    case `smart`
+}
+
 public struct ColorAdjustments: Codable, Sendable {
     public var brightness: Int64
     public var contrast: Int64
@@ -694,6 +750,67 @@ public struct CurrentImageRenderResult: Codable, Sendable {
     public init(image: CurrentImageFacts, metadata: CurrentImageMetadata) {
         self.image = image
         self.metadata = metadata
+    }
+}
+
+public struct CurrentMediaExport: Codable, Sendable {
+    public var asset: StoredAsset
+    public var files: [CurrentMediaFile]
+    public var freshAsset: StoredAsset
+    public var inputAudioTracks: Int64
+    public var inputDurationMs: Int64
+    public var inputVideoTracks: Int64
+    public var kind: PlaybackKind
+    public var locationRemoved: Bool
+    public init(asset: StoredAsset, files: [CurrentMediaFile] = [], freshAsset: StoredAsset, inputAudioTracks: Int64, inputDurationMs: Int64, inputVideoTracks: Int64, kind: PlaybackKind, locationRemoved: Bool) {
+        self.asset = asset
+        self.files = files
+        self.freshAsset = freshAsset
+        self.inputAudioTracks = inputAudioTracks
+        self.inputDurationMs = inputDurationMs
+        self.inputVideoTracks = inputVideoTracks
+        self.kind = kind
+        self.locationRemoved = locationRemoved
+    }
+}
+
+public struct CurrentMediaFile: Codable, Sendable {
+    public var audioTracks: Int64
+    public var contentIdentifier: String?
+    public var durationMs: Int64
+    public var hasLocation: Bool
+    public var hasStillImageTime: Bool
+    public var image: CurrentImageFacts?
+    public var metadataTracks: Int64
+    public var onlyPairMetadata: Bool
+    public var path: String
+    public var role: ResourceRole
+    public var videoTracks: Int64
+    public init(audioTracks: Int64, contentIdentifier: String? = nil, durationMs: Int64, hasLocation: Bool, hasStillImageTime: Bool, image: CurrentImageFacts? = nil, metadataTracks: Int64, onlyPairMetadata: Bool, path: String, role: ResourceRole, videoTracks: Int64) {
+        self.audioTracks = audioTracks
+        self.contentIdentifier = contentIdentifier
+        self.durationMs = durationMs
+        self.hasLocation = hasLocation
+        self.hasStillImageTime = hasStillImageTime
+        self.image = image
+        self.metadataTracks = metadataTracks
+        self.onlyPairMetadata = onlyPairMetadata
+        self.path = path
+        self.role = role
+        self.videoTracks = videoTracks
+    }
+}
+
+public struct CurrentMovieOutput: Codable, Sendable {
+    public var file: CurrentMediaFile
+    public var inputAudioTracks: Int64
+    public var inputDurationMs: Int64
+    public var inputVideoTracks: Int64
+    public init(file: CurrentMediaFile, inputAudioTracks: Int64, inputDurationMs: Int64, inputVideoTracks: Int64) {
+        self.file = file
+        self.inputAudioTracks = inputAudioTracks
+        self.inputDurationMs = inputDurationMs
+        self.inputVideoTracks = inputVideoTracks
     }
 }
 
@@ -1776,6 +1893,83 @@ public enum ImmichVisibilityWriteAvailability: String, Codable, CaseIterable, Se
     case `unsupported`
 }
 
+public struct ImportItem: Codable, Sendable {
+    public var id: String
+    public var metadata: ImportMetadata
+    public var resources: [StagedResource]
+    public init(id: String, metadata: ImportMetadata, resources: [StagedResource] = []) {
+        self.id = id
+        self.metadata = metadata
+        self.resources = resources
+    }
+}
+
+public struct ImportJournal: Codable, Sendable {
+    public var created: Bool?
+    public var createdAt: Date
+    public var destination: Provider
+    public var destinationKeys: [AssetKey]
+    public var destinationScope: String
+    public var id: String
+    public var item: ImportItem
+    public var phase: ImportPhase
+    public var purpose: ImportPurpose
+    public var sourceKeys: [AssetKey]
+    public var stagingOperation: String
+    public init(created: Bool? = nil, createdAt: Date, destination: Provider, destinationKeys: [AssetKey] = [], destinationScope: String, id: String, item: ImportItem, phase: ImportPhase, purpose: ImportPurpose, sourceKeys: [AssetKey] = [], stagingOperation: String) {
+        self.created = created
+        self.createdAt = createdAt
+        self.destination = destination
+        self.destinationKeys = destinationKeys
+        self.destinationScope = destinationScope
+        self.id = id
+        self.item = item
+        self.phase = phase
+        self.purpose = purpose
+        self.sourceKeys = sourceKeys
+        self.stagingOperation = stagingOperation
+    }
+}
+
+public struct ImportMetadata: Codable, Sendable {
+    public var capturedAt: String?
+    public var favorite: Bool
+    public var latitude: Double?
+    public var longitude: Double?
+    public init(capturedAt: String? = nil, favorite: Bool, latitude: Double? = nil, longitude: Double? = nil) {
+        self.capturedAt = capturedAt
+        self.favorite = favorite
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+}
+
+public struct ImportNotice: Codable, Sendable {
+    public var canInspect: Bool
+    public var id: String
+    public var phase: ImportPhase
+    public init(canInspect: Bool, id: String, phase: ImportPhase) {
+        self.canInspect = canInspect
+        self.id = id
+        self.phase = phase
+    }
+}
+
+public enum ImportPhase: String, Codable, CaseIterable, Sendable {
+    case `prepared`
+    case `submitting`
+    case `verified`
+    case `alreadyPresent`
+    case `uncertain`
+    case `cancelled`
+}
+
+public enum ImportPurpose: String, Codable, CaseIterable, Sendable {
+    case `external`
+    case `duplicateOriginal`
+    case `duplicateCurrent`
+}
+
 public struct InferenceSelection: Codable, Sendable {
     public var analysis: AnalysisStatus?
     public var inference: InferenceStatus?
@@ -2187,6 +2381,98 @@ public struct MetadataChange: Codable, Sendable {
     }
 }
 
+public struct MetadataEditCapturedAtData: Codable, Sendable {
+    public var local: String
+    public var occurrence: Occurrence?
+    public var zone: String
+    public init(local: String, occurrence: Occurrence? = nil, zone: String) {
+        self.local = local
+        self.occurrence = occurrence
+        self.zone = zone
+    }
+    private enum CodingKeys: String, CodingKey { case local, occurrence, zone }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["local", "occurrence", "zone"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        local = try values.decode(String.self, forKey: .local)
+        occurrence = try values.decodeIfPresent(Occurrence.self, forKey: .occurrence)
+        zone = try values.decode(String.self, forKey: .zone)
+    }
+}
+
+public struct MetadataEditLocationData: Codable, Sendable {
+    public var latitude: String
+    public var longitude: String
+    public init(latitude: String, longitude: String) {
+        self.latitude = latitude
+        self.longitude = longitude
+    }
+    private enum CodingKeys: String, CodingKey { case latitude, longitude }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["latitude", "longitude"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        latitude = try values.decode(String.self, forKey: .latitude)
+        longitude = try values.decode(String.self, forKey: .longitude)
+    }
+}
+
+public struct MetadataEditDescriptionData: Codable, Sendable {
+    public var text: String
+    public init(text: String) {
+        self.text = text
+    }
+    private enum CodingKeys: String, CodingKey { case text }
+    public init(from decoder: any Decoder) throws {
+        try requireSchemaKeys(decoder, allowed: ["text"])
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        text = try values.decode(String.self, forKey: .text)
+    }
+}
+
+public enum MetadataEdit: Codable, Sendable {
+    case `capturedAt`(MetadataEditCapturedAtData)
+    case `location`(MetadataEditLocationData)
+    case `removeLocation`
+    case `description`(MetadataEditDescriptionData)
+    private enum CodingKeys: String, CodingKey { case type, data }
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        switch try values.decode(String.self, forKey: .type) {
+        case "capturedAt":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .capturedAt(try values.decode(MetadataEditCapturedAtData.self, forKey: .data))
+        case "location":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .location(try values.decode(MetadataEditLocationData.self, forKey: .data))
+        case "removeLocation":
+            try requireSchemaKeys(decoder, allowed: ["type"])
+            self = .removeLocation
+        case "description":
+            try requireSchemaKeys(decoder, allowed: ["type", "data"])
+            self = .description(try values.decode(MetadataEditDescriptionData.self, forKey: .data))
+        default:
+            throw DecodingError.dataCorruptedError(forKey: .type, in: values,
+                debugDescription: "Unknown enum tag")
+        }
+    }
+    public func encode(to encoder: any Encoder) throws {
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        switch self {
+        case let .capturedAt(data):
+            try values.encode("capturedAt", forKey: .type)
+            try values.encode(data, forKey: .data)
+        case let .location(data):
+            try values.encode("location", forKey: .type)
+            try values.encode(data, forKey: .data)
+        case .removeLocation:
+            try values.encode("removeLocation", forKey: .type)
+        case let .description(data):
+            try values.encode("description", forKey: .type)
+            try values.encode(data, forKey: .data)
+        }
+    }
+}
+
 public struct MetadataInput: Codable, Sendable {
     public var action: MetadataAction
     public var capturedAt: Date?
@@ -2199,6 +2485,57 @@ public struct MetadataInput: Codable, Sendable {
         self.latitude = latitude
         self.longitude = longitude
         self.timeZone = timeZone
+    }
+}
+
+public struct MetadataObservation: Codable, Sendable {
+    public var key: AssetKey
+    public var unavailable: Bool
+    public var witness: MetadataWitness?
+    public init(key: AssetKey, unavailable: Bool, witness: MetadataWitness? = nil) {
+        self.key = key
+        self.unavailable = unavailable
+        self.witness = witness
+    }
+}
+
+public enum MetadataOutcome: String, Codable, CaseIterable, Sendable {
+    case `submittedUnknown`
+    case `notApplied`
+    case `verifiedApplied`
+}
+
+public struct MetadataRecord: Codable, Sendable {
+    public var after: [MetadataWitness]
+    public var before: [MetadataWitness]
+    public var current: [MetadataObservation]
+    public var edit: MetadataEdit
+    public var id: String
+    public var keys: [AssetKey]
+    public var memberEdits: [MetadataEdit]
+    public var outcome: MetadataOutcome
+    public var restores: String?
+    public init(after: [MetadataWitness] = [], before: [MetadataWitness] = [], current: [MetadataObservation] = [], edit: MetadataEdit, id: String, keys: [AssetKey] = [], memberEdits: [MetadataEdit] = [], outcome: MetadataOutcome, restores: String? = nil) {
+        self.after = after
+        self.before = before
+        self.current = current
+        self.edit = edit
+        self.id = id
+        self.keys = keys
+        self.memberEdits = memberEdits
+        self.outcome = outcome
+        self.restores = restores
+    }
+}
+
+public struct MetadataRestoreAvailability: Codable, Sendable {
+    public var id: String
+    public var originalReason: String?
+    public var undoReason: String?
+    public init(id: String, originalReason: String? = nil, undoReason: String? = nil) {
+        self.id = id
+        self.originalReason = originalReason
+        self.undoReason = undoReason
     }
 }
 
@@ -2222,6 +2559,30 @@ public struct MetadataTarget: Codable, Sendable {
         self.location = location
         self.locationsVary = locationsVary
         self.provider = provider
+    }
+}
+
+public struct MetadataValues: Codable, Sendable {
+    public var capturedAt: Date?
+    public var description: String
+    public var latitude: Double?
+    public var longitude: Double?
+    public var timeZone: String?
+    public init(capturedAt: Date? = nil, description: String, latitude: Double? = nil, longitude: Double? = nil, timeZone: String? = nil) {
+        self.capturedAt = capturedAt
+        self.description = description
+        self.latitude = latitude
+        self.longitude = longitude
+        self.timeZone = timeZone
+    }
+}
+
+public struct MetadataWitness: Codable, Sendable {
+    public var asset: StoredAsset
+    public var values: MetadataValues
+    public init(asset: StoredAsset, values: MetadataValues) {
+        self.asset = asset
+        self.values = values
     }
 }
 
@@ -2308,6 +2669,11 @@ public enum ObservedState: Codable, Sendable {
             try values.encode(data, forKey: .data)
         }
     }
+}
+
+public enum Occurrence: String, Codable, CaseIterable, Sendable {
+    case `earlier`
+    case `later`
 }
 
 public struct OrdinaryContentAuthorization: Codable, Sendable {
@@ -3099,10 +3465,12 @@ public struct SavedLibrary: Codable, Sendable {
     public var appleVisibilityOperations: [AppleVisibilityOperation]
     public var connection: ConnectionSettings?
     public var editClipboard: EditClipboard?
+    public var externalImports: [ImportJournal]
     public var immichLiveLegacyReconciliations: [LegacyReconciliation]
     public var immichLiveOperations: [Batch]
     public var immichLiveUnstartedClosures: [UnstartedClosure]
     public var immichVisibilityOperations: [ImmichVisibilityOperation]
+    public var metadataOperations: [MetadataRecord]
     public var pendingAppleTrash: [AppleTrashOperation]
     public var pendingEditPastes: [PendingEditPaste]
     public var pendingTrash: [TrashOperation]
@@ -3113,7 +3481,7 @@ public struct SavedLibrary: Codable, Sendable {
     public var snapshots: [LibrarySnapshot]
     public var trash: TrashSnapshot?
     public var uploadIntents: [UploadIntent]
-    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, immichLiveLegacyReconciliations: [LegacyReconciliation] = [], immichLiveOperations: [Batch] = [], immichLiveUnstartedClosures: [UnstartedClosure] = [], immichVisibilityOperations: [ImmichVisibilityOperation] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
+    public init(albums: [AlbumSnapshot] = [], amazonConnection: AmazonConnection? = nil, amazonUploads: [AmazonUploadRecord] = [], appleScope: String, appleVisibilityOperations: [AppleVisibilityOperation] = [], connection: ConnectionSettings? = nil, editClipboard: EditClipboard? = nil, externalImports: [ImportJournal] = [], immichLiveLegacyReconciliations: [LegacyReconciliation] = [], immichLiveOperations: [Batch] = [], immichLiveUnstartedClosures: [UnstartedClosure] = [], immichVisibilityOperations: [ImmichVisibilityOperation] = [], metadataOperations: [MetadataRecord] = [], pendingAppleTrash: [AppleTrashOperation] = [], pendingEditPastes: [PendingEditPaste] = [], pendingTrash: [TrashOperation] = [], pendingUploads: [PendingUpload] = [], protectedEntries: [PersistentProtectedEntry] = [], receipts: [TransferReceipt] = [], schemaVersion: Int64, snapshots: [LibrarySnapshot] = [], trash: TrashSnapshot? = nil, uploadIntents: [UploadIntent] = []) {
         self.albums = albums
         self.amazonConnection = amazonConnection
         self.amazonUploads = amazonUploads
@@ -3121,10 +3489,12 @@ public struct SavedLibrary: Codable, Sendable {
         self.appleVisibilityOperations = appleVisibilityOperations
         self.connection = connection
         self.editClipboard = editClipboard
+        self.externalImports = externalImports
         self.immichLiveLegacyReconciliations = immichLiveLegacyReconciliations
         self.immichLiveOperations = immichLiveOperations
         self.immichLiveUnstartedClosures = immichLiveUnstartedClosures
         self.immichVisibilityOperations = immichVisibilityOperations
+        self.metadataOperations = metadataOperations
         self.pendingAppleTrash = pendingAppleTrash
         self.pendingEditPastes = pendingEditPastes
         self.pendingTrash = pendingTrash
@@ -3211,6 +3581,25 @@ public struct SimilarityHit: Codable, Sendable {
     }
 }
 
+public struct StagedResource: Codable, Sendable {
+    public var bytes: Int64
+    public var contentIdentifier: String?
+    public var mediaType: String
+    public var name: String
+    public var role: ResourceRole
+    public var sha256: String
+    public var token: String
+    public init(bytes: Int64, contentIdentifier: String? = nil, mediaType: String, name: String, role: ResourceRole, sha256: String, token: String) {
+        self.bytes = bytes
+        self.contentIdentifier = contentIdentifier
+        self.mediaType = mediaType
+        self.name = name
+        self.role = role
+        self.sha256 = sha256
+        self.token = token
+    }
+}
+
 public struct Step: Codable, Sendable {
     public var id: String
     public var outcome: Outcome
@@ -3282,6 +3671,29 @@ public struct StoredAsset: Codable, Sendable {
         self.immichStack = immichStack
         self.immichStackMembership = immichStackMembership
         self.immichVisibility = immichVisibility
+    }
+}
+
+public struct StoredCollection: Codable, Sendable {
+    public var abilities: [CollectionAbility]
+    public var children: [AlbumKey]
+    public var dateOrder: AlbumDateOrder?
+    public var explanation: String?
+    public var externalUrl: String?
+    public var key: AlbumKey
+    public var kind: CollectionKind
+    public var parent: AlbumKey?
+    public var title: String
+    public init(abilities: [CollectionAbility] = [], children: [AlbumKey] = [], dateOrder: AlbumDateOrder? = nil, explanation: String? = nil, externalUrl: String? = nil, key: AlbumKey, kind: CollectionKind, parent: AlbumKey? = nil, title: String) {
+        self.abilities = abilities
+        self.children = children
+        self.dateOrder = dateOrder
+        self.explanation = explanation
+        self.externalUrl = externalUrl
+        self.key = key
+        self.kind = kind
+        self.parent = parent
+        self.title = title
     }
 }
 
@@ -3518,18 +3930,22 @@ public struct ViewModel: Codable, Sendable {
     public var canTransfer: Bool
     public var editingTargets: [String: [EditingTarget]]
     public var error: String?
+    public var externalImports: [ImportJournal]
     public var immichArchiveActions: [ImmichArchiveActionHint]
     public var immichArchiveView: ImmichArchiveView
     public var immichLiveResources: ImmichLiveResourcesView?
     public var immichLockedView: ImmichLockedView
     public var immichVisibilityActions: [ImmichVisibilityActionHint]
     public var immichVisibilityView: ImmichVisibilityView
+    public var importNotices: [ImportNotice]
     public var liveKeepPrompt: LiveKeepPrompt?
     public var livePlacementCandidates: [AssetKey]
     public var livePlacementCleanup: LivePlacementCleanup?
     public var livePlacementHistory: LivePlacementHistory
     public var livePlacementPrompt: LivePlacementPrompt?
     public var media: [String: PlaybackKind]
+    public var metadataOperations: [MetadataRecord]
+    public var metadataRestoreAvailability: [MetadataRestoreAvailability]
     public var metadataTargets: [String: [MetadataTarget]]
     public var moveBlockers: [String: [String]]
     public var ordinaryContentKeys: [AssetKey]
@@ -3553,7 +3969,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, liveKeepPrompt: LiveKeepPrompt? = nil, livePlacementCandidates: [AssetKey] = [], livePlacementCleanup: LivePlacementCleanup? = nil, livePlacementHistory: LivePlacementHistory, livePlacementPrompt: LivePlacementPrompt? = nil, media: [String: PlaybackKind] = [:], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinaryLiveActions: [OrdinaryLivePairAction] = [], ordinaryLiveImagePending: [PairImagePending] = [], ordinaryLiveImages: [PairImageAccess] = [], ordinaryLivePairs: [PairPresentation] = [], ordinaryLiveProgress: OrdinaryLiveReadProgress? = nil, ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, externalImports: [ImportJournal] = [], immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, importNotices: [ImportNotice] = [], liveKeepPrompt: LiveKeepPrompt? = nil, livePlacementCandidates: [AssetKey] = [], livePlacementCleanup: LivePlacementCleanup? = nil, livePlacementHistory: LivePlacementHistory, livePlacementPrompt: LivePlacementPrompt? = nil, media: [String: PlaybackKind] = [:], metadataOperations: [MetadataRecord] = [], metadataRestoreAvailability: [MetadataRestoreAvailability] = [], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinaryLiveActions: [OrdinaryLivePairAction] = [], ordinaryLiveImagePending: [PairImagePending] = [], ordinaryLiveImages: [PairImageAccess] = [], ordinaryLivePairs: [PairPresentation] = [], ordinaryLiveProgress: OrdinaryLiveReadProgress? = nil, ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -3561,18 +3977,22 @@ public struct ViewModel: Codable, Sendable {
         self.canTransfer = canTransfer
         self.editingTargets = editingTargets
         self.error = error
+        self.externalImports = externalImports
         self.immichArchiveActions = immichArchiveActions
         self.immichArchiveView = immichArchiveView
         self.immichLiveResources = immichLiveResources
         self.immichLockedView = immichLockedView
         self.immichVisibilityActions = immichVisibilityActions
         self.immichVisibilityView = immichVisibilityView
+        self.importNotices = importNotices
         self.liveKeepPrompt = liveKeepPrompt
         self.livePlacementCandidates = livePlacementCandidates
         self.livePlacementCleanup = livePlacementCleanup
         self.livePlacementHistory = livePlacementHistory
         self.livePlacementPrompt = livePlacementPrompt
         self.media = media
+        self.metadataOperations = metadataOperations
+        self.metadataRestoreAvailability = metadataRestoreAvailability
         self.metadataTargets = metadataTargets
         self.moveBlockers = moveBlockers
         self.ordinaryContentKeys = ordinaryContentKeys

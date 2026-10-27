@@ -65,7 +65,7 @@ import SuwopShell
                     key: ImmichLockedFixtureData.key(ImmichVisibilityFixtureData.sourceID)
                 ),
             ] : [],
-            schemaVersion: 10
+            schemaVersion: 11
         )
         rawJournal = try .from(journal)
     }

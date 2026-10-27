@@ -18,7 +18,7 @@ import Testing
         resources: [resource]
     )
     let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
-    let state = SavedLibrary(appleScope: "library", schemaVersion: 10)
+    let state = SavedLibrary(appleScope: "library", schemaVersion: 11)
     func update(_ event: [String: JSONValue]) throws -> [EffectRequest] {
         try bridge.call(0, input: .object(event)).decode([EffectRequest].self)
     }
@@ -38,7 +38,7 @@ import Testing
     let workspace = try #require(update([
         "type": .string("share"), "keys": .from([asset.key]), "id": .string("11111111-1111-4111-8111-111111111111"),
     ]).first)
-    #expect(workspace.effect["Io"]?.type == "workspace")
+    #expect(workspace.effect["Io"]?.type == "sharingWorkspace")
     let export = try #require(resolve(workspace, value: .string("/tmp/share-workspace")).first)
     #expect(export.effect["Io"]?.type == "appleExport")
     let signature = FileSignature(bytes: 12, sha256: String(repeating: "a", count: 64))

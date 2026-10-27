@@ -275,21 +275,7 @@ impl PublishedLibrary {
                 }
             }
         }
-        for s in &mut state.albums {
-            if s.access == ScanAccess::Unavailable {
-                for album in &mut s.albums {
-                    album.members.retain(|key| {
-                        !canonical
-                            .immich_visibility_operations
-                            .iter()
-                            .any(|o| o.key == *key)
-                    });
-                }
-            }
-            s.albums
-                .iter_mut()
-                .for_each(|a| a.members.retain(|k| access.visible(k)));
-        }
+        publish_album_members(&mut state, &access);
         if let Some(c) = &mut state.edit_clipboard
             && c.source_key.as_ref().is_none_or(|k| !access.visible(k))
         {
@@ -316,6 +302,34 @@ impl PublishedLibrary {
             trash: state.trash,
             pending_trash: state.pending_trash,
             pending_apple_trash: state.pending_apple_trash,
+        }
+    }
+}
+
+/// Canonical album membership includes private resources for fresh write
+/// verification. Public membership grants no authority beyond the ordinary
+/// catalog, including for another owner's shared album or an unavailable scan.
+fn publish_album_members(state: &mut SavedLibrary, access: &ContentAccess) {
+    let ordinary: BTreeSet<_> = state
+        .snapshots
+        .iter()
+        .filter(|s| s.access != ScanAccess::Unavailable)
+        .flat_map(|s| {
+            s.assets.iter().filter_map(|a| {
+                (a.key.provider == s.provider && a.key.scope == s.scope && access.visible(&a.key))
+                    .then_some(a.key.clone())
+            })
+        })
+        .collect();
+    for snapshot in &mut state.albums {
+        for album in &mut snapshot.albums {
+            album.members.retain(|key| {
+                snapshot.access != ScanAccess::Unavailable
+                    && key.provider == snapshot.provider
+                    && key.scope == snapshot.scope
+                    && ordinary.contains(key)
+                    && access.visible(key)
+            });
         }
     }
 }
@@ -500,7 +514,7 @@ mod amazon_upload_tests {
         let protected = apple("protected", AppleVisibility::Visible)?;
         let hidden = apple("hidden", AppleVisibility::Hidden)?;
         let canonical = SavedLibrary {
-            schema_version: 10,
+            schema_version: crate::immich_live_writes::CURRENT_SCHEMA_VERSION,
             apple_scope: "apple".into(),
             snapshots: vec![LibrarySnapshot {
                 provider: Provider::Apple,

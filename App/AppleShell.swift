@@ -3,9 +3,11 @@ import SuwopShell
 
 @MainActor final class AppleShell {
     private let root: URL
+    let importStaging: ExternalImportStaging
     let localStore: LocalStore
+    private let operationWorkspaces: OperationWorkspaces
     var catalogChanged: (@MainActor () -> Void)?
-    private var apple: ApplePhotosStore?
+    private(set) var apple: ApplePhotosStore?
     let http = HTTPExecutor()
     let ordinaryContent = OrdinaryContentAccess()
     let ordinaryLivePairEffects = OrdinaryLivePairEffects()
@@ -101,6 +103,8 @@ import SuwopShell
             "Suwop",
             isDirectory: true
         )
+        importStaging = ExternalImportStaging(root: root)
+        operationWorkspaces = try OperationWorkspaces()
         localStore = try LocalStore(root: root)
         try FileManager.default.createDirectory(
             at: root,
@@ -208,7 +212,7 @@ extension AppleShell {
         switch operation.type {
         case "confirmImmichArchive", "confirmImmichVisibility", "confirmAppleVisibility", "appleVisibilityApply",
              "appleVisibilityInspect",
-             "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": return try await appleJournalEffect(
+             "confirmAppleTrash", "appleTrashApply", "appleTrashInspect": try await appleJournalEffect(
                 operation.type,
                 data: data,
                 context: context
@@ -228,25 +232,39 @@ extension AppleShell {
              "quiesceImmichLockedLive", "capturePrivateMediaKey", "drainCapturedPrivateMedia",
              "readOrdinarySelectedImage", "publishOrdinarySelectedImage", "releaseOrdinarySelectedImage",
              "releaseOrdinarySelectedImages":
-            return try await appStateEffect(operation.type, data: data, context: context)
-        case "readCredential", "saveCredential", "removeCredential": return try credentialEffect(
+            try await appStateEffect(operation.type, data: data, context: context)
+        case "readCredential", "saveCredential", "removeCredential": try credentialEffect(
                 operation.type,
                 data: data
             )
-        case "workspace", "cleanup", "copyFile", "shareFiles", "playMedia": return try await fileEffect(
+        case "importHttp", "stageImportFiles", "resolveImportResource", "releaseImportStaging", "appleImportStaged":
+            try await importEffect(operation.type, data: data, context: context)
+        case "sharingWorkspace", "workspace", "cleanup", "copyFile", "shareFiles",
+             "playMedia": try await fileEffect(
                 operation.type,
                 data: data,
                 context: context
             )
         case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite", "appleCurrentImage",
-             "appleMetadata": return try await photoEffect(
+             "appleCurrentMedia", "prepareCurrentLive", "prepareCurrentMovie", "inspectCurrentMediaFile",
+             "appleMetadata", "appleMetadataObserve", "appleMetadataVerified": try await photoEffect(
                 operation.type,
-                data: data
+                data: data,
+                context: context
             )
-        case "appleAlbums", "appleAlbumCreate", "appleAlbumEdit": return try await albumEffect(
+        case "appleAlbums", "appleAlbumCreate", "appleAlbumEdit", "appleCollectionEdit": try await albumEffect(
                 operation.type,
-                data: data
+                data: data,
+                context: context
             )
+        default: try await dispatchNativeUtility(operation, data: data, context: context)
+        }
+    }
+
+    private func dispatchNativeUtility(
+        _ operation: ShellOperation, data: JSONValue, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        switch operation.type {
         case "hashFile": return try await .from(ApplePhotosStore.hash(URL(fileURLWithPath: requiredString(
                 data,
                 "path"
@@ -324,74 +342,6 @@ extension AppleShell {
         return result
     }
 
-    private func photoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
-        if type == "appleCurrentImage" {
-            let asset = try data["asset"].decode(StoredAsset.self)
-            return try await .from(appleStore(scope: asset.key.scope).currentImage(
-                asset, to: URL(fileURLWithPath: requiredString(data, "directory"))
-            ))
-        }
-        if type == "appleMetadata" {
-            return try await metadataEffect(data)
-        }
-        return try await basicPhotoEffect(type, data: data)
-    }
-
-    private func metadataEffect(_ data: JSONValue) async throws -> JSONValue {
-        let keys = try data["keys"].decode([AssetKey].self)
-        guard let first = keys.first else { throw SuwopError("写真を選択してください。") }
-        return try await .from(appleStore(scope: first.scope).setMetadata(
-            keys, change: data["change"].decode(MetadataChange.self)
-        ))
-    }
-
-    private func basicPhotoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
-        switch type {
-        case "appleScan":
-            let store = try appleStore(scope: requiredString(data, "scope"))
-            return try await .from(store.scan(requestPermission: data["permission"].decode(Bool.self)))
-        case "appleExport":
-            let keys = try data["keys"].decode([AssetKey].self)
-            guard let first = keys.first else { throw SuwopError("転送元がありません。") }
-            let store = appleStore(scope: first.scope)
-            return try await .from(store.export(keys, to: URL(fileURLWithPath: requiredString(data, "directory"))))
-        case "appleImport":
-            let plan = try data.decode(AppleImportPlan.self)
-            guard let apple else { throw SuwopError("先に Apple Photos の一覧を更新してください。") }
-            return try await .from(apple.importPlan(plan))
-        case "appleTrash":
-            let assets = try data["assets"].decode([StoredAsset].self)
-            guard let apple else { throw SuwopError("Apple Photos に接続してください。") }
-            try await apple.trash(assets)
-            return .null
-        case "appleFavorite":
-            let keys = try data["keys"].decode([AssetKey].self)
-            guard let first = keys.first else { throw SuwopError("写真を選択してください。") }
-            return try await .from(appleStore(scope: first.scope).setFavorite(
-                keys,
-                value: data["value"].decode(Bool.self)
-            ))
-        default: throw SuwopError("未知の PhotoKit 入出力です。")
-        }
-    }
-
-    private func albumEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
-        switch type {
-        case "appleAlbums":
-            return try await .from(appleStore(scope: requiredString(data, "scope")).albums())
-        case "appleAlbumCreate":
-            return try await .from(appleStore(scope: requiredString(data, "scope")).createAlbum(title: requiredString(
-                data,
-                "title"
-            )))
-        case "appleAlbumEdit":
-            let key = try data["key"].decode(AlbumKey.self)
-            try await appleStore(scope: key.scope).editAlbum(key, edit: data["edit"].decode(AlbumEdit.self))
-            return .null
-        default: throw SuwopError("未知のアルバム入出力です。")
-        }
-    }
-
     private func fileEffect(
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
@@ -410,6 +360,8 @@ extension AppleShell {
             _ = try await ordinaryContent.validate(keys: plan.sourceKeys, context: context)
             try await playback.present(plan, context: context)
             return .null
+        case "sharingWorkspace":
+            return try .string(operationWorkspaces.create(id: requiredString(data, "id")))
         case "workspace":
             let id = try requiredString(data, "id")
             guard UUID(uuidString: id) != nil else { throw SuwopError("作業領域 ID が不正です。") }
@@ -421,7 +373,12 @@ extension AppleShell {
             )
             return .string(url.path)
         case "cleanup":
-            try FileManager.default.removeItem(atPath: requiredString(data, "path"))
+            let path = try requiredString(data, "path")
+            if operationWorkspaces.contains(path: path) {
+                try operationWorkspaces.remove(path: path)
+            } else {
+                try FileManager.default.removeItem(atPath: path)
+            }
             return .null
         default: throw SuwopError("未知のファイル入出力です。")
         }
@@ -531,8 +488,10 @@ private extension AppleShell {
         default: throw SuwopError("未知の Apple 可視性入出力です。")
         }
     }
+}
 
-    private func appleStore(scope: String) -> ApplePhotosStore {
+extension AppleShell {
+    func appleStore(scope: String) -> ApplePhotosStore {
         if let apple, apple.scope == scope {
             return apple
         }
@@ -540,9 +499,7 @@ private extension AppleShell {
         apple = store
         return store
     }
-}
 
-extension AppleShell {
     func embeddingAppleStore(scope: String) -> ApplePhotosStore {
         appleStore(scope: scope)
     }

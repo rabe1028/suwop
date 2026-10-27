@@ -9,6 +9,13 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    current_movie_output: suwop_core::sharing::CurrentMovieOutput,
+    current_media_export: suwop_core::sharing::CurrentMediaExport,
+    import_item: suwop_core::external_import::ImportItem,
+    collection_edit: suwop_core::albums::CollectionEdit,
+    collection_snapshot: suwop_core::albums::AlbumSnapshot,
+    metadata_edit: suwop_core::metadata::MetadataEdit,
+
     pair_image_ticket: suwop_core::immich_live_writes::PairImageTicket,
     pair_image_result: suwop_core::immich_live_writes::PairImageResult,
     live_resource_destination: suwop_core::immich_live_writes::LiveResourceDestination,

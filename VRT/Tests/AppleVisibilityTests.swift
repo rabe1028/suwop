@@ -6,6 +6,8 @@ import XCTest
 @MainActor private final class VisibilityEffects {
     var hidden = false
     var loads = 0
+    var currentImageReads = 0
+    var sharingWorkspaces = 0
     var delayed = false
     var waiting: CheckedContinuation<PlatformImage, Error>?
     let asset = StoredAsset(
@@ -18,10 +20,13 @@ import XCTest
 
     func execute(_ operation: ShellOperation) throws -> JSONValue {
         switch operation.type {
-        case "readState", "persist", "cleanup": .null
-        case "workspace": .string("/tmp/visibility")
-        case "appleCurrentImage": throw SuwopError("PRIVATE.jpg at /private/PRIVATE.jpg")
-        case "appleScan": try .from(LibrarySnapshot(
+        case "readState", "persist", "cleanup": return .null
+        case "workspace": return .string("/tmp/visibility")
+        case "sharingWorkspace": sharingWorkspaces += 1
+            return .string("/tmp/visibility")
+        case "appleCurrentImage": currentImageReads += 1
+            throw SuwopError("PRIVATE.jpg at /private/PRIVATE.jpg")
+        case "appleScan": return try .from(LibrarySnapshot(
                 provider: .apple, scope: "visibility", assets: hidden ? [] : [asset], access: .full
             ))
         default: throw SuwopError("Unexpected visibility effect: \(operation.type)")
@@ -104,6 +109,8 @@ final class AppleVisibilityTests: XCTestCase {
         let model = try await readyModel(effects)
         try model.shareCurrentImage(XCTUnwrap(model.photos.first))
         try await waitUntil { !model.isBusy && model.errorMessage?.contains("PRIVATE") == true }
+        XCTAssertEqual(effects.sharingWorkspaces, 1)
+        XCTAssertEqual(effects.currentImageReads, 1, "The intended native error injection must be reached")
         effects.hidden = true
         model.refresh(preservingError: true)
         try await waitUntil { !model.isBusy && model.photos.isEmpty }
@@ -133,5 +140,6 @@ final class AppleVisibilityTests: XCTestCase {
             try await Task.sleep(for: .milliseconds(10))
         }
         XCTFail("Visibility workflow did not settle")
+        throw SuwopError("Visibility workflow fixture timed out")
     }
 }

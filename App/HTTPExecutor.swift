@@ -23,7 +23,9 @@ private final class RedirectGuard: NSObject, URLSessionTaskDelegate, Sendable {
 
 actor HTTPExecutor {
     private let session: URLSession
-    init() {
+    private let uploadDirectory: URL
+    init(uploadDirectory: URL = FileManager.default.temporaryDirectory) {
+        self.uploadDirectory = uploadDirectory
         let config = URLSessionConfiguration.ephemeral
         config.httpMaximumConnectionsPerHost = 32
         config.urlCache = nil
@@ -37,7 +39,7 @@ actor HTTPExecutor {
 
     func execute(_ operation: HttpRequest, submission: NativeSubmissionPermit? = nil) async throws -> HttpResponse {
         if submission != nil {
-            guard operation.files.isEmpty, operation.downloadPath == nil else { throw CancellationError() }
+            guard operation.downloadPath == nil else { throw CancellationError() }
         }
         var request = try urlRequest(operation)
         if let path = operation.downloadPath {
@@ -56,15 +58,20 @@ actor HTTPExecutor {
         }
         let bytes: Data
         let response: URLResponse
-        if let submission {
-            guard operation.files.isEmpty, operation.downloadPath == nil else { throw CancellationError() }
+        if let submission, !operation.files.isEmpty {
+            let boundary = "Suwop-\(UUID().uuidString)"
+            request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
+            let multipart = try Multipart.make(operation, boundary: boundary, directory: uploadDirectory)
+            defer { try? FileManager.default.removeItem(at: multipart) }
+            (bytes, response) = try await submittedUpload(request, body: multipart, permit: submission)
+        } else if let submission {
             (bytes, response) = try await submittedData(request, permit: submission)
         } else if operation.files.isEmpty {
             (bytes, response) = try await session.data(for: request)
         } else {
             let boundary = "Suwop-\(UUID().uuidString)"
             request.setValue("multipart/form-data; boundary=\(boundary)", forHTTPHeaderField: "Content-Type")
-            let multipart = try Multipart.make(operation, boundary: boundary)
+            let multipart = try Multipart.make(operation, boundary: boundary, directory: uploadDirectory)
             defer { try? FileManager.default.removeItem(at: multipart) }
             (bytes, response) = try await session.upload(for: request, fromFile: multipart)
         }
@@ -72,6 +79,26 @@ actor HTTPExecutor {
         let body: JSONValue = (200 ..< 300).contains(status) && !bytes.isEmpty
             ? try Wire.decoder().decode(JSONValue.self, from: bytes) : .null
         return HttpResponse(body: body, path: nil, status: Int64(status))
+    }
+
+    private func submittedUpload(
+        _ request: URLRequest,
+        body: URL,
+        permit: NativeSubmissionPermit
+    ) async throws -> (Data, URLResponse) {
+        let lease = PermittedUploadTask()
+        let transport = session
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                let task = transport.uploadTask(with: request, fromFile: body) { data, response, error in
+                    lease.finish(data: data, response: response, error: error)
+                }
+                lease.install(task, continuation: continuation)
+                do {
+                    try lease.start(permit: permit)
+                } catch { lease.refuse(error) }
+            }
+        } onCancel: { lease.cancel() }
     }
 
     private func submittedData(
@@ -142,8 +169,8 @@ actor HTTPExecutor {
 }
 
 private enum Multipart {
-    static func make(_ operation: HttpRequest, boundary: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent("suwop-upload-\(UUID().uuidString)")
+    static func make(_ operation: HttpRequest, boundary: String, directory: URL) throws -> URL {
+        let url = directory.appendingPathComponent("suwop-upload-\(UUID().uuidString)")
         guard FileManager.default.createFile(atPath: url.path, contents: nil, attributes: [.posixPermissions: 0o600])
         else {
             throw SuwopError("転送用ファイルを作成できません。")
@@ -155,10 +182,13 @@ private enum Multipart {
                 try output.write(contentsOf: Data(text.utf8))
             }
             for (key, value) in operation.fields.sorted(by: { $0.key < $1.key }) {
+                let key = try quotedParameter(key)
                 try write("--\(boundary)\r\nContent-Disposition: form-data; name=\"\(key)\"\r\n\r\n\(value)\r\n")
             }
             for file in operation.files {
-                let disposition = "Content-Disposition: form-data; name=\"\(file.field)\"; filename=\"\(file.filename)\""
+                let field = try quotedParameter(file.field)
+                let filename = try quotedParameter(file.filename)
+                let disposition = "Content-Disposition: form-data; name=\"\(field)\"; filename=\"\(filename)\""
                 try write("--\(boundary)\r\n\(disposition)\r\nContent-Type: application/octet-stream\r\n\r\n")
                 let input = try FileHandle(forReadingFrom: URL(fileURLWithPath: file.path))
                 defer { try? input.close() }
@@ -173,5 +203,16 @@ private enum Multipart {
         } catch { try? FileManager.default.removeItem(at: url)
             throw error
         }
+    }
+
+    /// MIME quoted-string parameters preserve literal quotes/backslashes and
+    /// cannot introduce additional header lines. Body field values stay data.
+    private static func quotedParameter(_ value: String) throws -> String {
+        guard !value.isEmpty,
+              !value.unicodeScalars.contains(where: { CharacterSet.controlCharacters.contains($0) })
+        else {
+            throw SuwopError("multipartの項目名とファイル名に制御文字は使用できません。")
+        }
+        return value.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
     }
 }

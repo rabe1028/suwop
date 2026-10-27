@@ -41,8 +41,8 @@ struct PhotoViewer: View {
     private var pages: [UnifiedPhoto] {
         var visible = model.visiblePhotos
         if let collection {
-            let ids = Set(model.albums.first { $0.album.key == collection }?.photoIDs ?? [])
-            visible = model.photos.filter { ids.contains($0.id) }
+            let ids = model.albums.first { $0.album.key == collection }?.photoIDs ?? []
+            visible = ids.compactMap { id in model.photos.first { $0.id == id } }
         }
         if let photo, !visible.contains(where: { $0.id == photo.id }) {
             visible.append(photo)
@@ -168,14 +168,15 @@ struct PhotoViewer: View {
             )
             .confirmationDialog("共有する内容", isPresented: $confirmingShare, titleVisibility: .visible) {
                 if let photo {
-                    Button("この表示元の現在の静止画を共有") { model.shareCurrentImage(photo) }
+                    Button("この表示元の現在の内容を共有") { model.shareCurrentImage(photo) }
+                    Button("位置情報を除いて共有") { model.shareCurrentImages([photo], removeLocation: true) }
                     Button("原本を共有") { model.share([photo]) }
                 }
             } message: {
                 Text("""
-                Apple Photosは現在の画像、Immichの編集後は対応する切り抜き・90度回転・反転をPNGで共有します。
-                Immichの編集後は1,600万画素以内のSDR画像に対応します。撮影日時・位置も含みます。
-                動画とLive Photoは原本を選んでください。原本は位置情報などのメタデータ、Live Photoの動画、RAWを含みます。
+                現在の内容は表示元の編集を反映します。対応を確認できない編集は、原本に置き換えずお知らせします。
+                Immichの編集済み静止画は、1,600万画素以内のSDR画像の切り抜き・90度回転・反転に対応します。
+                位置情報を除く場合は再書き出しします。原本には位置情報などのメタデータ、Live Photoの動画、RAWが含まれます。
                 """)
             }
             .alert(
@@ -276,6 +277,11 @@ struct PhotoViewer: View {
         Button { confirmingShare = true } label: { Image(systemName: "square.and.arrow.up") }
             .disabled(model.isBusy || model.isReadOnlyPresentation(photo)).accessibilityLabel("原本ファイルを共有")
         Menu {
+            if let source = model.displayedSource(photo) {
+                PhotoDuplicateMenu { destination, current in
+                    model.duplicatePhoto(from: source.key, to: destination, current: current)
+                }
+            }
             Button("編集をコピー", systemImage: "doc.on.doc") { copyingEdits = true }
             Button("この表示元へ編集をペースト", systemImage: "doc.on.clipboard") {
                 if let source = model.displayedSource(photo) {

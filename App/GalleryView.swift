@@ -4,6 +4,8 @@ import SwiftUI
 struct GalleryView: View {
     @ObservedObject var model: LibraryModel
     private let sceneID: String
+    @State private var showImport = false
+    @State private var showImportHistory = false
     @State private var showProtected = false
     @State private var showImmichLocked = false
     @State private var showLiveReads = false
@@ -41,7 +43,7 @@ struct GalleryView: View {
         #endif
     }
 
-    private var content: some View {
+    private var browsingTabs: some View {
         TabView(selection: $tab) {
             library.tabItem { Label("ライブラリ", systemImage: "photo.on.rectangle") }.tag(0)
             collections.tabItem { Label("コレクション", systemImage: "square.stack") }.tag(1)
@@ -66,53 +68,95 @@ struct GalleryView: View {
         .onChange(of: model.photoIDs) { _, _ in
             selectedKeys.formIntersection(model.publishedAssetKeys)
         }
-        .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
-        .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
-        .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
-        .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }
-        .sheet(isPresented: $showProtected) { ProtectedPhotosView(session: model.protection, sceneID: sceneID) }
-        .sheet(isPresented: $showImmichArchive) {
-            ImmichArchiveViewScreen(session: model.immichArchive, sceneID: sceneID)
-        }
-        .sheet(isPresented: $showImmichLocked) { ImmichLockedPhotosView(session: model.immichLocked, sceneID: sceneID) }
-        .sheet(isPresented: $showLiveReads) {
-            NavigationStack {
-                List {
-                    LivePlacementCleanupPanel(cleanup: model.view?.livePlacementCleanup) {
-                        model.immichLocked.retryLivePlacementCleanup(captureID: $0)
-                    }
-                    OrdinaryLivePairImageCleanupPanel(session: model.ordinaryLivePairImages)
-                    OrdinaryLiveReadPanel(
-                        ordinary: model.view?.ordinaryLiveActions ?? [],
-                        progress: model.view?.ordinaryLiveProgress,
-                        discover: { model.immichLocked.discoverOrdinaryLivePairs() },
-                        cancel: { model.immichLocked.cancelOrdinaryLivePair(requestID: $0) },
-                        refresh: { model.immichLocked.ordinaryLivePair(type: "refreshOrdinaryLivePair", parent: $0) },
-                        play: { model.immichLocked.ordinaryLivePair(type: "playOrdinaryLivePair", parent: $0) },
-                        cleanup: { model.immichLocked.cleanupOrdinaryLivePair(requestID: $0) }
-                    )
-                }.navigationTitle("Live Photo の通常再生")
-                    .toolbar { Button("閉じる") { showLiveReads = false } }
+    }
+
+    private var librarySheets: some View {
+        browsingTabs
+            .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
+            .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
+            .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
+            .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }
+    }
+
+    private var privacySheets: some View {
+        librarySheets
+            .sheet(isPresented: $showProtected) { ProtectedPhotosView(session: model.protection, sceneID: sceneID) }
+            .sheet(isPresented: $showImmichArchive) {
+                ImmichArchiveViewScreen(session: model.immichArchive, sceneID: sceneID)
             }
+            .sheet(isPresented: $showImmichLocked) { ImmichLockedPhotosView(
+                session: model.immichLocked,
+                sceneID: sceneID
+            ) }
+            .sheet(isPresented: $showLiveReads) { liveReadsSheet }
+    }
+
+    private var liveReadsSheet: some View {
+        NavigationStack {
+            List {
+                LivePlacementCleanupPanel(cleanup: model.view?.livePlacementCleanup) {
+                    model.immichLocked.retryLivePlacementCleanup(captureID: $0)
+                }
+                OrdinaryLivePairImageCleanupPanel(session: model.ordinaryLivePairImages)
+                OrdinaryLiveReadPanel(
+                    ordinary: model.view?.ordinaryLiveActions ?? [],
+                    progress: model.view?.ordinaryLiveProgress,
+                    discover: { model.immichLocked.discoverOrdinaryLivePairs() },
+                    cancel: { model.immichLocked.cancelOrdinaryLivePair(requestID: $0) },
+                    refresh: { model.immichLocked.ordinaryLivePair(type: "refreshOrdinaryLivePair", parent: $0) },
+                    play: { model.immichLocked.ordinaryLivePair(type: "playOrdinaryLivePair", parent: $0) },
+                    cleanup: { model.immichLocked.cleanupOrdinaryLivePair(requestID: $0) }
+                )
+            }.navigationTitle("Live Photo の通常再生")
+                .toolbar { Button("閉じる") { showLiveReads = false } }
         }
-        .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
-        .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
-        .alert("操作を完了できませんでした", isPresented: Binding(
-            get: { model.errorMessage != nil },
-            set: {
-                if !$0 {
-                    model.errorMessage = nil
+    }
+
+    private var importSheets: some View {
+        privacySheets
+            .sheet(isPresented: $showImportHistory) {
+                NavigationStack {
+                    ImportHistoryView(
+                        records: model.view?.externalImports ?? [],
+                        notices: model.view?.importNotices ?? [],
+                        inspect: { model.inspectImport(id: $0) }
+                    )
+                    .toolbar { Button("閉じる") { showImportHistory = false } }
                 }
             }
-        )) {
-            Button("閉じる", role: .cancel) { model.errorMessage = nil }
-        } message: { Text(model.errorMessage ?? "") }
-        .confirmationDialog("原本をダウンロードして照合しますか？", isPresented: $confirmIndex, titleVisibility: .visible) {
-            Button("原本を照合") { model.indexOriginals() }
-        } message: { Text("iCloud・Amazon Photos 上の原本を取得する場合があります。元の写真は変更しません。") }
-        .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
-            Button("\(selection.count) 件の原本を共有") { model.share(selection) }
-        } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
+            .sheet(isPresented: $showImport) {
+                ExternalImportView(stage: { urls, operation in
+                    try await model.stageExternalImport(urls, operation: operation)
+                }, discard: { operation in
+                    await model.discardUnsubmittedImport(operation)
+                }, submit: { operation, destination, items in
+                    model.importExternalFiles(operation: operation, destination: destination, items: items)
+                })
+            }
+            .sheet(isPresented: $model.showTrash) { TrashView(model: model) }
+            .sheet(isPresented: $model.showEditPasteRecords) { EditPasteRecordsView(model: model) }
+    }
+
+    private var content: some View {
+        importSheets
+            .alert("操作を完了できませんでした", isPresented: Binding(
+                get: { model.errorMessage != nil },
+                set: {
+                    if !$0 {
+                        model.errorMessage = nil
+                    }
+                }
+            )) {
+                Button("閉じる", role: .cancel) { model.errorMessage = nil }
+            } message: { Text(model.errorMessage ?? "") }
+            .confirmationDialog("原本をダウンロードして照合しますか？", isPresented: $confirmIndex, titleVisibility: .visible) {
+                Button("原本を照合") { model.indexOriginals() }
+            } message: { Text("iCloud・Amazon Photos 上の原本を取得する場合があります。元の写真は変更しません。") }
+            .confirmationDialog("原本ファイルを共有", isPresented: $confirmingShare, titleVisibility: .visible) {
+                Button("\(selection.count) 件の原本を共有") { model.share(selection) }
+                Button("現在の内容を共有") { model.shareCurrentImages(selection, removeLocation: false) }
+                Button("位置情報を除いて共有") { model.shareCurrentImages(selection, removeLocation: true) }
+            } message: { Text("元の形式で共有します。位置情報などのメタデータ、Live Photo の動画、RAW 原本を含みます。") }
     }
 
     private var searchContent: some View {
@@ -219,6 +263,9 @@ struct GalleryView: View {
                 Text("多く表示").tag(5)
             }
             Divider()
+            Button("ファイルを取り込む…", systemImage: "square.and.arrow.down") { showImport = true }
+                .disabled(model.isBusy)
+            Button("取り込み・複製の記録", systemImage: "clock") { showImportHistory = true }
             Button("一覧を更新", systemImage: "arrow.clockwise") { model.refresh(requestPermission: true) }
                 .disabled(model.isBusy)
             Button("未照合の原本を照合（\(model.pendingAppleCount) 件）") { confirmIndex = true }

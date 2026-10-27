@@ -2,29 +2,43 @@ import Foundation
 import XCTest
 
 final class PhotoKitAcceptanceTests: XCTestCase {
+    private let phases = [
+        "seed",
+        "saved",
+        "paste-lost",
+        "resolve",
+        "pasted",
+        "revert",
+        "original",
+        "metadata-save",
+        "metadata-restart",
+        "metadata-restore",
+        "metadata-description-restart",
+        "metadata-final-restart",
+        "collections",
+        "current-media",
+        "import-formats",
+        "import-create",
+        "import-restart",
+        "import-lost",
+        "import-lost-restart",
+        "trash-cancel",
+        "trash-native-cancel",
+        "trash",
+        "trash-lost",
+        "trash-inspect",
+        "visibility-hide",
+        "visibility-hidden",
+        "visibility-restore",
+        "product-visibility-hide",
+        "product-visibility-hidden",
+        "product-visibility-inspect",
+        "product-visibility-restore",
+    ]
+
     @MainActor func testNativeEditsPasteLostResponseReconciliationAndReversionSurviveAppRelaunch() {
         let app = XCUIApplication()
-        for phase in [
-            "seed",
-            "saved",
-            "paste-lost",
-            "resolve",
-            "pasted",
-            "revert",
-            "original",
-            "trash-cancel",
-            "trash-native-cancel",
-            "trash",
-            "trash-lost",
-            "trash-inspect",
-            "visibility-hide",
-            "visibility-hidden",
-            "visibility-restore",
-            "product-visibility-hide",
-            "product-visibility-hidden",
-            "product-visibility-inspect",
-            "product-visibility-restore",
-        ] {
+        for phase in phases {
             app.launchArguments = ["--native-acceptance", phase]
             app.launch()
             if phase == "seed" {
@@ -87,6 +101,7 @@ final class PhotoKitAcceptanceTests: XCTestCase {
         _ phase: String, app: XCUIApplication, result: XCUIElement
     ) -> Bool {
         switch phase {
+        case "collections": answerCollectionDeletion(app, result: result)
         case "trash-native-cancel", "trash", "trash-lost":
             answerNativeDeletion(app, cancel: phase == "trash-native-cancel")
         case "visibility-hide", "product-visibility-hide":
@@ -95,6 +110,43 @@ final class PhotoKitAcceptanceTests: XCTestCase {
             answerNativeVisibility(app, hide: false, result: result)
         default: true
         }
+    }
+
+    @MainActor private func answerCollectionDeletion(_ app: XCUIApplication, result: XCUIElement) -> Bool {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let deadline = Date().addingTimeInterval(120)
+        let fixture = "Suwop collection fixture [0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+        repeat {
+            for surface in [app, springboard] {
+                for alert in surface.alerts.allElementsBoundByIndex {
+                    let texts = alert.staticTexts.allElementsBoundByIndex.map(\.label)
+                    let folder = texts.contains { text in
+                        text.contains("SuwopPhotoKitHost") && text
+                            .range(of: fixture, options: .regularExpression) != nil &&
+                            (text
+                                .range(of: "delete (?:the )?folder", options: [.regularExpression, .caseInsensitive]) !=
+                                nil ||
+                                (text.contains("フォルダ") && text.contains("削除")))
+                    }
+                    let keepsPhotos = texts.contains {
+                        $0.lowercased().contains("the photos will not be deleted") || $0.contains("写真は削除されません")
+                    }
+                    guard folder, keepsPhotos else { continue }
+                    let button = alert.buttons.matching(NSPredicate(format: "label IN %@", ["Delete", "削除"])).firstMatch
+                    guard button.exists, button.isHittable else { continue }
+                    button.tap()
+                    return true
+                }
+            }
+            if result.exists, result.label != "RUNNING" {
+                return result.label == "PASS collections"
+            }
+            _ = springboard.alerts.firstMatch.waitForExistence(timeout: 0.25)
+        } while Date() < deadline
+        XCTFail("Missing generated-folder deletion confirmation with explicit photo preservation.")
+        print(app.debugDescription)
+        print(springboard.debugDescription)
+        return false
     }
 
     @MainActor private func answerNativeVisibility(

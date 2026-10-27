@@ -138,7 +138,7 @@ struct Shell {
 impl Shell {
     fn handle(&mut self, operation: ShellOperation) -> Result<Value, String> {
         match operation {
-            ShellOperation::Workspace { .. } => {
+            ShellOperation::SharingWorkspace { .. } => {
                 self.trace.push("workspace".into());
                 Ok(json!("/tmp/current-test"))
             }
@@ -518,5 +518,115 @@ fn unknown_remote_edit_state_never_falls_back_to_originals() -> Result<(), Strin
     assert!(core.view().error.is_some());
     assert!(!shell.trace.contains(&"share".into()));
     assert!(!shell.trace.iter().any(|r| r.contains("/original")));
+    Ok(())
+}
+
+#[test]
+fn batch_current_share_is_atomic_and_separates_equal_filenames() -> Result<(), String> {
+    for fail_second in [false, true] {
+        let first = apple();
+        let mut second = first.clone();
+        second.key.asset_id = "second".into();
+        let keys = vec![first.key.clone(), second.key.clone()];
+        let mut saved = state(first.clone());
+        saved.snapshots[0].assets.push(second);
+        let core = Core::new_with(
+            Suwop,
+            Model {
+                ready: true,
+                state: saved,
+                ..Model::default()
+            },
+        );
+        let mut effects = core.process_event(Event::ShareCurrentImages {
+            keys: keys.clone(),
+            id: ID.into(),
+            remove_location: false,
+        });
+        let mut shell = shell(first, Fault::None);
+        let mut presented = Vec::new();
+        let mut exports = 0;
+        let mut calls = 0;
+        while !effects.is_empty() {
+            calls += 1;
+            assert!(calls < 100);
+            let Effect::Io(mut request) = effects.remove(0);
+            let result = match request.operation.clone() {
+                ShellOperation::AppleCurrentImage { ref asset, .. } => {
+                    exports += 1;
+                    shell.asset = asset.clone();
+                    if exports == 2 && fail_second {
+                        Err("second export failed".into())
+                    } else {
+                        shell.handle(request.operation.clone())
+                    }
+                }
+                ShellOperation::ShareFiles(presentation) => {
+                    assert_eq!(presentation.source_keys, Some(keys.clone()));
+                    presented = presentation.files;
+                    Ok(json!(true))
+                }
+                other => shell.handle(other),
+            };
+            let response = match result {
+                Ok(value) => ShellResponse {
+                    value: Some(value),
+                    error: None,
+                },
+                Err(error) => ShellResponse {
+                    value: None,
+                    error: Some(error),
+                },
+            };
+            effects.extend(
+                core.resolve(&mut request, response)
+                    .map_err(|e| e.to_string())?,
+            );
+        }
+        assert_eq!(exports, 2);
+        assert_eq!(core.view().error.is_some(), fail_second);
+        assert!(shell.trace.contains(&"cleanup".into()));
+        if fail_second {
+            assert!(presented.is_empty());
+        } else {
+            assert_eq!(presented.len(), 2);
+            assert_eq!(presented[0].name, presented[1].name);
+            assert_ne!(presented[0].path, presented[1].path);
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn gps_free_render_preserves_date_but_rejects_returned_location() -> Result<(), String> {
+    let source = apple();
+    let plan = CurrentImageRenderPlan::without_location(
+        &source,
+        &ImageEncodingFacts {
+            raw_dimensions: PixelSize {
+                width: 4,
+                height: 3,
+            },
+            orientation: 1,
+            has_color_space: true,
+            has_alpha: false,
+            hdr: false,
+        },
+    )?;
+    assert!(plan.metadata.latitude.is_none());
+    assert!(plan.metadata.longitude.is_none());
+    assert!(plan.metadata.date_time_original.is_some());
+    let mut result = CurrentImageRenderResult {
+        image: CurrentImageFacts {
+            width: 4,
+            height: 3,
+            ..facts()
+        },
+        metadata: plan.metadata.clone(),
+    };
+    plan.verify(&result)?;
+    result.metadata.latitude = Some(0.0);
+    result.metadata.longitude = Some(0.0);
+    assert!(plan.verify(&result).is_err());
     Ok(())
 }

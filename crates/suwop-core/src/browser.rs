@@ -92,6 +92,7 @@ fn matches_query(
     captured_at: Option<f64>,
     tokens: &[String],
     time_zone: chrono_tz::Tz,
+    description: Option<&String>,
 ) -> bool {
     let mut haystack = photo
         .assets
@@ -102,6 +103,10 @@ fn matches_query(
         .collect::<Vec<_>>()
         .join(" ")
         .to_lowercase();
+    if let Some(description) = description {
+        haystack.push(' ');
+        haystack.push_str(&description.to_lowercase());
+    }
     if let Some(seconds) = captured_at {
         // Date search also supports year and month without downloading originals.
         #[allow(clippy::cast_possible_truncation)]
@@ -128,6 +133,16 @@ pub fn browse_with_dates(
     photos: &[UnifiedPhoto],
     options: &BrowserOptions,
     dates: &BTreeMap<String, Option<f64>>,
+) -> BrowserView {
+    browse_with_descriptions(photos, options, dates, &BTreeMap::new())
+}
+
+#[must_use]
+pub fn browse_with_descriptions(
+    photos: &[UnifiedPhoto],
+    options: &BrowserOptions,
+    dates: &BTreeMap<String, Option<f64>>,
+    descriptions: &BTreeMap<String, String>,
 ) -> BrowserView {
     let displayed_date = |photo: &UnifiedPhoto| {
         dates
@@ -158,7 +173,13 @@ pub fn browse_with_dates(
                     PhotoFilter::Live => has_role(photo, ResourceRole::LiveVideo),
                     PhotoFilter::Raw => has_role(photo, ResourceRole::RawImage),
                 }
-                && matches_query(photo, displayed_date(photo), &tokens, time_zone)
+                && matches_query(
+                    photo,
+                    displayed_date(photo),
+                    &tokens,
+                    time_zone,
+                    descriptions.get(&photo_id(photo)),
+                )
         })
         .collect();
     visible.sort_by(|a, b| {

@@ -4,7 +4,12 @@ import Photos
 import SuwopShell
 
 extension ApplePhotosStore {
-    func setMetadata(_ keys: [AssetKey], change: MetadataChange) async throws -> [StoredAsset] {
+    func setMetadata(
+        _ keys: [AssetKey],
+        change: MetadataChange,
+        expected: [StoredAsset]? = nil,
+        permit: NativeSubmissionPermit
+    ) async throws -> [StoredAsset] {
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
             throw SuwopError("日時・位置情報の変更には写真ライブラリへのフルアクセスが必要です。")
         }
@@ -13,7 +18,8 @@ extension ApplePhotosStore {
             return try Self.fetch(key.assetID).localIdentifier
         }
         try Task.checkCancellation()
-        let result: Result<Void, Error> = try await NativeChange.perform {
+        let scope = scope
+        let result: Result<Void, Error> = try await NativeMutationSubmission.perform(permit: permit) {
             do {
                 guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
                     throw SuwopError("写真ライブラリの権限が変わりました。")
@@ -22,6 +28,16 @@ extension ApplePhotosStore {
                 let assets = (0 ..< fetched.count).map { fetched.object(at: $0) }
                 guard assets.allSatisfy({ $0.canPerform(.properties) }) else {
                     throw SuwopError("選択した写真の日時・位置情報を変更できません。")
+                }
+                if let expected {
+                    guard expected.count == assets.count,
+                          Set(expected.map(\.key)) == Set(keys) else { throw SuwopError("メタデータの対象が変わりました。") }
+                    for asset in assets {
+                        let observed = try Self.describe(asset, scope: scope, fullAccess: true)
+                        guard expected.first(where: { $0.key == observed.key })?.revision == observed.revision else {
+                            throw SuwopError("写真が変更されています。古い値を上書きしません。")
+                        }
+                    }
                 }
                 try Self.applyMetadata(change, to: assets)
                 return .success(())

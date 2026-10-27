@@ -23,6 +23,10 @@ pub struct ConnectionSettings {
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
     #[serde(default)]
+    pub external_imports: Vec<crate::external_import::ImportJournal>,
+    #[serde(default)]
+    pub metadata_operations: Vec<crate::metadata::MetadataRecord>,
+    #[serde(default)]
     pub immich_live_operations: Vec<crate::immich_live_writes::Batch>,
     #[serde(default)]
     pub immich_live_unstarted_closures: Vec<crate::immich_live_writes::UnstartedClosure>,
@@ -388,6 +392,25 @@ pub enum ShellOperation {
     RemoveCredential {
         account: String,
     },
+    StageImportFiles {
+        operation: String,
+        files: Vec<crate::sharing::ShareFile>,
+    },
+    ResolveImportResource {
+        operation: String,
+        resource: crate::external_import::StagedResource,
+    },
+    ReleaseImportStaging {
+        operation: String,
+    },
+    AppleImportStaged {
+        operation: String,
+        item: crate::external_import::ImportItem,
+        scope: String,
+    },
+    SharingWorkspace {
+        id: String,
+    },
     Workspace {
         id: String,
     },
@@ -402,6 +425,18 @@ pub enum ShellOperation {
     PlayMedia {
         plan: crate::media::PlaybackPlan,
     },
+    AppleMetadataVerified {
+        before: Vec<crate::domain::StoredAsset>,
+        change: crate::metadata::MetadataChange,
+    },
+    AppleMetadataObserve {
+        keys: Vec<crate::domain::AssetKey>,
+    },
+    AppleCollectionEdit {
+        scope: String,
+        edit: crate::albums::CollectionEdit,
+        expected: crate::albums::AlbumSnapshot,
+    },
     AppleScan {
         scope: String,
         permission: bool,
@@ -409,6 +444,26 @@ pub enum ShellOperation {
     AppleExport {
         keys: Vec<crate::domain::AssetKey>,
         directory: String,
+    },
+    PrepareCurrentLive {
+        files: Vec<crate::sharing::CurrentMediaFile>,
+        directory: String,
+    },
+    PrepareCurrentMovie {
+        path: String,
+        directory: String,
+        #[serde(rename = "removeLocation")]
+        remove_location: bool,
+    },
+    InspectCurrentMediaFile {
+        path: String,
+        role: crate::domain::ResourceRole,
+    },
+    AppleCurrentMedia {
+        asset: crate::domain::StoredAsset,
+        directory: String,
+        #[serde(rename = "removeLocation")]
+        remove_location: bool,
     },
     AppleCurrentImage {
         asset: crate::domain::StoredAsset,
@@ -472,6 +527,9 @@ pub enum ShellOperation {
     AppleAlbumEdit {
         key: crate::albums::AlbumKey,
         edit: crate::albums::AlbumEdit,
+    },
+    ImportHttp {
+        request: HttpRequest,
     },
     Http(HttpRequest),
     /// A prepared source deletion. Native execution must recheck the original
@@ -1027,6 +1085,25 @@ pub enum Event {
         key: crate::domain::AssetKey,
         id: String,
     },
+    EditMetadata {
+        keys: Vec<crate::domain::AssetKey>,
+        edit: crate::metadata::MetadataEdit,
+        id: String,
+    },
+    InspectMetadata {
+        #[serde(rename = "operationID")]
+        operation_id: String,
+    },
+    RestoreMetadata {
+        id: String,
+        #[serde(rename = "operationID")]
+        operation_id: String,
+        original: bool,
+    },
+    EditCollection {
+        provider: Provider,
+        edit: crate::albums::CollectionEdit,
+    },
     SetMetadata {
         keys: Vec<crate::domain::AssetKey>,
         input: crate::metadata::MetadataInput,
@@ -1038,6 +1115,28 @@ pub enum Event {
     Share {
         keys: Vec<crate::domain::AssetKey>,
         id: String,
+    },
+    InspectImport {
+        id: String,
+    },
+    ImportStaged {
+        id: String,
+        destination: Provider,
+        items: Vec<crate::external_import::ImportItem>,
+        now: f64,
+    },
+    Duplicate {
+        keys: Vec<crate::domain::AssetKey>,
+        destination: Provider,
+        current: bool,
+        id: String,
+        now: f64,
+    },
+    ShareCurrentImages {
+        keys: Vec<crate::domain::AssetKey>,
+        id: String,
+        #[serde(rename = "removeLocation")]
+        remove_location: bool,
     },
     ShareCurrentImage {
         key: crate::domain::AssetKey,
@@ -1178,6 +1277,10 @@ pub struct Model {
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
+    pub import_notices: Vec<crate::external_import::ImportNotice>,
+    pub external_imports: Vec<crate::external_import::ImportJournal>,
+    pub metadata_restore_availability: Vec<crate::metadata::MetadataRestoreAvailability>,
+    pub metadata_operations: Vec<crate::metadata::MetadataRecord>,
     pub ordinary_live_image_pending:
         Vec<crate::immich_live_writes::ordinary_images::PairImagePending>,
     pub ordinary_live_images: Vec<crate::immich_live_writes::ordinary_images::PairImageAccess>,
@@ -1240,6 +1343,10 @@ impl crux_core::App for Suwop {
 }
 impl Suwop {
     fn reduce(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if crate::workflow::metadata_event_blocked(&event, &model.state) {
+            model.error = Some("この写真には結果不明の情報変更があります。変更履歴で保存先の状態を確認してください。".into());
+            return Command::done();
+        }
         if let Some(command) = crate::immich_live_writes::ordinary_images::update(&event, model) {
             return command;
         }
@@ -1545,8 +1652,16 @@ impl Suwop {
         let metadata_access = crate::metadata::MetadataAccess::new(&operation_public.snapshots);
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
+        let descriptions = public_descriptions(model, &photos, &ordinary_content_keys);
         let (status, error) = public_messages(model, &ordinary);
+        let metadata_operations = public_metadata(model, &ordinary_content_keys);
         ViewModel {
+            import_notices: crate::external_import::history::notices(model, &ordinary_content_keys),
+            external_imports: public_imports(model, &ordinary_content_keys),
+            metadata_restore_availability: crate::metadata::restore_availability(
+                &metadata_operations,
+            ),
+            metadata_operations,
             live_placement_cleanup: crate::immich_live_writes::runtime::cleanup(model),
             ordinary_live_image_pending: crate::immich_live_writes::ordinary_images::pending(model),
             ordinary_live_images: crate::immich_live_writes::ordinary_images::images(model),
@@ -1598,19 +1713,19 @@ impl Suwop {
                 })
                 .collect(),
             preview_choices,
-            media: photos
-                .iter()
-                .filter_map(|p| {
-                    crate::media::kind(p).map(|kind| (crate::browser::photo_id(p), kind))
-                })
-                .collect(),
+            media: public_media(&photos),
             albums: crate::albums::views_for_picker(
                 &public.albums,
                 &photos,
                 &public.snapshots,
                 model.album_candidate_key.as_ref(),
             ),
-            browser: crate::browser::browse_with_dates(&photos, &model.browser, &displayed_dates),
+            browser: crate::browser::browse_with_descriptions(
+                &photos,
+                &model.browser,
+                &displayed_dates,
+                &descriptions,
+            ),
             photos,
             pending_apple_count: pending_apple_count(&public),
             state: public,
@@ -1910,6 +2025,17 @@ fn paired_public_library(
     public
 }
 
+fn public_media(
+    photos: &[UnifiedPhoto],
+) -> std::collections::BTreeMap<String, crate::media::PlaybackKind> {
+    photos
+        .iter()
+        .filter_map(|photo| {
+            crate::media::kind(photo).map(|kind| (crate::browser::photo_id(photo), kind))
+        })
+        .collect()
+}
+
 fn photo_preview_choices(
     model: &Model,
     public: &crate::privacy::PublishedLibrary,
@@ -1931,4 +2057,73 @@ fn photo_preview_choices(
         })
         .collect();
     choices
+}
+
+fn public_descriptions(
+    model: &Model,
+    photos: &[UnifiedPhoto],
+    ordinary_content_keys: &[crate::domain::AssetKey],
+) -> std::collections::BTreeMap<String, String> {
+    photos
+        .iter()
+        .map(|photo| {
+            let text = photo
+                .assets
+                .iter()
+                .filter(|asset| ordinary_content_keys.contains(&asset.key))
+                .filter_map(|asset| {
+                    crate::metadata::description_for(&asset.key, &model.state.metadata_operations)
+                })
+                .collect::<Vec<_>>()
+                .join(" ");
+            (crate::browser::photo_id(photo), text)
+        })
+        .collect()
+}
+
+fn public_imports(
+    model: &Model,
+    ordinary_content_keys: &[crate::domain::AssetKey],
+) -> Vec<crate::external_import::ImportJournal> {
+    model
+        .state
+        .external_imports
+        .iter()
+        .filter(|record| {
+            let scope_valid = match record.destination {
+                Provider::Apple => record.destination_scope == model.state.apple_scope,
+                Provider::Immich => model
+                    .session
+                    .as_ref()
+                    .is_some_and(|session| session.scope == record.destination_scope),
+                Provider::Amazon => false,
+            };
+            scope_valid
+                && record
+                    .source_keys
+                    .iter()
+                    .chain(&record.destination_keys)
+                    .all(|key| ordinary_content_keys.contains(key))
+        })
+        .cloned()
+        .collect()
+}
+
+fn public_metadata(
+    model: &Model,
+    ordinary_content_keys: &[crate::domain::AssetKey],
+) -> Vec<crate::metadata::MetadataRecord> {
+    model
+        .state
+        .metadata_operations
+        .iter()
+        .filter(|record| {
+            !record.keys.is_empty()
+                && record
+                    .keys
+                    .iter()
+                    .all(|key| ordinary_content_keys.contains(key))
+        })
+        .cloned()
+        .collect()
 }

@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess, UnifiedPhoto};
+mod collections;
+pub use collections::*;
 
 #[derive(
     Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, schemars::JsonSchema,
@@ -41,6 +43,8 @@ pub struct AlbumSnapshot {
     pub scope: String,
     pub albums: Vec<StoredAlbum>,
     pub access: ScanAccess,
+    #[serde(default)]
+    pub collections: Vec<StoredCollection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -144,7 +148,7 @@ pub fn validate_snapshot(
     {
         return Err("アルバムの保存先または取得結果が不正です。".into());
     }
-    Ok(())
+    validate_collections(snapshot)
 }
 
 #[must_use]
@@ -182,13 +186,16 @@ pub fn views_for_picker(
     for snapshot in snapshots {
         for album in &snapshot.albums {
             let members: BTreeSet<_> = album.members.iter().collect();
-            // Preserve gallery order, including when multiple members resolve to
-            // the same unified photo. Do not scan the whole library per album.
-            let positions: BTreeSet<_> = members
+            // Preserve the provider's album order. Multiple original members may
+            // resolve to one unified photo, which is displayed once at its first position.
+            let mut seen_positions = BTreeSet::new();
+            let positions: Vec<_> = album
+                .members
                 .iter()
-                .filter_map(|key| photo_positions.get(*key))
+                .filter_map(|key| photo_positions.get(key))
                 .flatten()
                 .copied()
+                .filter(|position| seen_positions.insert(*position))
                 .collect();
             let photo_ids = positions
                 .into_iter()

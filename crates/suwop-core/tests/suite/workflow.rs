@@ -1621,6 +1621,8 @@ fn schema2_upload_journals_resume_after_fresh_visible_scan_without_new_post() ->
             .map_err(|e| e.to_string())?;
         old["schemaVersion"] = json!(2);
         for field in [
+            "metadataOperations",
+            "externalImports",
             "immichLiveOperations",
             "immichLiveUnstartedClosures",
             "immichLiveLegacyReconciliations",
@@ -1931,6 +1933,8 @@ fn migrated_legacy_receipts_never_authorize_deletion() -> Result<(), String> {
             .map_err(|e| e.to_string())?;
         raw["schemaVersion"] = json!(version);
         for field in [
+            "metadataOperations",
+            "externalImports",
             "immichLiveOperations",
             "immichLiveUnstartedClosures",
             "immichLiveLegacyReconciliations",

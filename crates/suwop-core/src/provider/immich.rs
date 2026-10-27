@@ -182,12 +182,28 @@ impl ImmichBackend {
     async fn read_owned_albums(&self, io: &ReadIo<'_>) -> Result<AlbumSnapshot, String> {
         let session = &self.session;
         let mut albums = Vec::new();
+        let mut collections = Vec::new();
         for album in session
             .albums(io.ctx())
             .await?
             .into_iter()
-            .filter(|a| a.owned_by(&session.user_id))
+            .filter(|a| a.readable_by(&session.user_id))
         {
+            let owned = album.owned_by(&session.user_id);
+            let key = AlbumKey {
+                provider: Provider::Immich,
+                scope: session.scope.clone(),
+                album_id: album.id.clone(),
+            };
+            collections.push(crate::albums::StoredCollection {
+                key: key.clone(), title: album.album_name.clone(),
+                kind: if album.shared || !owned { crate::albums::CollectionKind::Shared } else { crate::albums::CollectionKind::Album },
+                parent: None, children: Vec::new(),
+                abilities: if owned { vec![crate::albums::CollectionAbility::DateOrder] } else { Vec::new() },
+                date_order: album.order,
+                explanation: Some(if owned { "Immich は撮影日時の昇順・降順を保存できます。任意順・フォルダーは公開APIに対応していません。Apple Photos のフォルダーを利用できます。" } else { "共有アルバムは閲覧のみです。他の所有者の写真は Immich で開いてください。写真の所有権は変更しません。" }.into()),
+                external_url: Some(format!("{}/albums/{}", session.endpoint.trim_end_matches("/api"), album.id)),
+            });
             let members = session
                 .album_members(io.ctx(), &album.id)
                 .await?
@@ -203,10 +219,10 @@ impl ImmichBackend {
                 title: album.album_name,
                 members,
                 permissions: AlbumPermissions {
-                    add: true,
-                    remove: true,
-                    rename: true,
-                    delete: true,
+                    add: owned,
+                    remove: owned,
+                    rename: owned,
+                    delete: owned,
                 },
             });
         }
@@ -215,6 +231,7 @@ impl ImmichBackend {
             scope: session.scope.clone(),
             albums,
             access: ScanAccess::Full,
+            collections,
         })
     }
 }
@@ -371,6 +388,26 @@ impl AlbumCreator for ImmichBackend {
 }
 
 impl AlbumEditor for ImmichBackend {
+    fn edit_collection<'a>(
+        &'a self,
+        io: ReadIo<'a>,
+        edit: &'a crate::albums::CollectionEdit,
+        _expected: &'a AlbumSnapshot,
+    ) -> Io<'a, ()> {
+        Box::pin(async move {
+            if edit.action != crate::albums::CollectionAction::SetDateOrder {
+                return Err("Immich の任意順・フォルダー操作は未対応です。Apple Photos を利用してください。".into());
+            }
+            let key = edit.key.as_ref().ok_or("アルバムがありません。")?;
+            self.session
+                .set_album_date_order(
+                    io.ctx(),
+                    &key.album_id,
+                    edit.order.ok_or("日時順がありません。")?,
+                )
+                .await
+        })
+    }
     fn edit_album<'a>(
         &'a self,
         io: ReadIo<'a>,

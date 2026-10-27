@@ -257,6 +257,7 @@ enum Fault {
     WrongId,
     Owner,
     Zone,
+    DerivedZone,
     Manifest,
     Inventory,
     ResourceDuplicate,
@@ -341,7 +342,9 @@ impl Native {
                             json["exifInfo"][key] = value.clone();
                         }
                         if matches!(self.fault, Fault::Zone) {
-                            json["exifInfo"]["timeZone"] = "UTC".into();
+                            json["exifInfo"]["timeZone"] = "invalid/zone".into();
+                        } else if matches!(self.fault, Fault::DerivedZone) {
+                            json["exifInfo"]["timeZone"] = "Asia/Tokyo".into();
                         }
                     }
                     json
@@ -668,6 +671,7 @@ fn metadata_keeps_known_partial_original_matches_without_inventing_unknown_hashe
 fn remote_metadata_verifies_ids_ownership_values_and_timezone() -> Result<(), String> {
     for (fault, writes) in [
         (Fault::None, 1),
+        (Fault::DerivedZone, 1),
         (Fault::WrongId, 0),
         (Fault::Owner, 0),
         (Fault::Value, 1),
@@ -680,7 +684,7 @@ fn remote_metadata_verifies_ids_ownership_values_and_timezone() -> Result<(), St
         };
         run(&core, &mut native, Provider::Immich, date_input())?;
         assert_eq!(native.writes, writes);
-        if matches!(fault, Fault::None) {
+        if matches!(fault, Fault::None | Fault::DerivedZone) {
             assert!(core.view().error.is_none());
             assert_eq!(
                 core.view().state.snapshots[0].assets[0].captured_at,
@@ -740,4 +744,590 @@ fn metadata_membership_does_not_join_separate_or_limited_snapshots() {
     );
     joined.access = ScanAccess::Limited;
     assert!(targets(&photos[0], &[joined])[0].disabled_reason.is_some());
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PreflightFault {
+    Drift,
+    Cancelled,
+    ClosureSaveFailure,
+}
+struct DurableMetadataNative {
+    current: StoredAsset,
+    disk: Option<SavedLibrary>,
+    writes: usize,
+    fail_write: bool,
+    fail_final_save: bool,
+    lose_final_ack: bool,
+    preflight: Option<PreflightFault>,
+    after_write_drift: Option<fn(&mut StoredAsset)>,
+}
+impl DurableMetadataNative {
+    fn new() -> Self {
+        Self {
+            current: asset(Provider::Apple),
+            disk: None,
+            writes: 0,
+            fail_write: false,
+            fail_final_save: false,
+            lose_final_ack: false,
+            preflight: None,
+            after_write_drift: None,
+        }
+    }
+    fn handle(&mut self, operation: &ShellOperation) -> Result<Value, String> {
+        match operation {
+            ShellOperation::AppleMetadataObserve { keys } => {
+                assert_eq!(keys, &vec![self.current.key.clone()]);
+                if self.disk.as_ref().is_some_and(|state| {
+                    state.metadata_operations.last().is_some_and(|record| {
+                        record.outcome == suwop_core::metadata::MetadataOutcome::SubmittedUnknown
+                    })
+                }) && self.writes == 0
+                {
+                    match self.preflight {
+                        Some(PreflightFault::Drift) => self.current.latitude = Some(90.0),
+                        Some(PreflightFault::Cancelled | PreflightFault::ClosureSaveFailure) => {
+                            return Err("cancelled before native write".into());
+                        }
+                        None => {}
+                    }
+                }
+                serde_json::to_value(vec![self.current.clone()]).map_err(|error| error.to_string())
+            }
+            ShellOperation::AppleMetadataVerified { before, change } => {
+                assert!(self.disk.as_ref().is_some_and(|state| {
+                    state.metadata_operations.last().is_some_and(|record| {
+                        record.outcome == suwop_core::metadata::MetadataOutcome::SubmittedUnknown
+                    })
+                }));
+                assert_eq!(before[0].revision, self.current.revision);
+                self.writes += 1;
+                if self.fail_write {
+                    return Err("lost native reply".into());
+                }
+                match change.action {
+                    MetadataAction::SetCapturedAt => self.current.captured_at = change.captured_at,
+                    MetadataAction::SetLocation | MetadataAction::RemoveLocation => {
+                        self.current.latitude =
+                            change.location.as_ref().map(|point| point.latitude);
+                        self.current.longitude =
+                            change.location.as_ref().map(|point| point.longitude);
+                    }
+                }
+                self.current.revision = format!("revision-{}", self.writes);
+                if let Some(drift) = self.after_write_drift {
+                    drift(&mut self.current);
+                }
+
+                serde_json::to_value(vec![self.current.clone()]).map_err(|error| error.to_string())
+            }
+            ShellOperation::Persist(state) => {
+                if self.preflight == Some(PreflightFault::ClosureSaveFailure)
+                    && state.metadata_operations.last().is_some_and(|record| {
+                        record.outcome == suwop_core::metadata::MetadataOutcome::NotApplied
+                    })
+                {
+                    return Err("cannot prove durable no-submission".into());
+                }
+                if self.fail_final_save
+                    && state.metadata_operations.last().is_some_and(|record| {
+                        record.outcome == suwop_core::metadata::MetadataOutcome::VerifiedApplied
+                    })
+                {
+                    return Err("disk failure".into());
+                }
+                if let Some(previous) = &self.disk {
+                    suwop_core::metadata::validate_record_transition(
+                        &previous.metadata_operations,
+                        &state.metadata_operations,
+                    )?;
+                }
+                self.disk = Some(state.clone());
+                if self.lose_final_ack
+                    && state.metadata_operations.last().is_some_and(|record| {
+                        record.outcome == suwop_core::metadata::MetadataOutcome::VerifiedApplied
+                    })
+                {
+                    return Err("lost persistence acknowledgement".into());
+                }
+                Ok(Value::Null)
+            }
+            ShellOperation::ReadStateVersioned => {
+                Ok(json!({"revision":"fixture-only","state":self.disk}))
+            }
+            _ => Err("unexpected metadata I/O".into()),
+        }
+    }
+}
+fn run_durable_metadata(
+    core: &Core<Suwop>,
+    native: &mut DurableMetadataNative,
+    event: Event,
+) -> Result<(), String> {
+    let mut requests = core.process_event(event);
+    while !requests.is_empty() {
+        let Effect::Io(mut request) = requests.remove(0);
+        let response = match native.handle(&request.operation) {
+            Ok(value) => ShellResponse {
+                value: Some(value),
+                error: None,
+            },
+            Err(error) => ShellResponse {
+                value: None,
+                error: Some(error),
+            },
+        };
+        requests.extend(
+            core.resolve(&mut request, response)
+                .map_err(|error| error.to_string())?,
+        );
+    }
+    Ok(())
+}
+#[test]
+fn durable_apple_description_is_local_and_undo_survives_restart() -> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
+    let core = core(Provider::Apple, ScanAccess::Full);
+    let mut native = DurableMetadataNative::new();
+    let id = "33333333-3333-4333-8333-333333333333";
+    let keys = vec![native.current.key.clone()];
+    run_durable_metadata(
+        &core,
+        &mut native,
+        Event::EditMetadata {
+            keys,
+            edit: MetadataEdit::Description {
+                text: "Tokyo station 東京".into(),
+            },
+            id: id.into(),
+        },
+    )?;
+    assert!(core.view().error.is_none());
+    assert_eq!(native.writes, 0);
+    let saved = native.disk.clone().ok_or("missing durable state")?;
+    assert_eq!(
+        saved.metadata_operations[0].outcome,
+        MetadataOutcome::VerifiedApplied
+    );
+    assert_eq!(
+        suwop_core::metadata::description_for(&native.current.key, &saved.metadata_operations),
+        Some("Tokyo station 東京")
+    );
+    let restarted = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state: saved,
+            ..Model::default()
+        },
+    );
+    run_durable_metadata(
+        &restarted,
+        &mut native,
+        Event::RestoreMetadata {
+            id: "44444444-4444-4444-8444-444444444444".into(),
+            operation_id: id.into(),
+            original: false,
+        },
+    )?;
+    assert!(restarted.view().error.is_none());
+    assert_eq!(native.writes, 0);
+    let saved = native.disk.as_ref().ok_or("missing restored state")?;
+    assert_eq!(saved.metadata_operations.len(), 2);
+    assert_eq!(
+        suwop_core::metadata::description_for(&native.current.key, &saved.metadata_operations),
+        Some("")
+    );
+    Ok(())
+}
+#[test]
+fn durable_metadata_unknown_and_failed_save_never_retry() -> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
+    for final_save in [false, true] {
+        let core = core(Provider::Apple, ScanAccess::Full);
+        let mut native = DurableMetadataNative::new();
+        native.fail_write = !final_save;
+        native.fail_final_save = final_save;
+        let keys = vec![native.current.key.clone()];
+        run_durable_metadata(
+            &core,
+            &mut native,
+            Event::EditMetadata {
+                keys: keys.clone(),
+                edit: MetadataEdit::Location {
+                    latitude: "35.0".into(),
+                    longitude: "139.0".into(),
+                },
+                id: "55555555-5555-4555-8555-555555555555".into(),
+            },
+        )?;
+        assert!(core.view().error.is_some());
+        assert_eq!(native.writes, 1);
+        assert_eq!(
+            native
+                .disk
+                .as_ref()
+                .ok_or("missing submitted state")?
+                .metadata_operations[0]
+                .outcome,
+            MetadataOutcome::SubmittedUnknown
+        );
+        run_durable_metadata(
+            &core,
+            &mut native,
+            Event::EditMetadata {
+                keys,
+                edit: MetadataEdit::Description {
+                    text: "do not retry".into(),
+                },
+                id: "66666666-6666-4666-8666-666666666666".into(),
+            },
+        )?;
+        assert!(core.view().error.is_some());
+        assert_eq!(native.writes, 1);
+    }
+    Ok(())
+}
+
+#[test]
+fn durable_metadata_lost_final_ack_reads_disk_without_reissuing_write() -> Result<(), String> {
+    let core = core(Provider::Apple, ScanAccess::Full);
+    let mut native = DurableMetadataNative::new();
+    native.lose_final_ack = true;
+    let keys = vec![native.current.key.clone()];
+    run_durable_metadata(
+        &core,
+        &mut native,
+        Event::EditMetadata {
+            keys,
+            edit: suwop_core::metadata::MetadataEdit::Location {
+                latitude: "35".into(),
+                longitude: "139".into(),
+            },
+            id: "77777777-7777-4777-8777-777777777777".into(),
+        },
+    )?;
+    assert!(core.view().error.is_none());
+    assert_eq!(native.writes, 1);
+    assert_eq!(
+        native
+            .disk
+            .as_ref()
+            .ok_or("missing durable commit")?
+            .metadata_operations[0]
+            .outcome,
+        suwop_core::metadata::MetadataOutcome::VerifiedApplied
+    );
+    Ok(())
+}
+
+#[test]
+fn metadata_undo_restores_distinct_member_values_without_flattening() -> Result<(), String> {
+    let (state, mut records) = distinct_date_fixture()?;
+    let keys = records
+        .iter()
+        .map(|record| record.key.clone())
+        .collect::<Vec<_>>();
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state,
+            ..Model::default()
+        },
+    );
+
+    let mut disk: Option<SavedLibrary> = None;
+    let mut writes = 0;
+    let operation = "88888888-8888-4888-8888-888888888888";
+    for event in [
+        Event::EditMetadata {
+            keys: keys.clone(),
+            edit: suwop_core::metadata::MetadataEdit::CapturedAt {
+                local: "2024-01-01T00:00:00".into(),
+                zone: "UTC".into(),
+                occurrence: None,
+            },
+            id: operation.into(),
+        },
+        Event::RestoreMetadata {
+            id: "99999999-9999-4999-8999-999999999999".into(),
+            operation_id: operation.into(),
+            original: false,
+        },
+    ] {
+        let mut effects = core.process_event(event);
+        while !effects.is_empty() {
+            let Effect::Io(mut effect) = effects.remove(0);
+            let value = match &effect.operation {
+                ShellOperation::AppleMetadataObserve { keys } => serde_json::to_value(
+                    records
+                        .iter()
+                        .filter(|record| keys.contains(&record.key))
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                )
+                .map_err(|error| error.to_string())?,
+                ShellOperation::AppleMetadataVerified { before, change } => {
+                    assert!(disk.as_ref().is_some_and(|state| {
+                        state.metadata_operations.last().is_some_and(|record| {
+                            record.outcome
+                                == suwop_core::metadata::MetadataOutcome::SubmittedUnknown
+                        })
+                    }));
+                    for item in before {
+                        let record = records
+                            .iter_mut()
+                            .find(|record| record.key == item.key)
+                            .ok_or("missing member")?;
+                        assert_eq!(record.revision, item.revision);
+                        record.captured_at = change.captured_at;
+                        writes += 1;
+                        record.revision = format!("new-{writes}");
+                    }
+                    serde_json::to_value(
+                        records
+                            .iter()
+                            .filter(|record| before.iter().any(|item| item.key == record.key))
+                            .cloned()
+                            .collect::<Vec<_>>(),
+                    )
+                    .map_err(|error| error.to_string())?
+                }
+                ShellOperation::Persist(state) => {
+                    disk = Some(state.clone());
+                    Value::Null
+                }
+                _ => return Err("unexpected multi-member metadata operation".into()),
+            };
+            effects.extend(
+                core.resolve(
+                    &mut effect,
+                    ShellResponse {
+                        value: Some(value),
+                        error: None,
+                    },
+                )
+                .map_err(|error| error.to_string())?,
+            );
+        }
+        assert!(core.view().error.is_none(), "{:?}", core.view().error);
+    }
+    assert_eq!(writes, 4);
+    assert_eq!(records[0].captured_at, Some(10.0));
+    assert_eq!(records[1].captured_at, Some(20.0));
+    let state = disk.ok_or("missing restored journal")?;
+    assert_eq!(state.metadata_operations[2].member_edits.len(), 2);
+    Ok(())
+}
+
+#[test]
+fn metadata_proven_preflight_denial_is_not_applied_only_after_durable_save() -> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
+    for fault in [
+        PreflightFault::Drift,
+        PreflightFault::Cancelled,
+        PreflightFault::ClosureSaveFailure,
+    ] {
+        let core = core(Provider::Apple, ScanAccess::Full);
+        let mut native = DurableMetadataNative::new();
+        native.preflight = Some(fault);
+        let keys = vec![native.current.key.clone()];
+        run_durable_metadata(
+            &core,
+            &mut native,
+            Event::EditMetadata {
+                keys,
+                edit: MetadataEdit::Location {
+                    latitude: "35".into(),
+                    longitude: "139".into(),
+                },
+                id: "cccccccc-cccc-4ccc-8ccc-cccccccccccc".into(),
+            },
+        )?;
+        assert!(core.view().error.is_some());
+        assert_eq!(native.writes, 0);
+        let expected = if fault == PreflightFault::ClosureSaveFailure {
+            MetadataOutcome::SubmittedUnknown
+        } else {
+            MetadataOutcome::NotApplied
+        };
+        assert_eq!(
+            native
+                .disk
+                .as_ref()
+                .ok_or("missing durable outcome")?
+                .metadata_operations[0]
+                .outcome,
+            expected
+        );
+        assert_eq!(
+            suwop_core::metadata::blocked(
+                &[native.current.key.clone()],
+                &native.disk.as_ref().ok_or("disk")?.metadata_operations
+            ),
+            fault == PreflightFault::ClosureSaveFailure
+        );
+    }
+    Ok(())
+}
+
+#[test]
+fn first_postwrite_metadata_observation_never_adopts_resource_or_membership_drift()
+-> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
+    let cases: [fn(&mut StoredAsset); 5] = [
+        |asset| asset.resources[0].sha1 = None,
+        |asset| asset.resources[0].bytes = None,
+        |asset| {
+            asset.immich_stack_membership = Some(suwop_core::domain::ImmichStackMembership {
+                id: "unexpected-stack".into(),
+                primary_asset_id: asset.key.asset_id.clone(),
+                asset_count: 2,
+            });
+        },
+        |asset| asset.inventory_complete = false,
+        |asset| asset.deletion_blockers.push("new blocker".into()),
+    ];
+    for drift in cases {
+        let core = core(Provider::Apple, ScanAccess::Full);
+        let mut native = DurableMetadataNative::new();
+        native.after_write_drift = Some(drift);
+        let original = native.current.clone();
+        run_durable_metadata(
+            &core,
+            &mut native,
+            Event::EditMetadata {
+                keys: vec![original.key.clone()],
+                edit: MetadataEdit::Location {
+                    latitude: "35".into(),
+                    longitude: "139".into(),
+                },
+                id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+            },
+        )?;
+        assert_eq!(native.writes, 1);
+        assert!(core.view().error.is_some());
+        let record = &native
+            .disk
+            .as_ref()
+            .ok_or("missing durable state")?
+            .metadata_operations[0];
+        assert_eq!(record.outcome, MetadataOutcome::SubmittedUnknown);
+        assert!(record.after.is_empty());
+        assert_eq!(record.before[0].asset, original);
+    }
+    Ok(())
+}
+
+fn known_date_baseline(
+    assets: &[StoredAsset],
+) -> Result<suwop_core::metadata::MetadataRecord, String> {
+    use suwop_core::metadata::{
+        MetadataEdit, MetadataOutcome, MetadataRecord, MetadataValues, MetadataWitness,
+    };
+    let mut edits = Vec::new();
+    let mut witnesses = Vec::new();
+    for asset in assets {
+        let (local, occurrence) = suwop_core::metadata::time_zone::local(
+            asset.captured_at.ok_or("fixture date")?,
+            "UTC",
+        )?;
+        edits.push(MetadataEdit::CapturedAt {
+            local,
+            zone: "UTC".into(),
+            occurrence,
+        });
+        witnesses.push(MetadataWitness {
+            asset: asset.clone(),
+            values: MetadataValues {
+                captured_at: asset.captured_at,
+                time_zone: Some("UTC".into()),
+                latitude: asset.latitude,
+                longitude: asset.longitude,
+                description: String::new(),
+            },
+        });
+    }
+    let record = MetadataRecord {
+        id: "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".into(),
+        keys: assets.iter().map(|asset| asset.key.clone()).collect(),
+        edit: edits.first().ok_or("fixture edit")?.clone(),
+        member_edits: edits,
+        before: witnesses.clone(),
+        after: witnesses,
+        outcome: MetadataOutcome::VerifiedApplied,
+        restores: None,
+        current: Vec::new(),
+    };
+    suwop_core::metadata::validate_records(std::slice::from_ref(&record))?;
+    Ok(record)
+}
+
+#[test]
+fn immich_missing_original_location_is_explained_before_undo_and_never_submitted()
+-> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, restore_availability};
+    let current = asset(Provider::Immich);
+    let mut record = known_date_baseline(std::slice::from_ref(&current))?;
+    record.edit = MetadataEdit::Location {
+        latitude: "1".into(),
+        longitude: "2".into(),
+    };
+    record.member_edits = vec![record.edit.clone()];
+    record.before[0].asset.latitude = None;
+    record.before[0].asset.longitude = None;
+    record.before[0].values.latitude = None;
+    record.before[0].values.longitude = None;
+    suwop_core::metadata::validate_records(std::slice::from_ref(&record))?;
+    let available = restore_availability(std::slice::from_ref(&record));
+    assert!(
+        available[0]
+            .undo_reason
+            .as_deref()
+            .is_some_and(|reason| reason.contains("位置情報の削除"))
+    );
+    assert_eq!(available[0].undo_reason, available[0].original_reason);
+    let mut state = fixture_state(Provider::Immich, ScanAccess::Full);
+    state.metadata_operations = vec![record.clone()];
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            ready: true,
+            state,
+            ..Model::default()
+        },
+    );
+    for original in [false, true] {
+        let effects = core.process_event(Event::RestoreMetadata {
+            operation_id: record.id.clone(),
+            id: "ffffffff-ffff-4fff-8fff-ffffffffffff".into(),
+            original,
+        });
+        assert!(
+            effects.is_empty(),
+            "unsupported undo must not read, write or persist"
+        );
+        assert!(
+            core.view()
+                .error
+                .as_deref()
+                .is_some_and(|error| error.contains("位置情報の削除"))
+        );
+    }
+    Ok(())
+}
+
+fn distinct_date_fixture() -> Result<(SavedLibrary, [StoredAsset; 2]), String> {
+    let mut first = asset(Provider::Apple);
+    first.captured_at = Some(10.0);
+    let mut second = first.clone();
+    second.key.asset_id = "second".into();
+    second.captured_at = Some(20.0);
+    let mut state = fixture_state(Provider::Apple, ScanAccess::Full);
+    state.receipts.clear();
+    state.snapshots[0].assets = vec![first.clone(), second.clone()];
+    state.metadata_operations = vec![known_date_baseline(&state.snapshots[0].assets)?];
+    Ok((state, [first, second]))
 }

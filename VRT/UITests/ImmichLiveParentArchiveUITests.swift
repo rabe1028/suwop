@@ -37,7 +37,12 @@ final class ImmichLiveParentArchiveUITests: XCTestCase {
             expect("albums=2", id: "archiveFixtureAlbums", in: app)
             expect("auth=0", id: "archiveFixtureAuthentication", in: app)
             app.buttons["表示と操作"].tap()
-            app.buttons["一覧を更新"].tap()
+            let refresh = app.buttons["一覧を更新"]
+            guard WriteMenuScrollGesture.revealGalleryItem(refresh, in: app), refresh.isEnabled else {
+                XCTFail("The exact gallery refresh menu action must be visible and enabled: " + app.debugDescription)
+                return
+            }
+            refresh.tap()
             expect("scans=\(count + 1)", id: "archiveFixtureScans", in: app)
         }
         app.terminate()

@@ -335,6 +335,17 @@ pub(crate) trait AlbumCreator: Send + Sync {
 }
 
 pub(crate) trait AlbumEditor: Send + Sync {
+    fn edit_collection<'a>(
+        &'a self,
+        _io: ReadIo<'a>,
+        _edit: &'a crate::albums::CollectionEdit,
+        _expected: &'a AlbumSnapshot,
+    ) -> Io<'a, ()> {
+        Box::pin(async {
+            Err("この保存先のコレクション操作は未対応です。".into())
+        })
+    }
+
     fn edit_album<'a>(
         &'a self,
         io: ReadIo<'a>,

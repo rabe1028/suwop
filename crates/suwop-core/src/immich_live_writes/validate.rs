@@ -9,7 +9,17 @@ use crate::{
 use std::collections::{BTreeMap, BTreeSet};
 
 pub fn validate_library(state: &SavedLibrary) -> Validation {
+    crate::metadata::validate_records(&state.metadata_operations)?;
     let mut ids = BTreeSet::new();
+    for record in &state.external_imports {
+        record.validate()?;
+        define(&mut ids, &record.id)?;
+    }
+
+    for record in &state.metadata_operations {
+        define(&mut ids, &record.id)?;
+    }
+
     for op in &state.apple_visibility_operations {
         crate::apple_visibility::validate_operation(op, &state.apple_scope)?;
     }

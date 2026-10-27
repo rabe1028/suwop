@@ -10,6 +10,9 @@ struct AlbumsSection: View {
             Button("アルバムを作成", systemImage: "folder.badge.plus") { creating = true }
                 .disabled(model.isBusy).accessibilityIdentifier("createAlbum")
             Button("アルバムを更新", systemImage: "arrow.clockwise") { model.refreshAlbums() }.disabled(model.isBusy)
+            NavigationLink("Apple Photos のフォルダーと順序") {
+                CollectionBrowserView(model: model, provider: .apple, parent: nil)
+            }.accessibilityIdentifier("collectionBrowser")
             ForEach(model.albums, id: \.album.key) { value in
                 NavigationLink {
                     AlbumDetailView(model: model, key: value.album.key)
@@ -66,14 +69,20 @@ struct AlbumDetailView: View {
     @State private var viewer: AssetKey?
     @State private var selecting = false
     @State private var selected: Set<AssetKey> = []
+    @State private var ordering = false
+    @State private var moving = false
 
     private var value: AlbumView? {
         model.albums.first { $0.album.key == key }
     }
 
+    private var collection: StoredCollection? {
+        model.collections.first { $0.key == key }
+    }
+
     private var photos: [UnifiedPhoto] {
-        let ids = Set(value?.photoIDs ?? [])
-        return model.photos.filter { ids.contains($0.id) }
+        let photos = Dictionary(uniqueKeysWithValues: model.photos.map { ($0.id, $0) })
+        return (value?.photoIDs ?? []).compactMap { photos[$0] }
     }
 
     var body: some View {
@@ -82,6 +91,8 @@ struct AlbumDetailView: View {
             .sheet(isPresented: $adding) {
                 AlbumPhotoPicker(model: model, key: key)
             }
+            .sheet(isPresented: $ordering) { AlbumOrderingView(model: model, key: key) }
+            .sheet(isPresented: $moving) { CollectionMoveView(model: model, key: key) }
             .onChange(of: value?.album.members ?? []) { _, keys in selected.formIntersection(Set(keys)) }
             .alert("アルバム名を変更", isPresented: $renaming) {
                 TextField("アルバム名", text: $title)
@@ -106,6 +117,9 @@ struct AlbumDetailView: View {
             VStack(spacing: 12) {
                 if let value {
                     Text("\(key.provider.title)・\(value.album.members.count) 枚").foregroundStyle(.secondary)
+                    if let node = model.collections.first(where: { $0.key == key }) {
+                        CollectionCapabilitiesView(model: model, node: node)
+                    }
                     if value.access != .full {
                         Text("権限や保存先を再確認してからアルバムを変更してください。")
                         Button("アルバムを更新") { model.refreshAlbums() }.disabled(model.isBusy)
@@ -118,6 +132,12 @@ struct AlbumDetailView: View {
                             selected.removeAll()
                         }.disabled(!value.album.permissions.remove || model.isBusy || photos.isEmpty)
                         Menu("アルバムの操作") {
+                            if collection?.abilities.contains(.reorderPhotos) == true {
+                                Button("写真の順序を変更") { ordering = true }
+                            }
+                            if collection?.abilities.contains(.move) == true {
+                                Button("フォルダーへ移動") { moving = true }
+                            }
                             Button("名前を変更") { title = value.album.title
                                 renaming = true
                             }

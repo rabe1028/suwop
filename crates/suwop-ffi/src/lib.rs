@@ -20,6 +20,25 @@ use std::{
 };
 use suwop_core::domain::{AppleFacts, FileSignature, StoredAsset, describe_apple, hex};
 
+fn verify_current_media_input(input: &str) -> Result<Value, String> {
+    #[derive(serde::Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Check {
+        expected: suwop_core::domain::StoredAsset,
+        export: suwop_core::sharing::CurrentMediaExport,
+        directory: String,
+        remove_location: bool,
+    }
+    let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
+    suwop_core::sharing::verify_current_media(
+        &check.expected,
+        &check.export,
+        &check.directory,
+        check.remove_location,
+    )?;
+    Ok(Value::Bool(true))
+}
+
 #[cfg(test)]
 use suwop_core::workflow::HashResult;
 
@@ -143,7 +162,7 @@ fn error_envelope(error: &str) -> Vec<u8> {
         .into_bytes()
 }
 fn respond(handle: u64, action: u32, input: &str) -> Result<Vec<u8>, String> {
-    if (3..=15).contains(&action) || matches!(action, 20 | 21) {
+    if (3..=15).contains(&action) || matches!(action, 20..=23) {
         serde_json::to_vec(&execute(action, input)?).map_err(|e| e.to_string())
     } else {
         execute_core(handle, action, input)
@@ -166,6 +185,22 @@ fn execute(action: u32, input: &str) -> Result<Value, String> {
             );
         }
         21 => return hash_amazon_input(input),
+        23 => return verify_current_media_input(input),
+        22 => {
+            #[derive(serde::Deserialize)]
+            struct Check {
+                snapshot: suwop_core::albums::AlbumSnapshot,
+                expected: suwop_core::albums::AlbumSnapshot,
+                edit: suwop_core::albums::CollectionEdit,
+            }
+            let check: Check = serde_json::from_str(input).map_err(|e| e.to_string())?;
+            suwop_core::albums::validate_collection_request(
+                &check.expected,
+                &check.snapshot,
+                &check.edit,
+            )?;
+            return Ok(Value::Bool(true));
+        }
         3 => {
             return serde_json::to_value(describe_apple(
                 serde_json::from_str(input).map_err(|e| e.to_string())?,
