@@ -55,7 +55,7 @@ import SuwopShell
     }
 
     private func fence(_ operation: ShellOperation) throws {
-        if operation.type == "appleExport" {
+        if ["appleExport", "appleImportReadback"].contains(operation.type) {
             let keys = try (operation.data ?? .null)["keys"].decode([AssetKey].self)
             guard !keys.isEmpty,
                   keys.allSatisfy(allowed.contains) else { throw SuwopError("Refusing non-fixture export.") }
@@ -63,7 +63,7 @@ import SuwopShell
         let allowedEffects: Set = [
             "readState", "persist", "readStateVersioned", "persistIfCurrent", "appleScan", "appleExport",
             "workspace", "cleanup", "hashFile", "stageImportFiles", "resolveImportResource", "releaseImportStaging",
-            "appleImportStaged",
+            "appleImportStaged", "appleImportReadback",
         ]
         guard allowedEffects.contains(operation.type) else {
             throw SuwopError("Refusing non-import effect: \(operation.type)")

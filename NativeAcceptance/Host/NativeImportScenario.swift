@@ -27,7 +27,9 @@ import SuwopShell
             ["permission": .bool(false), "now": .number(Date().timeIntervalSince1970)]
         )
         switch phase {
-        case "import-create": try await create(driver, manifest: manifest, evidence: &evidence)
+        case "import-create":
+            try await create(driver, manifest: manifest, evidence: &evidence)
+            try await NativeImportObserverScenario.run(original: manifest.keys[0])
         case "import-restart": try await restart(driver, manifest: manifest, evidence: &evidence)
         case "import-lost": try await lost(driver, manifest: manifest, evidence: &evidence)
         case "import-lost-restart": try await lostRestart(driver, manifest: manifest, evidence: &evidence)

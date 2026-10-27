@@ -298,3 +298,5 @@ fn verified_import_publishes_fresh_destination_with_its_journal_and_rolls_back_b
 }
 
 mod lifecycle;
+
+mod observer;

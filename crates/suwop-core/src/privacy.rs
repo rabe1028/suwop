@@ -138,6 +138,7 @@ impl ContentAccess {
                 .iter()
                 .map(|e| e.key.clone())
                 .chain(crate::immich_live_writes::held_keys(state))
+                .chain(state.metadata_intent_holds.iter().cloned())
                 .chain(
                     state
                         .immich_visibility_operations

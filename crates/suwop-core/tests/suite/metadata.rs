@@ -1415,3 +1415,6 @@ fn apple_observer_after_atomic_submission_keeps_owned_readback_but_retires_catal
     }
     Ok(())
 }
+
+#[path = "metadata/intent.rs"]
+mod intent_persistence;

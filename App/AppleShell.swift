@@ -237,7 +237,8 @@ extension AppleShell {
                 operation.type,
                 data: data
             )
-        case "importHttp", "stageImportFiles", "resolveImportResource", "releaseImportStaging", "appleImportStaged":
+        case "importHttp", "stageImportFiles", "resolveImportResource", "releaseImportStaging", "appleImportStaged",
+             "appleImportReadback":
             try await importEffect(operation.type, data: data, context: context)
         case "sharingWorkspace", "workspace", "cleanup", "copyFile", "shareFiles",
              "playMedia": try await fileEffect(

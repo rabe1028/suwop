@@ -7,6 +7,7 @@ use crate::{
     sharing::ShareFile,
 };
 
+mod apple_completion;
 mod immich;
 mod lifecycle;
 #[cfg(test)]
@@ -200,14 +201,29 @@ impl Runtime<'_> {
         if !record.source_keys.is_empty() {
             self.check_content_keys(&record.source_keys)?;
         }
-        self.check_ordinary_generation()?;
+        // An earlier creation may have retired this batch's Apple authority.
+        let mut authority_keys = record.source_keys.clone();
+        if record.destination == Provider::Apple {
+            authority_keys.push(AssetKey {
+                provider: Provider::Apple,
+                scope: record.destination_scope.clone(),
+                asset_id: String::new(),
+            });
+        }
+        self.check_content_generation(&authority_keys)?;
         let submitting = record.prepare_submission()?;
         self.save_import(submitting.clone()).await?;
         let permit = record.submission_after_save(&submitting)?;
         let result = self.submit_import(&submitting).await;
         match result {
             Ok((keys, hashes, created, assets)) => match permit.verified(keys, hashes, created) {
-                Ok(finished) => self.save_verified_import(finished, &assets).await?,
+                Ok(finished) => {
+                    if finished.destination == Provider::Apple {
+                        self.save_completed_apple_import(finished, &assets).await?;
+                    } else {
+                        self.save_verified_import(finished, &assets).await?;
+                    }
+                }
                 Err(error) => {
                     self.mark_import_uncertain(&record.id).await?;
                     return Err(error);
@@ -308,13 +324,11 @@ impl Runtime<'_> {
                 let mut partial = record.clone();
                 partial.destination_keys = keys.clone();
                 partial.created = Some(true);
-                self.save_import(partial).await?;
+                self.save_import(partial.clone()).await?;
                 if self.workspace.is_none() {
                     self.workspace(&record.staging_operation).await?;
                 }
-                let bundle = self
-                    .export_readback(&keys, &format!("import-verify-{}", record.id))
-                    .await?;
+                let bundle = self.completed_apple_import_readback(&partial).await?;
                 verify_import_metadata(record, &bundle.assets)?;
                 let hashes = bundle
                     .files

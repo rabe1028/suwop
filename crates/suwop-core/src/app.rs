@@ -22,6 +22,11 @@ pub struct ConnectionSettings {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SavedLibrary {
+    /// An intent save and its readback both failed. This is a process-local
+    /// admission fence, never a journal record or data to persist/export.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub metadata_intent_holds: Vec<crate::domain::AssetKey>,
     #[serde(default)]
     pub external_imports: Vec<crate::external_import::ImportJournal>,
     #[serde(default)]
@@ -407,6 +412,12 @@ pub enum ShellOperation {
         operation: String,
         item: crate::external_import::ImportItem,
         scope: String,
+    },
+    AppleImportReadback {
+        operation: String,
+        item_id: String,
+        keys: Vec<crate::domain::AssetKey>,
+        directory: String,
     },
     SharingWorkspace {
         id: String,
@@ -1596,6 +1607,7 @@ impl Suwop {
             .denied
             .union(&model.immich_visibility.denied)
             .cloned()
+            .chain(model.state.metadata_intent_holds.iter().cloned())
             .collect();
         let ordinary_generation = model.ordinary_generation.clone();
         let expected_generation = ordinary_generation.load(std::sync::atomic::Ordering::SeqCst);

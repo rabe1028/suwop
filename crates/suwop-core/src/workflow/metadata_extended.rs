@@ -7,6 +7,8 @@ use crate::{
 
 #[path = "metadata_apple.rs"]
 mod apple;
+#[path = "metadata_intent.rs"]
+mod intent;
 #[path = "metadata_settle.rs"]
 mod settle;
 
@@ -78,7 +80,12 @@ impl Runtime<'_> {
             current: Vec::new(),
         };
         self.state.metadata_operations.push(record.clone());
-        self.persist().await?;
+        if let Err(error) = self.persist().await {
+            self.metadata_failed_intent_save(&record).await;
+            return Err(format!(
+                "写真の変更要求は送信していません。操作記録の保存を確認できませんでした。アプリを再起動して保存状態を確認してください: {error}"
+            ));
+        }
         // Only this private cursor can attest no provider submission occurred.
         let mut submitted = false;
         let applied = self
@@ -110,7 +117,7 @@ impl Runtime<'_> {
         self.apply_metadata_members(keys, members, provider, current, submitted)
             .await
     }
-    async fn metadata_not_applied(&mut self, id: &str) {
+    pub(super) async fn metadata_not_applied(&mut self, id: &str) {
         let Some(index) = self
             .state
             .metadata_operations

@@ -25,6 +25,9 @@ extension AppleShell {
             try await importStaging.release(operation: operation)
             return .null
         }
+        if type == "appleImportReadback" {
+            return try await appleImportReadback(data, context: context)
+        }
         try context.requireCurrent()
         if type == "stageImportFiles" {
             let files = try data["files"].decode([ShareFile].self)

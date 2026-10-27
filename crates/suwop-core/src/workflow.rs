@@ -1086,6 +1086,7 @@ impl Runtime<'_> {
         self.check_ordinary_generation()?;
         if keys.iter().any(|key| {
             self.denied_content.contains(key)
+                || self.state.metadata_intent_holds.contains(key)
                 || crate::immich_visibility::fences(&self.state, key)
                 || self
                     .state

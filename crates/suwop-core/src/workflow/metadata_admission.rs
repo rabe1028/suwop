@@ -49,5 +49,7 @@ pub(super) fn blocked(event: &Event, state: &SavedLibrary) -> bool {
             .collect(),
         _ => Vec::new(),
     };
-    crate::metadata::blocked(&keys, &state.metadata_operations)
+    keys.iter()
+        .any(|key| state.metadata_intent_holds.contains(key))
+        || crate::metadata::blocked(&keys, &state.metadata_operations)
 }

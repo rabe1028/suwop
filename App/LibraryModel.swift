@@ -45,7 +45,7 @@ import SwiftUI
     let ordinaryLivePairImages = OrdinaryLivePairImageSession()
 
     #if SUWOP_VRT
-        private var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
+        var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
         private(set) var snapshotImages: [AssetKey: PlatformImage] = [:]
         init(
             runtime: RustRuntime,
@@ -58,26 +58,6 @@ import SwiftUI
             started = true
         }
 
-        init(
-            runtime: RustRuntime,
-            shell: AppleShell,
-            thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
-            executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
-        ) {
-            self.runtime = runtime
-            self.shell = shell
-            self.thumbnailEffect = thumbnailEffect
-            protection.executeEffect = executeEffect
-            immichLocked.executeEffect = executeEffect
-            immichArchive.executeEffect = executeEffect
-            self.executeEffect = { operation, context in
-                guard let context else { throw CancellationError() }
-                return try await executeEffect(operation, context)
-            }
-            started = true
-            configurePrivateSessions(runtime: runtime, shell: shell)
-        }
-
         init(snapshotView: ViewModel, images: [AssetKey: PlatformImage], semanticSearch: SemanticSearchModel? = nil) {
             view = snapshotView
             presentationIndex = LibraryPresentationIndex(view: snapshotView)
@@ -86,6 +66,31 @@ import SwiftUI
             self.semanticSearch = semanticSearch
             started = true
         }
+    #endif
+
+    #if SUWOP_VRT || SUWOP_NATIVE_ACCEPTANCE
+        init(
+            runtime: RustRuntime,
+            shell: AppleShell,
+            thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
+            executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
+        ) {
+            self.runtime = runtime
+            self.shell = shell
+            #if SUWOP_VRT
+                self.thumbnailEffect = thumbnailEffect
+                protection.executeEffect = executeEffect
+                immichLocked.executeEffect = executeEffect
+                immichArchive.executeEffect = executeEffect
+            #endif
+            self.executeEffect = { operation, context in
+                guard let context else { throw CancellationError() }
+                return try await executeEffect(operation, context)
+            }
+            started = true
+            configurePrivateSessions(runtime: runtime, shell: shell)
+        }
+
     #endif
 
     init() {
@@ -576,25 +581,5 @@ extension LibraryModel {
             "now": .number(Date().timeIntervalSince1970),
         ])
         showSettings = false
-    }
-}
-
-extension LibraryModel {
-    func loadThumbnail(_ key: AssetKey, preview: Bool) async throws -> PlatformImage {
-        let span = PerformanceTrace.begin(preview ? .previewImage : .thumbnail)
-        defer { PerformanceTrace.end(span) }
-        #if SUWOP_VRT
-            if let thumbnailEffect {
-                return try await thumbnailEffect(key, preview)
-            }
-        #endif
-        guard let shell else { throw SuwopError("入出力が利用できません。") }
-        return try await shell.thumbnail(
-            key,
-            connection: connection,
-            amazonConnection: view?.state.amazonConnection,
-            version: view?.remoteVersion,
-            preview: preview
-        )
     }
 }
