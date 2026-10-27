@@ -32,6 +32,9 @@ private struct LibrarySceneRoot: View {
             .background(NativeScenePresentationAnchor(sceneID: sceneID))
             .task { model.start() }
             .onChange(of: phase, initial: true) { _, phase in
+                if phase == .active {
+                    model.sceneBecameActive()
+                }
                 let value: ProtectionScenePhase = switch phase {
                 case .active: .active
                 case .inactive: .inactive

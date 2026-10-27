@@ -9,6 +9,7 @@ use suwop_core::{
 #[derive(JsonSchema)]
 #[allow(dead_code)]
 struct Protocol {
+    organization_date: suwop_core::organization::OrganizationDate,
     current_movie_output: suwop_core::sharing::CurrentMovieOutput,
     current_media_export: suwop_core::sharing::CurrentMediaExport,
     import_item: suwop_core::external_import::ImportItem,

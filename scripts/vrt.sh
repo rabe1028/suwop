@@ -117,7 +117,8 @@ if [[ -n "$LANE" ]]; then
         -test-enumeration-output-path "$ARTIFACTS/registered-raw.json"
     stage inventory uv run --no-project python scripts/vrt_lanes.py inventory \
         "$ARTIFACTS/registered-raw.json" "$ARTIFACTS/registered-tests.json"
-    # UI lanes are deterministic duration-balanced shards of the enumerated bundle.
+    # UI lanes enumerate every test; organization/selection classes each have one
+    # explicit owner and remaining tests balance deterministically by duration.
     stage select uv run --no-project python scripts/vrt_lanes.py select "$ARTIFACTS" "$LANE"
     ONLY=()
     while IFS= read -r selected; do ONLY+=("-only-testing:$selected"); done < "$ARTIFACTS/only-testing.txt"

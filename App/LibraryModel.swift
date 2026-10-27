@@ -22,8 +22,14 @@ import SwiftUI
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var observer: PhotoObserver?
+    private var appleAuthorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    private var appleAuthorizationBarriers: Set<UUID> = []
     @Published private(set) var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
+    private var gallerySelectionWork: Task<Void, Never>?
+    var organizationNavigationWork: Task<Void, Never>?
+    @Published private(set) var gallerySelectionPending = false
+    private var gallerySelectionSequence: UInt64 = 0
     private var previewWork: Task<Void, Never>?
     private var browseGeneration: UInt64 = 0
     private var publishedRevision: UInt64 = 0
@@ -45,6 +51,8 @@ import SwiftUI
     let ordinaryLivePairImages = OrdinaryLivePairImageSession()
 
     #if SUWOP_VRT
+        var beforeAppleChange: (@MainActor () throws -> Void)?
+        var beforeGallerySelection: (@MainActor () throws -> Void)?
         var thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)?
         private(set) var snapshotImages: [AssetKey: PlatformImage] = [:]
         init(
@@ -66,17 +74,35 @@ import SwiftUI
             self.semanticSearch = semanticSearch
             started = true
         }
+
+        convenience init(
+            coldStartRuntime runtime: RustRuntime,
+            shell: AppleShell,
+            initialAppleAuthorization: PHAuthorizationStatus,
+            initiallyStarted: Bool,
+            executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
+        ) {
+            self.init(
+                runtime: runtime,
+                shell: shell,
+                initialAppleAuthorization: initialAppleAuthorization,
+                executeEffect: executeEffect
+            )
+            started = initiallyStarted
+        }
     #endif
 
     #if SUWOP_VRT || SUWOP_NATIVE_ACCEPTANCE
         init(
             runtime: RustRuntime,
             shell: AppleShell,
+            initialAppleAuthorization: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite),
             thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
             executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
         ) {
             self.runtime = runtime
             self.shell = shell
+            appleAuthorization = initialAppleAuthorization
             #if SUWOP_VRT
                 self.thumbnailEffect = thumbnailEffect
                 protection.executeEffect = executeEffect
@@ -123,13 +149,42 @@ import SwiftUI
         }
     }
 
+    /// PhotoKit notifications may be delayed while the app is suspended. Check
+    /// permission before foreground interaction can reuse an earlier presentation.
+    func sceneBecameActive() {
+        reconcileAppleAuthorization(PHPhotoLibrary.authorizationStatus(for: .readWrite))
+    }
+
+    /// The value is supplied separately so acceptance can exercise transitions
+    /// without changing the host or the user's Photos authorization.
+    func reconcileAppleAuthorization(_ current: PHAuthorizationStatus) {
+        guard started else {
+            // The initial scene callback can precede .task/start(). No content
+            // has been published; initialize must load persistence before scan.
+            appleAuthorization = current
+            return
+        }
+        // Limited membership can change while suspended without changing this
+        // enum or delivering PHChange before foreground interaction resumes.
+        guard current == .limited || current != appleAuthorization || !appleAuthorizationBarriers.isEmpty
+        else { return }
+        photoLibraryChanged(assetsChanged: true)
+        appleAuthorization = current
+    }
+
     /// The production PhotoObserver callback path, shared with ordering regressions.
     func photoLibraryChanged(assetsChanged: Bool) {
+        appleAuthorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         guard assetsChanged else {
             if albumsRequested {
                 refreshAlbums()
             }
             return
+        }
+        // Limited membership may change without an authorization enum change.
+        // Suspend every asset notification, including the foreground handoff.
+        if let token = shell?.presentationEpoch.suspendContentAdmission() {
+            appleAuthorizationBarriers.insert(token)
         }
         if protection.ownerSceneID != nil {
             protection.close()
@@ -137,22 +192,6 @@ import SwiftUI
         shell?.invalidateContentPresentations()
         invalidateThumbnails()
         notifyPhotoChange()
-    }
-
-    var editClipboard: EditClipboard? {
-        view?.state.editClipboard
-    }
-
-    var pendingEditPastes: [PendingEditPaste] {
-        view?.state.pendingEditPastes ?? []
-    }
-
-    var browser: BrowserView? {
-        view?.browser
-    }
-
-    var albums: [AlbumView] {
-        view?.albums ?? []
     }
 
     func refreshAlbums() {
@@ -189,40 +228,68 @@ import SwiftUI
         }
     }
 
-    func favorite(_ photos: [UnifiedPhoto], value: Bool) {
-        do {
-            try send([
-                "type": .string("setFavorite"),
-                "keys": .from(Array(Set(photos.flatMap { operationKeys($0) }))),
-                "value": .bool(value),
-            ])
-        } catch { errorMessage = error.localizedDescription }
+    func selectGalleryPhotos(_ photoIDs: [String], selected: Bool) {
+        queueGallerySelection([
+            "type": .string("selectGalleryPhotos"),
+            "photoIDs": .array(photoIDs.map(JSONValue.string)),
+            "selected": .bool(selected),
+        ])
     }
 
-    func share(_ photos: [UnifiedPhoto]) {
-        do {
-            try send([
-                "type": .string("share"),
-                "keys": .from(Array(Set(photos.flatMap { operationKeys($0) }))),
-                "id": .string(UUID().uuidString),
-            ])
-        } catch { errorMessage = error.localizedDescription }
+    func toggleGalleryPhoto(_ photoID: String) {
+        queueGallerySelection(["type": .string("toggleGalleryPhoto"), "photoID": .string(photoID)])
+    }
+
+    func clearGallerySelection() {
+        queueGallerySelection(["type": .string("clearGallerySelection")])
+    }
+
+    /// Selection is ephemeral Core state, not a native operation. Preserve rapid
+    /// clicks in order instead of dropping them through the workflow busy guard.
+    private func queueGallerySelection(_ event: [String: JSONValue]) {
+        guard let runtime else { return }
+        gallerySelectionPending = true
+        let previous = gallerySelectionWork
+        gallerySelectionSequence &+= 1
+        let sequence = gallerySelectionSequence
+        gallerySelectionWork = Task {
+            await previous?.value
+            defer {
+                if sequence == gallerySelectionSequence {
+                    gallerySelectionWork = nil
+                    gallerySelectionPending = false
+                }
+            }
+            do {
+                #if SUWOP_VRT
+                    try beforeGallerySelection?()
+                #endif
+                let requests = try await runtime.update(.object(event))
+                try await readView()
+                try await resolveRequests(requests, context: shell?.beginWorkflow())
+            } catch { errorMessage = error.localizedDescription }
+        }
+    }
+
+    /// Navigation events have no native IO and must overtake a held people page.
+    /// Their own short queue preserves leave/reopen order without waiting for that page.
+    func queueOrganizationNavigation(_ event: [String: JSONValue]) {
+        guard let runtime else { return }
+        let previous = organizationNavigationWork
+        organizationNavigationWork = Task {
+            await previous?.value
+            do {
+                let requests = try await runtime.update(.object(event))
+                try await publish(runtime.snapshot())
+                if !requests.isEmpty {
+                    try await resolveRequests(requests, context: shell?.beginWorkflow())
+                }
+            } catch { errorMessage = error.localizedDescription }
+        }
     }
 
     func operationKeys(_ photo: UnifiedPhoto) -> [AssetKey] {
         photo.assets.map(\.key).filter { operationKeyIndex.contains($0) }
-    }
-
-    func previewChoices(_ photo: UnifiedPhoto) -> [PreviewChoice] {
-        view?.previewChoices[photo.id] ?? []
-    }
-
-    func displayedSource(_ photo: UnifiedPhoto) -> PreviewChoice? {
-        previewChoices(photo).first(where: \.selected)
-    }
-
-    func previewIdentifier(_ photo: UnifiedPhoto) -> String {
-        "\(thumbnailGeneration)|\(displayedSource(photo)?.cacheId ?? "unavailable")"
     }
 
     func choosePreview(_ photo: UnifiedPhoto, key: AssetKey, chosen: @escaping @MainActor (AssetKey) -> Void) {
@@ -243,89 +310,6 @@ import SwiftUI
                 }
             }
         }
-    }
-
-    func setMetadata(_ target: MetadataTarget, input: MetadataInput, completion: @escaping @MainActor (Bool) -> Void) {
-        do {
-            try send([
-                "type": .string("setMetadata"),
-                "keys": .from(target.keys),
-                "input": .from(input),
-            ], completion: completion)
-        } catch {
-            errorMessage = error.localizedDescription
-            completion(false)
-        }
-    }
-
-    var pendingUploads: [PendingUpload] {
-        view?.state.pendingUploads ?? []
-    }
-
-    var uploadIntents: [UploadIntent] {
-        view?.state.uploadIntents ?? []
-    }
-
-    func forgetUploadIntent(_ upload: UploadIntent) {
-        send([
-            "type": .string("forgetUploadIntent"),
-            "scope": .string(upload.scope),
-            "token": .string(upload.token),
-        ])
-    }
-
-    func forgetUploadRecord(_ upload: PendingUpload) {
-        do {
-            try send(["type": .string("forgetUploadRecord"), "key": .from(upload.key)])
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    var connection: ConnectionSettings? {
-        view?.state.connection
-    }
-
-    var remoteVersion: Version? {
-        view?.remoteVersion
-    }
-
-    var serverVersion: String? {
-        view?.serverVersion
-    }
-
-    var isBusy: Bool {
-        work != nil || view?.busy == true
-    }
-
-    var status: String {
-        progress.value ?? view?.status ?? "写真ライブラリを接続してください。"
-    }
-
-    var canTransfer: Bool {
-        view?.canTransfer == true && work == nil
-    }
-
-    func disconnect() {
-        immichArchive.revokeForConnectionChange()
-        immichLocked.close()
-        send(["type": .string("disconnect")])
-    }
-
-    func indexOriginals() {
-        send(["type": .string("index"), "id": .string(UUID().uuidString)])
-    }
-
-    func completeMove(_ receipt: TransferReceipt) {
-        send(["type": .string("completeMove"), "id": .string(receipt.id), "workspace": .string(UUID().uuidString)])
-    }
-
-    func stop() {
-        work?.cancel()
-    }
-
-    func moveBlockers(_ receipt: TransferReceipt) -> [String] {
-        view?.moveBlockers[receipt.id] ?? ["記録を確認できません"]
     }
 
     func send(
@@ -522,10 +506,21 @@ private extension LibraryModel {
         pendingRefresh = true
         pendingAlbumsRefresh = albumsRequested
         guard let runtime, executeEffect != nil else { return }
-        let context = shell?.beginWorkflow()
+        let barriers = appleAuthorizationBarriers
+        let notificationContext = shell?.beginWorkflow()
         Task {
             do {
+                #if SUWOP_VRT
+                    try beforeAppleChange?()
+                #endif
                 let requests = try await runtime.update(.object(["type": .string("appleChanged")]))
+                // Reopen native admission only after Rust revoked old catalog
+                // authority. New reads still require the subsequent fresh scan.
+                for token in barriers {
+                    shell?.presentationEpoch.resumeContentAdmission(token)
+                    appleAuthorizationBarriers.remove(token)
+                }
+                let context = barriers.isEmpty ? notificationContext : shell?.beginWorkflow()
                 try await readView()
                 try await resolveRequests(requests, context: context)
                 if work == nil {

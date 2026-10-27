@@ -23,14 +23,22 @@ struct PhotoViewer: View {
     @Environment(\.protectionSceneID) private var inheritedSceneID
     private let collection: AlbumKey?
     private let sceneID: String
+    private let organizationReview: Bool
     private var protectionOwner: String {
         inheritedSceneID ?? sceneID
     }
 
-    init(model: LibraryModel, key: AssetKey, collection: AlbumKey? = nil, sceneID: String = UUID().uuidString) {
+    init(
+        model: LibraryModel,
+        key: AssetKey,
+        collection: AlbumKey? = nil,
+        sceneID: String = UUID().uuidString,
+        organizationReview: Bool = false
+    ) {
         self.model = model
         self.collection = collection
         self.sceneID = sceneID
+        self.organizationReview = organizationReview
         _cursor = State(initialValue: PhotoViewerCursor(anchor: key))
     }
 
@@ -39,6 +47,9 @@ struct PhotoViewer: View {
     }
 
     private var pages: [UnifiedPhoto] {
+        if organizationReview {
+            return photo.map { [$0] } ?? []
+        }
         var visible = model.visiblePhotos
         if let collection {
             let ids = model.albums.first { $0.album.key == collection }?.photoIDs ?? []
@@ -80,7 +91,7 @@ struct PhotoViewer: View {
                 .task(id: model.previewIdentifier(photo)) {
                     model.prefetchPreviews(pages, at: index, owner: prefetchOwner)
                 }
-                if chrome {
+                if chrome, !organizationReview {
                     if model.selectedPresentation(photo) != nil {
                         Text("表示のみ — この表示元の共有・編集・再生・転送はできません。")
                             .font(.caption).padding(.horizontal).accessibilityIdentifier("ordinarySelectedReadOnly")
@@ -192,23 +203,6 @@ struct PhotoViewer: View {
         #if os(macOS)
             .frame(minWidth: 700, minHeight: 580)
         #endif
-    }
-
-    private var header: some View {
-        HStack {
-            Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("写真を閉じる")
-            Spacer()
-            VStack(spacing: 2) {
-                Text(photo.flatMap { model.displayedSource($0)?.capturedAt }?
-                    .formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
-                    .font(.subheadline.bold())
-                    .multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
-                Text("\(index + 1) / \(pages.count)").font(.caption).foregroundStyle(.secondary)
-            }
-            Spacer()
-            Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の情報")
-        }.font(.title3).padding()
     }
 
     private func actions(_ photo: UnifiedPhoto) -> some View {
@@ -357,8 +351,29 @@ struct PhotoViewer: View {
             }
         }
     }
+}
 
-    private func move(_ step: Int) {
+private extension PhotoViewer {
+    var header: some View {
+        HStack {
+            Button { dismiss() } label: { Image(systemName: "xmark") }.accessibilityLabel("写真を閉じる")
+            Spacer()
+            VStack(spacing: 2) {
+                Text(photo.flatMap { model.displayedSource($0)?.capturedAt }?
+                    .formatted(date: .abbreviated, time: .shortened) ?? "撮影日不明")
+                    .font(.subheadline.bold())
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("\(index + 1) / \(pages.count)").font(.caption).foregroundStyle(.secondary)
+            }
+            Spacer()
+            if !organizationReview {
+                Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の情報")
+            }
+        }.font(.title3).padding()
+    }
+
+    func move(_ step: Int) {
         let next = index + step
         if pages.indices.contains(next), let key = pages[next].assets.first?.key {
             cursor.point(to: key, in: pages[next])

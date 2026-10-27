@@ -22,15 +22,15 @@ final class VisualRegressionTests: XCTestCase {
         try await capture("gallery-dark", view: GalleryView(model: model), dark: true)
         let photo = try XCTUnwrap(model.photos.first { $0.assets.contains { $0.key.assetID == "photo-0" } })
         let key = try XCTUnwrap(photo.assets.first?.key)
-        let selected = try XCTUnwrap(model.visiblePhotos.first?.assets.first?.key)
+        let selected = try XCTUnwrap(model.visiblePhotos.first)
+        let selectionModel = try SnapshotFixtures.model(selectedPhotoIDs: [selected.id])
         try await capture("selection", view: NavigationStack {
             PhotoGrid(
-                model: model,
+                model: selectionModel,
                 density: 3,
                 timeline: .days,
                 sort: .newest,
                 selecting: .constant(true),
-                selectedKeys: .constant([selected]),
                 open: { _ in }
             ).navigationTitle("写真を選択")
         })

@@ -9,6 +9,7 @@ struct GalleryView: View {
     @State private var showProtected = false
     @State private var showImmichLocked = false
     @State private var showLiveReads = false
+    @State private var showOrganization = false
     @State private var showImmichArchive = false
     @State private var tab = 0
     @State private var filter: PhotoFilter = .all
@@ -17,7 +18,6 @@ struct GalleryView: View {
     @State private var query = ""
     @State private var contentSearch = false
     @State private var selecting = false
-    @State private var selectedKeys: Set<AssetKey> = []
     @State private var viewer: AssetKey?
     @State private var confirmIndex = false
     @State private var creatingAlbum = false
@@ -31,8 +31,7 @@ struct GalleryView: View {
     }
 
     private var selection: [UnifiedPhoto] {
-        guard !selectedKeys.isEmpty else { return [] }
-        return model.photos.filter { $0.assets.contains { selectedKeys.contains($0.key) } }
+        model.selectedGalleryPhotos
     }
 
     var body: some View {
@@ -64,9 +63,6 @@ struct GalleryView: View {
             } else {
                 query = ""
             }
-        }
-        .onChange(of: model.photoIDs) { _, _ in
-            selectedKeys.formIntersection(model.publishedAssetKeys)
         }
     }
 
@@ -190,8 +186,7 @@ struct GalleryView: View {
                         density: density,
                         timeline: timeline,
                         sort: sort,
-                        selecting: $selecting,
-                        selectedKeys: $selectedKeys
+                        selecting: $selecting
                     ) { viewer = $0 }
                 }
                 footer
@@ -201,7 +196,7 @@ struct GalleryView: View {
                 ToolbarItem(placement: .cancellationAction) {
                     if selecting {
                         Button("すべて選択") {
-                            selectedKeys.formUnion(model.visiblePhotos.flatMap { model.operationKeys($0) })
+                            model.selectGalleryPhotos(model.visiblePhotos.map(\.id), selected: true)
                         }.disabled(model.visiblePhotos.isEmpty)
                     }
                 }
@@ -209,7 +204,7 @@ struct GalleryView: View {
                     Button(selecting ? "キャンセル" : "選択") {
                         selecting.toggle()
                         if !selecting {
-                            selectedKeys.removeAll()
+                            model.clearGallerySelection()
                         }
                     }.accessibilityIdentifier("selectPhotos").disabled(model.photos.isEmpty)
                     optionsMenu
@@ -245,6 +240,7 @@ struct GalleryView: View {
                     ForEach(Presence.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
                 }
             } label: { Label(presence?.title ?? filter.title, systemImage: "line.3.horizontal.decrease") }
+                .accessibilityIdentifier("galleryFilter")
             Spacer()
             Picker("日付別表示", selection: $timeline) {
                 ForEach(TimelineGrouping.allCases) { Text($0.title).tag($0) }
@@ -287,6 +283,7 @@ struct GalleryView: View {
             Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)
         } label: { Label("表示と操作", systemImage: "ellipsis.circle") }
+            .accessibilityIdentifier("galleryOptions")
     }
 
     private var footer: some View {
@@ -294,6 +291,7 @@ struct GalleryView: View {
             if selecting {
                 HStack {
                     Text("\(selection.count) 件を選択").font(.subheadline)
+                        .accessibilityIdentifier("gallerySelectionCount")
                     Spacer()
                     Menu {
                         Button("原本ファイルを共有", systemImage: "square.and.arrow.up") { confirmingShare = true }
@@ -304,15 +302,17 @@ struct GalleryView: View {
                         }.disabled(model.editClipboard == nil)
                         Button("選択した Apple 側のすべてのコピーを削除", role: .destructive) { model.trashOnApple(selection) }
                             .disabled(!selection.contains { $0.assets.contains { $0.key.provider == .apple } })
-                        Button("選択した Apple Photos のコピーを非表示（\(model.visibilityHideKeys(in: selectedKeys).count) 件）") {
-                            model.hideOnApple(model.visibilityHideKeys(in: selectedKeys))
-                        }.disabled(model.visibilityHideKeys(in: selectedKeys).isEmpty)
+                        Button(
+                            "選択した Apple Photos のコピーを非表示（\(model.visibilityHideKeys(in: model.selectedGalleryKeys).count) 件）"
+                        ) {
+                            model.hideOnApple(model.visibilityHideKeys(in: model.selectedGalleryKeys))
+                        }.disabled(model.visibilityHideKeys(in: model.selectedGalleryKeys).isEmpty)
                             .accessibilityIdentifier("hideSelectedApplePhotos")
                         Button("Immich のゴミ箱に移す", role: .destructive) { model.trashOnImmich(selection) }
                             .disabled(!selection.contains { $0.providers.contains(.immich) })
-                        Button("選択を解除") { selectedKeys.removeAll() }
+                        Button("選択を解除") { model.clearGallerySelection() }
                     } label: { Label("選択した写真の操作", systemImage: "ellipsis.circle") }
-                        .disabled(selection.isEmpty || model.isBusy)
+                        .disabled(selection.isEmpty || model.isBusy || model.gallerySelectionPending)
                 }
             } else {
                 Text("\(model.visiblePhotos.count) 枚の写真・ビデオ").font(.caption).foregroundStyle(.secondary)
@@ -327,7 +327,13 @@ struct GalleryView: View {
         }.padding(10)
     }
 
-    private var collections: some View {
+    private func updateBrowse() {
+        model.browse(query: query, filter: filter, sort: sort, presence: presence)
+    }
+}
+
+private extension GalleryView {
+    var collections: some View {
         NavigationStack {
             List {
                 Section("ライブラリ") {
@@ -341,6 +347,9 @@ struct GalleryView: View {
                 }
                 AlbumsSection(model: model, creating: $creatingAlbum)
                 Section("整理") {
+                    Button { showOrganization = true } label: {
+                        Label("見つける：場所・思い出・重複コピー", systemImage: "sparkle.magnifyingglass")
+                    }.accessibilityIdentifier("organizationCollection")
                     Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
                         model.showAppleVisibility = true
                     }.accessibilityIdentifier("appleVisibilityCollectionHistory")
@@ -348,12 +357,25 @@ struct GalleryView: View {
                         .disabled(model.isBusy)
                 }
             }.navigationTitle("コレクション")
+                .navigationDestination(isPresented: $showOrganization) {
+                    OrganizationBrowserView(model: model, sceneID: sceneID)
+                }
+                .onChange(of: showOrganization) { _, presented in
+                    if !presented {
+                        model.endOrganizationBrowse()
+                    }
+                }
+                .onChange(of: tab) { _, value in
+                    if value != 1 {
+                        showOrganization = false
+                    }
+                }
                 .task { model.refreshAlbums() }
                 .sheet(isPresented: $creatingAlbum) { AlbumCreationView(model: model) }
         }
     }
 
-    private func collectionRow(_ value: PhotoFilter, count: Int64) -> some View {
+    func collectionRow(_ value: PhotoFilter, count: Int64) -> some View {
         Button { query = ""
             presence = nil
             filter = value
@@ -365,9 +387,5 @@ struct GalleryView: View {
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }
         }.foregroundStyle(.primary)
-    }
-
-    private func updateBrowse() {
-        model.browse(query: query, filter: filter, sort: sort, presence: presence)
     }
 }

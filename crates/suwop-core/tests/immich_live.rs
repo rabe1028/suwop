@@ -750,6 +750,7 @@ async fn exercise_metadata(ctx: &Context, session: &Session, ids: &[String]) -> 
         assert_eq!(asset.is_favorite, before.is_favorite);
         assert_eq!(asset.is_trashed, before.is_trashed);
     }
+    Box::pin(organization_people::exercise(ctx, session, ids)).await?;
     Box::pin(metadata_extended::exercise(ctx, session, &ids[0])).await?;
     Ok(())
 }
@@ -1296,3 +1297,6 @@ mod metadata_extended;
 
 #[path = "immich_live/external_import.rs"]
 mod external_import;
+
+#[path = "immich_live/organization_people.rs"]
+mod organization_people;

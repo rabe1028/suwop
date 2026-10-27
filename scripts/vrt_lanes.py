@@ -18,6 +18,9 @@ from vrt_test_inventory import (
 )
 
 UI_SHARDS = 3
+# Keep each organization/selection acceptance class together in one owned lane.
+# Other tests continue to balance against their estimated load; no runner changes.
+PINNED_UI_CLASSES = {"OrganizationUITests": 0, "GallerySelectionUITests": 1}
 SCOPES = {
     "host-snapshots": "SuwopVRT",
     **{f"ui-{index}": "SuwopVRTUI" for index in range(1, UI_SHARDS + 1)},
@@ -87,7 +90,18 @@ def selection(registered, scope):
     default = sorted(seconds.values())[len(seconds) // 2]
     loads = [0] * UI_SHARDS
     shards = [[] for _ in range(UI_SHARDS)]
-    for test in sorted(tests, key=lambda test: (-seconds.get(test, default), test)):
+    pinned = {
+        test: PINNED_UI_CLASSES[test.split("/")[1]]
+        for test in tests
+        if test.split("/")[1] in PINNED_UI_CLASSES
+    }
+    for test, index in sorted(pinned.items()):
+        loads[index] += seconds.get(test, default)
+        shards[index].append(test)
+    for test in sorted(
+        (test for test in tests if test not in pinned),
+        key=lambda test: (-seconds.get(test, default), test),
+    ):
         index = min(range(UI_SHARDS), key=lambda index: (loads[index], index))
         loads[index] += seconds.get(test, default)
         shards[index].append(test)

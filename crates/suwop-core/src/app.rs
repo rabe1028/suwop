@@ -1186,6 +1186,26 @@ pub enum Event {
     BrowseAlbumCandidates {
         key: Option<crate::albums::AlbumKey>,
     },
+    ToggleGalleryPhoto {
+        #[serde(rename = "photoID")]
+        photo_id: String,
+    },
+    SelectGalleryPhotos {
+        #[serde(rename = "photoIDs")]
+        photo_ids: Vec<String>,
+        selected: bool,
+    },
+    ClearGallerySelection,
+    BrowseOrganizationPeople,
+    #[serde(skip)]
+    OrganizationPeopleFinished {
+        request: u64,
+        result: Result<crate::organization_people::ResultData, String>,
+    },
+    EndOrganizationBrowse,
+    BrowseOrganization {
+        reference: crate::organization::OrganizationDate,
+    },
     Browse {
         options: crate::browser::BrowserOptions,
     },
@@ -1278,6 +1298,10 @@ pub struct Model {
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
     pub album_candidate_key: Option<crate::albums::AlbumKey>,
+    pub organization_people: crate::organization_people::PeopleState,
+    pub gallery_selection_keys: std::collections::BTreeSet<crate::domain::AssetKey>,
+    pub organization_reference: Option<crate::organization::OrganizationDate>,
+    pub organization_error: Option<String>,
     pub browser: crate::browser::BrowserOptions,
     pub state: SavedLibrary,
     pub session: Option<Session>,
@@ -1330,6 +1354,8 @@ pub struct ViewModel {
     pub preview_sources: std::collections::BTreeMap<String, crate::domain::AssetKey>,
     pub media: std::collections::BTreeMap<String, crate::media::PlaybackKind>,
     pub albums: Vec<crate::albums::AlbumView>,
+    pub organization: crate::organization::OrganizationView,
+    pub gallery_selection: crate::gallery_selection::GallerySelection,
     pub browser: crate::browser::BrowserView,
     pub state: crate::privacy::PublishedLibrary,
     pub photos: Vec<UnifiedPhoto>,
@@ -1349,7 +1375,14 @@ impl crux_core::App for Suwop {
     type ViewModel = ViewModel;
     type Effect = Effect;
     fn update(&self, event: Event, model: &mut Model) -> Command<Effect, Event> {
-        Self::reduce(event, model).and(crate::immich_live_writes::ordinary_images::reconcile(model))
+        let count_only = matches!(event, Event::FetchProgress { .. });
+        let command = Self::reduce(event, model)
+            .and(crate::immich_live_writes::ordinary_images::reconcile(model));
+        crate::organization_people::reconcile(model);
+        if !count_only {
+            crate::gallery_selection::reconcile_model(model);
+        }
+        command
     }
     fn view(&self, model: &Model) -> ViewModel {
         Self::library_view(model)
@@ -1357,6 +1390,12 @@ impl crux_core::App for Suwop {
 }
 impl Suwop {
     fn reduce(event: Event, model: &mut Model) -> Command<Effect, Event> {
+        if crate::gallery_selection::update(&event, model) {
+            return Command::done();
+        }
+        if let Some(command) = crate::organization_people::update(&event, model) {
+            return command;
+        }
         if crate::workflow::metadata_event_blocked(&event, &model.state) {
             model.error = Some("この写真には結果不明の情報変更があります。変更履歴で保存先の状態を確認してください。".into());
             return Command::done();
@@ -1386,6 +1425,18 @@ impl Suwop {
         // The original event is reduced synchronously. Only cleanup work is asynchronous;
         // an old cancellation/Finished event must never be re-enqueued behind new work.
         cleanup.and(Self::update_after_capture(event, model))
+    }
+
+    pub(crate) fn gallery_selection_catalog(
+        model: &Model,
+    ) -> (Vec<UnifiedPhoto>, Vec<crate::domain::AssetKey>) {
+        let ordinary = crate::protection::ordinary_state_view(model);
+        let operation_public = crate::privacy::PublishedLibrary::from_canonical(&ordinary);
+        let public = paired_public_library(model, &ordinary, &operation_public);
+        (
+            crate::display_catalog::photos(&public.snapshots, &public.receipts),
+            ordinary_projection(model, &operation_public).0,
+        )
     }
 
     /// Ordinary membership has no clock-dependent grants. Native callers still
@@ -1537,6 +1588,17 @@ impl Suwop {
                 model.album_candidate_key = key;
                 Command::done()
             }
+            Event::EndOrganizationBrowse => {
+                model.organization_reference = None;
+                model.organization_error = None;
+                Command::done()
+            }
+            Event::BrowseOrganization { reference } => {
+                model.organization_error = reference.validate().err();
+                model.organization_reference =
+                    model.organization_error.is_none().then_some(reference);
+                Command::done()
+            }
             Event::Browse { options } => {
                 model.browser = options;
                 Command::done()
@@ -1660,10 +1722,6 @@ impl Suwop {
         let photos = crate::display_catalog::photos(&public.snapshots, &public.receipts);
         let preview_choices = photo_preview_choices(model, &public, &photos);
         let displayed_dates = displayed_dates(&preview_choices);
-        let editing_access = crate::editing::EditingAccess::new(
-            &operation_public.snapshots,
-            &model.state.apple_scope,
-        );
         let metadata_access = crate::metadata::MetadataAccess::new(&operation_public.snapshots);
         let (ordinary_content_keys, private_content_revision) =
             ordinary_projection(model, &operation_public);
@@ -1694,6 +1752,12 @@ impl Suwop {
             ordinary_selected_images: crate::ordinary_selected::images(model),
             ordinary_selected_pending: crate::ordinary_selected::pending(model),
             ordinary_selected_generation: crate::ordinary_selected::generation(model),
+            organization: organization_view(model, &operation_public, &ordinary_content_keys),
+            gallery_selection: crate::gallery_selection::reconcile(
+                &photos,
+                &ordinary_content_keys,
+                &model.gallery_selection_keys,
+            ),
             ordinary_content_keys,
             private_content_revision,
             immich_archive_view: crate::immich_archive::view(model),
@@ -1713,10 +1777,7 @@ impl Suwop {
             protected_view: crate::protection::view(model),
             apple_visibility_hide_keys: apple_visibility_hide_keys(model, &ordinary),
             remote_version: model.session.as_ref().map(|s| s.version.clone()),
-            editing_targets: photos
-                .iter()
-                .map(|p| (crate::browser::photo_id(p), editing_access.targets(p)))
-                .collect(),
+            editing_targets: public_editing_targets(model, &photos, &operation_public),
             metadata_targets: photos
                 .iter()
                 .map(|p| (crate::browser::photo_id(p), metadata_access.targets(p)))
@@ -1753,6 +1814,40 @@ impl Suwop {
         }
     }
 }
+fn public_editing_targets(
+    model: &Model,
+    photos: &[UnifiedPhoto],
+    public: &crate::privacy::PublishedLibrary,
+) -> std::collections::BTreeMap<String, Vec<crate::editing::EditingTarget>> {
+    let access = crate::editing::EditingAccess::new(&public.snapshots, &model.state.apple_scope);
+    photos
+        .iter()
+        .map(|photo| (crate::browser::photo_id(photo), access.targets(photo)))
+        .collect()
+}
+
+fn organization_view(
+    model: &Model,
+    public: &crate::privacy::PublishedLibrary,
+    keys: &[crate::domain::AssetKey],
+) -> crate::organization::OrganizationView {
+    let mut view = if model.organization_reference.is_some() {
+        crate::organization::project(
+            &public.snapshots,
+            keys,
+            model.organization_reference.as_ref(),
+            model.organization_error.as_ref(),
+        )
+    } else {
+        crate::organization::OrganizationView {
+            error: model.organization_error.clone(),
+            ..crate::organization::OrganizationView::default()
+        }
+    };
+    view.people = crate::organization_people::view(model);
+    view
+}
+
 fn amazon_scope(model: &Model) -> Option<&str> {
     model
         .state
@@ -2004,6 +2099,8 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
                 | Event::FetchProgress { .. }
                 | Event::Progress { .. }
                 | Event::Finished { .. }
+                | Event::EndOrganizationBrowse
+                | Event::BrowseOrganization { .. }
                 | Event::Browse { .. }
                 | Event::BrowseAlbumCandidates { .. }
                 | Event::ChoosePreview { .. }
@@ -2079,6 +2176,8 @@ fn public_descriptions(
     photos: &[UnifiedPhoto],
     ordinary_content_keys: &[crate::domain::AssetKey],
 ) -> std::collections::BTreeMap<String, String> {
+    let ordinary_content_keys: std::collections::BTreeSet<_> =
+        ordinary_content_keys.iter().collect();
     photos
         .iter()
         .map(|photo| {
