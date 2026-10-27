@@ -355,7 +355,7 @@ pub async fn observe(
             .as_ref()
             .and_then(|id| observed.get(id))
             .map(|(asset, _)| asset);
-        if asset.record(&session.scope, companion, None).revision != source.revision {
+        if !matches_parent_observation(source, asset, companion, &session.scope) {
             partial = true;
             continue;
         }
@@ -368,6 +368,21 @@ pub async fn observe(
         observations,
         partial,
     })
+}
+
+fn matches_parent_observation(
+    source: &StoredAsset,
+    asset: &Asset,
+    companion: Option<&Asset>,
+    scope: &str,
+) -> bool {
+    let fresh = asset.record(scope, companion, None);
+    // The parent fence comes directly from the provider observation. Never parse
+    // full revision or infer a parent fence from editable catalog metadata.
+    source.immich_parent_revision.as_ref().map_or_else(
+        || fresh.revision == source.revision,
+        |parent| fresh.immich_parent_revision.as_ref() == Some(parent),
+    )
 }
 
 #[must_use]
@@ -718,6 +733,192 @@ mod tests {
             core.view().organization.people.groups[0].name,
             "New generated name"
         );
+        Ok(())
+    }
+
+    fn exported_live_parent_fixture() -> Result<(Model, Value), String> {
+        let mut parent_json = raw();
+        let motion_id = "55555555-5555-4555-8555-555555555555";
+        parent_json["livePhotoVideoId"] = json!(motion_id);
+        let parent: Asset =
+            serde_json::from_value(parent_json.clone()).map_err(|error| error.to_string())?;
+        let mut motion_json = raw();
+        motion_json["id"] = json!(motion_id);
+        motion_json["type"] = json!("VIDEO");
+        motion_json["visibility"] = json!("hidden");
+        motion_json["updatedAt"] = json!("2026-01-02T00:00:00Z");
+        let motion: Asset =
+            serde_json::from_value(motion_json).map_err(|error| error.to_string())?;
+        let exported = parent.record("fixture", Some(&motion), None);
+        let listed = parent.record("fixture", None, None);
+        assert_ne!(exported.revision, listed.revision);
+        assert_eq!(
+            exported.immich_parent_revision,
+            listed.immich_parent_revision
+        );
+        assert!(exported.immich_parent_revision.is_some());
+        let mut model = model()?;
+        model.state.snapshots[0].assets = vec![exported];
+        Ok((model, parent_json))
+    }
+
+    fn assert_parent_only_query(effect: &Effect) -> Result<(), String> {
+        let Effect::Io(request) = effect;
+        let ShellOperation::Http(http) = &request.operation else {
+            return Err("expected metadata query".into());
+        };
+        assert_eq!(
+            http.body.as_ref().ok_or("body")?["filter"]["or"],
+            json!([{"id":{"eq":ID}}])
+        );
+        assert_eq!(
+            http.ordinary_content_authorization
+                .as_ref()
+                .ok_or("authority")?
+                .source_keys
+                .len(),
+            1
+        );
+        assert_eq!(
+            http.ordinary_content_authorization
+                .as_ref()
+                .ok_or("authority")?
+                .source_keys[0]
+                .asset_id,
+            ID
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn exported_live_parent_people_does_not_require_hidden_motion_query() -> Result<(), String> {
+        let (model, parent_json) = exported_live_parent_fixture()?;
+        let expected_full_revision = model.state.snapshots[0].assets[0].revision.clone();
+        let core = Core::new_with(Suwop, model);
+        let effect = core
+            .process_event(Event::BrowseOrganizationPeople)
+            .pop()
+            .ok_or("parent query")?;
+        assert_parent_only_query(&effect)?;
+        assert!(reply(&core, effect, vec![parent_json], Value::Null)?.is_empty());
+        let view = core.view();
+        assert!(!view.organization.people.partial_coverage);
+        assert_eq!(view.organization.people.groups.len(), 1);
+        assert_eq!(
+            view.organization.people.groups[0].members[0].revision,
+            expected_full_revision
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn live_parent_updates_link_changes_and_revocation_still_reject_people() -> Result<(), String> {
+        for change in ["updatedAt", "livePhotoVideoId", "permission"] {
+            let (model, mut parent_json) = exported_live_parent_fixture()?;
+            let generation = model.ordinary_generation.clone();
+            let core = Core::new_with(Suwop, model);
+            let effect = core
+                .process_event(Event::BrowseOrganizationPeople)
+                .pop()
+                .ok_or("parent query")?;
+            assert_parent_only_query(&effect)?;
+            match change {
+                "updatedAt" => parent_json[change] = json!("2026-01-03T00:00:00Z"),
+                "livePhotoVideoId" => {
+                    parent_json[change] = json!("66666666-6666-4666-8666-666666666666");
+                }
+                _ => {
+                    generation.fetch_add(1, Ordering::SeqCst);
+                }
+            }
+            assert!(reply(&core, effect, vec![parent_json], Value::Null)?.is_empty());
+            assert!(core.view().organization.people.groups.is_empty());
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_live_record_without_parent_token_fails_closed_until_normal_refresh()
+    -> Result<(), String> {
+        let (mut state_model, parent_json) = exported_live_parent_fixture()?;
+        let exported = &state_model.state.snapshots[0].assets[0];
+        let mut saved = serde_json::to_value(exported).map_err(|error| error.to_string())?;
+        saved
+            .as_object_mut()
+            .ok_or("saved record")?
+            .remove("immichParentRevision");
+        let legacy: StoredAsset =
+            serde_json::from_value(saved).map_err(|error| error.to_string())?;
+        assert!(legacy.immich_parent_revision.is_none());
+        assert_eq!(legacy.revision, exported.revision);
+        state_model.state.snapshots[0].assets = vec![legacy];
+        let core = Core::new_with(Suwop, state_model);
+        let effect = core
+            .process_event(Event::BrowseOrganizationPeople)
+            .pop()
+            .ok_or("legacy query")?;
+        assert_parent_only_query(&effect)?;
+        reply(&core, effect, vec![parent_json.clone()], Value::Null)?;
+        assert!(core.view().organization.people.partial_coverage);
+        assert!(core.view().organization.people.groups.is_empty());
+        // A normal provider enumeration creates the token without reading hidden motion.
+        let parent: Asset =
+            serde_json::from_value(parent_json.clone()).map_err(|error| error.to_string())?;
+        let mut refreshed = model()?;
+        refreshed.state.snapshots[0].assets = vec![parent.record("fixture", None, None)];
+        let fresh_core = Core::new_with(Suwop, refreshed);
+        let effect = fresh_core
+            .process_event(Event::BrowseOrganizationPeople)
+            .pop()
+            .ok_or("refreshed query")?;
+        assert_parent_only_query(&effect)?;
+        reply(&fresh_core, effect, vec![parent_json], Value::Null)?;
+        assert_eq!(fresh_core.view().organization.people.groups.len(), 1);
+        assert!(!fresh_core.view().organization.people.partial_coverage);
+        Ok(())
+    }
+
+    #[test]
+    fn legacy_upload_intent_ignores_only_derived_parent_token_not_full_evidence()
+    -> Result<(), String> {
+        let (model, _) = exported_live_parent_fixture()?;
+        let session = model.session.as_ref().ok_or("session")?;
+        let fresh = model.state.snapshots[0].assets[0].clone();
+        let mut source_json = serde_json::to_value(&fresh).map_err(|error| error.to_string())?;
+        source_json
+            .as_object_mut()
+            .ok_or("saved source")?
+            .remove("immichParentRevision");
+        let source: StoredAsset =
+            serde_json::from_value(source_json).map_err(|error| error.to_string())?;
+        assert!(source.immich_parent_revision.is_none());
+        let intent = crate::immich::UploadIntent {
+            scope: session.scope.clone(),
+            token: "legacy-intent".into(),
+            source,
+            resource: fresh.resources[0].clone(),
+            signature: crate::domain::FileSignature {
+                sha256: "1".repeat(64),
+                bytes: 12,
+            },
+            live_id: None,
+        };
+        let restored: crate::immich::UploadIntent = serde_json::from_value(
+            serde_json::to_value(&intent).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        let file = crate::domain::TransferFile {
+            resource: fresh.resources[0].clone(),
+            signature: restored.signature.clone(),
+            path: "generated-only".into(),
+        };
+        assert!(restored.matches(session, &file, &fresh, None));
+        let mut changed = fresh.clone();
+        changed.revision.push_str("changed");
+        assert!(!restored.matches(session, &file, &changed, None));
+        let mut changed = fresh;
+        changed.resources[0].sha1 = Some("b".repeat(40));
+        assert!(!restored.matches(session, &file, &changed, None));
         Ok(())
     }
 }

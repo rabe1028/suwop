@@ -100,6 +100,10 @@ pub struct ImmichStackMembership {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StoredAsset {
+    /// Opaque parent-only observation fence for Immich People reads. Full
+    /// revision and original evidence remain authoritative for every operation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub immich_parent_revision: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub immich_visibility: Option<crate::immich_visibility::ImmichVisibility>,
     #[serde(default)]
@@ -133,6 +137,10 @@ impl StoredAsset {
         let mut evidence = self.clone();
         evidence.apple_visibility = other.apple_visibility;
         evidence.immich_visibility = other.immich_visibility;
+        // This derived read-only lookup token cannot alter content/receipt identity.
+        evidence
+            .immich_parent_revision
+            .clone_from(&other.immich_parent_revision);
         evidence == *other
     }
     pub fn originals(&self) -> impl Iterator<Item = &PhotoResource> {

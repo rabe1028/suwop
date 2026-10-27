@@ -178,6 +178,7 @@ fn large(state: &SavedLibrary) -> SavedLibrary {
         name: "x".repeat(18 * 1024 * 1024),
         revision: "fixture".into(),
         apple_visibility: AppleVisibility::Visible,
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: ImmichStackState::Unknown,
         immich_stack_membership: None,

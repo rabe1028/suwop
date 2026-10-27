@@ -3778,7 +3778,8 @@ public struct StoredAsset: Codable, Sendable {
     public var immichStack: ImmichStackState
     public var immichStackMembership: ImmichStackMembership?
     public var immichVisibility: ImmichVisibility?
-    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichStackMembership: ImmichStackMembership? = nil, immichVisibility: ImmichVisibility? = nil) {
+    public var immichParentRevision: String?
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichStackMembership: ImmichStackMembership? = nil, immichVisibility: ImmichVisibility? = nil, immichParentRevision: String? = nil) {
         self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
@@ -3795,6 +3796,7 @@ public struct StoredAsset: Codable, Sendable {
         self.immichStack = immichStack
         self.immichStackMembership = immichStackMembership
         self.immichVisibility = immichVisibility
+        self.immichParentRevision = immichParentRevision
     }
 }
 

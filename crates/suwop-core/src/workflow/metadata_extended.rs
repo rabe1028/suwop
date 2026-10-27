@@ -456,7 +456,15 @@ fn same_witnesses(expected: &[MetadataWitness], actual: &[MetadataWitness]) -> R
             actual
                 .iter()
                 .find(|new| new.asset.key == old.asset.key)
-                .is_none_or(|new| serde_json::to_value(old).ok() != serde_json::to_value(new).ok())
+                .is_none_or(|new| {
+                    // A derived People lookup token is not metadata/write evidence.
+                    // Legacy witnesses omit it; the full revision remains exact.
+                    let mut new = new.clone();
+                    new.asset
+                        .immich_parent_revision
+                        .clone_from(&old.asset.immich_parent_revision);
+                    serde_json::to_value(old).ok() != serde_json::to_value(new).ok()
+                })
         })
     {
         return Err("写真またはメタデータが変更されています。古い値を上書きしません。".into());
@@ -471,6 +479,9 @@ fn same_originals(
 ) -> Result<(), String> {
     let mut expected = before.clone();
     expected.revision.clone_from(&after.revision);
+    expected
+        .immich_parent_revision
+        .clone_from(&after.immich_parent_revision);
     expected.modified_at = after.modified_at;
     match edit {
         MetadataEdit::CapturedAt { .. } => expected.captured_at = after.captured_at,
@@ -484,4 +495,89 @@ fn same_originals(
         return Err("指定したメタデータ以外の原本・関連資源・写真の状態が変わりました。".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod parent_token_tests {
+    use super::*;
+    use serde_json::json;
+
+    fn observed(updated_at: &str) -> Result<MetadataWitness, String> {
+        let native: crate::immich::Asset = serde_json::from_value(json!({
+            "id":"11111111-1111-4111-8111-111111111111",
+            "ownerId":"22222222-2222-4222-8222-222222222222",
+            "type":"IMAGE","originalFileName":"generated.JPG","checksum":"a".repeat(40),
+            "fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z",
+            "updatedAt":updated_at,"isFavorite":false,"isOffline":false,"isTrashed":false,
+            "visibility":"timeline"
+        }))
+        .map_err(|error| error.to_string())?;
+        Ok(witness(
+            native.record("fixture", None, None),
+            "caption".into(),
+            None,
+        ))
+    }
+
+    #[test]
+    fn legacy_parent_token_does_not_relax_full_revision_or_other_witness_fields()
+    -> Result<(), String> {
+        let current = observed("2026-01-01T00:00:00Z")?;
+        let mut legacy = current.clone();
+        legacy.asset.immich_parent_revision = None;
+        let legacy: MetadataWitness = serde_json::from_value(
+            serde_json::to_value(legacy).map_err(|error| error.to_string())?,
+        )
+        .map_err(|error| error.to_string())?;
+        same_witnesses(
+            std::slice::from_ref(&legacy),
+            std::slice::from_ref(&current),
+        )?;
+        let changed = observed("2026-01-02T00:00:00Z")?;
+        assert!(
+            same_witnesses(
+                std::slice::from_ref(&legacy),
+                std::slice::from_ref(&changed)
+            )
+            .is_err()
+        );
+        let mut changed = current;
+        changed.values.description = "other caption".into();
+        assert!(same_witnesses(&[legacy], &[changed]).is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn post_write_settling_ignores_only_already_normalized_revision_and_derived_token()
+    -> Result<(), String> {
+        let before = observed("2026-01-01T00:00:00Z")?;
+        let after = observed("2026-01-02T00:00:00Z")?;
+        assert_ne!(
+            before.asset.immich_parent_revision,
+            after.asset.immich_parent_revision
+        );
+        same_originals(
+            &before.asset,
+            &after.asset,
+            &MetadataEdit::Description {
+                text: "caption".into(),
+            },
+        )?;
+        let mut settling = after.clone();
+        settling.asset.revision.clone_from(&before.asset.revision);
+        same_witnesses(std::slice::from_ref(&before), &[settling])?;
+        let mut drifted = after.asset;
+        drifted.resources[0].sha1 = Some("b".repeat(40));
+        assert!(
+            same_originals(
+                &before.asset,
+                &drifted,
+                &MetadataEdit::Description {
+                    text: "caption".into()
+                }
+            )
+            .is_err()
+        );
+        Ok(())
+    }
 }

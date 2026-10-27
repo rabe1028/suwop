@@ -72,7 +72,9 @@ import XCTest
     private static func discover(
         _ element: XCUIElement, in app: XCUIApplication, menu: XCUIElement, viewport: CGRect
     ) -> Bool {
+        var attempts: [String] = []
         for downward in [true, false] {
+            var stationary = 0
             for _ in 0 ..< 8 {
                 if hasGeometry(element) {
                     return true
@@ -84,10 +86,25 @@ import XCTest
                 if hasGeometry(element) {
                     return true
                 }
-                // At a scroll boundary, reverse once rather than repeating stationary drags.
-                if menu.buttons.allElementsBoundByIndex.map(\.frame) == before {
+                let after = menu.buttons.allElementsBoundByIndex.map(\.frame)
+                attempts.append("downward=\(downward) viewport=\(viewport) before=\(before) after=\(after)")
+                // A native menu can swallow a pan before its scrolling recognizer engages.
+                // Confirm a boundary with at most two further stationary pans, within
+                // the existing eight-attempt budget; a progressing pan resets the count.
+                stationary = after == before ? stationary + 1 : 0
+                if stationary > 2 {
                     break
                 }
+            }
+        }
+        if !hasGeometry(element) {
+            XCTContext.runActivity(named: "Native menu discovery failed") { activity in
+                let geometry = XCTAttachment(string: attempts.joined(separator: "\n"))
+                geometry.lifetime = .keepAlways
+                activity.add(geometry)
+                let screenshot = XCTAttachment(screenshot: app.screenshot())
+                screenshot.lifetime = .keepAlways
+                activity.add(screenshot)
             }
         }
         return hasGeometry(element)

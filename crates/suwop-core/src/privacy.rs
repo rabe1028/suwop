@@ -384,6 +384,7 @@ fn redact_asset(access: &ContentAccess, asset: &mut StoredAsset) {
     };
     asset.name = "非公開の写真".into();
     asset.revision.clear();
+    asset.immich_parent_revision = None;
     asset.resources.clear();
     asset.captured_at = None;
     asset.modified_at = None;
@@ -401,6 +402,7 @@ pub(crate) fn public_text(state: &SavedLibrary, text: &str) -> String {
     for asset in state.recorded_assets().filter(|a| !access.visible(&a.key)) {
         for token in std::iter::once(asset.name.as_str())
             .chain(std::iter::once(asset.revision.as_str()))
+            .chain(asset.immich_parent_revision.as_deref())
             .chain(asset.resources.iter().map(|r| r.name.as_str()))
         {
             if !token.is_empty() {

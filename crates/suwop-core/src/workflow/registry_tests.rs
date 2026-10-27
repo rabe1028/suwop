@@ -26,6 +26,7 @@ const SHA1: &str = "1111111111111111111111111111111111111111";
 
 fn asset(provider: Provider, scope: &str, id: &str) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: ImmichStackState::Unknown,
         immich_stack_membership: None,

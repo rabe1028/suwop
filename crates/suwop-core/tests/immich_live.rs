@@ -852,6 +852,7 @@ async fn upload_sidecar(
 
 fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

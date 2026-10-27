@@ -136,6 +136,8 @@ struct OrganizationBrowserView: View {
             Text(title).fixedSize(horizontal: false, vertical: true)
             Text("\(count) コピー").font(.caption).foregroundStyle(.secondary)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
     }
 
     private func members(_ reference: OrganizationGroupReference) -> some View {

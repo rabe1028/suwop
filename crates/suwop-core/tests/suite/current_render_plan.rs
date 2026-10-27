@@ -8,6 +8,7 @@ use suwop_core::{
 const ID: &str = "11111111-1111-4111-8111-111111111111";
 fn source() -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

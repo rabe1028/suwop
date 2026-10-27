@@ -190,6 +190,7 @@ mod tests {
             name: "photo.jpg".into(),
             revision: "1".into(),
             apple_visibility: AppleVisibility::Visible,
+            immich_parent_revision: None,
             immich_visibility: None,
             immich_stack: ImmichStackState::Unknown,
             immich_stack_membership: None,
