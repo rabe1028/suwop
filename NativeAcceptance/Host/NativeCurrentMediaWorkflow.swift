@@ -128,20 +128,95 @@ import UIKit
         try await NativeCurrentMediaReception.live(liveFiles)
     }
 
+    /// Exercise the exact compatibility callback backend on the current SDK.
+    static func verifyLegacyExporter(_ source: URL, root: URL) async throws {
+        let original = try Data(contentsOf: source)
+        let output = try await CurrentMediaMovie.export(
+            AVURLAsset(url: source),
+            to: root.appendingPathComponent("legacy-export-success"),
+            removeLocation: false,
+            forceLegacyExportForTesting: true
+        )
+        try await NativeCurrentMediaReception.movie(output.file.path)
+        guard try Data(contentsOf: source) == original else {
+            throw SuwopError("Legacy exporter changed its generated source.")
+        }
+        let cancelledDirectory = root.appendingPathComponent("legacy-export-pre-cancel")
+        let cancelled = Task { @MainActor in
+            try await CurrentMediaMovie.export(
+                AVURLAsset(url: source),
+                to: cancelledDirectory,
+                removeLocation: true,
+                forceLegacyExportForTesting: true
+            )
+        }
+        cancelled.cancel() // Same actor: cancellation precedes this task's first native step.
+        do {
+            _ = try await cancelled.value
+            throw SuwopError("Pre-cancelled legacy export unexpectedly succeeded.")
+        } catch is CancellationError {}
+        guard !FileManager.default
+            .fileExists(atPath: cancelledDirectory.appendingPathComponent("current-video.mov").path),
+            try Data(contentsOf: source) == original
+        else {
+            throw SuwopError("Pre-cancelled legacy export wrote output or changed its source.")
+        }
+        try await cancelLegacyAtSubmissionHandoff(source, root: root)
+        try await cancelExport(source, root: root, forceLegacy: true)
+    }
+
+    private static func cancelLegacyAtSubmissionHandoff(_ source: URL, root: URL) async throws {
+        let original = try Data(contentsOf: source)
+        let probe = CancellationProbe()
+        let directory = root.appendingPathComponent("legacy-export-handoff-cancel")
+        let task = Task { @MainActor in
+            try await CurrentMediaMovie.export(
+                AVURLAsset(url: source),
+                to: directory,
+                removeLocation: false,
+                forceLegacyExportForTesting: true,
+                beforeLegacySubmissionForTesting: {
+                    probe.handoff = true
+                    probe.task?.cancel()
+                },
+                exportObserver: { observation in
+                    switch observation {
+                    case .started: probe.started = true
+                    case .terminal: probe.terminal = true
+                    }
+                }
+            )
+        }
+        probe.task = task
+        do {
+            _ = try await task.value
+            throw SuwopError("Legacy handoff cancellation unexpectedly succeeded.")
+        } catch is CancellationError {}
+        guard probe.handoff, task.isCancelled, !probe.started, !probe.terminal,
+              !FileManager.default.fileExists(atPath: directory.appendingPathComponent("current-video.mov").path),
+              try Data(contentsOf: source) == original
+        else {
+            throw SuwopError("Unsubmitted legacy cancellation started native work, monitoring or changed its source.")
+        }
+        probe.task = nil
+    }
+
     private final class CancellationProbe {
         var task: Task<CurrentMovieOutput, Error>?
+        var handoff = false
         var started = false
         var terminal = false
     }
 
-    static func cancelExport(_ source: URL, root: URL) async throws {
+    static func cancelExport(_ source: URL, root: URL, forceLegacy: Bool = false) async throws {
         let original = try Data(contentsOf: source)
         let probe = CancellationProbe()
         let task = Task { @MainActor in
             try await CurrentMediaMovie.export(
                 AVURLAsset(url: source),
-                to: root.appendingPathComponent("cancelled-export"),
+                to: root.appendingPathComponent(forceLegacy ? "cancelled-legacy-export" : "cancelled-export"),
                 removeLocation: true,
+                forceLegacyExportForTesting: forceLegacy,
                 exportObserver: { observation in
                     switch observation {
                     case .started:

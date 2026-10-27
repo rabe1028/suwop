@@ -1,4 +1,11 @@
-import AVFoundation
+#if compiler(>=6.2)
+    import AVFoundation
+#else
+    // SDK 18's async loaders predate isolation-aware overlays. These immutable
+    // native facts are consumed serially by this adapter; no object is sent to
+    // another Swift actor. Remove this import bridge when SDK 18 support ends.
+    @preconcurrency import AVFoundation
+#endif
 import Foundation
 import ImageIO
 import SuwopShell

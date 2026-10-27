@@ -65,6 +65,8 @@ import SuwopShell
         try await NativeCurrentMediaWorkflow.run(keys: [stillKey, videoKey, liveKey], root: root)
         stage = "native export in-flight cancellation"
         try await NativeCurrentMediaWorkflow.cancelExport(movie, root: root)
+        stage = "legacy SDK export success and cancellation join"
+        try await NativeCurrentMediaWorkflow.verifyLegacyExporter(movie, root: root)
         stage = "final original retention"
         try await verifyOriginals(originals, store: store, root: root)
     }

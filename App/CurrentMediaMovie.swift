@@ -1,4 +1,11 @@
-import AVFoundation
+#if compiler(>=6.2)
+    import AVFoundation
+#else
+    // SDK 18's async loaders predate isolation-aware overlays. These immutable
+    // native facts are consumed serially by this adapter; no object is sent to
+    // another Swift actor. Remove this import bridge when SDK 18 support ends.
+    @preconcurrency import AVFoundation
+#endif
 import Foundation
 import SuwopShell
 
@@ -17,8 +24,11 @@ enum CurrentMediaExportObservation {
         to directory: URL,
         removeLocation: Bool,
         pairIdentifier: String? = nil,
+        forceLegacyExportForTesting: Bool = false,
+        beforeLegacySubmissionForTesting: (@MainActor () -> Void)? = nil,
         exportObserver: (@MainActor (CurrentMediaExportObservation) -> Void)? = nil
     ) async throws -> CurrentMovieOutput {
+        try Task.checkCancellation()
         let duration = try await asset.load(.duration)
         guard duration.seconds.isFinite, duration.seconds > 0, duration.seconds < Double(Int64.max) / 1000 else {
             throw SuwopError("現在の動画の長さが不正です。")
@@ -55,7 +65,12 @@ enum CurrentMediaExportObservation {
             }
         }
         let lease = CurrentMovieExportLease(session: session)
-        try await lease.run(to: output, observer: exportObserver)
+        try await lease.run(
+            to: output,
+            forceLegacy: forceLegacyExportForTesting,
+            beforeLegacySubmission: beforeLegacySubmissionForTesting,
+            observer: exportObserver
+        )
         try Task.checkCancellation()
         let file = try await CurrentMediaInspector.file(output.path, role: .video)
         return CurrentMovieOutput(
@@ -85,42 +100,107 @@ enum CurrentMediaExportObservation {
     }
 }
 
-/// MainActor owns the non-Sendable exporter. Native callbacks capture this
-/// actor-isolated lease, not the exporter, and completion is awaited after cancel.
-@MainActor private final class CurrentMovieExportLease {
+/// A checked, actor-bound protocol permits the deprecated compatibility backend
+/// to be exercised on a current OS without treating its SDK entry points as new
+/// API. The native implementation itself retains its real deprecation versions.
+@MainActor private protocol CurrentMovieLegacyExport {
+    func exportLegacy(to url: URL) async throws
+}
+
+/// MainActor owns the exporter. The legacy native callback captures only its
+/// continuation; cancellation requests never complete it before native join.
+@MainActor private final class CurrentMovieExportLease: CurrentMovieLegacyExport {
     private let session: AVAssetExportSession
+    private var observer: (@MainActor (CurrentMediaExportObservation) -> Void)?
+    private var beforeLegacySubmission: (@MainActor () -> Void)?
+    private var monitoring: Task<Void, Never>?
     init(session: AVAssetExportSession) {
         self.session = session
     }
 
-    func run(to url: URL, observer: (@MainActor (CurrentMediaExportObservation) -> Void)?) async throws {
+    func run(
+        to url: URL,
+        forceLegacy: Bool,
+        beforeLegacySubmission: (@MainActor () -> Void)?,
+        observer: (@MainActor (CurrentMediaExportObservation) -> Void)?
+    ) async throws {
         try Task.checkCancellation()
-        // Acceptance-only observation. Without an observer production starts no
-        // monitoring task and retains the SDK's cancellation/completion path.
-        let monitoring: Task<Void, Never>?
-        if let observer {
+        if observer != nil {
             guard #available(iOS 18, macOS 15, *) else {
                 throw SuwopError("Native export observation requires iOS 18 / macOS 15.")
             }
-            monitoring = Task { @MainActor in
-                for await state in session.states(updateInterval: 0.001) {
-                    if case .exporting = state {
-                        observer(.started)
-                    }
-                }
-                observer(.terminal)
-            }
-        } else {
-            monitoring = nil
         }
-        // The SDK's isolation-aware async exporter back-deploys to iOS 13 /
-        // macOS 10.15 and joins its native completion after cancelExport.
+        self.observer = observer
+        self.beforeLegacySubmission = beforeLegacySubmission
+        // SDK 26 back-deploys the isolation-aware exporter, but SDK 18 declares
+        // it iOS 18/macOS 15 only. Keep the supported iOS 17/macOS 14 route.
         do {
-            try await session.export(to: url, as: .mov, isolation: MainActor.shared)
+            if forceLegacy {
+                try await (self as any CurrentMovieLegacyExport).exportLegacy(to: url)
+            } else if #available(iOS 18, macOS 15, *) {
+                startMonitoring()
+                try await session.export(to: url, as: .mov, isolation: MainActor.shared)
+            } else {
+                try await (self as any CurrentMovieLegacyExport).exportLegacy(to: url)
+            }
         } catch {
+            // The backend has already joined native completion, or rejected
+            // before submission. Cancelling observation is never native join.
+            monitoring?.cancel()
             await monitoring?.value
             throw error
         }
+        monitoring?.cancel()
         await monitoring?.value
+    }
+
+    private func startMonitoring() {
+        guard let observer, #available(iOS 18, macOS 15, *) else { return }
+        monitoring = Task { @MainActor in
+            var started = false
+            for await state in session.states(updateInterval: 0.001) {
+                if case .exporting = state {
+                    started = true
+                    observer(.started)
+                }
+            }
+            if started {
+                observer(.terminal)
+            }
+        }
+    }
+
+    @available(iOS, deprecated: 18, message: "Compatibility backend for iOS 17.")
+    @available(macOS, deprecated: 15, message: "Compatibility backend for macOS 14.")
+    func exportLegacy(to url: URL) async throws {
+        beforeLegacySubmission?()
+        session.outputURL = url
+        session.outputFileType = .mov
+        try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            // The Sendable native callback owns only a Void continuation. Read
+            // session state on MainActor after the native terminal callback.
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                guard !Task.isCancelled else {
+                    continuation.resume(throwing: CancellationError())
+                    return
+                }
+                // Same MainActor turn: no await between final cancellation check,
+                // monitoring creation and actual native submission. Unsent work
+                // never creates a monitor that could await a nonexistent terminal state.
+                startMonitoring()
+                session.exportAsynchronously { @Sendable in continuation.resume() }
+            }
+        } onCancel: {
+            // Serialize cancellation with native submission on the same owner.
+            // Cancellation never resolves the continuation before native join.
+            Task { @MainActor [self] in session.cancelExport() }
+        }
+        switch session.status {
+        case .completed: break
+        case .cancelled: throw CancellationError()
+        case .failed: throw session.error ?? SuwopError("動画の書き出しに失敗しました。")
+        default: throw SuwopError("動画の書き出し完了を確認できません。")
+        }
     }
 }
