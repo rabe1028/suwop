@@ -10,8 +10,11 @@ import Foundation
 import SuwopShell
 
 enum CurrentMediaExportObservation {
+    // These describe sampled native progress, not submission or callback join.
     case started
     case terminal
+    case legacySubmitted
+    case legacyJoined
 }
 
 @MainActor enum CurrentMediaMovie {
@@ -25,6 +28,7 @@ enum CurrentMediaExportObservation {
         removeLocation: Bool,
         pairIdentifier: String? = nil,
         forceLegacyExportForTesting: Bool = false,
+        observeLegacyProgressForTesting: Bool = true,
         beforeLegacySubmissionForTesting: (@MainActor () -> Void)? = nil,
         exportObserver: (@MainActor (CurrentMediaExportObservation) -> Void)? = nil
     ) async throws -> CurrentMovieOutput {
@@ -68,6 +72,7 @@ enum CurrentMediaExportObservation {
         try await lease.run(
             to: output,
             forceLegacy: forceLegacyExportForTesting,
+            observeLegacyProgress: observeLegacyProgressForTesting,
             beforeLegacySubmission: beforeLegacySubmissionForTesting,
             observer: exportObserver
         )
@@ -113,6 +118,7 @@ enum CurrentMediaExportObservation {
     private let session: AVAssetExportSession
     private var observer: (@MainActor (CurrentMediaExportObservation) -> Void)?
     private var beforeLegacySubmission: (@MainActor () -> Void)?
+    private var observeLegacyProgress = true
     private var monitoring: Task<Void, Never>?
     init(session: AVAssetExportSession) {
         self.session = session
@@ -121,6 +127,7 @@ enum CurrentMediaExportObservation {
     func run(
         to url: URL,
         forceLegacy: Bool,
+        observeLegacyProgress: Bool,
         beforeLegacySubmission: (@MainActor () -> Void)?,
         observer: (@MainActor (CurrentMediaExportObservation) -> Void)?
     ) async throws {
@@ -132,6 +139,7 @@ enum CurrentMediaExportObservation {
         }
         self.observer = observer
         self.beforeLegacySubmission = beforeLegacySubmission
+        self.observeLegacyProgress = observeLegacyProgress
         // SDK 26 back-deploys the isolation-aware exporter, but SDK 18 declares
         // it iOS 18/macOS 15 only. Keep the supported iOS 17/macOS 14 route.
         do {
@@ -188,14 +196,22 @@ enum CurrentMediaExportObservation {
                 // Same MainActor turn: no await between final cancellation check,
                 // monitoring creation and actual native submission. Unsent work
                 // never creates a monitor that could await a nonexistent terminal state.
-                startMonitoring()
+                if observeLegacyProgress {
+                    startMonitoring()
+                }
                 session.exportAsynchronously { @Sendable in continuation.resume() }
+                // Real native submission has occurred. A fast passthrough need
+                // not remain exporting long enough for progress sampling.
+                observer?(.legacySubmitted)
             }
         } onCancel: {
             // Serialize cancellation with native submission on the same owner.
             // Cancellation never resolves the continuation before native join.
             Task { @MainActor [self] in session.cancelExport() }
         }
+        // Only the native completion continuation reaches this point. Neither
+        // pre-submission rejection nor cancellation itself can report JOIN.
+        observer?(.legacyJoined)
         switch session.status {
         case .completed: break
         case .cancelled: throw CancellationError()

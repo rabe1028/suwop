@@ -154,10 +154,23 @@ final class PrivateLiveUITests: XCTestCase {
     }
 
     @MainActor private func enter(_ value: String, into field: XCUIElement, app: XCUIApplication) -> Bool {
-        guard reveal(field, in: app) else { return false }
-        field.tap()
-        field.typeText(value)
-        return true
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for _ in 0 ..< 3 {
+            guard reveal(field, in: app) else { return false }
+            let frame = field.frame
+            app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                dx: frame.midX - app.frame.minX, dy: frame.midY - app.frame.minY
+            )).tap()
+            let focus = XCTNSPredicateExpectation(predicate: focused, object: field)
+            if XCTWaiter.wait(for: [focus], timeout: 2) == .completed {
+                field.typeText(value)
+                return true
+            }
+        }
+        attachText(app.debugDescription, name: "private-live-authentication-focus-hierarchy")
+        capture(app, name: "private-live-authentication-focus-failure")
+        XCTFail("C1 credential field did not acquire keyboard focus before typing")
+        return false
     }
 
     @MainActor private func reveal(_ element: XCUIElement, in app: XCUIApplication) -> Bool {

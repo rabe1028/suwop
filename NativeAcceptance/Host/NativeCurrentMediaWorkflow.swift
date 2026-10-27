@@ -183,6 +183,8 @@ import UIKit
                     switch observation {
                     case .started: probe.started = true
                     case .terminal: probe.terminal = true
+                    case .legacySubmitted: probe.submitted = true
+                    case .legacyJoined: probe.joined = true
                     }
                 }
             )
@@ -193,6 +195,7 @@ import UIKit
             throw SuwopError("Legacy handoff cancellation unexpectedly succeeded.")
         } catch is CancellationError {}
         guard probe.handoff, task.isCancelled, !probe.started, !probe.terminal,
+              !probe.submitted, !probe.joined,
               !FileManager.default.fileExists(atPath: directory.appendingPathComponent("current-video.mov").path),
               try Data(contentsOf: source) == original
         else {
@@ -206,8 +209,13 @@ import UIKit
         var handoff = false
         var started = false
         var terminal = false
+        var submitted = false
+        var joined = false
     }
 
+    /// Modern cancellation requires observed native exporting progress. Legacy
+    /// cancellation instead proves real submission and native callback JOIN;
+    /// a fast native export may finish before cancellation reaches the encoder.
     static func cancelExport(_ source: URL, root: URL, forceLegacy: Bool = false) async throws {
         let original = try Data(contentsOf: source)
         let probe = CancellationProbe()
@@ -217,12 +225,23 @@ import UIKit
                 to: root.appendingPathComponent(forceLegacy ? "cancelled-legacy-export" : "cancelled-export"),
                 removeLocation: true,
                 forceLegacyExportForTesting: forceLegacy,
+                // Deterministically reproduce missing progress samples without
+                // mocking submission, completion, cancellation or native I/O.
+                observeLegacyProgressForTesting: !forceLegacy,
                 exportObserver: { observation in
                     switch observation {
                     case .started:
                         probe.started = true
-                        probe.task?.cancel()
+                        if !forceLegacy {
+                            probe.task?.cancel()
+                        }
                     case .terminal: probe.terminal = true
+                    case .legacySubmitted:
+                        probe.submitted = true
+                        if forceLegacy {
+                            probe.task?.cancel()
+                        }
+                    case .legacyJoined: probe.joined = true
                     }
                 }
             )
@@ -231,11 +250,16 @@ import UIKit
         do {
             _ = try await task.value
         } catch {
-            guard probe.started, task.isCancelled, probe.terminal,
+            let nativeJoined = forceLegacy
+                ? probe.submitted && probe.joined && !probe.started && !probe.terminal
+                : probe.started && probe.terminal && !probe.submitted && !probe.joined
+            guard nativeJoined, task.isCancelled,
                   error is CancellationError,
                   try Data(contentsOf: source) == original
             else {
-                throw SuwopError("Export cancellation did not observe native start/join or changed its source.")
+                throw SuwopError(
+                    "Export cancellation did not prove native progress/submission and join or changed its source."
+                )
             }
             probe.task = nil
             return

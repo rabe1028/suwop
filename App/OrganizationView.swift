@@ -178,7 +178,9 @@ private struct OrganizationMembersView: View {
                     memberButton(member)
                 }
             }
-        }.navigationTitle(members.isEmpty ? "写真" : group?.title ?? "写真")
+        }
+        .accessibilityIdentifier("organizationMembers")
+        .navigationTitle(members.isEmpty ? "写真" : group?.title ?? "写真")
     }
 
     private func memberButton(_ member: OrganizationMember) -> some View {
