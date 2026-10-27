@@ -26,15 +26,15 @@ final class AppleVisibilityUITests: XCTestCase {
         }
         app.buttons["visibilityScheduleHide"].tap()
         metadata.tap()
-        XCTAssertTrue(app.navigationBars["日時・位置情報"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.navigationBars["メタデータ"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["写真を表示できません"].waitForExistence(timeout: 10))
         let dismissed = XCTNSPredicateExpectation(
             predicate: NSPredicate(format: "exists == false"),
-            object: app.navigationBars["日時・位置情報"]
+            object: app.navigationBars["メタデータ"]
         )
         XCTAssertEqual(XCTWaiter.wait(for: [dismissed], timeout: 3), .completed)
         XCTAssertEqual(app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "PRIVATE-")).count, 0)
-        XCTAssertFalse(app.otherElements["metadataDate"].exists)
+        XCTAssertFalse(app.textFields["metadataDate"].exists)
         app.terminate()
     }
 

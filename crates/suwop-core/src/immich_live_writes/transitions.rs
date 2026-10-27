@@ -11,6 +11,11 @@ pub fn validate_transition(before: &SavedLibrary, after: &SavedLibrary) -> Valid
     )?;
     validate_library(before)?;
     validate_library(after)?;
+    crate::external_import::validate_transition(&before.external_imports, &after.external_imports)?;
+    crate::metadata::validate_record_transition(
+        &before.metadata_operations,
+        &after.metadata_operations,
+    )?;
     require(
         after.immich_live_operations.len() >= before.immich_live_operations.len()
             && after

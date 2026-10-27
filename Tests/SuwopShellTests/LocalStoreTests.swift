@@ -7,7 +7,13 @@ import Testing
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try LocalStore(root: root)
     let state: JSONValue = .object([
-        "schemaVersion": .number(10), "appleScope": .string("local-test"), "connection": .null,
+        "schemaVersion": .number(11),
+        "metadataOperations": .array([]),
+        "externalImports": .array([]),
+        "immichLiveOperations": .array([]),
+        "immichLiveUnstartedClosures": .array([]),
+        "immichLiveLegacyReconciliations": .array([]),
+        "appleScope": .string("local-test"), "connection": .null,
     ])
     try await store.persist(state)
     let reopened = try LocalStore(root: root)
@@ -33,7 +39,10 @@ import Testing
     defer { try? FileManager.default.removeItem(at: root) }
     let store = try LocalStore(root: root)
     let fixture = """
-    {"schemaVersion":10,"appleScope":"test","connection":null,"snapshots":[{
+    {"schemaVersion":11,
+    "metadataOperations":[],"externalImports":[],
+    "immichLiveOperations":[],"immichLiveUnstartedClosures":[],
+    "immichLiveLegacyReconciliations":[],"appleScope":"test","connection":null,"snapshots":[{
       "provider":"apple","scope":"test","access":"full","scannedAt":0,"assets":[{
         "key":{"provider":"apple","scope":"test","assetID":"one"},
         "appleVisibility":"visible","name":"one.jpg","revision":"1","resources":[],"isFavorite":false,
@@ -97,7 +106,15 @@ import Testing
         try Data("existing-derived-data".utf8).write(to: directory.appendingPathComponent("existing"))
     }
     let store = try LocalStore(root: root)
-    let state: JSONValue = .object(["schemaVersion": .number(10), "appleScope": .string("backup-test")])
+    let state: JSONValue = .object([
+        "schemaVersion": .number(11),
+        "metadataOperations": .array([]),
+        "externalImports": .array([]),
+        "immichLiveOperations": .array([]),
+        "immichLiveUnstartedClosures": .array([]),
+        "immichLiveLegacyReconciliations": .array([]),
+        "appleScope": .string("backup-test"),
+    ])
     try await store.persist(state)
     let reopened = try LocalStore(root: root)
     #expect(try await reopened.read()["appleScope"].string == "backup-test")

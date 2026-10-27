@@ -39,6 +39,7 @@ fn album() -> StoredAlbum {
 }
 fn snapshot() -> AlbumSnapshot {
     AlbumSnapshot {
+        collections: Vec::new(),
         provider: Provider::Apple,
         scope: "apple".into(),
         albums: vec![album()],
@@ -684,7 +685,7 @@ fn gallery_materializes_candidates_only_for_the_open_album() -> Result<(), Strin
 }
 
 #[test]
-fn indexed_album_members_preserve_gallery_order_and_candidate_authority() {
+fn indexed_album_members_preserve_album_order_and_candidate_authority() {
     use crux_core::App;
     let mut state = fixture_state();
     let template = Suwop
@@ -713,8 +714,8 @@ fn indexed_album_members_preserve_gallery_order_and_candidate_authority() {
     ];
     let key = state.albums[0].albums[0].key.clone();
     let expected = vec![
-        suwop_core::browser::photo_id(&photos[0]),
         suwop_core::browser::photo_id(&photos[2]),
+        suwop_core::browser::photo_id(&photos[0]),
     ];
     for access in [
         ScanAccess::Full,

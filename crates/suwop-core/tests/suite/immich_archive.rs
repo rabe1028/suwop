@@ -453,6 +453,8 @@ fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> 
     let mut raw = serde_json::to_value(model()?.state).map_err(|e| e.to_string())?;
     raw["schemaVersion"] = json!(6);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
@@ -476,6 +478,8 @@ fn legacy_locked_journal_migration_preserves_digest_and_cannot_be_ordinary() -> 
     assert!(suwop_core::workflow::migrate(raw.clone()).is_err());
     raw["schemaVersion"] = json!(7);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",

@@ -51,7 +51,7 @@ fn twin() -> Result<StoredAsset, String> {
 fn state(name: &str) -> Result<SavedLibrary, String> {
     let asset = source(name)?;
     Ok(SavedLibrary {
-        schema_version: 10,
+        schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
         apple_scope: "apple".into(),
         amazon_connection: Some(connection()?),
         snapshots: vec![LibrarySnapshot {
@@ -1295,6 +1295,8 @@ fn amazon_v9_from(library: &SavedLibrary) -> Result<Value, String> {
     raw["schemaVersion"] = json!(9);
     let object = raw.as_object_mut().ok_or("object")?;
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
@@ -1321,7 +1323,7 @@ fn amazon_schema_nine_catalog_migrates_to_live_schema_ten_keeping_amazon_fields(
         migrated.schema_version,
         suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
     );
-    assert_eq!(migrated.schema_version, 10);
+    assert_eq!(migrated.schema_version, 11);
     assert_eq!(
         serde_json::to_value(&migrated.amazon_connection).map_err(|e| e.to_string())?,
         expected_connection
@@ -1340,6 +1342,8 @@ fn amazon_schema_nine_catalog_migrates_to_live_schema_ten_keeping_amazon_fields(
 fn schema_nine_with_live_fields_and_malformed_schema_ten_are_rejected() -> Result<(), String> {
     let live = serde_json::to_value(live_library()?).map_err(|e| e.to_string())?;
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",

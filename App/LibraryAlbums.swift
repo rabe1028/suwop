@@ -1,6 +1,15 @@
 import SuwopShell
 
 extension LibraryModel {
+    var collections: [StoredCollection] {
+        view?.state.albums.flatMap(\.collections) ?? []
+    }
+
+    func editCollection(provider: Provider, edit: CollectionEdit) {
+        do { try send(["type": .string("editCollection"), "provider": .string(provider.rawValue), "edit": .from(edit)])
+        } catch { errorMessage = error.localizedDescription }
+    }
+
     func createAlbum(provider: Provider, title: String) {
         send(["type": .string("createAlbum"), "provider": .string(provider.rawValue), "title": .string(title)])
     }

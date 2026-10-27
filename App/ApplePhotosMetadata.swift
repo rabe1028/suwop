@@ -4,7 +4,12 @@ import Photos
 import SuwopShell
 
 extension ApplePhotosStore {
-    func setMetadata(_ keys: [AssetKey], change: MetadataChange) async throws -> [StoredAsset] {
+    func setMetadata(
+        _ keys: [AssetKey],
+        change: MetadataChange,
+        expected: [StoredAsset]? = nil,
+        permit: NativeSubmissionPermit
+    ) async throws -> [StoredAsset] {
         guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
             throw SuwopError("日時・位置情報の変更には写真ライブラリへのフルアクセスが必要です。")
         }
@@ -13,7 +18,8 @@ extension ApplePhotosStore {
             return try Self.fetch(key.assetID).localIdentifier
         }
         try Task.checkCancellation()
-        let result: Result<Void, Error> = try await NativeChange.perform {
+        let scope = scope
+        let result: Result<Void, Error> = try await NativeMutationSubmission.perform(permit: permit) {
             do {
                 guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == .authorized else {
                     throw SuwopError("写真ライブラリの権限が変わりました。")
@@ -23,6 +29,17 @@ extension ApplePhotosStore {
                 guard assets.allSatisfy({ $0.canPerform(.properties) }) else {
                     throw SuwopError("選択した写真の日時・位置情報を変更できません。")
                 }
+                if let expected {
+                    guard expected.count == assets.count,
+                          Set(expected.map(\.key)) == Set(keys) else { throw SuwopError("メタデータの対象が変わりました。") }
+                    for asset in assets {
+                        let observed = try Self.describe(asset, scope: scope, fullAccess: true)
+                        guard expected.first(where: { $0.key == observed.key })?.revision == observed.revision else {
+                            throw SuwopError("写真が変更されています。古い値を上書きしません。")
+                        }
+                    }
+                }
+                try Self.validateMetadataChange(change)
                 try Self.applyMetadata(change, to: assets)
                 return .success(())
             } catch { return .failure(error) }
@@ -33,7 +50,21 @@ extension ApplePhotosStore {
         return try keys.map { try Self.describe(Self.fetch($0.assetID), scope: scope, fullAccess: true) }
     }
 
-    private nonisolated static func applyMetadata(_ change: MetadataChange, to assets: [PHAsset]) throws {
+    nonisolated static func validateMetadataChange(_ change: MetadataChange) throws {
+        switch change.action {
+        case .setCapturedAt:
+            guard let date = change.capturedAt, date.timeIntervalSince1970.isFinite else {
+                throw SuwopError("変更する日時が不正です。")
+            }
+        case .setLocation:
+            guard let point = change.location, point.latitude.isFinite, point.longitude.isFinite,
+                  (-90 ... 90).contains(point.latitude), (-180 ... 180).contains(point.longitude)
+            else { throw SuwopError("変更する座標が不正です。") }
+        case .removeLocation: break
+        }
+    }
+
+    nonisolated static func applyMetadata(_ change: MetadataChange, to assets: [PHAsset]) throws {
         switch change.action {
         case .setCapturedAt:
             guard let date = change.capturedAt else { throw SuwopError("変更する日時がありません。") }

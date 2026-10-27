@@ -151,12 +151,17 @@ targets:
       - path: App
         excludes: [SuwopApp.swift]
       - path: NativeAcceptance/Host
+      - path: Tests/fixtures/native_live_pair/media/synthetic-still.jpg
+        buildPhase: resources
+      - path: Tests/fixtures/native_live_pair/media/synthetic-motion.mov
+        buildPhase: resources
     dependencies:
       - package: SuwopShell
         product: SuwopShell
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_NATIVE_ACCEPTANCE'
         TARGETED_DEVICE_FAMILY: '1'
     info:
       path: Generated/PhotoKitAcceptance-Info.plist
@@ -215,6 +220,87 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.sharing.tests
         SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_SHARING_TEST'
+  SuwopOSSharingiPadHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App/SystemSharing.swift
+      - path: App/ContentPresentationEpoch.swift
+      - path: App/PrivateLivePhotoKitRequest.swift
+      - path: NativeAcceptance/Host/NativeCurrentMediaReception.swift
+      - path: NativeAcceptance/OSSharingHost
+      - path: Tests/fixtures/native_live_motion/media/synthetic-still.jpg
+        buildPhase: resources
+      - path: Tests/fixtures/native_live_motion/media/synthetic-motion.mov
+        buildPhase: resources
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.os-sharing.ipad
+        TARGETED_DEVICE_FAMILY: '2'
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_OS_SHARING_TEST'
+    info:
+      path: Generated/OSSharingiPad-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop OS Sharing
+        UILaunchScreen: {}
+        UIFileSharingEnabled: true
+        LSSupportsOpeningDocumentsInPlace: true
+  SuwopOSSharingiPadTests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [NativeAcceptance/OSSharingUITests]
+    dependencies:
+      - target: SuwopOSSharingiPadHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.os-sharing.ipad.tests
+        TEST_TARGET_NAME: SuwopOSSharingiPadHost
+  SuwopOSSharingMacHost:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: App/SystemSharing.swift
+      - path: App/ContentPresentationEpoch.swift
+      - path: App/PrivateLivePhotoKitRequest.swift
+      - path: NativeAcceptance/Host/NativeCurrentMediaReception.swift
+      - path: NativeAcceptance/OSSharingHost
+      - path: Tests/fixtures/native_live_motion/media/synthetic-still.jpg
+        buildPhase: resources
+      - path: Tests/fixtures/native_live_motion/media/synthetic-motion.mov
+        buildPhase: resources
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.os-sharing.mac
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_OS_SHARING_TEST'
+    info:
+      path: Generated/OSSharingMac-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop OS Sharing
+        NSPrincipalClass: NSApplication
+        LSUIElement: false
+        LSApplicationCategoryType: public.app-category.developer-tools
+  SuwopOSSharingMacTests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources: [NativeAcceptance/OSSharingUITests]
+    dependencies:
+      - target: SuwopOSSharingMacHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.os-sharing.mac.tests
+        TEST_TARGET_NAME: SuwopOSSharingMacHost
   SuwopPrivateVideoMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -461,6 +547,22 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopSharingTests]
+  SuwopOSSharingiPad:
+    build:
+      targets:
+        SuwopOSSharingiPadHost: all
+        SuwopOSSharingiPadTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopOSSharingiPadTests]
+  SuwopOSSharingMac:
+    build:
+      targets:
+        SuwopOSSharingMacHost: all
+        SuwopOSSharingMacTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopOSSharingMacTests]
   SuwopPrivateVideoMac:
     build:
       targets:

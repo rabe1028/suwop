@@ -17,10 +17,27 @@ fn photo() -> Value {
 #[derive(Clone, Copy)]
 enum Action {
     Members,
+    PrivateMembers,
     Add,
     Delete,
 }
 fn run(action: Action, bodies: Vec<Value>) -> Result<(Vec<HttpRequest>, Option<String>), String> {
+    run_version(
+        action,
+        bodies,
+        Version {
+            major: 3,
+            minor: 2,
+            patch: 4,
+        },
+    )
+}
+
+fn run_version(
+    action: Action,
+    bodies: Vec<Value>,
+    version: Version,
+) -> Result<(Vec<HttpRequest>, Option<String>), String> {
     let session = Session {
         ordinary_content_guard: None,
         ordinary_content_context: None,
@@ -28,15 +45,30 @@ fn run(action: Action, bodies: Vec<Value>) -> Result<(Vec<HttpRequest>, Option<S
         key: "test".into(),
         user_id: USER.into(),
         scope: "scope".into(),
-        version: Version {
-            major: 3,
-            minor: 2,
-            patch: 4,
-        },
+        version,
     };
     let mut command = Command::<Effect, Event>::new(move |ctx| async move {
         let result = match action {
             Action::Members => session.album_members(&ctx, ALBUM).await.map(|_| ()),
+            Action::PrivateMembers => {
+                session
+                    .album_members(&ctx, ALBUM)
+                    .await
+                    .and_then(|members| {
+                        if members.len() == 2
+                            && members
+                                .iter()
+                                .any(|a| a.visibility.as_deref() == Some("hidden"))
+                            && members
+                                .iter()
+                                .any(|a| a.visibility.as_deref() == Some("locked"))
+                        {
+                            Ok(())
+                        } else {
+                            Err("private membership inventory was incomplete".into())
+                        }
+                    })
+            }
             Action::Add => {
                 session
                     .change_album_members(&ctx, ALBUM, &[PHOTO.into()], true)
@@ -86,6 +118,26 @@ fn run(action: Action, bodies: Vec<Value>) -> Result<(Vec<HttpRequest>, Option<S
 }
 
 #[test]
+fn legacy_album_search_keeps_order_separate_from_cursor_filter() -> Result<(), String> {
+    let (seen, error) = run_version(
+        Action::Members,
+        vec![owned(), json!({"assets":{"items":[],"nextPage":null}})],
+        Version {
+            major: 2,
+            minor: 6,
+            patch: 0,
+        },
+    )?;
+    assert!(error.is_none());
+    let body = seen[1].body.as_ref().ok_or("missing legacy search")?;
+    assert_eq!(body["order"], "desc");
+    assert_eq!(body["albumIds"], json!([ALBUM]));
+    assert!(body.get("orderBy").is_none());
+    assert!(body.get("filter").is_none());
+    Ok(())
+}
+
+#[test]
 fn ownership_requires_unambiguous_matching_owner() -> Result<(), Box<dyn std::error::Error>> {
     let a: AlbumInfo = serde_json::from_value(owned())?;
     assert!(a.owned_by(USER));
@@ -117,6 +169,14 @@ fn member_search_has_album_filter_and_consumes_all_pages() -> Result<(), String>
     let body = seen[1].body.as_ref().ok_or("missing search")?;
     assert_eq!(body["filter"]["albumIds"]["any"], json!([ALBUM]));
     assert_eq!(body["filter"]["trashedAt"]["eq"], Value::Null);
+    assert!(
+        body.get("order").is_none(),
+        "cursor filter must not contain deprecated order"
+    );
+    assert_eq!(
+        body["orderBy"],
+        json!({"field":"fileCreatedAt","direction":"desc"})
+    );
     assert_eq!(
         seen[2].body.as_ref().ok_or("missing cursor")?["cursor"],
         "next"
@@ -162,6 +222,66 @@ fn duplicate_add_is_idempotent_only_after_fresh_membership_verification() -> Res
             ],
         )?;
         assert_eq!(error.is_none(), present);
+    }
+    Ok(())
+}
+
+#[test]
+fn private_membership_metadata_is_complete_without_granting_content_reads() -> Result<(), String> {
+    let mut hidden = photo();
+    hidden["visibility"] = json!("hidden");
+    let mut locked = photo();
+    locked["id"] = json!("44444444-4444-4444-8444-444444444444");
+    locked["visibility"] = json!("locked");
+    let mut trashed = photo();
+    trashed["id"] = json!("55555555-5555-4555-8555-555555555555");
+    trashed["isTrashed"] = json!(true);
+    let (seen, error) = run(
+        Action::PrivateMembers,
+        vec![
+            owned(),
+            json!({"assets":{"items":[hidden,locked,trashed],"nextCursor":null}}),
+        ],
+    )?;
+    assert!(error.is_none(), "{error:?}");
+    assert_eq!(seen.len(), 2);
+    assert!(seen[0].url.ends_with(&format!("/albums/{ALBUM}")));
+    assert!(seen[1].url.ends_with("/search/metadata"));
+
+    let mut locked = photo();
+    locked["visibility"] = json!("locked");
+    let (seen, error) = run(Action::Add, vec![owned(), locked])?;
+    assert!(
+        error.is_some(),
+        "locked input must still fail its ordinary asset gate"
+    );
+    assert_eq!(
+        seen.len(),
+        2,
+        "no album mutation or original read may follow"
+    );
+    Ok(())
+}
+
+#[test]
+fn add_fresh_verification_keeps_hidden_and_locked_membership() -> Result<(), String> {
+    for visibility in ["hidden", "locked"] {
+        let mut member = photo();
+        member["visibility"] = json!(visibility);
+        let (_, error) = run(
+            Action::Add,
+            vec![
+                owned(),
+                photo(),
+                json!([{"id":PHOTO,"success":true}]),
+                owned(),
+                json!({"assets":{"items":[member],"nextCursor":null}}),
+            ],
+        )?;
+        assert!(
+            error.is_none(),
+            "fresh {visibility} metadata is still a member: {error:?}"
+        );
     }
     Ok(())
 }

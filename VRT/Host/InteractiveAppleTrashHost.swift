@@ -28,7 +28,7 @@ import SwiftUI
             scope: "fixture",
             visibility: .absent
         )
-        return SavedLibrary(appleScope: "fixture", pendingAppleTrash: [operation], schemaVersion: 10)
+        return SavedLibrary(appleScope: "fixture", pendingAppleTrash: [operation], schemaVersion: 11)
     }
 
     private static func fixture() throws -> LibraryModel {

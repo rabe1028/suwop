@@ -39,12 +39,7 @@ struct FixtureManifest: Codable, Sendable {
                 "The dedicated test host needs full Photos permission: \(PHPhotoLibrary.authorizationStatus(for: .readWrite).rawValue)"
             )
         }
-        // This bundle has a private container. Reset only its local state; never
-        // delete library assets, even fixtures from previous runs.
-        let state = root.appendingPathComponent("Suwop/library-v1.json")
-        if FileManager.default.fileExists(atPath: state.path) {
-            try FileManager.default.removeItem(at: state)
-        }
+        try archivePreviousState()
         let store = ApplePhotosStore(scope: scope)
         var keys: [AssetKey] = []
         for index in 0 ..< 3 {
@@ -64,6 +59,35 @@ struct FixtureManifest: Codable, Sendable {
         let manifest = FixtureManifest(keys: keys, originals: originals)
         try write(manifest)
         return manifest
+    }
+
+    private static func archivePreviousState() throws {
+        // Called only by seed, before the new process creates any AppleShell or
+        // LocalStore. Preserve the whole SQLite/WAL store and legacy file; merely
+        // removing library-v1.json leaves durable deletion fences from old runs.
+        guard Bundle.main.bundleIdentifier == "jp.rabe1028.suwop.photokit.acceptance" else {
+            throw SuwopError("Refusing fixture-store initialization outside the dedicated PhotoKit host.")
+        }
+        let manager = FileManager.default
+        let store = root.appendingPathComponent("Suwop", isDirectory: true)
+        guard (try? manager.attributesOfItem(atPath: store.path)) != nil else { return }
+        let values = try store.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+        guard values.isDirectory == true, values.isSymbolicLink != true else {
+            throw SuwopError("The dedicated fixture store is not an ordinary directory.")
+        }
+        let archive = root.appendingPathComponent("native-state-archive-\(UUID().uuidString)", isDirectory: true)
+        try manager.createDirectory(
+            at: archive,
+            withIntermediateDirectories: false,
+            attributes: [.posixPermissions: 0o700]
+        )
+        try manager.moveItem(at: store, to: archive.appendingPathComponent("Suwop", isDirectory: true))
+        if manager.fileExists(atPath: manifestURL.path) {
+            try manager.copyItem(at: manifestURL, to: archive.appendingPathComponent("photokit-fixtures.json"))
+        }
+        print("PHOTOKIT_STATE_ARCHIVED \(archive.path)")
+        // Photos assets, other fixture evidence and operation-owned staging are
+        // not removed. Only this host's previous default catalog is relocated.
     }
 
     static func createAsset(_ index: Int) async throws -> AssetKey {

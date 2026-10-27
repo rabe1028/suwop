@@ -7,7 +7,7 @@ final class ImmichLockedPhotosUITests: XCTestCase {
 
     @MainActor func testActualGalleryEntryServerAuthenticationPreviewAndCloseNeverExposeOrdinaryContent() {
         let app = launch()
-        openFromGallery(app)
+        guard openFromGallery(app) else { return }
         assertPrivateContentAbsent(app)
         submit(app)
         let preview = app.buttons["immichLockedPreview-33333333-3333-4333-8333-333333333333"]
@@ -27,7 +27,7 @@ final class ImmichLockedPhotosUITests: XCTestCase {
         expectLabel("writes=0", element: app.staticTexts["lockedFixtureWrites"])
         expectLabel("reads=1", element: app.staticTexts["lockedFixtureReads"])
         XCTAssertEqual(app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "photo-")).count, 0)
-        openFromGallery(app)
+        guard openFromGallery(app) else { return }
         XCTAssertFalse(app.buttons["openImmichLocked"].isEnabled)
         assertPrivateContentAbsent(app)
         app.terminate()
@@ -43,7 +43,7 @@ final class ImmichLockedPhotosUITests: XCTestCase {
 
     @MainActor func testBackgroundRelocksOpenedServerSessionAndDoesNotReuseItsRaster() {
         let app = launch()
-        openFromGallery(app)
+        guard openFromGallery(app) else { return }
         submit(app)
         let preview = app.buttons["immichLockedPreview-33333333-3333-4333-8333-333333333333"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))
@@ -59,7 +59,7 @@ final class ImmichLockedPhotosUITests: XCTestCase {
 
     @MainActor private func verifyFailure(password: String, pin: String) {
         let app = launch()
-        openFromGallery(app)
+        guard openFromGallery(app) else { return }
         submit(app, password: password, pin: pin)
         XCTAssertTrue(app.staticTexts["ロックされた写真を確認できません。接続・パスワード認証・PIN を確認してください。"]
             .waitForExistence(timeout: 10))
@@ -83,12 +83,19 @@ final class ImmichLockedPhotosUITests: XCTestCase {
         return app
     }
 
-    @MainActor private func openFromGallery(_ app: XCUIApplication) {
+    @MainActor private func openFromGallery(_ app: XCUIApplication) -> Bool {
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
-        app.buttons["immichLockedPhotosHistory"].tap()
-        XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
+        let history = app.buttons["immichLockedPhotosHistory"]
+        guard WriteMenuScrollGesture.revealGalleryItem(history, in: app), history.isEnabled, history.isHittable else {
+            XCTFail("Locked Photos entry must be enabled and fully visible in the native menu viewport")
+            return false
+        }
+        history.tap()
+        let opened = app.textFields["immichLockedEmail"].waitForExistence(timeout: 10)
+        XCTAssertTrue(opened)
+        return opened
     }
 
     @MainActor private func submit(_ app: XCUIApplication, password: String? = nil, pin: String? = nil) {

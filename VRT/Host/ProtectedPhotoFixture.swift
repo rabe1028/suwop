@@ -63,7 +63,7 @@ import UIKit
                 id: $0.0,
                 key: $0.1.key
             ) } : [],
-            schemaVersion: 10,
+            schemaVersion: 11,
             snapshots: [LibrarySnapshot(provider: .apple, scope: "protection-fixture", assets: records, access: .full)]
         )
     }

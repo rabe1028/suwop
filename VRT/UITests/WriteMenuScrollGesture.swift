@@ -2,6 +2,22 @@ import XCTest
 
 /// Scrolls only within the independently identified native clipping viewport.
 @MainActor enum WriteMenuScrollGesture {
+    /// Gallery actions may be lazy native-menu cells at AX text sizes. Discover
+    /// their actual clipping viewport before using the same bounded scroll path.
+    static func revealGalleryItem(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard let menu = app.collectionViews.allElementsBoundByIndex.last else { return false }
+        let collectionFrame = menu.frame
+        let clipping = app.otherElements.containing(.collectionView, identifier: nil)
+            .allElementsBoundByIndex.map(\.frame).filter {
+                !$0.isEmpty && abs($0.minX - collectionFrame.minX) < 1 &&
+                    abs($0.minY - collectionFrame.minY) < 1 && abs($0.width - collectionFrame.width) < 1
+            }
+        guard !clipping.isEmpty else { return false }
+        let frame = clipping.reduce(collectionFrame.intersection(app.frame)) { $0.intersection($1) }
+        guard !frame.isEmpty, frame.height > 160 else { return false }
+        return reveal(element, in: app, menu: menu, viewport: frame.insetBy(dx: 0, dy: 12), needsHitTarget: true)
+    }
+
     static func reveal(
         _ element: XCUIElement,
         in app: XCUIApplication,

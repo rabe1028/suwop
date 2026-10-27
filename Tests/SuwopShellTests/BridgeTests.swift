@@ -16,7 +16,7 @@ import Testing
     let persisted = try #require(next.first)
     _ = try bridge.call(1, input: .object(["id": .number(Double(persisted.id)), "response": response]))
     let view = try bridge.call(2).decode(ViewModel.self)
-    #expect(view.state.schemaVersion == 10)
+    #expect(view.state.schemaVersion == 11)
     #expect(view.state.appleScope == "test-library")
     #expect(!view.busy)
 }
@@ -68,7 +68,7 @@ import Testing
         ]))
     }
     let view = try bridge.call(2).decode(ViewModel.self)
-    #expect(view.state.schemaVersion == 10)
+    #expect(view.state.schemaVersion == 11)
     #expect(!view.busy)
 }
 

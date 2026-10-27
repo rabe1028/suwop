@@ -1126,6 +1126,8 @@ fn old_sqlite_row_versioned_read_cas_and_restart_preserve_raw_token() -> Result 
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
+        "metadataOperations",
+        "externalImports",
     ] {
         legacy.as_object_mut().ok_or("object")?.remove(field);
     }
@@ -1367,6 +1369,8 @@ fn amazon_v9_row(
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
+        "metadataOperations",
+        "externalImports",
     ] {
         object.remove(field).ok_or("live field")?;
     }
@@ -1382,7 +1386,7 @@ fn with_amazon(mut library: SavedLibrary) -> std::result::Result<SavedLibrary, S
 }
 
 #[test]
-fn amazon_schema_nine_row_reads_as_schema_ten_and_cas_upgrades_it() -> Result {
+fn amazon_schema_nine_row_reads_as_current_schema_and_cas_upgrades_it() -> Result {
     let root = tempfile::tempdir()?;
     let mut first = Store::open(root.path())?;
     first.persist(&state(2))?;
@@ -1393,12 +1397,17 @@ fn amazon_schema_nine_row_reads_as_schema_ten_and_cas_upgrades_it() -> Result {
     let mut second = Store::open(root.path())?;
     let versioned = second.read_versioned()?;
     let mut migrated = versioned.state.ok_or("state")?;
-    assert_eq!(migrated.schema_version, 10);
+    assert_eq!(
+        migrated.schema_version,
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         serde_json::to_value(&migrated.amazon_connection)?,
         serde_json::to_value(&amazon.amazon_connection)?
     );
     assert!(migrated.immich_live_operations.is_empty());
+    assert!(migrated.metadata_operations.is_empty());
+    assert!(migrated.external_imports.is_empty());
     let row = |db: &rusqlite::Connection| -> rusqlite::Result<String> {
         db.query_row("SELECT json FROM library_state WHERE id=1", [], |r| {
             r.get(0)
@@ -1409,7 +1418,10 @@ fn amazon_schema_nine_row_reads_as_schema_ten_and_cas_upgrades_it() -> Result {
     migrated.immich_live_operations = live_wire_library(0)?.immich_live_operations;
     assert!(second.persist_if_current(&versioned.revision, &migrated)?);
     let stored: serde_json::Value = serde_json::from_str(&row(&db)?)?;
-    assert_eq!(stored["schemaVersion"], 10);
+    assert_eq!(
+        stored["schemaVersion"],
+        suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION
+    );
     assert_eq!(
         stored["amazonConnection"],
         serde_json::to_value(&amazon.amazon_connection)?

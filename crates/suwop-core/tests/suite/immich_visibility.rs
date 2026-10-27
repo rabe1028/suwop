@@ -665,6 +665,7 @@ fn explicit_unlocked_observation_requires_matching_fresh_full_scan() -> Result<(
     }];
     assert!(!suwop_core::immich_visibility::fences(&state, &key()));
     state.albums = vec![suwop_core::albums::AlbumSnapshot {
+        collections: Vec::new(),
         provider: Provider::Immich,
         scope: key().scope,
         access: suwop_core::domain::ScanAccess::Unavailable,
@@ -766,6 +767,8 @@ fn schema_five_migration_preserves_fences_and_rejects_duplicate_ids() -> Result<
     let mut raw = shell.disk.ok_or("disk")?;
     raw["schemaVersion"] = json!(5);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",

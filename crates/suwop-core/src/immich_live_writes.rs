@@ -1,4 +1,4 @@
-//! Schema10 evidence for explicitly confirmed physical-resource batches.
+//! Schema11 evidence for explicitly confirmed physical-resource batches.
 //! Persisted records are historical claims, never session/write/read authority.
 //! Runtime children execute fresh, explicitly confirmed operations and native JOIN.
 //! The serialized evidence alone grants none of that authority; matching Inspect
@@ -44,7 +44,7 @@ pub use references::original_continuation_open;
 pub use transitions::validate_transition;
 pub use validate::{transition_allowed, validate_library};
 
-pub const CURRENT_SCHEMA_VERSION: u32 = 10;
+pub const CURRENT_SCHEMA_VERSION: u32 = 11;
 /// First catalog version that stores the Live journal arrays (9 is the Amazon catalog).
 pub const LIVE_JOURNAL_SCHEMA_VERSION: u32 = 10;
 const INVALID: &str = "Live Photo の変更記録が不正です。既存ファイルは変更しません。";

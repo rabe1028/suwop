@@ -102,6 +102,69 @@ fn model(state: SavedLibrary) -> Model {
     }
 }
 
+#[test]
+fn album_membership_metadata_is_canonical_but_public_members_require_exact_ordinary_keys()
+-> Result<(), Box<dyn std::error::Error>> {
+    use suwop_core::albums::{AlbumKey, AlbumPermissions, AlbumSnapshot, StoredAlbum};
+    let mut canonical = state(AppleVisibility::Visible);
+    let visible = canonical.snapshots[1].assets[0].key.clone();
+    let private = |id: &str| AssetKey {
+        asset_id: id.into(),
+        ..visible.clone()
+    };
+    let hidden = private("hidden-member");
+    let locked = private("locked-member");
+    let foreign = AssetKey {
+        scope: "other-scope".into(),
+        ..visible.clone()
+    };
+    let members = vec![hidden.clone(), visible.clone(), locked.clone(), foreign];
+    canonical.albums = vec![AlbumSnapshot {
+        provider: Provider::Immich,
+        scope: "remote".into(),
+        access: ScanAccess::Full,
+        collections: vec![],
+        albums: vec![StoredAlbum {
+            key: AlbumKey {
+                provider: Provider::Immich,
+                scope: "remote".into(),
+                album_id: "shared".into(),
+            },
+            title: "Shared album".into(),
+            members: members.clone(),
+            permissions: AlbumPermissions::default(),
+        }],
+    }];
+    for (unavailable, stale_album) in [(false, false), (true, false), (false, true)] {
+        canonical.albums[0].access = if stale_album {
+            ScanAccess::Unavailable
+        } else {
+            ScanAccess::Full
+        };
+        canonical.snapshots[1].access = if unavailable {
+            ScanAccess::Unavailable
+        } else {
+            ScanAccess::Full
+        };
+        let model = model(canonical.clone());
+        let before = serde_json::to_value(&model.state)?;
+        let view = Suwop.view(&model);
+        let expected = if unavailable || stale_album {
+            vec![]
+        } else {
+            vec![visible.clone()]
+        };
+        assert_eq!(view.state.albums[0].albums[0].members, expected);
+        assert_eq!(view.albums[0].album.members, expected);
+        let public = serde_json::to_string(&view)?;
+        assert!(!public.contains(&hidden.asset_id));
+        assert!(!public.contains(&locked.asset_id));
+        assert_eq!(serde_json::to_value(&model.state)?, before);
+        assert_eq!(model.state.albums[0].albums[0].members, members);
+    }
+    Ok(())
+}
+
 const PRIVATE_BYTES: u64 = 987_654_321;
 const PRIVATE_SIGNATURE_BYTES: u64 = 876_543_210;
 const PRIVATE_BLOCKERS: [&str; 4] = [
@@ -357,11 +420,13 @@ fn journal_only_sources_are_redacted_from_state_and_stale_text()
 fn schema_migration_keeps_evidence_and_marks_missing_visibility_unknown()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut canonical = state(AppleVisibility::Visible);
-    canonical.schema_version = 10;
+    canonical.schema_version = suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION;
     for version in [1, 2] {
         let mut old = serde_json::to_value(&canonical)?;
         old["schemaVersion"] = json!(version);
         for field in [
+            "metadataOperations",
+            "externalImports",
             "immichLiveOperations",
             "immichLiveUnstartedClosures",
             "immichLiveLegacyReconciliations",
@@ -430,6 +495,8 @@ fn old_upload_intent_evidence_matches_fresh_visible_source_but_not_modified_orig
     let mut raw = serde_json::to_value(state(AppleVisibility::Visible))?;
     raw["schemaVersion"] = json!(2);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",

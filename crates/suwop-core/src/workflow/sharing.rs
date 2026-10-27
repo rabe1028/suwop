@@ -5,6 +5,15 @@ use crate::{
 };
 
 impl Runtime<'_> {
+    pub(super) async fn sharing_workspace(&mut self, id: &str) -> Result<(), String> {
+        if self.workspace.is_some() {
+            return Err("作業領域は既に使用中です。".into());
+        }
+        let path: String = io(self.ctx, ShellOperation::SharingWorkspace { id: id.into() }).await?;
+        self.workspace = Some(path);
+        Ok(())
+    }
+
     pub(super) async fn share(
         &mut self,
         keys: &[crate::domain::AssetKey],
@@ -23,7 +32,7 @@ impl Runtime<'_> {
         for key in &keys {
             self.check_keys(std::slice::from_ref(key))?;
         }
-        self.workspace(id).await?;
+        self.sharing_workspace(id).await?;
         let mut files = Vec::new();
         for (index, key) in keys.iter().enumerate() {
             self.progress(&format!(

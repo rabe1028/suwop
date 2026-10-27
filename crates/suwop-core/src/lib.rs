@@ -6,6 +6,7 @@ pub mod apple_visibility;
 pub mod browser;
 pub mod domain;
 pub mod editing;
+pub mod external_import;
 pub mod immich;
 pub mod inference;
 pub mod media;

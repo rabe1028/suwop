@@ -1,3 +1,15 @@
+mod restore;
+pub use restore::{MetadataRestoreAvailability, restore_availability, restore_edits};
+pub mod fixed_zone;
+mod migration;
+pub use migration::migrate_journal;
+mod extended;
+pub mod time_zone;
+pub use extended::{
+    AppleMetadataMember, MetadataEdit, MetadataObservation, MetadataOutcome, MetadataRecord,
+    MetadataValues, MetadataWitness, blocked, description_for, validate_record_transition,
+    validate_records,
+};
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::domain::{
@@ -158,8 +170,9 @@ pub fn normalize(input: &MetadataInput) -> Result<MetadataChange, String> {
                 .time_zone
                 .as_deref()
                 .ok_or("日時のタイムゾーンを指定してください。")?;
-            zone.parse::<chrono_tz::Tz>()
-                .map_err(|_| "日時のタイムゾーンを確認できません。")?;
+            if zone.parse::<chrono_tz::Tz>().is_err() && fixed_zone::parse(zone).is_none() {
+                return Err("日時のタイムゾーンを確認できません。".into());
+            }
             change.captured_at = Some(value);
             change.time_zone = Some(zone.into());
         }
@@ -307,6 +320,11 @@ impl MetadataChange {
                     .time_zone
                     .as_deref()
                     .ok_or("タイムゾーンがありません。")?;
+                if let Some(offset) = fixed_zone::parse(zone) {
+                    return Ok(
+                        serde_json::json!({"dateTimeOriginal": fixed_zone::format_instant(value, offset)?}),
+                    );
+                }
                 let zone: chrono_tz::Tz = zone.parse().map_err(|_| "タイムゾーンが不正です。")?;
                 // Keep the instant in UTC. Historical IANA offsets can include
                 // seconds that RFC 3339 offsets cannot represent exactly.

@@ -171,7 +171,7 @@ import XCTest
             revision: "synthetic-fixture-v1",
             resources: [resource]
         )
-        state = SavedLibrary(amazonConnection: connection, appleScope: scope, schemaVersion: 10, snapshots: [])
+        state = SavedLibrary(amazonConnection: connection, appleScope: scope, schemaVersion: 11, snapshots: [])
         let snapshot = LibrarySnapshot(
             provider: .apple,
             scope: scope,

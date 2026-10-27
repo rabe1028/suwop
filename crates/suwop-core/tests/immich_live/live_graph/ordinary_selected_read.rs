@@ -58,7 +58,7 @@ fn exercise(
     let mut host = Shell::new(agent, directory, fixture, &raw)?;
     acquire_locked_observation(&mut host, &core, fixture)?;
     let locked = host.raw()?;
-    assert_eq!(locked["schemaVersion"], 10);
+    assert_eq!(locked["schemaVersion"], 11);
     assert_eq!(locked["immichVisibilityOperations"][0]["outcome"], outcome);
     let mut old_fields = locked["immichVisibilityOperations"][0].clone();
     old_fields

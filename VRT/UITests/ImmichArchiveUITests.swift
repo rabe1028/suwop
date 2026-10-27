@@ -234,13 +234,23 @@ final class ImmichArchiveUITests: XCTestCase {
 
     @MainActor private func openHistory(_ app: XCUIApplication) {
         app.buttons["表示と操作"].tap()
-        app.buttons["immichArchiveHistory"].tap()
+        guard tapGalleryItem(app.buttons["immichArchiveHistory"], in: app) else { return }
         XCTAssertTrue(app.buttons["closeImmichArchive"].waitForExistence(timeout: 10))
     }
 
     @MainActor private func refreshGallery(_ app: XCUIApplication) {
         app.buttons["表示と操作"].tap()
-        app.buttons["一覧を更新"].tap()
+        _ = tapGalleryItem(app.buttons["一覧を更新"], in: app)
+    }
+
+    @MainActor private func tapGalleryItem(_ element: XCUIElement, in app: XCUIApplication) -> Bool {
+        guard WriteMenuScrollGesture.revealGalleryItem(element, in: app), element.isEnabled else {
+            attach(app, name: "gallery-menu-item-not-exposed")
+            XCTFail("The exact gallery menu action must be visible and enabled: " + app.debugDescription)
+            return false
+        }
+        element.tap()
+        return true
     }
 
     @MainActor private func assertNoAuthentication(in app: XCUIApplication) {

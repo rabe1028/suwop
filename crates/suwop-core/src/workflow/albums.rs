@@ -32,7 +32,7 @@ impl Runtime<'_> {
         }
     }
 
-    async fn reload_albums(&mut self, provider: Provider) -> Result<(), String> {
+    pub(super) async fn reload_albums(&mut self, provider: Provider) -> Result<(), String> {
         let result = self.read_albums(provider).await;
         match result {
             Ok(snapshot) => {
@@ -47,7 +47,7 @@ impl Runtime<'_> {
         }
     }
 
-    fn invalidate_albums(&mut self, provider: Provider) {
+    pub(super) fn invalidate_albums(&mut self, provider: Provider) {
         for s in self
             .state
             .albums

@@ -16,7 +16,11 @@ import SwiftUI
 
     var body: some Scene {
         WindowGroup {
-            if CommandLine.arguments.contains("--processing-fixture") {
+            if CommandLine.arguments.contains("--external-import-fixture") {
+                InteractiveExternalImportHost()
+            } else if CommandLine.arguments.contains("--metadata-parity-fixture") {
+                InteractiveMetadataHost()
+            } else if CommandLine.arguments.contains("--processing-fixture") {
                 InteractiveProcessingHost()
             } else if CommandLine.arguments.contains("--private-media-cleanup-fixture") {
                 InteractivePrivateMediaCleanupHost()

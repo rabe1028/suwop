@@ -31,6 +31,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [],
         "immichLiveOperations": [
           {
@@ -219,13 +220,14 @@
         ],
         "immichLiveUnstartedClosures": [],
         "immichVisibilityOperations": [],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -241,6 +243,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [],
         "immichLiveOperations": [
           {
@@ -415,13 +418,14 @@
         ],
         "immichLiveUnstartedClosures": [],
         "immichVisibilityOperations": [],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -437,6 +441,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [],
         "immichLiveOperations": [
           {
@@ -590,13 +595,14 @@
         ],
         "immichLiveUnstartedClosures": [],
         "immichVisibilityOperations": [],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -612,6 +618,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [],
         "immichLiveOperations": [
           {
@@ -824,13 +831,14 @@
         ],
         "immichLiveUnstartedClosures": [],
         "immichVisibilityOperations": [],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -846,6 +854,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [],
         "immichLiveOperations": [
           {
@@ -976,13 +985,14 @@
         ],
         "immichLiveUnstartedClosures": [],
         "immichVisibilityOperations": [],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []
@@ -998,6 +1008,7 @@
         "appleVisibilityOperations": [],
         "connection": null,
         "editClipboard": null,
+        "externalImports": [],
         "immichLiveLegacyReconciliations": [
           {
             "confirmedGraph": [
@@ -1298,13 +1309,14 @@
             "witnessDigest": "d9d8591eb16e0f53a8a1aee5d638d3312d4697f611593929cbb4ea69aac0a4bf"
           }
         ],
+        "metadataOperations": [],
         "pendingAppleTrash": [],
         "pendingEditPastes": [],
         "pendingTrash": [],
         "pendingUploads": [],
         "protectedEntries": [],
         "receipts": [],
-        "schemaVersion": 10,
+        "schemaVersion": 11,
         "snapshots": [],
         "trash": null,
         "uploadIntents": []

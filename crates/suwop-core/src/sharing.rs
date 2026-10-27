@@ -5,6 +5,11 @@ use crate::domain::{
     normalize_sha1,
 };
 mod current;
+mod current_media;
+pub use current_media::{
+    CurrentMediaExport, CurrentMediaFile, CurrentMovieOutput, current_media_kind,
+    current_media_source, verify_current_media,
+};
 mod rendering;
 pub use current::{
     CurrentImageExport, CurrentImageFacts, current_image_asset, current_image_name,

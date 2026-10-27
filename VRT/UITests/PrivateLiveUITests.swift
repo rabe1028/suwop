@@ -19,13 +19,26 @@ final class PrivateLiveUITests: XCTestCase {
         guard reveal(check, in: app) else { return }
         XCTAssertEqual(check.label, "Live Photoを確認して再生")
         check.tap()
+        expect("held=1", in: app.staticTexts["privateLiveUIInspectionHold"])
+        expect("pending=true", in: app.staticTexts["privateLiveUIInspectionPending"])
+        expect("drained=false completed=false", in: app.staticTexts["privateLiveUIInspectionTerminal"])
         let cancel = app.buttons["cancelImmichLockedLive"]
         XCTAssertTrue(cancel.waitForExistence(timeout: 5))
         guard reveal(cancel, in: app) else { return }
-        cancel.tap()
+        cancel.tap() // One real production cancel action; never retry the tap.
+        expect("pending=false", in: app.staticTexts["privateLiveUIInspectionPending"])
+        let release = app.buttons["releasePrivateLiveInspectionReply"]
+        guard release.exists, release.isEnabled, release.isHittable else {
+            XCTFail("The actual inspection must be cancelled before releasing its held HTTP response")
+            return
+        }
+        release.tap()
+        expect("released=1", in: app.staticTexts["privateLiveUIInspectionRelease"])
+        expect("drained=true completed=true", in: app.staticTexts["privateLiveUIInspectionTerminal"])
         expect("inspectionsFinished=1", in: app.staticTexts["privateLiveUIInspectionsFinished"])
         XCTAssertFalse(app.descendants(matching: .any)["immichLockedLivePlayer"].firstMatch.exists)
-        XCTAssertFalse(app.progressIndicators["immichLockedLiveLoading"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["immichLockedLiveLoading"].firstMatch.exists)
+        XCTAssertFalse(app.buttons["cancelImmichLockedLive"].exists)
         expect("originals=0", in: app.staticTexts["privateLiveUIOriginals"])
         expect("mutations=0", in: app.staticTexts["privateLiveUIMutations"])
         XCTAssertTrue(check.isEnabled)

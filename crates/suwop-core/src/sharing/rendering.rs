@@ -32,6 +32,27 @@ pub struct CurrentImageRenderResult {
 }
 
 impl CurrentImageRenderPlan {
+    /// Re-encode pixels into a fresh PNG with an explicit metadata allowlist.
+    /// Do not copy EXIF/XMP/maker notes that may contain another location field.
+    pub fn without_location(
+        source: &StoredAsset,
+        image: &ImageEncodingFacts,
+    ) -> Result<Self, String> {
+        let dimensions = image.oriented_size()?;
+        if image.hdr || !image.has_color_space {
+            return Err("このHDR画像・色空間の位置情報なし書き出しには未対応です。".into());
+        }
+        let mut metadata = metadata(source)?;
+        metadata.latitude = None;
+        metadata.longitude = None;
+        Ok(Self {
+            dimensions,
+            orientation: image.orientation,
+            transform: ImageTransform::original(dimensions)?,
+            metadata,
+        })
+    }
+
     pub fn remote(
         source: &StoredAsset,
         image: &ImageEncodingFacts,

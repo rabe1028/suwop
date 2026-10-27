@@ -1,3 +1,4 @@
+mod metadata_edit;
 pub mod stack;
 use crate::{
     app::{Context, ShellOperation, io},
@@ -246,11 +247,23 @@ impl Session {
         let mut fresh = Vec::new();
         for id in ids {
             let asset = self.asset(ctx, id).await?;
-            if change.action == crate::metadata::MetadataAction::SetCapturedAt
-                && asset.exif_info.as_ref().and_then(|e| e.time_zone.as_ref())
-                    != change.time_zone.as_ref()
-            {
-                return Err("日時のタイムゾーンの保存結果を確認できません。".into());
+            if change.action == crate::metadata::MetadataAction::SetCapturedAt {
+                // Extraction can finish before this immediate read and derive a
+                // GPS display zone. Validate the requested instant, not its label.
+                let instant = asset.record(&self.scope, None, None).captured_at;
+                let zone = asset
+                    .exif_info
+                    .as_ref()
+                    .and_then(|exif| exif.time_zone.as_deref());
+                if !instant
+                    .zip(change.captured_at)
+                    .is_some_and(|(actual, expected)| {
+                        crate::domain::same_capture_date(actual, expected)
+                    })
+                    || !zone.is_some_and(crate::metadata::fixed_zone::valid)
+                {
+                    return Err("日時の保存結果を確認できません。".into());
+                }
             }
             fresh.push(asset);
         }

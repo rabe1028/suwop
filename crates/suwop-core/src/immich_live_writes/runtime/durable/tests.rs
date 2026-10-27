@@ -137,7 +137,7 @@ use std::sync::{Arc, Mutex};
 
 fn pair() -> Result<(SavedLibrary, SavedLibrary), String> {
     let before = SavedLibrary {
-        schema_version: 10,
+        schema_version: crate::immich_live_writes::CURRENT_SCHEMA_VERSION,
         ..SavedLibrary::default()
     };
     let mut desired = before.clone();

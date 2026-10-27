@@ -24,6 +24,8 @@ import XCTest
     let signature = FileSignature(bytes: 12, sha256: String(repeating: "2", count: 64))
     var scans = 0
     var cleaned = false
+    var sharingWorkspaces = 0
+    var presentations = 0
     var preparing = false
     var contexts: [ContentPresentationContext] = []
     var rejectedPresentation = false
@@ -44,6 +46,8 @@ import XCTest
                 provider: .apple, scope: asset.key.scope, assets: [asset], access: .full
             ))
         case "workspace": return .string("/tmp/generated-workflow-context")
+        case "sharingWorkspace": sharingWorkspaces += 1
+            return .string("/tmp/generated-workflow-context")
         case "appleExport": return try .from(TransferBundle(assets: [asset], files: [
                 TransferFile(
                     resource: asset.resources[0],
@@ -60,6 +64,7 @@ import XCTest
     }
 
     private func present(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {
+        presentations += 1
         XCTAssertFalse(cleaned, "Rust must still retain its workspace when presentation is attempted")
         if race == .beforePresentation {
             shell.invalidateContentPresentations()
@@ -91,6 +96,8 @@ final class LibraryPresentationContextTests: XCTestCase {
                 shell.invalidateContentPresentations()
             }
             try await waitUntil { !model.isBusy && effects.cleaned }
+            XCTAssertEqual(effects.sharingWorkspaces, 1)
+            XCTAssertEqual(effects.presentations, 1, "The delayed native presentation race must be reached")
             XCTAssertTrue(effects.rejectedPresentation)
             XCTAssertGreaterThan(effects.contexts.count, 3)
             for context in effects.contexts {

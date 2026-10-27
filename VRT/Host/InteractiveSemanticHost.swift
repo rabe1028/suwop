@@ -7,7 +7,10 @@ import SwiftUI
     @State private var failure: String?
 
     static let failedPhoto = """
-    {"schemaVersion":10,"appleScope":"test","connection":null,"snapshots":[{
+    {"schemaVersion":11,"appleScope":"test","connection":null,
+     "metadataOperations":[],"externalImports":[],
+     "immichLiveOperations":[],"immichLiveUnstartedClosures":[],"immichLiveLegacyReconciliations":[],
+     "snapshots":[{
       "provider":"apple","scope":"test","access":"full","scannedAt":0,"assets":[{
         "key":{"provider":"apple","scope":"test","assetID":"one"},
         "appleVisibility":"visible","name":"one.jpg","revision":"1","resources":[],"isFavorite":false,

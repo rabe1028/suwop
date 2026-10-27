@@ -97,7 +97,7 @@ import SuwopShell
         transport.memberBytes[secondParentID] = parent
         transport.memberBytes[imageID] = parent
         transport.memberBytes[videoID] = motion
-        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 10)
+        saved = SavedLibrary(appleScope: ImmichVisibilityFixtureData.appleScope, schemaVersion: 11)
     }
 
     private static func bytes(_ name: String, _ suffix: String) throws -> Data {

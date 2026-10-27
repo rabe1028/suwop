@@ -15,6 +15,9 @@ import SuwopShell
     #if os(macOS) && SUWOP_SHARING_TEST
         var pickerTestHooks: SharingPickerTestHooks?
     #endif
+    #if os(macOS) && SUWOP_OS_SHARING_TEST
+        var localServicesForTesting: (@MainActor ([Any]) -> [NSSharingService])?
+    #endif
 
     func invalidateForContentChange() {
         active?.invalidateForContentChange()
@@ -30,6 +33,9 @@ import SuwopShell
         let presentation = NativeSharePresentation(sourceKeys: request.sourceKeys ?? [])
         #if os(macOS) && SUWOP_SHARING_TEST
             presentation.pickerTestHooks = pickerTestHooks
+        #endif
+        #if os(macOS) && SUWOP_OS_SHARING_TEST
+            presentation.localServicesForTesting = localServicesForTesting
         #endif
         active = presentation
         defer { active = nil }
@@ -50,6 +56,9 @@ import SuwopShell
     #endif
     #if os(macOS) && SUWOP_SHARING_TEST
         var pickerTestHooks: SharingPickerTestHooks?
+    #endif
+    #if os(macOS) && SUWOP_OS_SHARING_TEST
+        var localServicesForTesting: (@MainActor ([Any]) -> [NSSharingService])?
     #endif
 
     init(sourceKeys: [AssetKey]) {
@@ -191,7 +200,24 @@ import SuwopShell
 #endif
 
 #if os(macOS)
-    extension NativeSharePresentation: NSSharingServicePickerDelegate, NSSharingServiceDelegate {
+    #if SUWOP_OS_SHARING_TEST
+        /// Test-only custom services are created synchronously by AppKit's main-thread
+        /// picker callback. The preconcurrency conformance checks that actor on entry;
+        /// native service objects never become Sendable or cross an actor/await boundary.
+        extension NativeSharePresentation: @preconcurrency NSSharingServicePickerDelegate {
+            func sharingServicePicker(
+                _ sharingServicePicker: NSSharingServicePicker,
+                sharingServicesForItems items: [Any],
+                proposedSharingServices proposedServices: [NSSharingService]
+            ) -> [NSSharingService] {
+                localServicesForTesting?(items) ?? proposedServices
+            }
+        }
+    #else
+        extension NativeSharePresentation: NSSharingServicePickerDelegate {}
+    #endif
+
+    extension NativeSharePresentation: NSSharingServiceDelegate {
         nonisolated func sharingServicePicker(
             _ sharingServicePicker: NSSharingServicePicker,
             didChoose service: NSSharingService?

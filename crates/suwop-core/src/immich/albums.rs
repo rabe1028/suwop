@@ -14,6 +14,10 @@ pub struct AlbumInfo {
     pub owner_id: Option<String>,
     #[serde(default)]
     pub album_users: Vec<AlbumUser>,
+    #[serde(default)]
+    pub shared: bool,
+    #[serde(default)]
+    pub order: Option<crate::albums::AlbumDateOrder>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -28,6 +32,15 @@ pub struct AlbumOwner {
 }
 
 impl AlbumInfo {
+    #[must_use]
+    pub fn readable_by(&self, id: &str) -> bool {
+        self.owned_by(id)
+            || self.album_users.iter().filter(|u| u.user.id == id).count() == 1
+                && self
+                    .album_users
+                    .iter()
+                    .any(|u| u.user.id == id && matches!(u.role.as_str(), "viewer" | "editor"))
+    }
     #[must_use]
     pub fn owned_by(&self, id: &str) -> bool {
         let owners: Vec<_> = self
@@ -54,6 +67,35 @@ struct MemberResult {
 }
 
 impl Session {
+    pub async fn readable_album(&self, ctx: &Context, id: &str) -> Result<AlbumInfo, String> {
+        valid_id(id)?;
+        let album: AlbumInfo = self.json(ctx, &format!("albums/{id}"), "GET", None).await?;
+        if album.id != id || !album.readable_by(&self.user_id) {
+            return Err("アルバムの閲覧権限を確認できません。".into());
+        }
+        Ok(album)
+    }
+
+    pub async fn set_album_date_order(
+        &self,
+        ctx: &Context,
+        id: &str,
+        order: crate::albums::AlbumDateOrder,
+    ) -> Result<(), String> {
+        self.album(ctx, id).await?;
+        let _: Value = self
+            .json(
+                ctx,
+                &format!("albums/{id}"),
+                "PATCH",
+                Some(json!({"order":order})),
+            )
+            .await?;
+        if self.album(ctx, id).await?.order != Some(order) {
+            return Err("アルバムの日時順を確認できません。".into());
+        }
+        Ok(())
+    }
     pub async fn albums(&self, ctx: &Context) -> Result<Vec<AlbumInfo>, String> {
         let albums: Vec<AlbumInfo> = self.json(ctx, "albums", "GET", None).await?;
         for album in &albums {
@@ -101,7 +143,7 @@ impl Session {
     }
 
     pub async fn album_members(&self, ctx: &Context, id: &str) -> Result<Vec<Asset>, String> {
-        self.album(ctx, id).await?;
+        let album = self.readable_album(ctx, id).await?;
         let mut assets = BTreeMap::new();
         let mut cursor = None;
         let mut page = 1_u32;
@@ -111,12 +153,15 @@ impl Session {
                 return Err("アルバムのページ上限に達しました。".into());
             }
             let mut body = json!({"size":500,"withExif":true,"withStacked":true});
+            let direction = album.order.unwrap_or(crate::albums::AlbumDateOrder::Desc);
             if self.version.uses_cursor() {
                 body["filter"] = json!({"albumIds":{"any":[id]},"trashedAt":{"eq":null}});
+                body["orderBy"] = json!({"field":"fileCreatedAt","direction":direction});
                 if let Some(token) = &cursor {
                     body["cursor"] = json!(token);
                 }
             } else {
+                body["order"] = json!(direction);
                 body["albumIds"] = json!([id]);
                 body["page"] = json!(page);
                 body["withDeleted"] = json!(false);
@@ -135,6 +180,9 @@ impl Session {
             )
             .map_err(|_| "アルバムの写真一覧が不正です。")?;
             for item in items {
+                // Membership metadata is also used to verify writes involving
+                // private Live resources. It does not authorize content reads;
+                // the published album projection intersects the ordinary catalog.
                 if !item.is_trashed {
                     assets.insert(item.id.clone(), item);
                 }
@@ -168,7 +216,17 @@ impl Session {
                 page = number;
             }
         }
-        Ok(assets.into_values().collect())
+        let mut assets: Vec<_> = assets.into_values().collect();
+        assets.sort_by(|a, b| {
+            super::parse_date(&a.file_created_at)
+                .unwrap_or(f64::NEG_INFINITY)
+                .total_cmp(&super::parse_date(&b.file_created_at).unwrap_or(f64::NEG_INFINITY))
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        if album.order != Some(crate::albums::AlbumDateOrder::Asc) {
+            assets.reverse();
+        }
+        Ok(assets)
     }
 
     pub async fn change_album_members(

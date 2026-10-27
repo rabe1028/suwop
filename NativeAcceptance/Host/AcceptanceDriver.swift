@@ -1,3 +1,4 @@
+import Foundation
 import SuwopShell
 import UIKit
 
@@ -5,18 +6,26 @@ import UIKit
 /// the production adapter; Rust still creates plans, journals and decisions.
 @MainActor final class AcceptanceDriver {
     let runtime = try? RustRuntime()
-    let shell = try? AppleShell()
+    let shell: AppleShell?
     let keys: [AssetKey]
     var loseNextSaveResponse = false
     var cancelEditor = false
     var cancelTrash = false
     var loseNextTrashResponse = false
+    var shareAnswer: (@MainActor (SharePresentation) async throws -> Bool)?
+    var beforeEffect: (@MainActor (ShellOperation) throws -> Void)?
+    var afterEffect: (@MainActor (ShellOperation, JSONValue) throws -> Void)?
     private(set) var visibilityPersistedBeforeApply = false
     private(set) var savedAdjustment: AppleAdjustment?
     private(set) var effects: [String] = []
+    private(set) var queuedEffects: [String] = []
 
-    init(keys: [AssetKey]) {
+    init(keys: [AssetKey], root: URL? = nil) {
         self.keys = keys
+        shell = try? AppleShell(root: root)
+        if let runtime {
+            shell?.ordinaryContent.configure(runtime: runtime)
+        }
     }
 
     func event(_ type: String, _ data: [String: JSONValue] = [:], allowError: Bool = false) async throws -> ViewModel {
@@ -31,12 +40,17 @@ import UIKit
             guard steps < 200 else { throw SuwopError("Effect sequence did not finish.") }
             let request = requests.removeFirst()
             guard let operation = request.effect["Io"] else { throw SuwopError("Unknown effect.") }
+            queuedEffects = requests.compactMap { $0.effect["Io"]?.type }
             effects.append(operation.type)
-            let value: JSONValue?
+            var value: JSONValue?
             let failure: String?
             do {
                 try fence(operation)
+                try beforeEffect?(operation)
                 value = try await execute(operation, shell: shell, context: context)
+                if let value {
+                    try afterEffect?(operation, value)
+                }
                 failure = nil
             } catch {
                 value = nil
@@ -57,6 +71,8 @@ import UIKit
     ) async throws -> JSONValue {
         let data = operation.data ?? .null
         switch operation.type {
+        case "shareFiles":
+            return try await executeShare(operation, shell: shell, context: context)
         case "editImage":
             try context.requireCurrent(sourceKeys: [data["key"].decode(AssetKey.self)])
             if cancelEditor {
@@ -88,12 +104,7 @@ import UIKit
             return try await executeVisibility(operation, shell: shell, context: context)
         case "confirmAppleTrash": return .bool(context.permits() && !cancelTrash)
         case "appleTrashApply":
-            let result = try await shell.execute(operation, context: context)
-            if loseNextTrashResponse {
-                loseNextTrashResponse = false
-                throw SuwopError("Intentional lost response after real PhotoKit deletion.")
-            }
-            return result
+            return try await executeTrash(operation, shell: shell, context: context)
         case "confirmPasteEdits", "confirmReversion": return .bool(context.permits())
         case "appleEditSave":
             let result = try await shell.execute(operation, context: context)
@@ -105,6 +116,27 @@ import UIKit
             return result
         default: return try await shell.execute(operation, context: context)
         }
+    }
+
+    private func executeShare(
+        _ operation: ShellOperation, shell: AppleShell, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        guard let shareAnswer else { return try await shell.execute(operation, context: context) }
+        let presentation = try (operation.data ?? .null).decode(SharePresentation.self)
+        try context.requireCurrent(sourceKeys: presentation.sourceKeys ?? [])
+        _ = try await shell.ordinaryContent.validate(keys: presentation.sourceKeys ?? [], context: context)
+        return try await .bool(shareAnswer(presentation))
+    }
+
+    private func executeTrash(
+        _ operation: ShellOperation, shell: AppleShell, context: ContentPresentationContext
+    ) async throws -> JSONValue {
+        let result = try await shell.execute(operation, context: context)
+        if loseNextTrashResponse {
+            loseNextTrashResponse = false
+            throw SuwopError("Intentional lost response after real PhotoKit deletion.")
+        }
+        return result
     }
 
     private func executeVisibility(
@@ -131,6 +163,8 @@ import UIKit
             "appleEditOpen",
             "appleEditInspect",
             "appleReversionInspect",
+            "appleCurrentMedia",
+            "appleCurrentImage",
         ]
         if assetEffects.contains(operation.type) {
             let asset = try data["asset"].decode(StoredAsset.self)
@@ -150,8 +184,17 @@ import UIKit
             let requested = try data["keys"].decode([AssetKey].self)
             guard requested.allSatisfy(keys.contains) else { throw SuwopError("Refusing a non-fixture export.") }
         }
+        try shareFence(operation)
         guard !["appleTrash", "appleImport", "appleFavorite", "appleMetadata", "http"].contains(operation.type) else {
             throw SuwopError("Unrequested native mutation / network operation.")
+        }
+    }
+
+    private func shareFence(_ operation: ShellOperation) throws {
+        guard operation.type == "shareFiles" else { return }
+        let requested = try (operation.data ?? .null).decode(SharePresentation.self).sourceKeys ?? []
+        guard !requested.isEmpty, requested.allSatisfy(keys.contains) else {
+            throw SuwopError("Refusing non-fixture sharing.")
         }
     }
 

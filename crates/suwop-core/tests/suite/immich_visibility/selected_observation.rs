@@ -154,6 +154,8 @@ fn schema_seven_and_older_migrate_without_inventing_observation_or_changing_old_
         let mut raw = shell.disk.clone().ok_or("disk")?;
         raw["schemaVersion"] = json!(version);
         for field in [
+            "metadataOperations",
+            "externalImports",
             "immichLiveOperations",
             "immichLiveUnstartedClosures",
             "immichLiveLegacyReconciliations",
@@ -164,6 +166,8 @@ fn schema_seven_and_older_migrate_without_inventing_observation_or_changing_old_
         let mut expected_state = raw.clone();
         expected_state["schemaVersion"] =
             json!(suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION);
+        expected_state["metadataOperations"] = json!([]);
+        expected_state["externalImports"] = json!([]);
         expected_state["immichLiveOperations"] = json!([]);
         expected_state["immichLiveUnstartedClosures"] = json!([]);
         expected_state["immichLiveLegacyReconciliations"] = json!([]);
@@ -196,6 +200,8 @@ fn selected_observation_requires_schema_eight_provenance() -> Result<(), String>
     let mut legacy = raw.clone();
     legacy["schemaVersion"] = json!(7);
     for field in [
+        "metadataOperations",
+        "externalImports",
         "immichLiveOperations",
         "immichLiveUnstartedClosures",
         "immichLiveLegacyReconciliations",
