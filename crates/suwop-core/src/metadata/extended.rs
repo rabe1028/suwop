@@ -61,6 +61,14 @@ pub struct MetadataRecord {
     #[serde(default)]
     pub current: Vec<MetadataObservation>,
 }
+/// A Rust-planned member of one atomic Apple metadata transaction.
+#[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AppleMetadataMember {
+    pub before: crate::domain::StoredAsset,
+    pub change: super::MetadataChange,
+}
+
 impl MetadataEdit {
     #[must_use]
     pub fn field(&self) -> &'static str {

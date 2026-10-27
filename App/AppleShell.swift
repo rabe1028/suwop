@@ -247,7 +247,8 @@ extension AppleShell {
             )
         case "appleScan", "appleExport", "appleImport", "appleTrash", "appleFavorite", "appleCurrentImage",
              "appleCurrentMedia", "prepareCurrentLive", "prepareCurrentMovie", "inspectCurrentMediaFile",
-             "appleMetadata", "appleMetadataObserve", "appleMetadataVerified": try await photoEffect(
+             "appleMetadata", "appleMetadataObserve", "appleMetadataVerified",
+             "appleMetadataBatchVerified": try await photoEffect(
                 operation.type,
                 data: data,
                 context: context

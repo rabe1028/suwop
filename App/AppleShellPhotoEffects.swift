@@ -5,7 +5,13 @@ extension AppleShell {
     func photoEffect(
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
-        if ["appleMetadataVerified", "appleMetadataObserve", "appleMetadata"].contains(type) {
+        let metadataTypes = [
+            "appleMetadataBatchVerified",
+            "appleMetadataVerified",
+            "appleMetadataObserve",
+            "appleMetadata",
+        ]
+        if metadataTypes.contains(type) {
             return try await metadataEffect(type, data: data, context: context)
         }
         if type == "prepareCurrentLive" {
@@ -48,8 +54,9 @@ extension AppleShell {
         _ type: String, data: JSONValue, context: ContentPresentationContext
     ) async throws -> JSONValue {
         try context.requireCurrent()
+        let batch = type == "appleMetadataBatchVerified" ? try data["members"].decode([AppleMetadataMember].self) : nil
         let before = type == "appleMetadataVerified" ? try data["before"].decode([StoredAsset].self) : nil
-        let keys = try before?.map(\.key) ?? data["keys"].decode([AssetKey].self)
+        let keys = try batch?.map(\.before.key) ?? before?.map(\.key) ?? data["keys"].decode([AssetKey].self)
         guard let first = keys.first,
               keys.allSatisfy({ $0.provider == .apple && $0.scope == first.scope })
         else { throw SuwopError("写真の保存先が一致しません。") }
@@ -60,9 +67,15 @@ extension AppleShell {
         let permit = try NativeMutationSubmission.permit(
             context: context, owner: presentationEpoch, gate: amazonSubmission
         )
-        return try await .from(appleStore(scope: first.scope).setMetadata(
-            keys, change: data["change"].decode(MetadataChange.self), expected: before, permit: permit
-        ))
+        let result: [StoredAsset] = if let batch {
+            try await appleStore(scope: first.scope).setMetadataBatch(batch, permit: permit)
+        } else {
+            try await appleStore(scope: first.scope).setMetadata(
+                keys, change: data["change"].decode(MetadataChange.self), expected: before, permit: permit
+            )
+        }
+        try context.requireProtectionCurrent()
+        return try .from(result)
     }
 
     private func basicPhotoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {

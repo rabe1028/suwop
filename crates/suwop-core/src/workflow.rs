@@ -286,6 +286,7 @@ impl Runtime<'_> {
         if let Some(trash) = &mut self.state.trash {
             trash.verified = false;
         }
+        self.recover_imports().await?;
         self.persist().await?;
         Ok("写真ライブラリを接続してください。".into())
     }

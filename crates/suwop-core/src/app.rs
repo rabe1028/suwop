@@ -429,6 +429,9 @@ pub enum ShellOperation {
         before: Vec<crate::domain::StoredAsset>,
         change: crate::metadata::MetadataChange,
     },
+    AppleMetadataBatchVerified {
+        members: Vec<crate::metadata::AppleMetadataMember>,
+    },
     AppleMetadataObserve {
         keys: Vec<crate::domain::AssetKey>,
     },

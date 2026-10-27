@@ -362,6 +362,15 @@ public struct AppleImportPlan: Codable, Sendable {
     }
 }
 
+public struct AppleMetadataMember: Codable, Sendable {
+    public var before: StoredAsset
+    public var change: MetadataChange
+    public init(before: StoredAsset, change: MetadataChange) {
+        self.before = before
+        self.change = change
+    }
+}
+
 public struct AppleReversionFacts: Codable, Sendable {
     public var asset: StoredAsset
     public var canEdit: Bool

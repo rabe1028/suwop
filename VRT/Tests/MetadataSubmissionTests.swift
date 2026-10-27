@@ -7,7 +7,9 @@ import XCTest
 /// Exercises product dispatch, not InteractiveMetadataHost's synthetic adapter.
 final class MetadataSubmissionTests: XCTestCase {
     private let routes = [
-        "appleMetadataObserve", "appleMetadataVerified", "appleMetadata", "appleCurrentImage", "appleCurrentMedia",
+        "appleMetadataBatchVerified", "appleMetadataObserve", "appleMetadataVerified", "appleMetadata",
+        "appleCurrentImage",
+        "appleCurrentMedia",
     ]
 
     @MainActor func testStalePresentationRejectsBeforeNativeLookupOrPayloadDecode() async throws {
@@ -123,6 +125,19 @@ final class MetadataSubmissionTests: XCTestCase {
         let value = try await work.value
         XCTAssertEqual(value, 7)
         XCTAssertTrue(returned.withLock { $0 })
+    }
+
+    @MainActor func testOwnedCompletionMayOutliveOrdinaryObserverButNeverProtectionRevocation() throws {
+        let shell = try AppleShell()
+        let context = shell.beginWorkflow()
+        shell.invalidateContentPresentations()
+        XCTAssertThrowsError(try context.requireCurrent())
+        XCTAssertNoThrow(try context.requireProtectionCurrent())
+        XCTAssertThrowsError(try NativeMutationSubmission.permit(
+            context: context, owner: shell.presentationEpoch, gate: shell.amazonSubmission
+        ))
+        shell.invalidateProtectedPresentations()
+        XCTAssertThrowsError(try context.requireProtectionCurrent())
     }
 
     @MainActor private func assertRejected(

@@ -6,8 +6,9 @@ pub use migration::migrate_journal;
 mod extended;
 pub mod time_zone;
 pub use extended::{
-    MetadataEdit, MetadataObservation, MetadataOutcome, MetadataRecord, MetadataValues,
-    MetadataWitness, blocked, description_for, validate_record_transition, validate_records,
+    AppleMetadataMember, MetadataEdit, MetadataObservation, MetadataOutcome, MetadataRecord,
+    MetadataValues, MetadataWitness, blocked, description_for, validate_record_transition,
+    validate_records,
 };
 use std::collections::{BTreeMap, BTreeSet};
 

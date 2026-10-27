@@ -101,11 +101,15 @@ extension ApplePhotosStore {
     }
 
     private static func currentResourceExtension(_ resource: PHAssetResource, role: ResourceRole) throws -> String {
-        let type: UTType? = if #available(iOS 26, macOS 26, *) {
-            resource.contentType
-        } else {
-            UTType(resource.uniformTypeIdentifier)
-        }
+        #if compiler(>=6.2)
+            let type: UTType? = if #available(iOS 26, macOS 26, *) {
+                resource.contentType
+            } else {
+                UTType(resource.uniformTypeIdentifier)
+            }
+        #else
+            let type = UTType(resource.uniformTypeIdentifier)
+        #endif
         guard let type, type.conforms(to: role == .liveVideo ? .movie : .image),
               let suffix = type.preferredFilenameExtension,
               !suffix.isEmpty, suffix.utf8.count <= 12,

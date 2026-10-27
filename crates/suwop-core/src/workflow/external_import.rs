@@ -8,6 +8,7 @@ use crate::{
 };
 
 mod immich;
+mod lifecycle;
 #[cfg(test)]
 mod tests;
 
@@ -184,17 +185,15 @@ impl Runtime<'_> {
             return Err(error);
         }
         for record in records {
-            self.submit_import_record(&record).await?;
+            if let Err(error) = self.submit_import_record(&record).await {
+                // Only Prepared proves that native submission was never authorized.
+                // Preserve uncertain attempts and their staged bytes unchanged.
+                self.cancel_prepared_imports(id).await?;
+                self.release_terminal_import_staging(id).await?;
+                return Err(error);
+            }
         }
-        // Every item's terminal state is durable before removing source bytes.
-        let _: serde_json::Value = io(
-            self.ctx,
-            ShellOperation::ReleaseImportStaging {
-                operation: id.into(),
-            },
-        )
-        .await?;
-        Ok(())
+        self.release_terminal_import_staging(id).await
     }
 
     async fn submit_import_record(&mut self, record: &ImportJournal) -> Result<(), String> {

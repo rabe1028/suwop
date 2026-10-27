@@ -108,7 +108,9 @@ extension AppleShell {
         _ item: NativeImportItem, operation: String, scope: String, context: ContentPresentationContext
     ) async throws -> [AssetKey] {
         let captureDate = try ImportCaptureDate.parse(item.metadata.capturedAt)
-        let permit = amazonSubmission.permit(deadline: Int64(Date().timeIntervalSince1970 * 1000) + 30000)
+        let permit = try NativeMutationSubmission.permit(
+            context: context, owner: presentationEpoch, gate: amazonSubmission
+        )
         let state = try await localStore.read()
         guard state["appleScope"].string == scope else { throw SuwopError("Apple Photos の接続先が変わりました。") }
         let resources = try await resolveAppleResources(item, operation: operation)
@@ -120,7 +122,7 @@ extension AppleShell {
         try context.requireCurrent()
         let entries = resources
         let metadata = item.metadata
-        let identifier = try await NativeChange.perform {
+        let identifier = try await Self.performStagedAppleImport(permit: permit) {
             let request = PHAssetCreationRequest.forAsset()
             if let captureDate {
                 request.creationDate = captureDate
@@ -135,21 +137,37 @@ extension AppleShell {
                 options.originalFilename = entry.name
                 // SDK: originalFilename does not provide contentType. Without
                 // this, a bare staging token cannot describe JPEG/HEIC/RAW/etc.
-                if #available(iOS 26, macOS 26, *) {
-                    options.contentType = UTType(entry.identifier)
-                } else {
+                #if compiler(>=6.2)
+                    if #available(iOS 26, macOS 26, *) {
+                        options.contentType = UTType(entry.identifier)
+                    } else {
+                        options.uniformTypeIdentifier = entry.identifier
+                    }
+                #else
                     options.uniformTypeIdentifier = entry.identifier
-                }
+                #endif
                 request.addResource(with: entry.type, fileURL: entry.url, options: options)
             }
             return request.placeholderForCreatedAsset?.localIdentifier
-        } submit: { changes, completion in
-            do {
-                try permit.submit { PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion) }
-            } catch { completion(false, error) }
         }
         guard let identifier else { throw SuwopError("保存先IDを確認できません。再送信せず、取り込み記録を確認してください。") }
         return [AssetKey(provider: .apple, scope: scope, assetID: identifier)]
+    }
+
+    /// Thin native creation boundary. The default submits the real PhotoKit
+    /// transaction; tests replace only that callback driver. Cancellation before
+    /// submission prevents creation, while a submitted request always joins its
+    /// native completion before any staged resource can be released.
+    nonisolated static func performStagedAppleImport(
+        permit: NativeSubmissionPermit,
+        changes: @escaping @Sendable () -> String?,
+        submit: @escaping @Sendable (
+            @escaping @Sendable () -> Void, @escaping @Sendable (Bool, Error?) -> Void
+        ) -> Void = { changes, completion in
+            PHPhotoLibrary.shared().performChanges(changes, completionHandler: completion)
+        }
+    ) async throws -> String? {
+        try await NativeMutationSubmission.perform(permit: permit, changes: changes, submit: submit)
     }
 }
 

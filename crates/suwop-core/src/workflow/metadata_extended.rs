@@ -5,6 +5,8 @@ use crate::{
     metadata::{MetadataEdit, MetadataOutcome, MetadataRecord, MetadataValues, MetadataWitness},
 };
 
+#[path = "metadata_apple.rs"]
+mod apple;
 #[path = "metadata_settle.rs"]
 mod settle;
 
@@ -23,30 +25,7 @@ impl Runtime<'_> {
                 },
             )
             .await?;
-            if assets.len() != keys.len() {
-                return Err("保存先の全項目を確認できません。".into());
-            }
-            for asset in assets {
-                if !keys.contains(&asset.key)
-                    || result
-                        .iter()
-                        .any(|w: &MetadataWitness| w.asset.key == asset.key)
-                {
-                    return Err("異なる項目が返りました。".into());
-                }
-                let previous = self
-                    .state
-                    .metadata_operations
-                    .iter()
-                    .rev()
-                    .filter(|record| record.outcome == MetadataOutcome::VerifiedApplied)
-                    .flat_map(|record| &record.after)
-                    .find(|w| w.asset.key == asset.key);
-                let description =
-                    previous.map_or_else(String::new, |w| w.values.description.clone());
-                let time_zone = previous.and_then(|w| w.values.time_zone.clone());
-                result.push(witness(asset, description, time_zone));
-            }
+            result = self.apple_metadata_witnesses(keys, assets)?;
         } else {
             let session = self.session.as_ref().ok_or("Immichに接続してください。")?;
             for key in keys {
@@ -157,10 +136,15 @@ impl Runtime<'_> {
         let edit = record.edit.clone();
         let mut after = if provider == Provider::Immich {
             settle::after_write(self, keys, expected, member_edits).await?
-        } else {
+        } else if matches!(member_edits.first(), Some(MetadataEdit::Description { .. })) {
             let after = self.metadata_witnesses(keys).await?;
             same_witnesses(&expected, &after)?;
             after
+        } else {
+            // The one native transaction already freshly read every selected
+            // member after its real callback. A PhotoObserver notification may
+            // invalidate the old presentation epoch, never these owned facts.
+            expected
         };
         if provider == Provider::Apple {
             for item in &mut after {
@@ -343,6 +327,13 @@ impl Runtime<'_> {
         current: Vec<MetadataWitness>,
         submitted: &mut bool,
     ) -> Result<Vec<MetadataWitness>, String> {
+        if provider == Provider::Apple
+            && !matches!(member_edits.first(), Some(MetadataEdit::Description { .. }))
+        {
+            return self
+                .apply_apple_metadata_batch(keys, member_edits, current, submitted)
+                .await;
+        }
         let mut expected = current;
         for (key, member) in keys.iter().zip(member_edits) {
             self.check_keys(keys)?;
@@ -358,28 +349,14 @@ impl Runtime<'_> {
                         .await?;
                 }
             } else if let Some(change) = member.change()? {
-                if provider == Provider::Apple {
-                    let before = expected
-                        .iter()
-                        .filter(|item| item.asset.key == *key)
-                        .map(|item| item.asset.clone())
-                        .collect();
-                    *submitted = true;
-                    let _: Vec<StoredAsset> = io(
-                        self.ctx,
-                        ShellOperation::AppleMetadataVerified { before, change },
-                    )
+                let registry = self.registry();
+                let writer = registry
+                    .metadata(provider)
+                    .ok_or("変更経路がありません。")?;
+                *submitted = true;
+                writer
+                    .change_metadata(self.read_io(), std::slice::from_ref(key), &change)
                     .await?;
-                } else {
-                    let registry = self.registry();
-                    let writer = registry
-                        .metadata(provider)
-                        .ok_or("変更経路がありません。")?;
-                    *submitted = true;
-                    writer
-                        .change_metadata(self.read_io(), std::slice::from_ref(key), &change)
-                        .await?;
-                }
             }
             let observed = self.metadata_witnesses(keys).await?;
             let prior = expected

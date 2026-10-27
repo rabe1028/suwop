@@ -84,6 +84,9 @@ fn failed_prepared_or_submitting_save_never_calls_provider_and_restores_memory()
                             response.error = Some("disk unavailable".into());
                         }
                     }
+                    ShellOperation::ReleaseImportStaging { .. } => {
+                        assert_eq!(fail_at, 2);
+                    }
                     ShellOperation::AppleImportStaged { .. }
                     | ShellOperation::ImportHttp { .. } => submissions += 1,
                     _ => return Err("unexpected native effect".into()),
@@ -101,7 +104,7 @@ fn failed_prepared_or_submitting_save_never_calls_provider_and_restores_memory()
         if fail_at == 1 {
             assert!(records.is_empty());
         } else {
-            assert_eq!(records[0].phase, ImportPhase::Prepared);
+            assert_eq!(records[0].phase, ImportPhase::Cancelled);
         }
     }
     Ok(())
@@ -293,3 +296,5 @@ fn verified_import_publishes_fresh_destination_with_its_journal_and_rolls_back_b
     }
     Ok(())
 }
+
+mod lifecycle;

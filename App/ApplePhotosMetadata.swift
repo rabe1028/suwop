@@ -39,6 +39,7 @@ extension ApplePhotosStore {
                         }
                     }
                 }
+                try Self.validateMetadataChange(change)
                 try Self.applyMetadata(change, to: assets)
                 return .success(())
             } catch { return .failure(error) }
@@ -49,7 +50,21 @@ extension ApplePhotosStore {
         return try keys.map { try Self.describe(Self.fetch($0.assetID), scope: scope, fullAccess: true) }
     }
 
-    private nonisolated static func applyMetadata(_ change: MetadataChange, to assets: [PHAsset]) throws {
+    nonisolated static func validateMetadataChange(_ change: MetadataChange) throws {
+        switch change.action {
+        case .setCapturedAt:
+            guard let date = change.capturedAt, date.timeIntervalSince1970.isFinite else {
+                throw SuwopError("変更する日時が不正です。")
+            }
+        case .setLocation:
+            guard let point = change.location, point.latitude.isFinite, point.longitude.isFinite,
+                  (-90 ... 90).contains(point.latitude), (-180 ... 180).contains(point.longitude)
+            else { throw SuwopError("変更する座標が不正です。") }
+        case .removeLocation: break
+        }
+    }
+
+    nonisolated static func applyMetadata(_ change: MetadataChange, to assets: [PHAsset]) throws {
         switch change.action {
         case .setCapturedAt:
             guard let date = change.capturedAt else { throw SuwopError("変更する日時がありません。") }

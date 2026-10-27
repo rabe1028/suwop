@@ -40,7 +40,12 @@ final class ImmichVisibilityRosterUITests: XCTestCase {
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         menu.tap()
-        app.buttons["immichLockedPhotosHistory"].tap()
+        let history = app.buttons["immichLockedPhotosHistory"]
+        guard WriteMenuScrollGesture.revealGalleryItem(history, in: app), history.isEnabled, history.isHittable else {
+            XCTFail("Locked Photos entry must be enabled and fully visible in the native menu viewport")
+            return
+        }
+        history.tap()
         authenticate(app)
         let preview = app.buttons["immichLockedPreview-\(sourceID)"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))

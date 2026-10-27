@@ -8,6 +8,7 @@ import UIKit
     @State private var fixture: PrivateLiveManagerFixture?
     @State private var failed = false
     @StateObject private var evidence = PrivateLiveUIEvidence()
+    @StateObject private var inspection = PrivateLiveInspectionUIEvidence()
     @Environment(\.scenePhase) private var phase
     private let sceneID = ImmichLockedFixtureData.sceneID
     private var large: Bool {
@@ -38,7 +39,12 @@ import UIKit
                             .accessibilityIdentifier("privateLiveUIMotion")
                             .accessibilityValue(evidence.snapshot.accessibilityValue)
                     }.font(.system(size: 8))
-                }.task { await evidence.observe(sceneID: sceneID) }
+                    if CommandLine.arguments.contains("--hold-live-inspect") {
+                        PrivateLiveInspectionUIControls(evidence: inspection)
+                    }
+                }
+                .task { await evidence.observe(sceneID: sceneID) }
+                .task { await inspection.observe(model.immichLocked) }
             } else if failed {
                 Text("Private Live fixture unavailable").accessibilityIdentifier("privateLiveUIFailure")
             } else {
@@ -52,6 +58,7 @@ import UIKit
             fixture?.model?.immichLocked.sceneChanged(sceneID: sceneID, phase: native)
         }
         .onDisappear {
+            inspection.release()
             guard let fixture else { return }
             fixture.shell.immichLockedLiveAccess.invalidate()
             Task { try? await fixture.close() }
@@ -68,18 +75,9 @@ import UIKit
                     created.server.additionalRecords[created.motionID] = .object(record)
                 }
                 if CommandLine.arguments.contains("--hold-live-inspect") {
-                    created.before = { operation in
-                        guard operation.type == "http", model.immichLocked.liveSelection.pending else { return }
-                        // Delivery delay only. Cancellation cannot turn the eventual real reply into a new action.
-                        await withCheckedContinuation { continuation in
-                            Task { @MainActor in
-                                let deadline = ContinuousClock.now.advanced(by: .seconds(10))
-                                while model.immichLocked.liveSelection.pending, ContinuousClock.now < deadline {
-                                    try? await Task.sleep(for: .milliseconds(10))
-                                }
-                                continuation.resume()
-                            }
-                        }
+                    created.after = { operation, _ in
+                        // Hold an actual first HTTP response before Rust receives it, never synthesize a reply.
+                        await inspection.holdFirstReply(operation, session: model.immichLocked)
                     }
                 }
                 fixture = created

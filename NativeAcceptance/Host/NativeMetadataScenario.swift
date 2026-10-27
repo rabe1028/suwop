@@ -34,7 +34,7 @@ import SuwopShell
             "refresh",
             ["permission": .bool(false), "now": .number(Date().timeIntervalSince1970)]
         )
-        guard !driver.effects.contains("appleMetadataVerified")
+        guard !driver.effects.contains(where: { ["appleMetadataVerified", "appleMetadataBatchVerified"].contains($0) })
         else { throw SuwopError("Restart replayed a metadata write.") }
         switch phase {
         case "metadata-save": try await save(driver, evidence: &evidence)
@@ -128,7 +128,8 @@ import SuwopShell
         let view = try await driver.runtimeView()
         try verifyJournal(view, evidence: evidence, count: 8)
         try verifyDescription(view, evidence: evidence, expected: localDescription)
-        let writes = driver.effects.filter { $0 == "appleMetadataVerified" }.count
+        let writes = driver.effects.filter { ["appleMetadataVerified", "appleMetadataBatchVerified"].contains($0) }
+            .count
         evidence.ids["descriptionUndo"] = try await undo(
             driver,
             evidence: evidence,
@@ -155,7 +156,9 @@ import SuwopShell
             original: true
         )
         try await verifyDescription(driver.runtimeView(), evidence: evidence, expected: "")
-        guard driver.effects.filter({ $0 == "appleMetadataVerified" }).count == writes else {
+        guard driver.effects.filter({ ["appleMetadataVerified", "appleMetadataBatchVerified"].contains($0) })
+            .count == writes
+        else {
             throw SuwopError("Apple local description unexpectedly issued a native metadata write.")
         }
         try await verifyNative(evidence, date: firstDate, latitude: 35.681, longitude: 139.767)
@@ -187,10 +190,12 @@ import SuwopShell
         _ driver: AcceptanceDriver, evidence: inout Evidence, name: String, text: String
     ) async throws {
         let before = try ApplePhotosStore.fetch(evidence.key.assetID).modificationDate
-        let writes = driver.effects.filter { $0 == "appleMetadataVerified" }.count
+        let writes = driver.effects.filter { ["appleMetadataVerified", "appleMetadataBatchVerified"].contains($0) }
+            .count
         evidence.ids[name] = try await edit(driver, key: evidence.key, value: .description(.init(text: text)))
         guard try ApplePhotosStore.fetch(evidence.key.assetID).modificationDate == before,
-              driver.effects.filter({ $0 == "appleMetadataVerified" }).count == writes
+              driver.effects.filter({ ["appleMetadataVerified", "appleMetadataBatchVerified"].contains($0) })
+              .count == writes
         else {
             throw SuwopError("Local description changed the PhotoKit asset instead of only this app's journal.")
         }
@@ -248,6 +253,11 @@ import SuwopShell
 
     private static func fence(_ operation: ShellOperation, key: AssetKey) throws {
         let data = operation.data ?? .null
+        if operation.type == "appleMetadataBatchVerified" {
+            guard try data["members"].decode([AppleMetadataMember].self).map(\.before.key) == [key] else {
+                throw SuwopError("Refusing metadata batch outside the dedicated generated fixture.")
+            }
+        }
         if operation.type == "appleMetadataVerified" {
             guard try data["before"].decode([StoredAsset].self).map(\.key) == [key] else {
                 throw SuwopError("Refusing metadata write outside the dedicated generated fixture.")

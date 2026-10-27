@@ -795,7 +795,10 @@ impl DurableMetadataNative {
                 }
                 serde_json::to_value(vec![self.current.clone()]).map_err(|error| error.to_string())
             }
-            ShellOperation::AppleMetadataVerified { before, change } => {
+            ShellOperation::AppleMetadataBatchVerified { members } => {
+                assert_eq!(members.len(), 1);
+                let before = [members[0].before.clone()];
+                let change = &members[0].change;
                 assert!(self.disk.as_ref().is_some_and(|state| {
                     state.metadata_operations.last().is_some_and(|record| {
                         record.outcome == suwop_core::metadata::MetadataOutcome::SubmittedUnknown
@@ -1069,14 +1072,16 @@ fn metadata_undo_restores_distinct_member_values_without_flattening() -> Result<
                         .collect::<Vec<_>>(),
                 )
                 .map_err(|error| error.to_string())?,
-                ShellOperation::AppleMetadataVerified { before, change } => {
+                ShellOperation::AppleMetadataBatchVerified { members } => {
                     assert!(disk.as_ref().is_some_and(|state| {
                         state.metadata_operations.last().is_some_and(|record| {
                             record.outcome
                                 == suwop_core::metadata::MetadataOutcome::SubmittedUnknown
                         })
                     }));
-                    for item in before {
+                    for member in members {
+                        let item = &member.before;
+                        let change = &member.change;
                         let record = records
                             .iter_mut()
                             .find(|record| record.key == item.key)
@@ -1089,7 +1094,9 @@ fn metadata_undo_restores_distinct_member_values_without_flattening() -> Result<
                     serde_json::to_value(
                         records
                             .iter()
-                            .filter(|record| before.iter().any(|item| item.key == record.key))
+                            .filter(|record| {
+                                members.iter().any(|item| item.before.key == record.key)
+                            })
                             .cloned()
                             .collect::<Vec<_>>(),
                     )
@@ -1177,7 +1184,7 @@ fn metadata_proven_preflight_denial_is_not_applied_only_after_durable_save() -> 
 fn first_postwrite_metadata_observation_never_adopts_resource_or_membership_drift()
 -> Result<(), String> {
     use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
-    let cases: [fn(&mut StoredAsset); 5] = [
+    let cases: [fn(&mut StoredAsset); 7] = [
         |asset| asset.resources[0].sha1 = None,
         |asset| asset.resources[0].bytes = None,
         |asset| {
@@ -1189,6 +1196,8 @@ fn first_postwrite_metadata_observation_never_adopts_resource_or_membership_drif
         },
         |asset| asset.inventory_complete = false,
         |asset| asset.deletion_blockers.push("new blocker".into()),
+        |asset| asset.apple_visibility = suwop_core::domain::AppleVisibility::Hidden,
+        |asset| asset.resources[0].sha1 = Some("0".repeat(40)),
     ];
     for drift in cases {
         let core = core(Provider::Apple, ScanAccess::Full);
@@ -1330,4 +1339,79 @@ fn distinct_date_fixture() -> Result<(SavedLibrary, [StoredAsset; 2]), String> {
     state.snapshots[0].assets = vec![first.clone(), second.clone()];
     state.metadata_operations = vec![known_date_baseline(&state.snapshots[0].assets)?];
     Ok((state, [first, second]))
+}
+
+#[test]
+fn apple_observer_after_atomic_submission_keeps_owned_readback_but_retires_catalog()
+-> Result<(), String> {
+    use suwop_core::metadata::{MetadataEdit, MetadataOutcome};
+    for count in [1, 2] {
+        let (mut state, records) = distinct_date_fixture()?;
+        let mut records = records.into_iter().take(count).collect::<Vec<_>>();
+        state.snapshots[0].assets = records.clone();
+        let keys = records.iter().map(|a| a.key.clone()).collect::<Vec<_>>();
+        let core = Core::new_with(
+            Suwop,
+            Model {
+                ready: true,
+                state,
+                ..Model::default()
+            },
+        );
+        let mut disk: Option<SavedLibrary> = None;
+        let mut batches = 0;
+        let mut requests = core.process_event(Event::EditMetadata {
+            keys: keys.clone(),
+            edit: MetadataEdit::CapturedAt {
+                local: "2024-01-01T00:00:00".into(),
+                zone: "UTC".into(),
+                occurrence: None,
+            },
+            id: "11112222-3333-4444-8555-666677778888".into(),
+        });
+        while !requests.is_empty() {
+            let Effect::Io(mut request) = requests.remove(0);
+            let value = match &request.operation {
+                ShellOperation::AppleMetadataObserve { .. } if batches == 0 => serde_json::to_value(&records).map_err(|e| e.to_string())?,
+                ShellOperation::AppleMetadataBatchVerified { members } => {
+                    assert_eq!(members.len(), count);
+                    assert_eq!(disk.as_ref().and_then(|s| s.metadata_operations.last()).map(|r| r.outcome), Some(MetadataOutcome::SubmittedUnknown));
+                    for member in members {
+                        let asset = records.iter_mut().find(|a| a.key == member.before.key).ok_or("missing member")?;
+                        assert_eq!(asset.revision, member.before.revision);
+                        asset.captured_at = member.change.captured_at;
+                        asset.revision = "native-committed".into();
+                    }
+                    batches += 1;
+                    // This is the actual Core event sent by LibraryModel's
+                    // PhotoObserver callback before the native result arrives.
+                    assert!(core.process_event(Event::AppleChanged).is_empty());
+                    serde_json::to_value(&records).map_err(|e| e.to_string())?
+                }
+                ShellOperation::Persist(state) => { disk = Some(state.clone()); Value::Null }
+                _ => return Err("observer must not trigger a stale-context post-write observation or extra write".into()),
+            };
+            requests.extend(
+                core.resolve(
+                    &mut request,
+                    ShellResponse {
+                        value: Some(value),
+                        error: None,
+                    },
+                )
+                .map_err(|e| e.to_string())?,
+            );
+        }
+        assert_eq!(batches, 1);
+        assert!(core.view().error.is_none(), "{:?}", core.view().error);
+        let saved = disk.ok_or("missing durable readback")?;
+        let record = saved.metadata_operations.last().ok_or("missing record")?;
+        assert_eq!(record.outcome, MetadataOutcome::VerifiedApplied);
+        assert_eq!(record.after.len(), count);
+        assert!(
+            core.view().ordinary_content_keys.is_empty(),
+            "the old catalog must remain invalidated after observer ordering"
+        );
+    }
+    Ok(())
 }

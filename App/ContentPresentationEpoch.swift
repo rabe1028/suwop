@@ -50,6 +50,12 @@ import SuwopShell
         return epoch.matches(value)
     }
 
+    /// Completion facts from an already submitted native transaction may outlive
+    /// ordinary catalog invalidation, but never protection/scene revocation.
+    func requireProtectionCurrent() throws {
+        guard epoch.matchesProtection(protectionValue) else { throw CancellationError() }
+    }
+
     func requireCurrent(sourceKeys: [AssetKey]? = nil) throws {
         guard permits(sourceKeys: sourceKeys) else { throw CancellationError() }
     }

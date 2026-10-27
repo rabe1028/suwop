@@ -111,22 +111,27 @@ import SwiftUI
         }
         configureImageCaches()
         observer = PhotoObserver { [weak self] assetsChanged in
-            guard assetsChanged else {
-                if self?.albumsRequested == true {
-                    self?.refreshAlbums()
-                }
-                return
-            }
-            if self?.protection.ownerSceneID != nil {
-                self?.protection.close()
-            }
-            self?.shell?.invalidateContentPresentations()
-            self?.invalidateThumbnails()
-            self?.notifyPhotoChange()
+            self?.photoLibraryChanged(assetsChanged: assetsChanged)
         }
         if let observer {
             PHPhotoLibrary.shared().register(observer)
         }
+    }
+
+    /// The production PhotoObserver callback path, shared with ordering regressions.
+    func photoLibraryChanged(assetsChanged: Bool) {
+        guard assetsChanged else {
+            if albumsRequested {
+                refreshAlbums()
+            }
+            return
+        }
+        if protection.ownerSceneID != nil {
+            protection.close()
+        }
+        shell?.invalidateContentPresentations()
+        invalidateThumbnails()
+        notifyPhotoChange()
     }
 
     var editClipboard: EditClipboard? {

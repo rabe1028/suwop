@@ -110,17 +110,19 @@ import SwiftUI
             try context.requireCurrent(sourceKeys: keys)
             _ = try await shell.ordinaryContent.validate(keys: keys, context: context)
             return try .from([asset])
-        case "appleMetadataVerified":
+        case "appleMetadataBatchVerified":
             guard let data = operation.data else { throw CancellationError() }
-            let before = try data["before"].decode([StoredAsset].self)
-            guard before.count == 1, before[0].revision == asset.revision else { throw CancellationError() }
+            let members = try data["members"].decode([AppleMetadataMember].self)
+            guard members.count == 1, let member = members.first,
+                  member.before.key == asset.key, member.before.revision == asset.revision
+            else { throw CancellationError() }
             try context.requireCurrent(sourceKeys: [asset.key])
             _ = try await shell.ordinaryContent.validate(keys: [asset.key], context: context)
             let disk = try await shell.localStore.readVersioned()["state"].decode(SavedLibrary.self)
             guard disk.metadataOperations.last?.outcome == .submittedUnknown else {
                 throw SuwopError("Native mutation did not have durable intent")
             }
-            let change = try data["change"].decode(MetadataChange.self)
+            let change = member.change
             switch change.action {
             case .setCapturedAt: asset.capturedAt = change.capturedAt
             case .setLocation, .removeLocation:

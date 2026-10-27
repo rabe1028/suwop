@@ -80,6 +80,7 @@ struct Protocol {
     playback: suwop_core::media::PlaybackPlan,
     metadata_input: suwop_core::metadata::MetadataInput,
     metadata_change: suwop_core::metadata::MetadataChange,
+    apple_metadata_member: suwop_core::metadata::AppleMetadataMember,
     edit_draft_request: suwop_core::editing::EditDraftRequest,
     image_edit_state: suwop_core::editing::ImageEditState,
     editing_source_check: suwop_core::editing::EditingSourceCheck,
