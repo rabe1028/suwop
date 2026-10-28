@@ -838,6 +838,15 @@ public enum Direction: String, Codable, CaseIterable, Sendable {
     case `reposition`
 }
 
+public struct DuplicateGroup: Codable, Sendable {
+    public var id: String
+    public var members: [OrganizationMember]
+    public init(id: String, members: [OrganizationMember] = []) {
+        self.id = id
+        self.members = members
+    }
+}
+
 public struct Edge: Codable, Sendable {
     public var id: String
     public var motionResource: String
@@ -1028,6 +1037,15 @@ public enum Forward: Codable, Sendable {
             try values.encode("linked", forKey: .type)
             try values.encode(data, forKey: .data)
         }
+    }
+}
+
+public struct GallerySelection: Codable, Sendable {
+    public var keys: [AssetKey]
+    public var photoIDs: [String]
+    public init(keys: [AssetKey] = [], photoIDs: [String] = []) {
+        self.keys = keys
+        self.photoIDs = photoIDs
     }
 }
 
@@ -2816,6 +2834,81 @@ public enum OrdinarySelectedVisibility: String, Codable, CaseIterable, Sendable 
     case `archive`
 }
 
+public struct OrganizationDate: Codable, Sendable {
+    public var day: Int64
+    public var month: Int64
+    public var timeZone: String
+    public var year: Int64
+    public init(day: Int64, month: Int64, timeZone: String, year: Int64) {
+        self.day = day
+        self.month = month
+        self.timeZone = timeZone
+        self.year = year
+    }
+}
+
+public struct OrganizationMember: Codable, Sendable {
+    public var key: AssetKey
+    public var name: String
+    public var revision: String
+    public init(key: AssetKey, name: String, revision: String) {
+        self.key = key
+        self.name = name
+        self.revision = revision
+    }
+}
+
+public struct OrganizationPeopleView: Codable, Sendable {
+    public var error: String?
+    public var groups: [OrganizationPersonGroup]
+    public var loaded: Bool
+    public var loading: Bool
+    public var partialCoverage: Bool
+    public var truncated: Bool
+    public init(error: String? = nil, groups: [OrganizationPersonGroup] = [], loaded: Bool, loading: Bool, partialCoverage: Bool, truncated: Bool) {
+        self.error = error
+        self.groups = groups
+        self.loaded = loaded
+        self.loading = loading
+        self.partialCoverage = partialCoverage
+        self.truncated = truncated
+    }
+}
+
+public struct OrganizationPersonGroup: Codable, Sendable {
+    public var id: String
+    public var members: [OrganizationMember]
+    public var name: String
+    public var personID: String
+    public var scope: String
+    public init(id: String, members: [OrganizationMember] = [], name: String, personID: String, scope: String) {
+        self.id = id
+        self.members = members
+        self.name = name
+        self.personID = personID
+        self.scope = scope
+    }
+}
+
+public struct OrganizationView: Codable, Sendable {
+    public var duplicates: [DuplicateGroup]
+    public var error: String?
+    public var people: OrganizationPeopleView
+    public var places: [PlaceGroup]
+    public var recollections: [RecollectionGroup]
+    public var referenceDate: OrganizationDate?
+    public var truncated: Bool
+    public init(duplicates: [DuplicateGroup] = [], error: String? = nil, people: OrganizationPeopleView, places: [PlaceGroup] = [], recollections: [RecollectionGroup] = [], referenceDate: OrganizationDate? = nil, truncated: Bool) {
+        self.duplicates = duplicates
+        self.error = error
+        self.people = people
+        self.places = places
+        self.recollections = recollections
+        self.referenceDate = referenceDate
+        self.truncated = truncated
+    }
+}
+
 public struct OutcomeUnknownData: Codable, Sendable {
     public var accepted: Accepted204?
     public var attempt_id: String
@@ -3096,6 +3189,19 @@ public struct PixelSize: Codable, Sendable {
     public init(height: Int64, width: Int64) {
         self.height = height
         self.width = width
+    }
+}
+
+public struct PlaceGroup: Codable, Sendable {
+    public var id: String
+    public var latitude: Double
+    public var longitude: Double
+    public var members: [OrganizationMember]
+    public init(id: String, latitude: Double, longitude: Double, members: [OrganizationMember] = []) {
+        self.id = id
+        self.latitude = latitude
+        self.longitude = longitude
+        self.members = members
     }
 }
 
@@ -3390,6 +3496,15 @@ public struct PublishedLibrary: Codable, Sendable {
     }
 }
 
+public struct RecollectionGroup: Codable, Sendable {
+    public var members: [OrganizationMember]
+    public var year: Int64
+    public init(members: [OrganizationMember] = [], year: Int64) {
+        self.members = members
+        self.year = year
+    }
+}
+
 public enum RenderFormat: String, Codable, CaseIterable, Sendable {
     case `jpeg`
     case `heic`
@@ -3663,7 +3778,8 @@ public struct StoredAsset: Codable, Sendable {
     public var immichStack: ImmichStackState
     public var immichStackMembership: ImmichStackMembership?
     public var immichVisibility: ImmichVisibility?
-    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichStackMembership: ImmichStackMembership? = nil, immichVisibility: ImmichVisibility? = nil) {
+    public var immichParentRevision: String?
+    public init(appleVisibility: AppleVisibility = .unknown, key: AssetKey, name: String, capturedAt: Date? = nil, modifiedAt: Date? = nil, revision: String, resources: [PhotoResource] = [], isFavorite: Bool = false, latitude: Double? = nil, longitude: Double? = nil, inventoryComplete: Bool = true, isOffline: Bool = false, deletionBlockers: [String] = [], immichStack: ImmichStackState = .unknown, immichStackMembership: ImmichStackMembership? = nil, immichVisibility: ImmichVisibility? = nil, immichParentRevision: String? = nil) {
         self.appleVisibility = appleVisibility
         self.key = key
         self.name = name
@@ -3680,6 +3796,7 @@ public struct StoredAsset: Codable, Sendable {
         self.immichStack = immichStack
         self.immichStackMembership = immichStackMembership
         self.immichVisibility = immichVisibility
+        self.immichParentRevision = immichParentRevision
     }
 }
 
@@ -3940,6 +4057,7 @@ public struct ViewModel: Codable, Sendable {
     public var editingTargets: [String: [EditingTarget]]
     public var error: String?
     public var externalImports: [ImportJournal]
+    public var gallerySelection: GallerySelection
     public var immichArchiveActions: [ImmichArchiveActionHint]
     public var immichArchiveView: ImmichArchiveView
     public var immichLiveResources: ImmichLiveResourcesView?
@@ -3967,6 +4085,7 @@ public struct ViewModel: Codable, Sendable {
     public var ordinarySelectedImages: [OrdinarySelectedImageAccess]
     public var ordinarySelectedPending: [OrdinarySelectedImageRequest]
     public var ordinarySelectedPresentation: [OrdinarySelectedPresentation]
+    public var organization: OrganizationView
     public var pendingAppleCount: Int64
     public var photos: [UnifiedPhoto]
     public var previewChoices: [String: [PreviewChoice]]
@@ -3978,7 +4097,7 @@ public struct ViewModel: Codable, Sendable {
     public var serverVersion: String?
     public var state: PublishedLibrary
     public var status: String
-    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, externalImports: [ImportJournal] = [], immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, importNotices: [ImportNotice] = [], liveKeepPrompt: LiveKeepPrompt? = nil, livePlacementCandidates: [AssetKey] = [], livePlacementCleanup: LivePlacementCleanup? = nil, livePlacementHistory: LivePlacementHistory, livePlacementPrompt: LivePlacementPrompt? = nil, media: [String: PlaybackKind] = [:], metadataOperations: [MetadataRecord] = [], metadataRestoreAvailability: [MetadataRestoreAvailability] = [], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinaryLiveActions: [OrdinaryLivePairAction] = [], ordinaryLiveImagePending: [PairImagePending] = [], ordinaryLiveImages: [PairImageAccess] = [], ordinaryLivePairs: [PairPresentation] = [], ordinaryLiveProgress: OrdinaryLiveReadProgress? = nil, ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
+    public init(albums: [AlbumView] = [], appleVisibilityHideKeys: [AssetKey] = [], browser: BrowserView, busy: Bool, canTransfer: Bool, editingTargets: [String: [EditingTarget]] = [:], error: String? = nil, externalImports: [ImportJournal] = [], gallerySelection: GallerySelection, immichArchiveActions: [ImmichArchiveActionHint] = [], immichArchiveView: ImmichArchiveView, immichLiveResources: ImmichLiveResourcesView? = nil, immichLockedView: ImmichLockedView, immichVisibilityActions: [ImmichVisibilityActionHint] = [], immichVisibilityView: ImmichVisibilityView, importNotices: [ImportNotice] = [], liveKeepPrompt: LiveKeepPrompt? = nil, livePlacementCandidates: [AssetKey] = [], livePlacementCleanup: LivePlacementCleanup? = nil, livePlacementHistory: LivePlacementHistory, livePlacementPrompt: LivePlacementPrompt? = nil, media: [String: PlaybackKind] = [:], metadataOperations: [MetadataRecord] = [], metadataRestoreAvailability: [MetadataRestoreAvailability] = [], metadataTargets: [String: [MetadataTarget]] = [:], moveBlockers: [String: [String]] = [:], ordinaryContentKeys: [AssetKey] = [], ordinaryLiveActions: [OrdinaryLivePairAction] = [], ordinaryLiveImagePending: [PairImagePending] = [], ordinaryLiveImages: [PairImageAccess] = [], ordinaryLivePairs: [PairPresentation] = [], ordinaryLiveProgress: OrdinaryLiveReadProgress? = nil, ordinarySelectedGeneration: Int64, ordinarySelectedImages: [OrdinarySelectedImageAccess] = [], ordinarySelectedPending: [OrdinarySelectedImageRequest] = [], ordinarySelectedPresentation: [OrdinarySelectedPresentation] = [], organization: OrganizationView, pendingAppleCount: Int64, photos: [UnifiedPhoto] = [], previewChoices: [String: [PreviewChoice]] = [:], previewSources: [String: AssetKey] = [:], privateContentRevision: String, privateMediaCleanup: [PrivateMediaCleanupView] = [], protectedView: ProtectedView, remoteVersion: Version? = nil, serverVersion: String? = nil, state: PublishedLibrary, status: String) {
         self.albums = albums
         self.appleVisibilityHideKeys = appleVisibilityHideKeys
         self.browser = browser
@@ -3987,6 +4106,7 @@ public struct ViewModel: Codable, Sendable {
         self.editingTargets = editingTargets
         self.error = error
         self.externalImports = externalImports
+        self.gallerySelection = gallerySelection
         self.immichArchiveActions = immichArchiveActions
         self.immichArchiveView = immichArchiveView
         self.immichLiveResources = immichLiveResources
@@ -4014,6 +4134,7 @@ public struct ViewModel: Codable, Sendable {
         self.ordinarySelectedImages = ordinarySelectedImages
         self.ordinarySelectedPending = ordinarySelectedPending
         self.ordinarySelectedPresentation = ordinarySelectedPresentation
+        self.organization = organization
         self.pendingAppleCount = pendingAppleCount
         self.photos = photos
         self.previewChoices = previewChoices

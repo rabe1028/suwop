@@ -21,6 +21,7 @@ const ENTRY: &str = "44444444-4444-4444-8444-444444444444";
 
 fn asset(provider: Provider, id: &str) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

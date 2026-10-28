@@ -46,7 +46,10 @@ import XCTest
     }
 
     static func model(
-        populated: Bool = true, editClipboard: EditClipboard? = nil, pendingEditPastes: [PendingEditPaste] = []
+        populated: Bool = true,
+        selectedPhotoIDs: [String] = [],
+        editClipboard: EditClipboard? = nil,
+        pendingEditPastes: [PendingEditPaste] = []
     ) throws -> LibraryModel {
         let assets = populated ? assets() : []
         let album = StoredAlbum(
@@ -83,6 +86,14 @@ import XCTest
         ).first)
         XCTAssertEqual(saved.effect["Io"]?.type, "persist")
         XCTAssertTrue(try resolve(bridge, request: saved, value: .null).isEmpty)
+        if !selectedPhotoIDs.isEmpty {
+            let effects = try bridge.call(0, input: .object([
+                "type": .string("selectGalleryPhotos"),
+                "photoIDs": .array(selectedPhotoIDs.map(JSONValue.string)),
+                "selected": .bool(true),
+            ])).decode([EffectRequest].self)
+            XCTAssertTrue(effects.isEmpty)
+        }
         let view = try bridge.call(2).decode(ViewModel.self)
         XCTAssertNil(view.error)
         XCTAssertEqual(view.photos.count, assets.count)

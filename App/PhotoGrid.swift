@@ -48,7 +48,6 @@ struct PhotoGrid: View {
     let timeline: TimelineGrouping
     let sort: PhotoSort
     @Binding var selecting: Bool
-    @Binding var selectedKeys: Set<AssetKey>
     let open: (AssetKey) -> Void
 
     private var sections: [PhotoSection] {
@@ -114,12 +113,7 @@ struct PhotoGrid: View {
     private func tile(_ photo: UnifiedPhoto) -> some View {
         Button {
             if selecting {
-                let keys = Set(model.operationKeys(photo))
-                if !selectedKeys.isDisjoint(with: keys) {
-                    selectedKeys.subtract(keys)
-                } else {
-                    selectedKeys.formUnion(keys)
-                }
+                model.toggleGalleryPhoto(photo.id)
             } else if let key = photo.assets.first?.key {
                 open(key)
             }
@@ -127,7 +121,7 @@ struct PhotoGrid: View {
             PhotoTile(
                 photo: photo,
                 model: model,
-                selected: !selectedKeys.isDisjoint(with: photo.assets.map(\.key)),
+                selected: model.isGallerySelected(photo),
                 selecting: selecting
             )
             .accessibilityElement(children: .ignore)
@@ -137,20 +131,20 @@ struct PhotoGrid: View {
                 "\(photo.name)、\(photo.presence.title)\(photo.rawFormatTitle.map { "、" + $0 } ?? "")\(photo.isFavorite ? "、お気に入り" : "")"
             )
             .accessibilityIdentifier("photo-\(photo.assets.first?.key.assetID ?? photo.id)")
-            .accessibilityAddTraits(!selectedKeys.isDisjoint(with: photo.assets.map(\.key)) ? .isSelected : [])
+            .accessibilityAddTraits(model.isGallerySelected(photo) ? .isSelected : [])
             .disabled(selecting && model.operationKeys(photo).isEmpty)
             .accessibilityActions {
                 if !model.operationKeys(photo).isEmpty {
                     Button("写真を選択") {
                         selecting = true
-                        selectedKeys.formUnion(model.operationKeys(photo))
+                        model.selectGalleryPhotos([photo.id], selected: true)
                     }
                 }
             }
             .contextMenu {
                 Button("写真を選択", systemImage: "checkmark.circle") {
                     selecting = true
-                    selectedKeys.formUnion(model.operationKeys(photo))
+                    model.selectGalleryPhotos([photo.id], selected: true)
                 }.disabled(model.operationKeys(photo).isEmpty)
                 Button(
                     photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加",

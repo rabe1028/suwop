@@ -750,6 +750,7 @@ async fn exercise_metadata(ctx: &Context, session: &Session, ids: &[String]) -> 
         assert_eq!(asset.is_favorite, before.is_favorite);
         assert_eq!(asset.is_trashed, before.is_trashed);
     }
+    Box::pin(organization_people::exercise(ctx, session, ids)).await?;
     Box::pin(metadata_extended::exercise(ctx, session, &ids[0])).await?;
     Ok(())
 }
@@ -851,6 +852,7 @@ async fn upload_sidecar(
 
 fn fixture_metadata(resource: PhotoResource, index: usize, now: f64) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,
@@ -1296,3 +1298,6 @@ mod metadata_extended;
 
 #[path = "immich_live/external_import.rs"]
 mod external_import;
+
+#[path = "immich_live/organization_people.rs"]
+mod organization_people;

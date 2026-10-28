@@ -21,6 +21,7 @@ fn signature() -> FileSignature {
 
 fn asset(provider: Provider, scope: &str, id: &str) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: ImmichStackState::Unknown,
         immich_stack_membership: None,

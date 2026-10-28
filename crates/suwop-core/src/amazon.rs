@@ -204,6 +204,7 @@ impl Node {
             longitude:self.image_properties["location"]["longitude"].as_f64(),
             inventory_complete:true,is_offline:false,
             deletion_blockers:vec!["Amazon Photos は原本のコピーに対応します。移動による元の削除には対応していません。".into()],
+            immich_parent_revision: None,
             immich_visibility:None,immich_stack:ImmichStackState::Unknown,
             immich_stack_membership:None,apple_visibility:AppleVisibility::Unknown,
         }

@@ -28,6 +28,7 @@ ORDER = {
         "immichStack",
         "immichStackMembership",
         "immichVisibility",
+        "immichParentRevision",
     ],
     "LibrarySnapshot": ["provider", "scope", "assets", "access", "scannedAt"],
     "TransferFile": ["resource", "path", "signature"],

@@ -13,6 +13,7 @@ use suwop_core::{
 
 fn asset(provider: Provider, visibility: AppleVisibility) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,
@@ -681,4 +682,32 @@ fn compact_content_authority_matches_gallery_and_reads_fresh_generation() {
             );
         }
     }
+}
+
+#[test]
+fn protected_parent_lookup_token_is_redacted_from_nested_records_and_text()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut canonical = state(AppleVisibility::Hidden);
+    let token = "PRIVATE-parent-only-observation-token";
+    canonical.snapshots[0].assets[0].immich_parent_revision = Some(token.into());
+    canonical.receipts[0].source[0].immich_parent_revision = Some(token.into());
+    // A retained workflow record must be redacted too, not only omitted snapshots.
+    canonical.pending_apple_trash[0].assets[0] = canonical.snapshots[0].assets[0].clone();
+    let mut model = model(canonical);
+    model.status = token.into();
+    model.error = Some(token.into());
+    let view = Suwop.view(&model);
+    assert!(
+        view.state.pending_apple_trash[0].assets[0]
+            .immich_parent_revision
+            .is_none()
+    );
+    assert!(!serde_json::to_string(&view)?.contains(token));
+    assert_eq!(
+        model.state.snapshots[0].assets[0]
+            .immich_parent_revision
+            .as_deref(),
+        Some(token)
+    );
+    Ok(())
 }

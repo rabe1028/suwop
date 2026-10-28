@@ -72,6 +72,7 @@ impl Shell {
             bytes: Some(12),
         };
         let a = StoredAsset {
+            immich_parent_revision: None,
             immich_visibility: None,
             immich_stack: suwop_core::domain::ImmichStackState::Unknown,
             immich_stack_membership: None,

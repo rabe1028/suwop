@@ -42,7 +42,7 @@ final class LivePlacementHistoryUITests: XCTestCase {
         app.launch()
         let discover = app.buttons["discoverOrdinaryLive"]
         XCTAssertTrue(discover.waitForExistence(timeout: 10))
-        discover.tap()
+        guard discoverCurrentAccount(app, expected: "READ PENDING") else { return }
         let stop = app.buttons["cancelOrdinaryLiveRead"]
         XCTAssertTrue(stop.waitForExistence(timeout: 5))
         reveal(stop, app: app)
@@ -101,7 +101,7 @@ final class LivePlacementHistoryUITests: XCTestCase {
         XCTAssertFalse(app.buttons["playOrdinaryLive-locked-parent"].exists)
         XCTAssertFalse(app.buttons["playOrdinaryLive-cross-account-parent"].exists)
         XCTAssertFalse(app.buttons["playOrdinaryLive-fresh-parent"].exists)
-        discover.tap()
+        guard discoverCurrentAccount(app, expected: "DISCOVERED CURRENT ACCOUNT") else { return }
         let play = app.buttons["playOrdinaryLive-fresh-parent"]
         XCTAssertTrue(play.waitForExistence(timeout: 5))
         reveal(play, app: app)
@@ -126,7 +126,7 @@ final class LivePlacementHistoryUITests: XCTestCase {
         let discover = app.buttons["discoverOrdinaryLive"]
         reveal(discover, app: app)
         XCTAssertFalse(app.buttons["playOrdinaryLive-fresh-parent"].exists)
-        discover.tap()
+        guard discoverCurrentAccount(app, expected: "DISCOVERED CURRENT ACCOUNT") else { return }
         let refresh = app.buttons["refreshOrdinaryLive-fresh-parent"]
         let play = app.buttons["playOrdinaryLive-fresh-parent"]
         reveal(refresh, app: app)
@@ -169,6 +169,57 @@ final class LivePlacementHistoryUITests: XCTestCase {
         screenshot.name = large ? "live-history-AX3" : "live-history-standard"
         screenshot.lifetime = .keepAlways
         add(screenshot)
+    }
+
+    @MainActor private func discoverCurrentAccount(_ app: XCUIApplication, expected: String) -> Bool {
+        let button = app.buttons["discoverOrdinaryLive"]
+        let action = app.staticTexts["liveHistorySyntheticAction"]
+        var previous = CGRect.zero
+        let stable = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            guard button.exists, button.isEnabled, button.isHittable,
+                  button.label == "読み取れる Live Photo を確認"
+            else {
+                previous = .zero
+                return false
+            }
+            let frame = button.frame
+            let viewport = app.collectionViews.firstMatch.frame.intersection(app.frame)
+            guard !frame.isEmpty, viewport.contains(frame), frame.maxY < action.frame.minY else {
+                previous = .zero
+                return false
+            }
+            defer { previous = frame }
+            return frame == previous
+        }, object: button)
+        guard XCTWaiter.wait(for: [stable], timeout: 5) == .completed else {
+            discoveryFailure(app, button: button, name: "live-discovery-unstable-button")
+            return false
+        }
+        let target = button.frame
+        app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+            dx: target.midX - app.frame.minX, dy: target.midY - app.frame.minY
+        )).tap()
+        let acknowledged = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "label == %@", expected), object: action
+        )
+        guard XCTWaiter.wait(for: [acknowledged], timeout: 5) == .completed else {
+            discoveryFailure(app, button: button, name: "live-discovery-unacknowledged")
+            return false
+        }
+        return true
+    }
+
+    @MainActor private func discoveryFailure(_ app: XCUIApplication, button: XCUIElement, name: String) {
+        let geometry = XCTAttachment(string: "button=\(button.frame) list=\(app.collectionViews.firstMatch.frame)"
+            + " app=\(app.frame)\n" + app.debugDescription)
+        geometry.name = name + "-geometry-and-hierarchy"
+        geometry.lifetime = .keepAlways
+        add(geometry)
+        let image = XCTAttachment(screenshot: app.screenshot())
+        image.name = name
+        image.lifetime = .keepAlways
+        add(image)
+        XCTFail("Live discovery must have a stable visible button and acknowledge its single tap")
     }
 
     /// Same as EditCopyUITests: the switch is the trailing control; the row's center is its label.

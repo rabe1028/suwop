@@ -3,6 +3,7 @@ use suwop_core::domain::*;
 
 fn asset(provider: Provider, id: &str, hashes: &[&str]) -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

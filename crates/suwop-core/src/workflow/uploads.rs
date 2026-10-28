@@ -44,6 +44,7 @@ mod selected_read_resume_tests {
     };
     fn apple_source() -> StoredAsset {
         StoredAsset {
+            immich_parent_revision: None,
             immich_visibility: None,
             immich_stack: crate::domain::ImmichStackState::Unknown,
             immich_stack_membership: None,

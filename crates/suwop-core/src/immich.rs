@@ -645,6 +645,7 @@ impl Asset {
         }
         inventory_sidecars(files, &mut resources, &mut blockers);
         StoredAsset {
+            immich_parent_revision: Some(self.revision(None)),
             immich_visibility: match self.visibility.as_deref() {
                 Some("timeline") => Some(crate::immich_visibility::ImmichVisibility::Timeline),
                 Some("archive") => Some(crate::immich_visibility::ImmichVisibility::Archive),

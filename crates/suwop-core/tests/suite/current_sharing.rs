@@ -20,6 +20,7 @@ const OWNER: &str = "22222222-2222-4222-8222-222222222222";
 const FILE: &str = "33333333-3333-4333-8333-333333333333";
 fn apple() -> StoredAsset {
     StoredAsset {
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

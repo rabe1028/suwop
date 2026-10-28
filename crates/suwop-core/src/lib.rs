@@ -39,3 +39,8 @@ mod private_media_cleanup;
 pub mod display_catalog;
 
 pub mod immich_live_writes;
+
+pub mod organization;
+
+pub mod gallery_selection;
+pub mod organization_people;

@@ -41,6 +41,7 @@ fn facts(id: &str) -> AppleVisibilityFacts {
 fn asset(id: &str) -> StoredAsset {
     StoredAsset {
         key: facts(id).key,
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: suwop_core::domain::ImmichStackState::Unknown,
         immich_stack_membership: None,

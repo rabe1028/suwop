@@ -196,6 +196,38 @@ class LaneTests(unittest.TestCase):
         shards = [lanes.selection(registered, s) for s in lanes.SCOPES if s != "host-snapshots"]
         self.assertEqual(sorted(t for shard in shards for t in shard), registered["SuwopVRTUI"])
 
+    def test_organization_and_selection_ui_classes_have_exact_single_lane_ownership(self):
+        registered = copy.deepcopy(self.registered)
+        organization = [
+            "SuwopVRTUI/OrganizationUITests/" + name
+            for name in (
+                "testActualOrganizationNavigationAndRevocation",
+                "testAX3ActualOrganizationNavigationAndRevocation",
+                "testActualOpenReviewRevocationRejectsOldRaster",
+                "testAX3ActualOpenReviewRevocationRejectsOldRaster",
+                "testActualPeopleReadFailureHiddenExclusionAndPendingLeave",
+                "testAX3ActualPeopleReadFailureHiddenExclusionAndPendingLeave",
+            )
+        ]
+        selection = [
+            "SuwopVRTUI/GallerySelectionUITests/" + name
+            for name in (
+                "testActualGallerySelectionAcrossCatalogTransitions",
+                "testAX3ActualGallerySelectionAcrossCatalogTransitions",
+            )
+        ]
+        registered["SuwopVRTUI"] = sorted([*registered["SuwopVRTUI"], *organization, *selection])
+        shards = [
+            lanes.selection(registered, f"ui-{index + 1}") for index in range(lanes.UI_SHARDS)
+        ]
+        self.assertEqual(set(organization).intersection(shards[0]), set(organization))
+        self.assertEqual(set(selection).intersection(shards[1]), set(selection))
+        self.assertEqual(
+            sorted(test for shard in shards for test in shard), registered["SuwopVRTUI"]
+        )
+        self.assertEqual(len(organization), 6)
+        self.assertEqual(len(selection), 2)
+
     def test_ui_test_moved_between_shards_breaks_the_union(self):
         reports = self.reports()
         moved = reports["ui-1"]["evidence"]["executed"]["SuwopVRTUI"].pop()

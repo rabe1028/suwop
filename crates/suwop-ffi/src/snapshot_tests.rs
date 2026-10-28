@@ -19,6 +19,7 @@ fn asset(index: u32) -> StoredAsset {
         name: format!("IMG_{index:06}.HEIC \"quoted\" \u{65e5}\u{672c}"),
         revision: format!("r{index}"),
         apple_visibility: AppleVisibility::Visible,
+        immich_parent_revision: None,
         immich_visibility: None,
         immich_stack: ImmichStackState::Unknown,
         immich_stack_membership: None,
@@ -410,6 +411,44 @@ fn compact_view_expands_to_the_exact_full_view() -> Result<(), String> {
         copies.dedup();
         let table = compact["value"]["assets"].as_array().ok_or("table")?;
         assert!(table.iter().all(|asset| copies.contains(&asset)));
+        suwop_drop(handle);
+    }
+    Ok(())
+}
+
+#[test]
+fn parent_lookup_token_is_optional_and_lossless_across_view_wires() -> Result<(), String> {
+    let raw = json!({"id":"11111111-1111-4111-8111-111111111111","ownerId":"22222222-2222-4222-8222-222222222222","type":"IMAGE","originalFileName":"generated.png","checksum":"a".repeat(40),"fileCreatedAt":"2026-01-01T00:00:00Z","fileModifiedAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","isFavorite":false,"isOffline":false,"isTrashed":false,"visibility":"timeline"});
+    let asset: suwop_core::immich::Asset =
+        serde_json::from_value(raw).map_err(|e| e.to_string())?;
+    let record = asset.record("remote", None, None);
+    for legacy in [false, true] {
+        let mut value = serde_json::to_value(&record).map_err(|e| e.to_string())?;
+        if legacy {
+            value
+                .as_object_mut()
+                .ok_or("record")?
+                .remove("immichParentRevision");
+        }
+        let restored: StoredAsset = serde_json::from_value(value).map_err(|e| e.to_string())?;
+        assert_eq!(restored.immich_parent_revision.is_none(), legacy);
+        let mut state = guarded_model();
+        state.state.snapshots[1].assets = vec![restored];
+        state.protection.denied.clear();
+        state.state.protected_entries.clear();
+        let handle = install(state)?;
+        let full = parse(&call(handle, 2, "")?)?;
+        let compact = parse(&call(handle, 18, "")?)?;
+        assert_eq!(expand_wire(&compact["value"])?, full["value"]);
+        let remote = &full["value"]["state"]["snapshots"][1]["assets"][0];
+        assert_eq!(remote["revision"], record.revision);
+        assert_eq!(remote["immichParentRevision"].is_null(), legacy);
+        if !legacy {
+            assert_eq!(
+                remote["immichParentRevision"].as_str(),
+                record.immich_parent_revision.as_deref()
+            );
+        }
         suwop_drop(handle);
     }
     Ok(())
