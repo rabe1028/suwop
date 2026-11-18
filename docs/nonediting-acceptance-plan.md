@@ -25,12 +25,31 @@ of old contexts. These are injected acceptance scenarios, not actual OS Photos
 permission transitions. See the source-bound verification receipt for execution
 status; test source alone is not a pass.
 
-Remaining native cases need an isolated fixture host/library: initial denial,
-limited membership selection/removal, Full to Limited to Denied while previewing,
-permission changes while suspended, regrant without process restart, interrupted
-scan, process restart and account/configuration change. Record the current
-permission and exact generated fixture members before and after. Do not use a
-personal library or change the user's host permissions for these tests.
+The opt-in `make apple-photo-authorization-test` runs on a fresh, owned iOS
+Simulator seeded with two generated photos. The fixture holds the first real
+PhotoKit scan response before Rust receives it. It checks that Rust admits no
+visible or readable keys during the hold and then requires fresh native and
+Rust key sets to agree. It also verifies the process and UIKit scene across
+each transition. See the [native run instructions](native-photokit.md#photokit-の読み書き権限と-limited-選択).
+
+The following local runs passed in the original authorization worktree based on
+`b3250e2252141957d6783b5db9c8f12b9237ea55`. The receipt directories are under
+`.tools/verification/` in that checkout. The receipts record the exact source
+fingerprint and the log points to the Simulator artifacts. The later Limited
+run includes a picker image matching adjustment.
+
+| Scenario | Observed result | Verification receipt directory |
+| --- | --- | --- |
+| Full | The explicit read/write grant stayed in the same process and scene. Rust published the exact native inventory and opened previews of both generated photos after the scan response was released. | `photokit-auth-final-full-t2ews8gh` |
+| Denied | The explicit denial stayed in the same process and scene. Automatic refresh kept the gallery and read authority empty. The system issued no repeat prompt. | `photokit-auth-final-denied-lxhwy53r` |
+| Limited | The system picker changed access from red only, to red and blue, to blue only, then restored the original red ID. Each membership change triggered the native observer, revoked the previous read context and required a fresh scan. The authorization stayed Limited in the same process and scene. | `photokit-auth-relative-hue-limited-bmy2moqi` |
+
+Repeat the three cases on the final PR source before counting them as its
+acceptance. Remaining cases cover Settings transitions from Full to Limited
+to Denied while previewing, changes while suspended, regrant after Denied,
+interrupted scans, restart, account or configuration changes, and PhotoKit
+and iCloud on physical devices. For Simulator cases use an isolated fixture
+library and record the actual permission and exact generated asset IDs.
 
 Selection is ephemeral Rust state over physical `AssetKey`s. A current group
 survives only when every member was already selected and remains authorized;

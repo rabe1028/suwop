@@ -97,6 +97,8 @@ import SwiftUI
             runtime: RustRuntime,
             shell: AppleShell,
             initialAppleAuthorization: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite),
+            initiallyStarted: Bool = true,
+            observeNativePhotoChanges: (@MainActor (Bool) -> Void)? = nil,
             thumbnailEffect: (@MainActor (AssetKey, Bool) async throws -> PlatformImage)? = nil,
             executeEffect: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
         ) {
@@ -113,8 +115,12 @@ import SwiftUI
                 guard let context else { throw CancellationError() }
                 return try await executeEffect(operation, context)
             }
-            started = true
+            started = initiallyStarted
             configurePrivateSessions(runtime: runtime, shell: shell)
+            if let observeNativePhotoChanges {
+                installEffectExecutor(executeEffect)
+                photoObservation = PhotoObserverRegistration(model: self, recordChange: observeNativePhotoChanges)
+            }
         }
 
     #endif

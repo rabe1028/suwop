@@ -182,6 +182,41 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.acceptance.tests
         TEST_TARGET_NAME: SuwopPhotoKitHost
+  SuwopPhotoAuthorizationHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: NativeAcceptance/AuthorizationHost
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.authorization
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_NATIVE_ACCEPTANCE'
+        TARGETED_DEVICE_FAMILY: '1'
+    info:
+      path: Generated/PhotoAuthorization-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop Photo Authorization
+        UILaunchScreen: {}
+        NSPhotoLibraryUsageDescription: Read generated photos in the dedicated Simulator.
+        PHPhotoLibraryPreventAutomaticLimitedAccessAlert: true
+  SuwopPhotoAuthorizationTests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [NativeAcceptance/AuthorizationUITests]
+    dependencies:
+      - target: SuwopPhotoAuthorizationHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.authorization.tests
+        TEST_TARGET_NAME: SuwopPhotoAuthorizationHost
   SuwopAmazonMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -532,6 +567,14 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopPhotoKitTests]
+  SuwopPhotoAuthorization:
+    build:
+      targets:
+        SuwopPhotoAuthorizationHost: all
+        SuwopPhotoAuthorizationTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopPhotoAuthorizationTests]
   SuwopAmazonMac:
     build:
       targets:
