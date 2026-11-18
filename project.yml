@@ -143,6 +143,40 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.vrt.ui
         TEST_TARGET_NAME: SuwopVRTHost
+  SuwopGalleryPerformanceHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: NativeAcceptance/GalleryPerformanceHost
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.gallery-performance
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT SUWOP_GALLERY_PERFORMANCE'
+        TARGETED_DEVICE_FAMILY: '1'
+    info:
+      path: Generated/GalleryPerformance-Info.plist
+      properties:
+        CFBundleDevelopmentRegion: ja
+        CFBundleLocalizations: [ja]
+        UILaunchScreen: {}
+  SuwopGalleryPerformanceUI:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources: [NativeAcceptance/GalleryPerformanceUITests]
+    dependencies:
+      - target: SuwopGalleryPerformanceHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.gallery-performance.ui
+        TEST_TARGET_NAME: SuwopGalleryPerformanceHost
   SuwopPhotoKitHost:
     type: application
     platform: iOS
@@ -559,6 +593,15 @@ schemes:
         SUWOP_VRT_BASELINES: '$(SUWOP_VRT_BASELINES)'
         SUWOP_VRT_ARTIFACTS: '$(SUWOP_VRT_ARTIFACTS)'
         TZ: UTC
+  SuwopGalleryPerformance:
+    build:
+      targets:
+        SuwopGalleryPerformanceHost: all
+        SuwopGalleryPerformanceUI: [test]
+    test:
+      config: Release
+      gatherCoverageData: false
+      targets: [SuwopGalleryPerformanceUI]
   SuwopPhotoKit:
     build:
       targets:

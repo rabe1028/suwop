@@ -9,14 +9,22 @@ mkdir -p Generated/RustHeaders/CSuwop
 # Namespace the module map: LiteRT also installs headers into Products/include.
 cp Sources/CSuwop/include/module.modulemap Sources/CSuwop/include/suwop.h Generated/RustHeaders/CSuwop/
 
-if [[ "${1:-}" == "--simulator" ]]; then
+if [[ "${1:-}" == "--simulator" || "${1:-}" == "--simulator-release" ]]; then
     # VRT needs only the current Apple Silicon simulator slice; retain Cargo's build cache.
     export SDKROOT
     SDKROOT="$(xcrun --sdk iphonesimulator --show-sdk-path)"
-    rustup target add aarch64-apple-ios-sim
-    cargo build --locked -p suwop-ffi --target aarch64-apple-ios-sim
+    PROFILE=debug
+    FLAGS=(--locked)
+    if [[ "$1" == "--simulator-release" ]]; then
+        # The opt-in gallery benchmark uses cached dependencies and a preinstalled target.
+        PROFILE=release
+        FLAGS+=(--release --offline)
+    else
+        rustup target add aarch64-apple-ios-sim
+    fi
+    cargo build -p suwop-ffi --target aarch64-apple-ios-sim "${FLAGS[@]}"
     rm -rf Generated/RustCore.xcframework
-    xcodebuild -create-xcframework -library target/aarch64-apple-ios-sim/debug/libsuwop_ffi.a \
+    xcodebuild -create-xcframework -library "target/aarch64-apple-ios-sim/$PROFILE/libsuwop_ffi.a" \
         -headers Generated/RustHeaders -output Generated/RustCore.xcframework
     exit 0
 fi
