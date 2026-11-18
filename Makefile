@@ -108,6 +108,11 @@ vrt-record:
 apple-native-test:
 	bash scripts/apple-native-test.sh
 
+.PHONY: apple-photo-authorization-test
+PHOTO_AUTHORIZATION_CASE ?= full
+apple-photo-authorization-test:
+	bash scripts/apple-photo-authorization-test.sh "$(PHOTO_AUTHORIZATION_CASE)"
+
 .PHONY: sharing-test
 sharing-test:
 	xcodegen generate

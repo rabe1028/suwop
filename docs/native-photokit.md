@@ -63,6 +63,38 @@ VRTの基準画像は変更しない。
 この証拠の範囲は、固定Simulatorの生成JPEGと製品のcore・アダプター。実機・iCloud・HDR・RAW・Live Photo・
 動画・native 複数選択の通常削除・Photos アプリでの実復元・外部アプリの既存編集・大量ライブラリ・OS再起動を通過した証拠としては扱わない。
 
+## PhotoKit の読み書き権限と Limited 選択
+
+```sh
+make apple-photo-authorization-test
+make apple-photo-authorization-test PHOTO_AUTHORIZATION_CASE=denied
+make apple-photo-authorization-test PHOTO_AUTHORIZATION_CASE=limited
+```
+
+ソースのハッシュを含む検証記録を残す場合は、各コマンドを `scripts/verify.py` で実行する。
+
+```sh
+uv run --no-project python scripts/verify.py run --label photokit-authorization-limited -- \
+    make apple-photo-authorization-test PHOTO_AUTHORIZATION_CASE=limited
+```
+
+このローカル専用の確認は Xcode と iOS の固定環境で実行する。毎回、新しい iPhone 17 Pro Simulator を作成し、
+生成 PNG 2 枚を `simctl addmedia` で追加する。初期状態で Simulator が持つサンプルも取得結果に含まれる。
+生成 PNG は縦横の寸法で識別し、Limited ピッカーでは生成画像の色を使って選択する。
+サンプルの変更や削除は行わず、権限は専用テストアプリのシステムダイアログで設定する。
+
+テストアプリは製品の PhotoKit adapter、LibraryModel、Rust と実際の PhotoKit 変更監視を使う。
+最初の実スキャン応答を Rust に渡す直前で待たせ、その時点の PhotoKit の権限と対象 ID を記録し、
+Rust のギャラリーと読み取り権限が空のままであることを確認する。
+応答を解放した後は、Photos と Rust の対象 ID が一致し、許可された生成画像をプレビューできることを確認する。
+拒否では実スキャンが失敗し、自動更新で再許可ダイアログが出ないことを確認する。
+各段階で実プロセス ID、UIKit のシーン ID、テストホストの起動 ID を照合する。
+
+証拠は `DerivedData/PhotoAuthorizationArtifacts/<日時>-<ID>/` に保存する。
+Simulator の UDID、生成 PNG とその SHA-256、XCTest ログ、xcresult、権限ダイアログと Limited ピッカーの画像、
+PhotoKit と Rust の各段階の JSON を保持する。指定したテストが専用 Simulator 上で 1 回成功した場合に完了とする。
+実行後に Simulator を停止して保持する。
+
 ## 現在の画像のフルサイズを保持する修正
 
 実テストで、241×120の保存済み画像に対し`PHImageManager`が240×120の派生JPEGを返すことを確認した。

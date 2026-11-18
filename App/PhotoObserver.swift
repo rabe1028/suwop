@@ -28,6 +28,15 @@ final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
     private weak var model: LibraryModel?
     private var active: Active?
 
+    #if SUWOP_VRT || SUWOP_NATIVE_ACCEPTANCE
+        private var recordChange: (@MainActor (Bool) -> Void)?
+
+        convenience init(model: LibraryModel, recordChange: @escaping @MainActor (Bool) -> Void) {
+            self.init(model: model)
+            self.recordChange = recordChange
+        }
+    #endif
+
     init(model: LibraryModel) {
         self.model = model
         synchronize(for: PHPhotoLibrary.authorizationStatus(for: .readWrite))
@@ -73,6 +82,9 @@ final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
             synchronize(for: current)
             return
         }
+        #if SUWOP_VRT || SUWOP_NATIVE_ACCEPTANCE
+            recordChange?(assetsChanged)
+        #endif
         model?.photoLibraryChanged(assetsChanged: assetsChanged, authorization: current)
     }
 }

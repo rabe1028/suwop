@@ -6,6 +6,8 @@ included:
   - VRT/Host
   - VRT/Tests
   - VRT/UITests
+  - NativeAcceptance/AuthorizationHost
+  - NativeAcceptance/AuthorizationUITests
   - NativeAcceptance/Host
   - NativeAcceptance/UITests
   - NativeAcceptance/PrivateLiveHost/PrivateLiveMacHost.swift
