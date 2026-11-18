@@ -5,7 +5,8 @@ case "${1:-}" in
     full) SCENARIO=testInitialFullGrant ;;
     limited) SCENARIO=testLimitedMembership ;;
     denied) SCENARIO=testInitialDenial ;;
-    *) echo 'Choose full, limited or denied.' >&2; exit 2 ;;
+    interrupted) SCENARIO=testInterruptsRealPhotoKitScanAndRequiresFreshAuthority ;;
+    *) echo 'Choose full, limited, denied or interrupted.' >&2; exit 2 ;;
 esac
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 if command -v mise >/dev/null; then PATH="$(mise bin-paths | tr '\n' ':')$PATH"; fi

@@ -20,10 +20,15 @@ import UniformTypeIdentifiers
     let scope: String
     private let imageManager = PHCachingImageManager()
     private var knownAssets: [AssetKey: StoredAsset] = [:]
+    #if SUWOP_NATIVE_ACCEPTANCE
+        var checkpointAfterFirstScanAsset: (@Sendable (AssetKey) async throws -> Void)?
+    #endif
     init(scope: String) {
         self.scope = scope
     }
+}
 
+extension ApplePhotosStore {
     func scan() async throws -> LibrarySnapshot {
         try await scan(authorization: PHPhotoLibrary.authorizationStatus(for: .readWrite), fetchLimit: nil)
     }
@@ -51,6 +56,9 @@ import UniformTypeIdentifiers
         }
         let fullAccess = authorization == .authorized && fetchLimit == nil
         let scope = scope
+        #if SUWOP_NATIVE_ACCEPTANCE
+            let checkpoint = fetchLimit == nil ? checkpointAfterFirstScanAsset : nil
+        #endif
         let worker = Task.detached(priority: .userInitiated) {
             let options = PHFetchOptions()
             options.predicate = NSPredicate(
@@ -70,6 +78,11 @@ import UniformTypeIdentifiers
                 let native = assets.object(at: i)
                 let record = try Self.describe(native, scope: scope, fullAccess: fullAccess)
                 records.append(record)
+                #if SUWOP_NATIVE_ACCEPTANCE
+                    if i == 0, let checkpoint {
+                        try await checkpoint(record.key)
+                    }
+                #endif
             }
             return records
         }
@@ -91,7 +104,9 @@ import UniformTypeIdentifiers
             scannedAt: Date()
         )
     }
+}
 
+extension ApplePhotosStore {
     func export(_ keys: [AssetKey], to directory: URL) async throws -> TransferBundle {
         try FileManager.default.createDirectory(
             at: directory,
