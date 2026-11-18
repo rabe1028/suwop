@@ -4,8 +4,8 @@ use serde_json::Value;
 
 use super::{
     AlbumCreator, AlbumEditor, AlbumReader, CatalogListing, CreatedCopies, DeletionOutcome,
-    ExportRequest, FavoriteWrite, ImportRequest, ImportWindow, Io, ListRequest, Listing,
-    ListingRange, MetadataWrite, OriginalExport, OriginalImport, ReadIo, SourceDeletion,
+    ExportRequest, FavoriteWrite, ImportRequest, ImportWindow, Io, ListRequest, ListResult,
+    Listing, ListingRange, MetadataWrite, OriginalExport, OriginalImport, ReadIo, SourceDeletion,
     authorize_deletion, authorize_import, submit_deletion,
 };
 use crate::{
@@ -29,27 +29,39 @@ impl AppleBackend {
     }
 }
 
+#[derive(serde::Deserialize)]
+struct AppleScanPreviewReply {
+    preview: LibrarySnapshot,
+}
+
 impl CatalogListing for AppleBackend {
-    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, Listing> {
+    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, ListResult> {
         Box::pin(async move {
-            let snapshot: LibrarySnapshot = shell(
-                io.ctx(),
-                ShellOperation::AppleScan {
-                    scope: self.scope.clone(),
-                    permission: request.permission,
-                },
-            )
-            .await?;
+            let operation = ShellOperation::AppleScan {
+                scope: self.scope.clone(),
+                permission: request.permission,
+                preview_limit: request.preview_limit,
+            };
+            if request.preview_limit.is_some() {
+                let reply: Option<AppleScanPreviewReply> = shell(io.ctx(), operation).await?;
+                return Ok(reply.map_or(ListResult::Deferred, |reply| {
+                    ListResult::Preview(reply.preview)
+                }));
+            }
+            let snapshot: Option<LibrarySnapshot> = shell(io.ctx(), operation).await?;
+            let Some(snapshot) = snapshot else {
+                return Ok(ListResult::Deferred);
+            };
             let range = if snapshot.access == ScanAccess::Full {
                 ListingRange::WholeLibrary
             } else {
                 ListingRange::Selection
             };
-            Ok::<_, String>(Listing {
+            Ok(ListResult::Complete(Listing {
                 snapshot,
                 range,
                 warning: None,
-            })
+            }))
         })
     }
 }

@@ -30,9 +30,8 @@ import Testing
     let save = try #require(resolve(read, value: .from(SavedLibrary(appleScope: "library", schemaVersion: 11))).first)
     _ = try resolve(save, value: .null)
     let scan = try update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)])
-    let scanned = try #require(resolve(scan, value: .from(LibrarySnapshot(
-        provider: .apple, scope: "library", assets: [asset], access: .limited
-    ))).first)
+    let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .limited)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: resolve)
     _ = try resolve(scanned, value: .null)
     let view = try bridge.call(2).decode(ViewModel.self)
     #expect(view.media.values.first == .video)

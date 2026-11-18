@@ -307,6 +307,7 @@ pub(crate) fn finish_refresh(
         if owns {
             model.ordinary_selected.active_refresh = None;
             model.busy = false;
+            model.apple_scan_preview = None;
             model.error = Some(
                 "更新中に写真へのアクセスが変わりました。保存状態を確認してから更新してください。"
                     .into(),

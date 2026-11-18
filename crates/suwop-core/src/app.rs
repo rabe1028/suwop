@@ -454,6 +454,12 @@ pub enum ShellOperation {
     AppleScan {
         scope: String,
         permission: bool,
+        #[serde(
+            rename = "previewLimit",
+            default,
+            skip_serializing_if = "Option::is_none"
+        )]
+        preview_limit: Option<u32>,
     },
     AppleExport {
         keys: Vec<crate::domain::AssetKey>,
@@ -1267,6 +1273,10 @@ pub enum Event {
         status: String,
     },
     #[serde(skip)]
+    AppleScanPreview {
+        preview: Option<AppleScanPreview>,
+    },
+    #[serde(skip)]
     Progress {
         state: SavedLibrary,
         session: Option<Session>,
@@ -1281,6 +1291,13 @@ pub enum Event {
         preview_to_select: Option<crate::domain::AssetKey>,
     },
 }
+#[derive(Debug, Clone)]
+pub struct AppleScanPreview {
+    pub(crate) snapshot: LibrarySnapshot,
+    pub(crate) apple_generation: u64,
+    pub(crate) ordinary_generation: u64,
+}
+
 #[derive(Debug, Default)]
 pub struct Model {
     pub ordinary_live_images: crate::immich_live_writes::ordinary_images::State,
@@ -1296,6 +1313,8 @@ pub struct Model {
     pub protection: crate::protection::ProtectionModel,
     /// Observation-only token shared with in-flight workflows; never persisted.
     pub apple_generation: std::sync::Arc<std::sync::atomic::AtomicU64>,
+    /// A provisional native scan is only used by read projections.
+    pub apple_scan_preview: Option<AppleScanPreview>,
     pub preview_preferences: Vec<crate::domain::AssetKey>,
     pub album_candidate_key: Option<crate::albums::AlbumKey>,
     pub organization_people: crate::organization_people::PeopleState,
@@ -1312,6 +1331,19 @@ pub struct Model {
     pub error: Option<String>,
     pub changed_during_work: bool,
 }
+impl Model {
+    pub(crate) fn current_apple_scan_preview(&self) -> Option<&LibrarySnapshot> {
+        use std::sync::atomic::Ordering;
+        let preview = self.apple_scan_preview.as_ref()?;
+        (self.busy
+            && !self.protection.membership_uncertain
+            && !self.immich_visibility.persistence_uncertain
+            && preview.apple_generation == self.apple_generation.load(Ordering::Relaxed)
+            && preview.ordinary_generation == self.ordinary_generation.load(Ordering::SeqCst))
+        .then_some(&preview.snapshot)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ViewModel {
@@ -1359,6 +1391,7 @@ pub struct ViewModel {
     pub browser: crate::browser::BrowserView,
     pub state: crate::privacy::PublishedLibrary,
     pub photos: Vec<UnifiedPhoto>,
+    pub apple_scan_preview: bool,
     pub busy: bool,
     pub status: String,
     pub error: Option<String>,
@@ -1607,6 +1640,10 @@ impl Suwop {
                 model.fetch_status = Some(status);
                 Command::done()
             }
+            Event::AppleScanPreview { preview } => {
+                model.apple_scan_preview = preview;
+                Command::done()
+            }
             Event::Progress {
                 mut state,
                 session,
@@ -1637,6 +1674,7 @@ impl Suwop {
                 model.status = status;
                 model.error = error;
                 model.busy = false;
+                model.apple_scan_preview = None;
                 model.fetch_status = None;
                 model.ready =
                     model.state.schema_version == crate::immich_live_writes::CURRENT_SCHEMA_VERSION;
@@ -1648,6 +1686,7 @@ impl Suwop {
                     .apple_generation
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 invalidate_apple(&mut model.state);
+                model.apple_scan_preview = None;
                 model.changed_during_work = model.busy;
                 crate::protection::reconcile(model)
             }
@@ -1657,6 +1696,7 @@ impl Suwop {
     }
     fn start_workflow(event: Event, model: &mut Model) -> Command<Effect, Event> {
         model.busy = true;
+        model.apple_scan_preview = None;
         model.error = None;
         model.changed_during_work = false;
         model.status = crate::workflow::initial_status(&event).into();
@@ -1729,6 +1769,7 @@ impl Suwop {
         let (status, error) = public_messages(model, &ordinary);
         let metadata_operations = public_metadata(model, &ordinary_content_keys);
         ViewModel {
+            apple_scan_preview: model.current_apple_scan_preview().is_some(),
             import_notices: crate::external_import::history::notices(model, &ordinary_content_keys),
             external_imports: public_imports(model, &ordinary_content_keys),
             metadata_restore_availability: crate::metadata::restore_availability(
@@ -2097,6 +2138,7 @@ fn ordinary_event_denied(model: &Model, event: &Event) -> bool {
             event,
             Event::AppleChanged
                 | Event::FetchProgress { .. }
+                | Event::AppleScanPreview { .. }
                 | Event::Progress { .. }
                 | Event::Finished { .. }
                 | Event::EndOrganizationBrowse

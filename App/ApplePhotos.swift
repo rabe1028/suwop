@@ -24,17 +24,33 @@ import UniformTypeIdentifiers
         self.scope = scope
     }
 
-    func scan(requestPermission: Bool = false) async throws -> LibrarySnapshot {
+    func scan() async throws -> LibrarySnapshot {
+        try await scan(authorization: PHPhotoLibrary.authorizationStatus(for: .readWrite), fetchLimit: nil)
+    }
+
+    func scanForRefresh(requestPermission: Bool, previewLimit: Int?) async throws -> LibrarySnapshot? {
         var status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        if requestPermission && status == .notDetermined {
+        if Self.shouldDeferScan(authorization: status, requestPermission: requestPermission) {
+            return nil
+        }
+        if status == .notDetermined {
             status = await withCheckedContinuation { continuation in
                 PHPhotoLibrary.requestAuthorization(for: .readWrite) { @Sendable in continuation.resume(returning: $0) }
             }
         }
-        guard status == .authorized || status == .limited else {
+        return try await scan(authorization: status, fetchLimit: previewLimit)
+    }
+
+    static func shouldDeferScan(authorization: PHAuthorizationStatus, requestPermission: Bool) -> Bool {
+        authorization == .notDetermined && !requestPermission
+    }
+
+    private func scan(authorization: PHAuthorizationStatus, fetchLimit: Int?) async throws -> LibrarySnapshot {
+        guard authorization == .authorized || authorization == .limited else {
             throw SuwopError("Apple Photos の読み取り権限がありません。設定から写真へのアクセスを許可してください。")
         }
-        let fullAccess = status == .authorized, scope = scope
+        let fullAccess = authorization == .authorized && fetchLimit == nil
+        let scope = scope
         let worker = Task.detached(priority: .userInitiated) {
             let options = PHFetchOptions()
             options.predicate = NSPredicate(
@@ -45,8 +61,10 @@ import UniformTypeIdentifiers
             options.includeHiddenAssets = false
             options.includeAllBurstAssets = true
             options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            options.fetchLimit = fetchLimit ?? 0
             let assets = PHAsset.fetchAssets(with: options)
             var records: [StoredAsset] = []
+            records.reserveCapacity(assets.count)
             for i in 0 ..< assets.count {
                 try Task.checkCancellation()
                 let native = assets.object(at: i)
@@ -58,7 +76,13 @@ import UniformTypeIdentifiers
         let records = try await withTaskCancellationHandler {
             try await worker.value
         } onCancel: { worker.cancel() }
-        knownAssets = Dictionary(records.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        try Task.checkCancellation()
+        guard PHPhotoLibrary.authorizationStatus(for: .readWrite) == authorization else {
+            throw CancellationError()
+        }
+        if fetchLimit == nil {
+            knownAssets = Dictionary(records.map { ($0.key, $0) }, uniquingKeysWith: { first, _ in first })
+        }
         return LibrarySnapshot(
             provider: .apple,
             scope: scope,

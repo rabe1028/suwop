@@ -67,8 +67,7 @@ import SwiftUI
         effects = try bridge.call(0, input: .object([
             "type": .string("refresh"), "permission": .bool(false), "now": .number(1),
         ])).decode([EffectRequest].self)
-        for _ in 0 ..< 2 {
-            guard let effect = effects.first else { throw SuwopError("Missing fixture effect") }
+        while let effect = effects.first {
             let value: JSONValue = effect.effect["Io"]?.type == "appleScan" ?
                 try .from(LibrarySnapshot(provider: .apple, scope: "fixture", assets: assets, access: .full)) : .null
             effects = try resolve(bridge, effect, value: value)

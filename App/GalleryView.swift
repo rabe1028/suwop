@@ -314,8 +314,8 @@ struct GalleryView: View {
                     } label: { Label("選択した写真の操作", systemImage: "ellipsis.circle") }
                         .disabled(selection.isEmpty || model.isBusy || model.gallerySelectionPending)
                 }
-            } else {
-                Text("\(model.visiblePhotos.count) 枚の写真・ビデオ").font(.caption).foregroundStyle(.secondary)
+            } else if let count = model.galleryPhotoCount {
+                Text(count).font(.caption).foregroundStyle(.secondary)
             }
             if model.isBusy {
                 HStack { ProgressView().controlSize(.small)

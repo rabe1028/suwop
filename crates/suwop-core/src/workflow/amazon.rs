@@ -3,7 +3,7 @@ use crate::{
     amazon::{Connection, UploadRecord, UploadRecordPhase},
     app::{Event, ShellOperation, io},
     domain::{AssetKey, LibrarySnapshot, Provider, ScanAccess},
-    provider::{ListRequest, Listing},
+    provider::{ListRequest, ListResult},
 };
 use serde_json::Value;
 use std::collections::BTreeSet;
@@ -167,16 +167,20 @@ impl Runtime<'_> {
         let Some(listing) = registry.listing(Provider::Amazon) else {
             return Ok(None);
         };
-        let (mut snapshot, warning) = listing
+        let listing = listing
             .list(
                 self.read_io(),
                 ListRequest {
                     permission: false,
+                    preview_limit: None,
                     now,
                 },
             )
-            .await
-            .map(Listing::into_snapshot)?;
+            .await?;
+        let ListResult::Complete(listing) = listing else {
+            return Err("Amazon Photosの一覧を完了できませんでした。".into());
+        };
+        let (mut snapshot, warning) = listing.into_snapshot();
         self.preserve_original_fingerprints(&mut snapshot.assets);
         self.replace(snapshot);
         Ok(warning)

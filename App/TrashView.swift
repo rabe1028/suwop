@@ -27,8 +27,10 @@ struct TrashView: View {
                     Section {
                         Text("保存先に接続して一覧を確認してください。キャッシュの表示だけでは復元できません。")
                             .font(.callout)
-                        Button("Immich のゴミ箱を更新", systemImage: "arrow.clockwise") { model.refreshTrash() }
-                            .disabled(model.isBusy)
+                        Button("Immich のゴミ箱を更新", systemImage: "arrow.clockwise") {
+                            model.refreshTrash(preservingError: false)
+                        }
+                        .disabled(model.isBusy)
                     }
                 }
                 Section("削除された写真・ビデオ") {
@@ -61,7 +63,8 @@ struct TrashView: View {
                         selecting.toggle()
                         selected.removeAll()
                     }.disabled(items.isEmpty || !canRestore)
-                    Button("更新", systemImage: "arrow.clockwise") { model.refreshTrash() }.disabled(model.isBusy)
+                    Button("更新", systemImage: "arrow.clockwise") { model.refreshTrash(preservingError: false) }
+                        .disabled(model.isBusy)
                 }
             }
             .task { model.refreshTrash() }

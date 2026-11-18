@@ -32,16 +32,9 @@ struct EditingABI {
         let persist = try next(read, value: .null, type: "persist")
         #expect(try resolve(persist, value: .null).isEmpty)
         let scan = try event("refresh", data: ["permission": .bool(false), "now": .number(0)])
-        let saved = try next(
-            scan,
-            value: .from(LibrarySnapshot(
-                provider: .apple,
-                scope: "library",
-                assets: [asset],
-                access: .full
-            )),
-            type: "persist"
-        )
+        let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [asset], access: .full)
+        let saved = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: resolve)
+        #expect(saved.effect["Io"]?.type == "persist")
         #expect(try resolve(saved, value: .null).isEmpty)
     }
 }

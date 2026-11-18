@@ -47,6 +47,18 @@ extension AppleShell {
             _ = try await ordinaryContent.validate(keys: [asset.key], context: context)
             return result
         }
+        if type == "appleScan" {
+            let store = try appleStore(scope: requiredString(data, "scope"))
+            let previewLimit = try data["previewLimit"].decode(Int?.self)
+            let result = try await store.scanForRefresh(
+                requestPermission: data["permission"].decode(Bool.self),
+                previewLimit: previewLimit
+            )
+            if previewLimit != nil, let result {
+                return try .object(["preview": .from(result)])
+            }
+            return try .from(result)
+        }
         return try await basicPhotoEffect(type, data: data)
     }
 
@@ -80,9 +92,6 @@ extension AppleShell {
 
     private func basicPhotoEffect(_ type: String, data: JSONValue) async throws -> JSONValue {
         switch type {
-        case "appleScan":
-            let store = try appleStore(scope: requiredString(data, "scope"))
-            return try await .from(store.scan(requestPermission: data["permission"].decode(Bool.self)))
         case "appleExport":
             let keys = try data["keys"].decode([AssetKey].self)
             guard let first = keys.first else { throw SuwopError("転送元がありません。") }

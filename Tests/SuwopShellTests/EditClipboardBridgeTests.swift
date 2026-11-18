@@ -64,16 +64,9 @@ private func clipboardInput(_ request: EffectRequest, asset: StoredAsset, adjust
     var target = source
     target.key.assetID = "target"
     let scan = try abi.event("refresh", data: ["permission": .bool(false), "now": .number(0)])
-    let scanned = try abi.next(
-        scan,
-        value: .from(LibrarySnapshot(
-            provider: .apple,
-            scope: "library",
-            assets: [source, target],
-            access: .full
-        )),
-        type: "persist"
-    )
+    let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [source, target], access: .full)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: abi.resolve)
+    #expect(scanned.effect["Io"]?.type == "persist")
     #expect(try abi.resolve(scanned, value: .null).isEmpty)
     let paste = try abi.event("pastePhotoEdits", data: ["keys": .from([target.key]), "id": .string(clipboardID)])
     let before = try abi.next(paste, value: .string("/tmp/paste-edits"), type: "appleExport")

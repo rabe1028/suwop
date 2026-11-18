@@ -34,12 +34,12 @@ import Testing
     let scan = try #require(bridge.call(0, input: .object([
         "type": .string("refresh"), "permission": .bool(false), "now": .number(1),
     ])).decode([EffectRequest].self).first)
-    let scanned = try #require(bridge.call(1, input: .object([
-        "id": .number(Double(scan.id)), "response": .object([
-            "value": .from(LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)),
-            "error": .null,
-        ]),
-    ])).decode([EffectRequest].self).first)
+    let snapshot = LibrarySnapshot(provider: .apple, scope: "fixture", assets: [asset], access: .full)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot) { request, value in
+        try bridge.call(1, input: .object([
+            "id": .number(Double(request.id)), "response": .object(["value": value, "error": .null]),
+        ])).decode([EffectRequest].self)
+    }
     _ = try bridge.call(1, input: .object([
         "id": .number(Double(scanned.id)), "response": .object(["value": .null, "error": .null]),
     ]))

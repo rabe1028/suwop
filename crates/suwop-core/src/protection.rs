@@ -251,6 +251,11 @@ pub(crate) fn ordinary_state_view(model: &Model) -> std::borrow::Cow<'_, SavedLi
     // Most snapshots have no pending denial. Borrow the canonical state rather
     // than copying every asset for each read-only projection.
     let mut state = std::borrow::Cow::Borrowed(&model.state);
+    if let Some(snapshot) = model.current_apple_scan_preview() {
+        let snapshots = &mut state.to_mut().snapshots;
+        snapshots.retain(|existing| existing.provider != Provider::Apple);
+        snapshots.push(snapshot.clone());
+    }
     for key in model
         .protection
         .denied

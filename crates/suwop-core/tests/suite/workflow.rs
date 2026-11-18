@@ -40,6 +40,7 @@ enum ObserveWrite {
     Deletion,
 }
 struct Shell {
+    apple_scan: Option<Result<Value, String>>,
     source: TransferBundle,
     deleted: usize,
     fail_phase: Option<TransferPhase>,
@@ -95,6 +96,7 @@ impl Shell {
             deletion_blockers: vec![],
         };
         Self {
+            apple_scan: None,
             source: TransferBundle {
                 assets: vec![a],
                 files: vec![TransferFile {
@@ -148,14 +150,18 @@ impl Shell {
             ShellOperation::AppleExport { .. } => {
                 serde_json::to_value(&self.source).map_err(|e| e.to_string())
             }
-            ShellOperation::AppleScan { scope, .. } => serde_json::to_value(LibrarySnapshot {
-                provider: Provider::Apple,
-                scope,
-                assets: self.source.assets.clone(),
-                access: ScanAccess::Full,
-                scanned_at: Some(10.0),
-            })
-            .map_err(|e| e.to_string()),
+            ShellOperation::AppleScan { scope, .. } => {
+                self.apple_scan.clone().unwrap_or_else(|| {
+                    serde_json::to_value(LibrarySnapshot {
+                        provider: Provider::Apple,
+                        scope,
+                        assets: self.source.assets.clone(),
+                        access: ScanAccess::Full,
+                        scanned_at: Some(10.0),
+                    })
+                    .map_err(|e| e.to_string())
+                })
+            }
             ShellOperation::Persist(state) => self.persist(state),
             ShellOperation::Wait { .. } => {
                 if matches!(self.upload_fault, UploadFault::Wait) {
@@ -369,7 +375,9 @@ impl Shell {
         json!({"id":ID,"ownerId":OWNER,"type":"IMAGE","originalFileName":self.uploaded_name,"checksum":checksum,"fileCreatedAt":"1970-01-01T00:00:10Z","fileModifiedAt":"1970-01-01T00:00:10Z","updatedAt":"1970-01-01T00:00:10Z","isFavorite":false,"isOffline":false,"isTrashed":false,"isEdited":false,"isExternal":false,"exifInfo":{"dateTimeOriginal":date,"fileSizeInByte":12,"latitude":self.location.map(|p| p.0),"longitude":self.location.map(|p| p.1)}})
     }
     fn run(&mut self, core: &Core<Suwop>, event: Event) -> Result<(), String> {
-        let mut effects = core.process_event(event);
+        self.drain(core, core.process_event(event))
+    }
+    fn drain(&mut self, core: &Core<Suwop>, mut effects: Vec<Effect>) -> Result<(), String> {
         let mut n = 0;
         while !effects.is_empty() {
             n += 1;
@@ -927,6 +935,226 @@ fn favorite_updates_the_native_library_and_persists_without_deleting() -> Result
     assert_eq!(shell.deleted, 0);
     Ok(())
 }
+
+#[test]
+fn pending_apple_authorization_keeps_saved_records_and_refreshes_remote() -> Result<(), String> {
+    let core = core();
+    let mut shell = Shell::new();
+    shell.apple_scan = Some(Ok(Value::Null));
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 10.0,
+        },
+    )?;
+    let view = core.view();
+    assert_eq!(view.error, None);
+    let saved = shell.journal.as_ref().ok_or("missing saved state")?;
+    let apple = saved
+        .snapshots
+        .iter()
+        .find(|s| s.provider == Provider::Apple)
+        .ok_or("missing Apple snapshot")?;
+    assert_eq!(apple.assets, shell.source.assets);
+    assert_eq!(apple.access, ScanAccess::Unavailable);
+    assert!(
+        !view
+            .ordinary_content_keys
+            .contains(&shell.source.assets[0].key)
+    );
+    assert!(
+        view.state
+            .snapshots
+            .iter()
+            .any(|s| s.provider == Provider::Immich && s.access == ScanAccess::Full)
+    );
+    assert!(shell.http_requests > 0);
+
+    shell.apple_scan = Some(Err("permission denied".into()));
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 11.0,
+        },
+    )?;
+    assert_eq!(core.view().error.as_deref(), Some("permission denied"));
+
+    shell.apple_scan = None;
+    shell.run(
+        &core,
+        Event::Refresh {
+            permission: false,
+            now: 12.0,
+        },
+    )?;
+    assert_eq!(core.view().error, None);
+    assert!(
+        core.view()
+            .ordinary_content_keys
+            .contains(&shell.source.assets[0].key)
+    );
+    Ok(())
+}
+
+#[test]
+fn apple_refresh_publishes_a_temporary_preview_and_preserves_saved_state() -> Result<(), String> {
+    for (changed, failure) in [
+        (false, None),
+        (false, Some("scan failure")),
+        (false, Some("cancelled")),
+        (true, None),
+    ] {
+        let core = core();
+        let mut shell = Shell::new();
+        let saved = shell.source.assets[0].clone();
+        assert!(core.process_event(Event::AppleChanged).is_empty());
+        assert!(core.view().photos.is_empty());
+        let mut effects = core.process_event(Event::Refresh {
+            permission: false,
+            now: 10.0,
+        });
+        let [Effect::Io(scan)] = effects.as_mut_slice() else {
+            return Err("missing Apple preview scan".into());
+        };
+        shell.source.assets[0].revision = "preview".into();
+        let preview = shell.handle(scan.operation.clone())?;
+        let mut next = core
+            .resolve(
+                scan,
+                ShellResponse {
+                    value: Some(json!({"preview": preview})),
+                    error: None,
+                },
+            )
+            .map_err(|e| e.to_string())?;
+        let [Effect::Io(full)] = next.as_mut_slice() else {
+            return Err("missing full Apple scan".into());
+        };
+        assert!(matches!(
+            full.operation,
+            ShellOperation::AppleScan {
+                permission: false,
+                preview_limit: None,
+                ..
+            }
+        ));
+        let view = core.view();
+        assert!(view.apple_scan_preview);
+        assert!(!view.can_transfer);
+        assert!(view.ordinary_content_keys.contains(&saved.key));
+        assert_eq!(view.state.snapshots[0].access, ScanAccess::Limited);
+        assert_eq!(view.photos[0].assets[0].revision, "preview");
+        assert!(shell.journal.is_none());
+        assert!(
+            core.process_event(Event::SetFavorite {
+                keys: vec![saved.key.clone()],
+                value: true
+            })
+            .is_empty()
+        );
+
+        if changed {
+            assert!(core.process_event(Event::AppleChanged).is_empty());
+            assert!(!core.view().ordinary_content_keys.contains(&saved.key));
+        }
+        shell.source.assets[0].revision = "complete".into();
+        let response = ShellResponse {
+            value: if failure.is_none() {
+                Some(shell.handle(full.operation.clone())?)
+            } else {
+                None
+            },
+            error: failure.map(String::from),
+        };
+        let next = core.resolve(full, response).map_err(|e| e.to_string())?;
+        assert!(!core.view().apple_scan_preview);
+        assert!(
+            matches!(next.as_slice(), [Effect::Io(request), ..] if matches!(request.operation, ShellOperation::Http(_)))
+        );
+        if !changed && failure.is_none() {
+            assert_eq!(core.view().photos[0].assets[0].revision, "complete");
+        } else {
+            assert!(!core.view().ordinary_content_keys.contains(&saved.key));
+        }
+        shell.drain(&core, next)?;
+        let persisted = shell
+            .journal
+            .as_ref()
+            .ok_or("missing saved state")?
+            .snapshots
+            .iter()
+            .find(|s| s.provider == Provider::Apple)
+            .ok_or("missing Apple snapshot")?;
+        if !changed && failure.is_none() {
+            assert!(core.view().can_transfer);
+            assert_eq!(persisted.access, ScanAccess::Full);
+            assert_eq!(persisted.assets[0].revision, "complete");
+        } else {
+            assert!(!core.view().ordinary_content_keys.contains(&saved.key));
+            assert_eq!(
+                (persisted.access, &persisted.assets[0]),
+                (ScanAccess::Unavailable, &saved)
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn failed_and_untagged_apple_previews_require_complete_scan() -> Result<(), String> {
+    for untagged in [false, true] {
+        let core = core();
+        let mut shell = Shell::new();
+        assert!(core.process_event(Event::AppleChanged).is_empty());
+        let mut effects = core.process_event(Event::Refresh {
+            permission: true,
+            now: 10.0,
+        });
+        let [Effect::Io(preview)] = effects.as_mut_slice() else {
+            return Err("missing Apple preview scan".into());
+        };
+        assert!(matches!(
+            preview.operation,
+            ShellOperation::AppleScan {
+                permission: true,
+                preview_limit: Some(32),
+                ..
+            }
+        ));
+        let response = if untagged {
+            ShellResponse {
+                value: Some(shell.handle(preview.operation.clone())?),
+                error: None,
+            }
+        } else {
+            ShellResponse {
+                value: None,
+                error: Some("preview failure".into()),
+            }
+        };
+        let next = core
+            .resolve(preview, response)
+            .map_err(|error| error.to_string())?;
+        assert!(
+            matches!(next.as_slice(), [Effect::Io(full)] if matches!(full.operation,
+            ShellOperation::AppleScan { permission: false, preview_limit: None, .. }))
+        );
+        assert!(!core.view().apple_scan_preview);
+        assert!(core.view().photos.is_empty());
+        shell.drain(&core, next)?;
+        assert!(core.view().error.is_none());
+        assert!(core.view().can_transfer);
+        assert!(
+            core.view()
+                .ordinary_content_keys
+                .contains(&shell.source.assets[0].key)
+        );
+    }
+    Ok(())
+}
+
 #[test]
 fn favorite_checks_all_scopes_before_any_mutation() -> Result<(), String> {
     let core = core();

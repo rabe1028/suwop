@@ -34,7 +34,8 @@ import XCTest
         self.outcome = outcome
     }
 
-    private func scan() throws -> JSONValue {
+    private func scan(_ data: JSONValue) throws -> JSONValue {
+        guard case .null = data["previewLimit"] else { throw SuwopError("Fixture only supplies complete scans.") }
         scans += 1
         if writes > 0 {
             order.append("refresh")
@@ -74,7 +75,7 @@ import XCTest
         case "readState": return .null
         case "persist": journal = try data.decode(SavedLibrary.self)
             return .null
-        case "appleScan": return try scan()
+        case "appleScan": return try scan(data)
         case "appleTrashInspect": return try .from(AppleTrashInspection(
                 assets: [
                     AppleFacts(

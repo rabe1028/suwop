@@ -191,15 +191,16 @@ import SwiftUI
         }
         shell?.invalidateContentPresentations()
         invalidateThumbnails()
+        redactErrorAfterAccessChange()
         notifyPhotoChange()
     }
 
-    func refreshAlbums() {
+    func refreshAlbums(preservingError: Bool = true) {
         albumsRequested = true
         if isBusy {
             pendingAlbumsRefresh = true
         } else {
-            send(["type": .string("refreshAlbums")])
+            send(["type": .string("refreshAlbums")], preservingError: preservingError)
         }
     }
 
@@ -349,7 +350,9 @@ import SwiftUI
                 try await resolveRequests(requests, context: presentationContext)
                 completion?(view?.error == nil)
             } catch {
-                errorMessage = error.localizedDescription
+                if !preservingError || errorMessage == nil {
+                    errorMessage = error.localizedDescription
+                }
                 completion?(false)
             }
         }
@@ -412,6 +415,11 @@ extension LibraryModel {
         if contentChanged || removed || replacedSource || pairProofChanged {
             invalidateThumbnails()
         }
+        redactErrorIfAccessReduced(
+            to: snapshot.view,
+            replacedSource: replacedSource,
+            lostKeys: removed || !operationKeyIndex.isSubset(of: snapshot.presentationIndex.operationKeys)
+        )
         ordinaryLivePairImages.receive(snapshot)
         operationKeyIndex = snapshot.presentationIndex.operationKeys
         presentationIndex = snapshot.presentationIndex
@@ -422,7 +430,7 @@ extension LibraryModel {
         immichArchive.receive(snapshot)
         ordinarySelected.receive(snapshot)
         shell?.ordinaryLivePairEffects.reconcile(snapshot.view.ordinaryLivePairs)
-        if let failure = view?.error {
+        if let failure = view?.error, errorMessage == nil {
             errorMessage = failure
         }
     }
@@ -455,7 +463,10 @@ private extension LibraryModel {
         protection.configure(
             runtime: runtime,
             shell: shell,
-            invalidateImages: { [weak self] in self?.invalidateThumbnails() },
+            invalidateImages: { [weak self] in
+                self?.invalidateThumbnails()
+                self?.redactErrorAfterAccessChange()
+            },
             publish: { [weak self] in self?.publish($0) }
         )
         immichLocked.configure(runtime: runtime, shell: shell) { [weak self] in self?.publish($0) }
@@ -497,9 +508,6 @@ private extension LibraryModel {
         previews.removeAllObjects()
         thumbnailLoads.cancelAll()
         previewLoads.cancelAll()
-        if errorMessage != nil {
-            errorMessage = "写真へのアクセスが変わりました。処理結果を確認してください。"
-        }
     }
 
     private func notifyPhotoChange() {
@@ -527,17 +535,24 @@ private extension LibraryModel {
                     pendingRefresh = false
                     refresh(preservingError: true)
                 }
-            } catch { errorMessage = error.localizedDescription }
+            } catch {
+                if errorMessage == nil {
+                    errorMessage = error.localizedDescription
+                }
+            }
         }
     }
 }
 
 extension LibraryModel {
-    func refreshTrash() {
+    func refreshTrash(preservingError: Bool = true) {
         if isBusy {
             pendingTrashRefresh = true
         } else {
-            send(["type": .string("refreshTrash"), "now": .number(Date().timeIntervalSince1970)])
+            send(
+                ["type": .string("refreshTrash"), "now": .number(Date().timeIntervalSince1970)],
+                preservingError: preservingError
+            )
         }
     }
 

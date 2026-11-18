@@ -1,5 +1,5 @@
 use crate::{
-    app::{ConnectionSettings, Context, Event, SavedLibrary, ShellOperation, io},
+    app::{AppleScanPreview, ConnectionSettings, Context, Event, SavedLibrary, ShellOperation, io},
     domain::{
         AssetKey, LibrarySnapshot, Provider, ScanAccess, StoredAsset, TransferBundle,
         TransferIntent, TransferPhase, TransferReceipt,
@@ -7,7 +7,8 @@ use crate::{
     immich::{Asset, Session, connect},
     provider::{
         Ability, AmazonBackend, AppleBackend, CreatedCopies, DeletionOutcome, ExportRequest,
-        ImmichBackend, ImportRequest, ListRequest, Listing, OriginalImport, ReadIo, Registry,
+        ImmichBackend, ImportRequest, ListRequest, ListResult, Listing, OriginalImport, ReadIo,
+        Registry,
     },
     transfer_lifecycle::{DeletionAuthority, LifecycleEffect, LifecycleEvent},
     transport::OrdinarySessionGuard,
@@ -703,23 +704,98 @@ impl Runtime<'_> {
         }
         Ok(())
     }
+    async fn list_apple(
+        &self,
+        permission: bool,
+        now: f64,
+        preview_limit: Option<u32>,
+    ) -> Result<Option<Listing>, String> {
+        let registry = self.registry();
+        let apple = registry
+            .listing(Provider::Apple)
+            .ok_or_else(|| registry.missing(Provider::Apple, Ability::Listing))?;
+        let first = apple
+            .list(
+                self.read_io(),
+                ListRequest {
+                    permission,
+                    preview_limit,
+                    now,
+                },
+            )
+            .await;
+        match first {
+            Ok(ListResult::Complete(listing)) => return Ok(Some(listing)),
+            Ok(ListResult::Deferred) => return Ok(None),
+            Err(error) if preview_limit.is_none() || error == "cancelled" => return Err(error),
+            Err(_) => {}
+            Ok(ListResult::Preview(mut snapshot)) => {
+                if self.read_io().check_apple().is_err() {
+                    return Ok(None);
+                }
+                self.check_content_generation(&[])?;
+                if preview_limit.is_some_and(|limit| snapshot.assets.len() <= limit as usize)
+                    && snapshot.provider == Provider::Apple
+                    && snapshot.scope == self.state.apple_scope
+                    && snapshot.assets.iter().all(|asset| {
+                        asset.key.provider == Provider::Apple && asset.key.scope == snapshot.scope
+                    })
+                    && matches!(snapshot.access, ScanAccess::Full | ScanAccess::Limited)
+                {
+                    snapshot.access = ScanAccess::Limited;
+                    self.ctx.send_event(Event::AppleScanPreview {
+                        preview: Some(AppleScanPreview {
+                            snapshot,
+                            apple_generation: self.started_generation,
+                            ordinary_generation: self.started_ordinary_generation,
+                        }),
+                    });
+                }
+            }
+        }
+        if self.read_io().check_apple().is_err() {
+            return Ok(None);
+        }
+        self.ctx.send_event(Event::FetchProgress {
+            status: "Apple Photos の一覧を引き続き確認中…".into(),
+        });
+        // An unavailable or failed preview can still be followed by a normal
+        // scan. Only the first effect may ask the user for access.
+        let result = apple
+            .list(
+                self.read_io(),
+                ListRequest {
+                    permission: false,
+                    preview_limit: None,
+                    now,
+                },
+            )
+            .await;
+        self.ctx
+            .send_event(Event::AppleScanPreview { preview: None });
+        match result {
+            Ok(ListResult::Complete(listing)) => Ok(Some(listing)),
+            Ok(ListResult::Deferred) => Ok(None),
+            Ok(ListResult::Preview(_)) => Err("Apple Photos の一覧を完了できませんでした。".into()),
+            Err(error) => Err(error),
+        }
+    }
     async fn refresh(&mut self, permission: bool, now: f64) -> Result<(), String> {
         self.check_content_generation(&[])?;
         let mut errors = Vec::new();
         self.ctx.send_event(Event::FetchProgress {
             status: "Apple Photos の一覧を確認中…".into(),
         });
-        let registry = self.registry();
-        let listing = match registry.listing(Provider::Apple) {
-            Some(apple) => {
-                apple
-                    .list(self.read_io(), ListRequest { permission, now })
-                    .await
-            }
-            None => Err(registry.missing(Provider::Apple, Ability::Listing)),
-        };
-        match listing.map(Listing::into_snapshot) {
-            Ok((mut snapshot, _)) => {
+        let needs_preview = !self.state.snapshots.iter().any(|snapshot| {
+            snapshot.provider == Provider::Apple
+                && matches!(snapshot.access, ScanAccess::Full | ScanAccess::Limited)
+        });
+        match self
+            .list_apple(permission, now, needs_preview.then_some(32))
+            .await
+        {
+            Ok(Some(listing)) if self.read_io().check_apple().is_ok() => {
+                let (mut snapshot, _) = listing.into_snapshot();
                 // Reuse hashes only for the exact same revision and resource inventory.
                 let previous: BTreeMap<_, _> = self
                     .state
@@ -747,11 +823,24 @@ impl Runtime<'_> {
                     }
                 }
                 self.replace(snapshot);
+                if needs_preview {
+                    self.check_content_generation(&[])?;
+                    self.progress("Apple Photos の一覧を取得しました。");
+                }
             }
+            Ok(_) => self.invalidate(Provider::Apple),
             Err(e) => {
                 self.invalidate(Provider::Apple);
                 errors.push(e);
             }
+        }
+        if self.state.connection.is_some()
+            || self.session.is_some()
+            || self.state.amazon_connection.is_some()
+        {
+            self.ctx.send_event(Event::FetchProgress {
+                status: "接続先の一覧を確認中…".into(),
+            });
         }
         match self.ensure_session().await {
             Ok(()) => {}
@@ -771,6 +860,9 @@ impl Runtime<'_> {
             }
         }
         self.check_content_generation(&[])?;
+        if self.read_io().check_apple().is_err() {
+            self.invalidate(Provider::Apple);
+        }
         self.ctx.send_event(Event::FetchProgress {
             status: "取得したカタログを保存中…".into(),
         });
