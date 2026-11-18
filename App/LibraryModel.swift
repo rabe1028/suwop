@@ -21,7 +21,7 @@ import SwiftUI
     private(set) var shell: AppleShell?
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
-    private var observer: PhotoObserver?
+    private var photoObservation: PhotoObserverRegistration?
     private var appleAuthorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
     private var appleAuthorizationBarriers: Set<UUID> = []
     @Published private(set) var work: Task<Void, Never>?
@@ -132,27 +132,23 @@ import SwiftUI
             let nativeShell = try AppleShell()
             shell = nativeShell
             semanticSearch = .connected(to: nativeShell, library: self)
-            executeEffect = { operation, context in
-                guard let context else { throw CancellationError() }
-                return try await nativeShell.execute(operation, context: context)
+            installEffectExecutor { operation, context in
+                try await nativeShell.execute(operation, context: context)
             }
         } catch { errorMessage = error.localizedDescription }
         if let runtime, let shell {
             configurePrivateSessions(runtime: runtime, shell: shell)
+            photoObservation = PhotoObserverRegistration(model: self)
         }
         configureImageCaches()
-        observer = PhotoObserver { [weak self] assetsChanged in
-            self?.photoLibraryChanged(assetsChanged: assetsChanged)
-        }
-        if let observer {
-            PHPhotoLibrary.shared().register(observer)
-        }
     }
 
     /// PhotoKit notifications may be delayed while the app is suspended. Check
     /// permission before foreground interaction can reuse an earlier presentation.
     func sceneBecameActive() {
-        reconcileAppleAuthorization(PHPhotoLibrary.authorizationStatus(for: .readWrite))
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        reconcileAppleAuthorization(current)
+        photoObservation?.synchronize(for: current)
     }
 
     /// The value is supplied separately so acceptance can exercise transitions
@@ -168,13 +164,14 @@ import SwiftUI
         // enum or delivering PHChange before foreground interaction resumes.
         guard current == .limited || current != appleAuthorization || !appleAuthorizationBarriers.isEmpty
         else { return }
-        photoLibraryChanged(assetsChanged: true)
-        appleAuthorization = current
+        photoLibraryChanged(assetsChanged: true, authorization: current)
     }
 
     /// The production PhotoObserver callback path, shared with ordering regressions.
-    func photoLibraryChanged(assetsChanged: Bool) {
-        appleAuthorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    func photoLibraryChanged(
+        assetsChanged: Bool, authorization: PHAuthorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    ) {
+        appleAuthorization = authorization
         guard assetsChanged else {
             if albumsRequested {
                 refreshAlbums()
@@ -437,6 +434,22 @@ extension LibraryModel {
 }
 
 private extension LibraryModel {
+    func installEffectExecutor(
+        _ execute: @escaping @MainActor (ShellOperation, ContentPresentationContext) async throws -> JSONValue
+    ) {
+        executeEffect = { [weak self] operation, context in
+            guard let context else { throw CancellationError() }
+            defer {
+                if operation.type == "appleScan", let self {
+                    self.appleAuthorization = self.photoObservation?
+                        .synchronizeAfterScan(previousAuthorization: self.appleAuthorization)
+                        ?? self.appleAuthorization
+                }
+            }
+            return try await execute(operation, context)
+        }
+    }
+
     func configurePrivateSessions(runtime: RustRuntime, shell: AppleShell) {
         shell.ordinaryContent.configure(runtime: runtime)
         shell.ordinaryLivePairEffects.configure(currentPresentations: {
@@ -577,19 +590,5 @@ extension LibraryModel {
             "permission": .bool(requestPermission),
             "now": .number(Date().timeIntervalSince1970),
         ], preservingError: preservingError)
-    }
-
-    func configure(address: String, apiKey: String, allowHTTP: Bool) {
-        immichArchive.revokeForConnectionChange()
-        immichLocked.close()
-        send([
-            "type": .string("configure"),
-            "address": .string(address),
-            "key": .string(apiKey),
-            "allowHTTP": .bool(allowHTTP),
-            "id": .string(UUID().uuidString),
-            "now": .number(Date().timeIntervalSince1970),
-        ])
-        showSettings = false
     }
 }

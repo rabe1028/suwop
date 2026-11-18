@@ -124,6 +124,20 @@ extension LibraryModel {
         view?.canTransfer == true && work == nil
     }
 
+    func configure(address: String, apiKey: String, allowHTTP: Bool) {
+        immichArchive.revokeForConnectionChange()
+        immichLocked.close()
+        send([
+            "type": .string("configure"),
+            "address": .string(address),
+            "key": .string(apiKey),
+            "allowHTTP": .bool(allowHTTP),
+            "id": .string(UUID().uuidString),
+            "now": .number(Date().timeIntervalSince1970),
+        ])
+        showSettings = false
+    }
+
     func disconnect() {
         immichArchive.revokeForConnectionChange()
         immichLocked.close()

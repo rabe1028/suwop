@@ -16,6 +16,67 @@ final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
     }
 }
 
+/// Keeps PhotoKit observation outside the initial permission request. Registration
+/// can raise a system prompt while read/write access is still undetermined.
+@MainActor final class PhotoObserverRegistration {
+    private struct Active: Sendable {
+        let id: UUID
+        let authorization: PHAuthorizationStatus
+        let observer: PhotoObserver
+    }
+
+    private weak var model: LibraryModel?
+    private var active: Active?
+
+    init(model: LibraryModel) {
+        self.model = model
+        synchronize(for: PHPhotoLibrary.authorizationStatus(for: .readWrite))
+    }
+
+    deinit {
+        if let active {
+            PHPhotoLibrary.shared().unregisterChangeObserver(active.observer)
+        }
+    }
+
+    func synchronize(for authorization: PHAuthorizationStatus) {
+        guard active?.authorization != authorization else { return }
+        if let retired = active {
+            active = nil
+            PHPhotoLibrary.shared().unregisterChangeObserver(retired.observer)
+        }
+        guard authorization == .authorized || authorization == .limited else { return }
+        let id = UUID()
+        let observer = PhotoObserver { [weak self] assetsChanged in
+            self?.receive(assetsChanged, from: id)
+        }
+        active = Active(id: id, authorization: authorization, observer: observer)
+        PHPhotoLibrary.shared().register(observer)
+    }
+
+    func synchronizeAfterScan(previousAuthorization: PHAuthorizationStatus) -> PHAuthorizationStatus? {
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        // The permission dialog can resolve without a scene activation. A later
+        // change must pass through the normal invalidation before retiring the observer.
+        if previousAuthorization != .notDetermined, current != previousAuthorization {
+            model?.reconcileAppleAuthorization(current)
+        }
+        synchronize(for: current)
+        return previousAuthorization == .notDetermined ? current : nil
+    }
+
+    private func receive(_ assetsChanged: Bool, from id: UUID) {
+        guard let active, active.id == id else { return }
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard current == active.authorization else {
+            model?.reconcileAppleAuthorization(current)
+            synchronize(for: current)
+            return
+        }
+        model?.photoLibraryChanged(assetsChanged: assetsChanged, authorization: current)
+    }
+}
+
 /// PhotoKit invokes observers on arbitrary queues. All retained, immutable native
 /// fetch results and authorization state are accessed under this lock; no native
 /// object escapes it. The PHChange is consumed synchronously on its callback queue.
