@@ -568,12 +568,14 @@ public struct Batch: Codable, Sendable {
 public struct BrowserOptions: Codable, Sendable {
     public var filter: PhotoFilter
     public var presence: Presence?
+    public var provider: Provider?
     public var query: String
     public var sort: PhotoSort
     public var timeZone: String?
-    public init(filter: PhotoFilter, presence: Presence? = nil, query: String, sort: PhotoSort, timeZone: String? = nil) {
+    public init(filter: PhotoFilter, presence: Presence? = nil, provider: Provider? = nil, query: String, sort: PhotoSort, timeZone: String? = nil) {
         self.filter = filter
         self.presence = presence
+        self.provider = provider
         self.query = query
         self.sort = sort
         self.timeZone = timeZone

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 
-use crate::domain::{Presence, ResourceRole, UnifiedPhoto};
+use crate::domain::{Presence, Provider, ResourceRole, UnifiedPhoto};
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -30,6 +30,8 @@ pub struct BrowserOptions {
     pub filter: PhotoFilter,
     pub sort: PhotoSort,
     pub presence: Option<Presence>,
+    /// Match membership in the already projected gallery. Presence stays independent.
+    pub provider: Option<Provider>,
     pub time_zone: Option<String>,
 }
 #[derive(Debug, Clone, Serialize, Deserialize, schemars::JsonSchema)]
@@ -165,6 +167,12 @@ pub fn browse_with_descriptions(
         .iter()
         .filter(|photo| {
             options.presence.is_none_or(|p| p == photo.presence)
+                && options.provider.is_none_or(|provider| {
+                    photo
+                        .assets
+                        .iter()
+                        .any(|asset| asset.key.provider == provider)
+                })
                 && match options.filter {
                     PhotoFilter::All => true,
                     PhotoFilter::Favorites => favorite(photo),

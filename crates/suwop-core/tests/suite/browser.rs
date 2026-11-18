@@ -200,3 +200,108 @@ fn browsing_remains_available_while_native_work_is_running() {
     assert!(core.view().busy);
     assert_eq!(core.view().browser.photo_ids, vec![id]);
 }
+
+#[test]
+fn provider_filter_selects_projected_members_without_changing_verified_presence()
+-> Result<(), serde_json::Error> {
+    use crux_core::Core;
+    use serde_json::json;
+    use suwop_core::app::{Event, Model, SavedLibrary, Suwop};
+    use suwop_core::domain::{AppleVisibility, LibrarySnapshot, ScanAccess};
+
+    let make_asset = |id, provider, captured_at, fingerprint: Option<&str>| {
+        let mut asset = photo(id, captured_at, ResourceRole::Image, false)
+            .assets
+            .remove(0);
+        asset.key.provider = provider;
+        asset.resources[0].sha1 = fingerprint.map(str::to_owned);
+        asset
+    };
+    let shared_hash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    let verified_hash = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let unrelated_hash = "cccccccccccccccccccccccccccccccccccccccc";
+    let apple_assets = vec![
+        make_asset("pending", Provider::Apple, Some(30.0), None),
+        make_asset("shared-a", Provider::Apple, Some(20.0), Some(shared_hash)),
+        make_asset(
+            "verified-a",
+            Provider::Apple,
+            Some(10.0),
+            Some(verified_hash),
+        ),
+        StoredAsset {
+            apple_visibility: AppleVisibility::Hidden,
+            ..make_asset("hidden", Provider::Apple, Some(40.0), None)
+        },
+    ];
+    let immich_assets = vec![
+        make_asset("shared-i", Provider::Immich, Some(20.0), Some(shared_hash)),
+        make_asset(
+            "unrelated",
+            Provider::Immich,
+            Some(5.0),
+            Some(unrelated_hash),
+        ),
+    ];
+    let core = Core::new_with(
+        Suwop,
+        Model {
+            state: SavedLibrary {
+                schema_version: suwop_core::immich_live_writes::CURRENT_SCHEMA_VERSION,
+                apple_scope: "library".into(),
+                snapshots: [
+                    (Provider::Apple, apple_assets),
+                    (Provider::Immich, immich_assets),
+                ]
+                .into_iter()
+                .map(|(provider, assets)| LibrarySnapshot {
+                    provider,
+                    scope: "library".into(),
+                    assets,
+                    access: ScanAccess::Full,
+                    scanned_at: Some(50.0),
+                })
+                .collect(),
+                ..SavedLibrary::default()
+            },
+            ..Model::default()
+        },
+    );
+    let pending = "apple|library|pending";
+    let shared = "apple|library|shared-a+immich|library|shared-i";
+    let verified = "apple|library|verified-a";
+    let unrelated = "immich|library|unrelated";
+    let browse_options = |options| {
+        assert!(core.process_event(Event::Browse { options }).is_empty());
+        core.view().browser.photo_ids
+    };
+    for (provider, expected) in [
+        (Provider::Apple, vec![pending, shared, verified]),
+        (Provider::Immich, vec![shared, unrelated]),
+    ] {
+        let options = BrowserOptions {
+            provider: Some(provider),
+            ..BrowserOptions::default()
+        };
+        assert_eq!(browse_options(options), expected);
+    }
+
+    let legacy_options = serde_json::from_value(json!({
+        "query": "",
+        "filter": "all",
+        "sort": "newest",
+        "presence": "appleOnly"
+    }))?;
+    assert_eq!(browse_options(legacy_options), vec![verified]);
+    let public = core.view();
+    let presence = |id| {
+        public
+            .photos
+            .iter()
+            .find(|p| photo_id(p) == id)
+            .map(|p| p.presence)
+    };
+    assert_eq!(presence(pending), Some(Presence::Unverified));
+    assert_eq!(presence(shared), Some(Presence::Both));
+    Ok(())
+}
