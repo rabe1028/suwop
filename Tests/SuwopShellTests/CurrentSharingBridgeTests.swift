@@ -25,7 +25,7 @@ import Testing
     let persist = try #require(resolve(read, value: .from(saved)).first)
     _ = try resolve(persist, value: .null)
     let scan = try #require(update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)]).first)
-    let scanned = try #require(resolve(scan, value: .from(snapshot)).first)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: resolve)
     _ = try resolve(scanned, value: .null)
     let workspace = try #require(update([
         "type": .string("shareCurrentImage"), "key": .from(asset.key),

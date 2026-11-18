@@ -9,7 +9,8 @@ struct AlbumsSection: View {
         Section("アルバム") {
             Button("アルバムを作成", systemImage: "folder.badge.plus") { creating = true }
                 .disabled(model.isBusy).accessibilityIdentifier("createAlbum")
-            Button("アルバムを更新", systemImage: "arrow.clockwise") { model.refreshAlbums() }.disabled(model.isBusy)
+            Button("アルバムを更新", systemImage: "arrow.clockwise") { model.refreshAlbums(preservingError: false) }
+                .disabled(model.isBusy)
             NavigationLink("Apple Photos のフォルダーと順序") {
                 CollectionBrowserView(model: model, provider: .apple, parent: nil)
             }.accessibilityIdentifier("collectionBrowser")
@@ -122,7 +123,7 @@ struct AlbumDetailView: View {
                     }
                     if value.access != .full {
                         Text("権限や保存先を再確認してからアルバムを変更してください。")
-                        Button("アルバムを更新") { model.refreshAlbums() }.disabled(model.isBusy)
+                        Button("アルバムを更新") { model.refreshAlbums(preservingError: false) }.disabled(model.isBusy)
                     }
                     HStack {
                         Button("写真を追加", systemImage: "plus") { adding = true }
@@ -199,7 +200,7 @@ struct AlbumDetailView: View {
                     }
                 } else {
                     ContentUnavailableView("アルバムを確認できません", systemImage: "folder")
-                    Button("一覧を更新") { model.refreshAlbums() }.disabled(model.isBusy)
+                    Button("一覧を更新") { model.refreshAlbums(preservingError: false) }.disabled(model.isBusy)
                 }
                 if model.isBusy {
                     ProgressView(model.status)

@@ -50,6 +50,7 @@ import XCTest
             journal = try data.decode(SavedLibrary.self)
             return .null
         case "appleScan":
+            guard case .null = data["previewLimit"] else { throw SuwopError("Fixture only supplies complete scans.") }
             scans += 1
             return try .from(LibrarySnapshot(
                 provider: .apple,

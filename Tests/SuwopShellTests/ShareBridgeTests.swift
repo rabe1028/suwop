@@ -33,7 +33,7 @@ import Testing
     _ = try resolve(saved, value: .null)
     let scan = try #require(update(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)]).first)
     #expect(scan.effect["Io"]?.type == "appleScan")
-    let scanned = try #require(resolve(scan, value: .from(snapshot)).first)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: resolve)
     _ = try resolve(scanned, value: .null)
     let workspace = try #require(update([
         "type": .string("share"), "keys": .from([asset.key]), "id": .string("11111111-1111-4111-8111-111111111111"),

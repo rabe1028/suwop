@@ -36,7 +36,8 @@ private func load(
     _ = try await resolve(persist.id, .null)
     let refresh: JSONValue = .object(["type": .string("refresh"), "permission": .bool(false), "now": .number(0)])
     let scan = try #require(await update(refresh).first)
-    let saved = try #require(await resolve(scan.id, .from(library)).first)
+    let fullScan = try #require(await resolve(scan.id, fixtureAppleScanPreview(library)).first)
+    let saved = try #require(await resolve(fullScan.id, .from(library)).first)
     _ = try await resolve(saved.id, .null)
 }
 

@@ -27,7 +27,11 @@ import XCTest
         ],
         inventoryComplete: true
     )
+    var authorization: PHAuthorizationStatus = .authorized
+    var albumFailure: String?
     var scans = 0
+    var simulatePreview = false
+    var heldPreview: CheckedContinuation<Void, Never>?
     var holdScan = false
     var heldScan: CheckedContinuation<LibrarySnapshot, any Error>?
     var requestedPermission = false
@@ -54,6 +58,7 @@ import XCTest
         access: ScanAccess = .full,
         initiallyStarted: Bool = true
     ) async throws -> LibraryModel {
+        self.authorization = authorization
         initialAccess = access
         try await shell.localStore.persist(.from(SavedLibrary(appleScope: "foreground-generated", schemaVersion: 11)))
         let library = LibraryModel(
@@ -91,10 +96,27 @@ import XCTest
         if operation.type == "readState" {
             stateReads += 1
         }
+        if operation.type == "appleAlbums" {
+            if let albumFailure {
+                throw SuwopError(albumFailure)
+            }
+            return try .from(AlbumSnapshot(access: .full, provider: .apple, scope: "foreground-generated"))
+        }
         guard operation.type == "appleScan" else { return try await shell.execute(operation, context: context) }
-        scans += 1
-        let permission = try (operation.data ?? .null)["permission"].decode(Bool.self)
+        let data = operation.data ?? .null
+        let permission = try data["permission"].decode(Bool.self)
         requestedPermission = requestedPermission || permission
+        if ApplePhotosStore.shouldDeferScan(authorization: authorization, requestPermission: permission) {
+            scans += 1
+            return .null
+        }
+        if let limit = try data["previewLimit"].decode(Int?.self) {
+            XCTAssertEqual(limit, 32)
+            guard simulatePreview else { throw SuwopError("Fixture only supplies complete scans.") }
+            await withCheckedContinuation { heldPreview = $0 }
+            return try .object(["preview": .from(snapshot(.limited))])
+        }
+        scans += 1
         if holdScan {
             let result: LibrarySnapshot = try await withCheckedThrowingContinuation { heldScan = $0 }
             return try .from(result)
@@ -103,7 +125,140 @@ import XCTest
     }
 }
 
+final class AppleScanPreviewTests: XCTestCase {
+    @MainActor func testPendingColdStartDoesNotPromptAndForegroundGrantLoadsCatalog() async throws {
+        let fixture = try ForegroundAuthorizationFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = try await fixture.start(authorization: .notDetermined, initiallyStarted: false)
+        model.start()
+        try await waitUntil { model.settled }
+        XCTAssertEqual(fixture.scans, 1)
+        XCTAssertFalse(fixture.requestedPermission)
+        XCTAssertNil(model.errorMessage)
+        XCTAssertTrue(model.photos.isEmpty)
+        XCTAssertFalse(ApplePhotosStore.shouldDeferScan(authorization: .denied, requestPermission: false))
+        XCTAssertFalse(ApplePhotosStore.shouldDeferScan(authorization: .restricted, requestPermission: false))
+        XCTAssertFalse(ApplePhotosStore.shouldDeferScan(authorization: .notDetermined, requestPermission: true))
+
+        fixture.authorization = .authorized
+        model.reconcileAppleAuthorization(.authorized)
+        try await waitUntil { model.settled && !model.photos.isEmpty }
+        XCTAssertEqual(fixture.scans, 2)
+        XCTAssertFalse(fixture.requestedPermission)
+        XCTAssertNil(model.errorMessage)
+    }
+
+    @MainActor func testColdStartCountDistinguishesWaitingPreviewAndFilteredResults() async throws {
+        let fixture = try ForegroundAuthorizationFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = try await fixture.start(initiallyStarted: false)
+        fixture.simulatePreview = true
+        fixture.holdScan = true
+        model.start()
+        try await waitUntil { fixture.heldPreview != nil }
+        XCTAssertTrue(model.isBusy)
+        XCTAssertNil(model.galleryPhotoCount)
+        let diagnostic = "Synthetic transfer failure before preview"
+        model.errorMessage = diagnostic
+
+        let preview = try XCTUnwrap(fixture.heldPreview)
+        fixture.heldPreview = nil
+        preview.resume()
+        try await waitUntil { fixture.heldScan != nil }
+        XCTAssertEqual(model.galleryPhotoCount, "取得済みの写真・ビデオ 1 枚")
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        XCTAssertFalse(model.canTransfer)
+        _ = try await fixture.shell.ordinaryContent.validate(
+            keys: [fixture.asset.key],
+            context: fixture.shell.beginWorkflow()
+        )
+
+        let scan = try XCTUnwrap(fixture.heldScan)
+        fixture.heldScan = nil
+        fixture.holdScan = false
+        scan.resume(returning: fixture.snapshot(.full))
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.galleryPhotoCount, "1 枚の写真・ビデオ")
+        XCTAssertEqual(model.snapshots.first?.access, .full)
+        XCTAssertEqual(model.errorMessage, diagnostic)
+
+        model.browse(query: "", filter: .all, sort: .newest, presence: .immichOnly)
+        try await waitUntil { model.visiblePhotos.isEmpty }
+        XCTAssertEqual(model.photos.count, 1)
+        XCTAssertEqual(model.galleryPhotoCount, "0 枚の写真・ビデオ")
+    }
+}
+
 final class ForegroundAuthorizationTests: XCTestCase {
+    @MainActor func testAutomaticRefreshPreservesDiagnosticAndAccessInvalidationRedactsDetail() async throws {
+        let fixture = try ForegroundAuthorizationFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = try await fixture.start()
+        try await waitUntil { model.settled }
+        let diagnostic = "Synthetic transfer failure with original detail"
+        model.errorMessage = diagnostic
+        model.refreshAlbums()
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        // This generated library has no Immich connection: trash refresh fails.
+        model.refreshTrash()
+        try await waitUntil { model.settled }
+        XCTAssertNotNil(model.view?.error)
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        fixture.albumFailure = "Synthetic album refresh failure"
+        model.refreshAlbums()
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.view?.error, fixture.albumFailure)
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        fixture.albumFailure = nil
+        fixture.holdScan = true
+        model.refresh(preservingError: true)
+        try await waitUntil { fixture.heldScan != nil }
+        model.refreshAlbums()
+        model.refreshTrash()
+        let scan = try XCTUnwrap(fixture.heldScan)
+        fixture.heldScan = nil
+        fixture.holdScan = false
+        scan.resume(returning: fixture.snapshot(.full))
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        model.photoLibraryChanged(assetsChanged: false)
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.errorMessage, diagnostic)
+        let accessChanged = "写真へのアクセスが変わりました。処理結果を確認してください。"
+        model.photoLibraryChanged(assetsChanged: true)
+        XCTAssertEqual(model.errorMessage, accessChanged)
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.errorMessage, accessChanged)
+        model.refreshAlbums(preservingError: false)
+        try await waitUntil { model.settled }
+        XCTAssertNil(model.errorMessage)
+        model.errorMessage = diagnostic
+        model.refreshTrash(preservingError: false)
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.errorMessage, model.view?.error)
+        XCTAssertNotNil(model.errorMessage, "Explicit retry displays its fresh failure")
+    }
+
+    @MainActor func testAutomaticScanRedactsDiagnosticWhenCatalogAccessChanges() async throws {
+        let fixture = try ForegroundAuthorizationFixture()
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+        let model = try await fixture.start()
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.snapshots.first?.access, .full)
+        model.errorMessage = "Synthetic transfer failure with original detail"
+        fixture.holdScan = true
+        model.refresh(preservingError: true)
+        try await waitUntil { fixture.heldScan != nil }
+        let scan = try XCTUnwrap(fixture.heldScan)
+        fixture.heldScan = nil
+        fixture.holdScan = false
+        scan.resume(returning: fixture.snapshot(.limited))
+        try await waitUntil { model.settled }
+        XCTAssertEqual(model.snapshots.first?.access, .limited)
+        XCTAssertEqual(model.errorMessage, "写真へのアクセスが変わりました。処理結果を確認してください。")
+    }
+
     /// Production start and Core persistence use a generated store and scan;
     /// the Limited status is synthetic and never changes actual OS permission.
     @MainActor func testLimitedForegroundBeforeStartCannotOvertakePersistedInitialization() async throws {
@@ -350,14 +505,14 @@ final class ForegroundAuthorizationTests: XCTestCase {
             XCTFail("Stale Apple content authority survived before a fresh scan completed")
         } catch {}
     }
+}
 
-    @MainActor private func waitUntil(_ condition: () -> Bool) async throws {
-        for _ in 0 ..< 300 {
-            if condition() {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(10))
+@MainActor private func waitUntil(_ condition: () -> Bool) async throws {
+    for _ in 0 ..< 300 {
+        if condition() {
+            return
         }
-        throw SuwopError("Foreground authorization scenario did not settle")
+        try await Task.sleep(for: .milliseconds(10))
     }
+    throw SuwopError("Foreground authorization scenario did not settle")
 }

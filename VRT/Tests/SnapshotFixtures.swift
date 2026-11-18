@@ -79,9 +79,16 @@ import XCTest
             "type": .string("refresh"), "permission": .bool(false), "now": .number(1_751_846_400),
         ])).decode([EffectRequest].self).first)
         XCTAssertEqual(scan.effect["Io"]?.type, "appleScan")
+        let preview = LibrarySnapshot(
+            provider: .apple,
+            scope: "vrt",
+            assets: Array(assets.prefix(32)),
+            access: .limited
+        )
+        let fullScan = try XCTUnwrap(resolve(bridge, request: scan, value: .object(["preview": .from(preview)])).first)
         let saved = try XCTUnwrap(resolve(
             bridge,
-            request: scan,
+            request: fullScan,
             value: .from(LibrarySnapshot(provider: .apple, scope: "vrt", assets: assets, access: .full))
         ).first)
         XCTAssertEqual(saved.effect["Io"]?.type, "persist")

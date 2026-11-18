@@ -41,10 +41,7 @@ import XCTest
         }
         switch operation.type {
         case "readState", "persist", "copyFile": return .null
-        case "appleScan": scans += 1
-            return try .from(LibrarySnapshot(
-                provider: .apple, scope: asset.key.scope, assets: [asset], access: .full
-            ))
+        case "appleScan": return try scan(operation.data ?? .null)
         case "workspace": return .string("/tmp/generated-workflow-context")
         case "sharingWorkspace": sharingWorkspaces += 1
             return .string("/tmp/generated-workflow-context")
@@ -61,6 +58,12 @@ import XCTest
             return .null
         default: throw SuwopError("Unexpected workflow fixture effect: \(operation.type)")
         }
+    }
+
+    private func scan(_ data: JSONValue) throws -> JSONValue {
+        guard case .null = data["previewLimit"] else { throw SuwopError("Fixture only supplies complete scans.") }
+        scans += 1
+        return try .from(LibrarySnapshot(provider: .apple, scope: asset.key.scope, assets: [asset], access: .full))
     }
 
     private func present(_ operation: ShellOperation, context: ContentPresentationContext) async throws -> JSONValue {

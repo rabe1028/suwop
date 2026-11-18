@@ -41,7 +41,7 @@ import Testing
     let photoScan = try #require(bridge.call(0, input: .object([
         "type": .string("refresh"), "permission": .bool(false), "now": .number(0),
     ])).decode([EffectRequest].self).first)
-    let scannedPhotos = try #require(resolve(photoScan, value: .from(library)).first)
+    let scannedPhotos = try finishFixtureAppleScan(photoScan, snapshot: library, resolve: resolve)
     _ = try resolve(scannedPhotos, value: .null)
     let scan = try #require(bridge.call(
         0,

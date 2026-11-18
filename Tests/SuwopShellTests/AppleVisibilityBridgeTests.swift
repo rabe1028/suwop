@@ -56,9 +56,8 @@ import Testing
     fresh.appleVisibility = .visible
     let scan = try update(["type": .string("refresh"), "permission": .bool(false), "now": .number(20)])
     #expect(scan.effect["Io"]?.type == "appleScan")
-    let scanned = try #require(resolve(scan, value: .from(LibrarySnapshot(
-        provider: .apple, scope: "library", assets: [fresh], access: .limited
-    ))).first)
+    let snapshot = LibrarySnapshot(provider: .apple, scope: "library", assets: [fresh], access: .limited)
+    let scanned = try finishFixtureAppleScan(scan, snapshot: snapshot, resolve: resolve)
     let saved = try #require(scanned.effect["Io"]?.data).decode(SavedLibrary.self)
     #expect(saved.snapshots.first?.assets.first?.appleVisibility == .visible)
     #expect(try resolve(scanned, value: .null).isEmpty)

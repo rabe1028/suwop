@@ -320,8 +320,12 @@ impl AmazonBackend {
 }
 
 impl CatalogListing for AmazonBackend {
-    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, Listing> {
-        Box::pin(async move { self.list_all(&io, request.now).await })
+    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, super::ListResult> {
+        Box::pin(async move {
+            self.list_all(&io, request.now)
+                .await
+                .map(super::ListResult::Complete)
+        })
     }
 }
 

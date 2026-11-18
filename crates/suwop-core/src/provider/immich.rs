@@ -283,7 +283,7 @@ impl SourceDeletion for ImmichBackend {
 /// Enumeration with plain hydration. The app refresh additionally replaces
 /// assets tracked by a saved visibility operation with a fresh read.
 impl CatalogListing for ImmichBackend {
-    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, Listing> {
+    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, super::ListResult> {
         Box::pin(async move {
             let session = &self.session;
             let assets = session.list(io.ctx(), request.now).await?;
@@ -296,7 +296,7 @@ impl CatalogListing for ImmichBackend {
                     .and_then(|id| by_id.get(id).copied());
                 records.push(hydrate(session, &io, asset, companion).await?);
             }
-            Ok::<_, String>(Listing {
+            Ok(super::ListResult::Complete(Listing {
                 snapshot: LibrarySnapshot {
                     provider: Provider::Immich,
                     scope: session.scope.clone(),
@@ -306,7 +306,7 @@ impl CatalogListing for ImmichBackend {
                 },
                 range: ListingRange::WholeLibrary,
                 warning: None,
-            })
+            }))
         })
     }
 }

@@ -35,9 +35,13 @@ private func previewRuntime() async throws -> PreviewFixture {
     let scan = try #require(await runtime.update(.object([
         "type": .string("refresh"), "permission": .bool(false), "now": .number(1),
     ])).first)
+    let snapshot = LibrarySnapshot(provider: .apple, scope: "fixture", assets: assets, access: .limited)
+    let fullScan = try #require(await runtime.resolve(
+        id: scan.id, value: fixtureAppleScanPreview(snapshot), error: nil
+    ).first)
     let refreshed = try await runtime.resolve(
-        id: scan.id,
-        value: .from(LibrarySnapshot(provider: .apple, scope: "fixture", assets: assets, access: .limited)),
+        id: fullScan.id,
+        value: .from(snapshot),
         error: nil
     )
     let saved = try #require(refreshed.first)

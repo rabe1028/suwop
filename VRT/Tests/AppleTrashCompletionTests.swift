@@ -34,7 +34,8 @@ import XCTest
         self.outcome = outcome
     }
 
-    private func scan() throws -> JSONValue {
+    private func scan(_ data: JSONValue) throws -> JSONValue {
+        guard case .null = data["previewLimit"] else { throw SuwopError("Fixture only supplies complete scans.") }
         scans += 1
         if writes > 0 {
             order.append("refresh")
@@ -52,7 +53,7 @@ import XCTest
         writes += 1
         order.append("delete")
         if outcome == .lost {
-            throw SuwopError("lost native response")
+            throw SuwopError("lost native response for \(asset.name)")
         }
         return try .from(AppleTrashResult(
             applied: outcome == .applied,
@@ -74,7 +75,7 @@ import XCTest
         case "readState": return .null
         case "persist": journal = try data.decode(SavedLibrary.self)
             return .null
-        case "appleScan": return try scan()
+        case "appleScan": return try scan(data)
         case "appleTrashInspect": return try .from(AppleTrashInspection(
                 assets: [
                     AppleFacts(
@@ -125,19 +126,15 @@ final class AppleTrashCompletionTests: XCTestCase {
             XCTAssertEqual(model.photos.count, outcome == .rejected ? 1 : 0)
             let view = try await runtime.view()
             XCTAssertEqual(view.state.snapshots.first?.access, .full)
+            XCTAssertEqual(view.ordinaryContentKeys.contains(effects.asset.key), outcome == .rejected)
             if outcome == .applied {
                 XCTAssertNil(model.errorMessage)
             } else {
-                XCTAssertEqual(
-                    effects.errorDuringRefresh,
-                    outcome == .rejected ? "native rejected" : "lost native response"
-                )
-                XCTAssertNotNil(model.errorMessage)
-                if outcome == .lost {
-                    XCTAssertEqual(model.errorMessage, "写真へのアクセスが変わりました。処理結果を確認してください。")
-                } else {
-                    XCTAssertTrue(model.errorMessage?.contains("アクセスが変わりました") == true)
-                }
+                // The unresolved deletion has already removed the photo from the
+                // public catalog. Rust redacts its filename before projecting the error.
+                let diagnostic = outcome == .rejected ? "native rejected" : "lost native response for 非公開の写真"
+                XCTAssertEqual(effects.errorDuringRefresh, diagnostic)
+                XCTAssertEqual(model.errorMessage, diagnostic)
                 XCTAssertTrue(model.showAppleTrash)
             }
             XCTAssertEqual(view.state.pendingAppleTrash.count, outcome == .lost ? 1 : 0)

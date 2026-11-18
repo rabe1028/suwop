@@ -138,11 +138,16 @@ impl<'a> ReadIo<'a> {
     /// the keys the next request touches.
     pub(crate) fn check(&self, keys: &[AssetKey]) -> Result<(), String> {
         self.check_ordinary()?;
+        if keys.iter().any(|k| k.provider == Provider::Apple) {
+            self.check_apple()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn check_apple(&self) -> Result<(), String> {
         // A generation comparison is a cancellation fence, not cross-thread
         // data synchronization.
-        if keys.iter().any(|k| k.provider == Provider::Apple)
-            && self.apple_expected != self.apple.load(std::sync::atomic::Ordering::Relaxed)
-        {
+        if self.apple_expected != self.apple.load(std::sync::atomic::Ordering::Relaxed) {
             return Err(
                 "読み出し中に Apple Photos のアクセスが変わりました。処理を中止しました。".into(),
             );
@@ -182,7 +187,14 @@ impl Listing {
 pub(crate) struct ListRequest {
     /// The native adapter may ask the user for access.
     pub permission: bool,
+    pub preview_limit: Option<u32>,
     pub now: f64,
+}
+
+pub(crate) enum ListResult {
+    Complete(Listing),
+    Preview(LibrarySnapshot),
+    Deferred,
 }
 
 /// Enumerate the service's catalog. A listing never consults workflow
@@ -190,7 +202,7 @@ pub(crate) struct ListRequest {
 /// ([`hydrate_immich`]) but replaces it, per asset, with a fresh read when a
 /// saved visibility operation tracks that asset; see `refresh_immich`.
 pub(crate) trait CatalogListing: Send + Sync {
-    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, Listing>;
+    fn list<'a>(&'a self, io: ReadIo<'a>, request: ListRequest) -> Io<'a, ListResult>;
 }
 
 #[derive(Debug, Clone, Copy)]
