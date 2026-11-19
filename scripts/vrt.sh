@@ -75,7 +75,15 @@ stage() {
     echo "VRT: $label"
     "$@" > "$ARTIFACTS/$label.log" 2>&1 || status=$?
     printf '%s\t%s\t%s\n' "$label" "$((SECONDS - started))" "$status" >> "$ARTIFACTS/stages.tsv"
-    if [[ "$status" != 0 ]]; then tail -100 "$ARTIFACTS/$label.log"; return "$status"; fi
+    if [[ "$status" != 0 ]]; then
+        tail -100 "$ARTIFACTS/$label.log"
+        if [[ "$label" == compare ]]; then
+            uv run --no-project python scripts/vrt_lanes.py compare-failure "$ARTIFACTS" "$LANE" \
+                2> "$ARTIFACTS/compare-failure.log" ||
+                echo 'VRT: Failed XCTest identifiers unavailable.'
+        fi
+        return "$status"
+    fi
 }
 if [[ -n "$LANE" ]]; then stage begin uv run --no-project python scripts/vrt_lanes.py begin "$ARTIFACTS"; fi
 stage slim simslim on "$UDID" --profile VRT/simslim.json

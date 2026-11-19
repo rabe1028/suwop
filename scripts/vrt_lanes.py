@@ -13,6 +13,7 @@ import vrt
 from vrt_test_inventory import (
     enumerate_inventory,
     executed_inventory,
+    failed_identifiers,
     registered_inventory,
     require,
 )
@@ -114,6 +115,42 @@ def only_testing(registered, scope):
     if scope == "host-snapshots":
         return [SCOPES[scope]]
     return selection(registered, scope)
+
+
+def report_compare_failure(artifacts, scope):
+    result = artifacts / "Tests.xcresult"
+    require(result.is_dir(), "Missing XCTest result bundle")
+    raw = artifacts / "test-inventory.log"
+    with raw.open("wb") as output, (artifacts / "test-inventory.stderr.log").open("wb") as errors:
+        subprocess.run(  # noqa: S603 - pinned Xcode and fixed tool arguments
+            [  # noqa: S607 - Xcode selected by vrt.sh
+                "xcrun",
+                "xcresulttool",
+                "get",
+                "test-results",
+                "tests",
+                "--path",
+                str(result),
+                "--compact",
+            ],
+            stdout=output,
+            stderr=errors,
+            check=True,
+            timeout=15,
+        )
+    identifiers = failed_identifiers(read(raw))
+    require(identifiers, "No failed XCTest case identifiers")
+    if scope:
+        registered = registered_inventory(read(artifacts / "registered-tests.json"))
+        require(
+            set(identifiers) <= set(selection(registered, scope)), "Unexpected failed case in lane"
+        )
+    limit = 8
+    print("VRT: Failed XCTest cases:")
+    for identifier in identifiers[:limit]:
+        print(identifier)
+    if len(identifiers) > limit:
+        print("VRT: Additional failed XCTest identifiers omitted.")
 
 
 def validate_stages(values, *, final):
@@ -265,6 +302,8 @@ def main():
         (artifacts / "only-testing.txt").write_text(
             "".join(f"{item}\n" for item in only_testing(registered, scope))
         )
+    elif operation == "compare-failure":
+        report_compare_failure(Path(args[0]), args[1])
     elif operation == "validate":
         artifacts, scope = Path(args[0]), args[1]
         stages(artifacts, final=False)
@@ -303,5 +342,5 @@ def main():
 if __name__ == "__main__":
     try:
         sys.exit(main())
-    except (ValueError, OSError, KeyError, TypeError, subprocess.CalledProcessError) as error:
+    except (ValueError, OSError, KeyError, TypeError, subprocess.SubprocessError) as error:
         sys.exit(str(error))
