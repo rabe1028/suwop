@@ -207,21 +207,21 @@ import SwiftUI
         }
     }
 
-    func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?) {
+    func browse(query: String, filter: PhotoFilter, sort: PhotoSort, presence: Presence?, provider: Provider? = nil) {
         guard let runtime else { return }
         browseWork?.cancel()
         browseGeneration &+= 1
         let generation = browseGeneration
         browseWork = Task {
             do {
-                let options = BrowserOptions(
+                let snapshot = try await runtime.browse(BrowserOptions(
                     filter: filter,
                     presence: presence,
+                    provider: provider,
                     query: query,
                     sort: sort,
                     timeZone: TimeZone.current.identifier
-                )
-                let snapshot = try await runtime.browse(options)
+                ))
                 guard !Task.isCancelled, generation == browseGeneration else { return }
                 publish(snapshot)
             } catch {

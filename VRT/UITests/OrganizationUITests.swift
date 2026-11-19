@@ -76,18 +76,26 @@ final class OrganizationUITests: XCTestCase {
         let member = app.buttons["organizationMember-11111111-1111-4111-8111-111111111111"]
         reach(member, in: app)
         tapVisible(member, in: app)
-        XCTAssertTrue(app.buttons["写真を閉じる"].waitForExistence(timeout: 10))
+        let closeReview = app.buttons["写真を閉じる"]
+        XCTAssertTrue(closeReview.waitForExistence(timeout: 10))
         XCTAssertFalse(app.buttons["previewSource"].exists)
-        app.buttons["写真を閉じる"].tap()
-        app.navigationBars.buttons.firstMatch.tap()
+        guard dismissReview(closeReview, in: app) else { return }
+        let memberBack = app.navigationBars.buttons.matching(
+            NSPredicate(format: "identifier == %@ AND label == %@", "BackButton", "見つける")
+        ).firstMatch
+        guard tapWhenReady(memberBack, in: app, name: "People member-list back button") else { return }
+        guard member.waitForNonExistence(timeout: 10) else {
+            failTransition("The People member list did not return to the browser", in: app)
+            return
+        }
 
-        fixtureAction("fixturePeopleFailure", in: app)
+        guard fixtureAction("fixturePeopleFailure", in: app) else { return }
         enabledTap(load, in: app)
         XCTAssertTrue(app.staticTexts["organizationPeopleError"].waitForExistence(timeout: 15))
         XCTAssertFalse(person.exists)
         revealForCapture(app.staticTexts["organizationPeopleError"], in: app)
         attach(app, name: "organization-people-error-\(large ? "AX3" : "normal")")
-        fixtureAction("fixturePeopleHold", in: app)
+        guard fixtureAction("fixturePeopleHold", in: app) else { return }
         reach(load, in: app)
         enabledTap(load, in: app)
         expectation(for: NSPredicate(format: "label == 'held'"), evaluatedWith: app.staticTexts["fixturePeoplePage"])
@@ -97,7 +105,7 @@ final class OrganizationUITests: XCTestCase {
         tapVisible(entry, in: app)
         XCTAssertTrue(load.waitForExistence(timeout: 10))
         XCTAssertFalse(person.exists)
-        fixtureAction("fixturePeopleRelease", in: app)
+        guard fixtureAction("fixturePeopleRelease", in: app) else { return }
         expectation(for: NSPredicate(format: "enabled == true"), evaluatedWith: load)
         waitForExpectations(timeout: 10)
         XCTAssertFalse(person.exists, "A held reply from the closed screen must not reinstall names after reopening")
@@ -107,7 +115,7 @@ final class OrganizationUITests: XCTestCase {
         XCTAssertTrue(person.waitForExistence(timeout: 15))
         tapVisible(person, in: app)
         XCTAssertTrue(member.waitForExistence(timeout: 10))
-        fixtureAction("fixturePeopleRevoke", in: app)
+        guard fixtureAction("fixturePeopleRevoke", in: app) else { return }
         XCTAssertTrue(app.staticTexts["このグループを表示できません"].waitForExistence(timeout: 15))
         XCTAssertFalse(app.staticTexts["GENERATED VISIBLE PERSON"].exists)
         XCTAssertFalse(member.exists)
@@ -146,11 +154,49 @@ final class OrganizationUITests: XCTestCase {
         tapVisible(element, in: app)
     }
 
-    @MainActor private func fixtureAction(_ identifier: String, in app: XCUIApplication) {
-        app.buttons["organizationFixtureActions"].tap()
-        let button = app.buttons[identifier]
-        XCTAssertTrue(button.waitForExistence(timeout: 10))
-        button.tap()
+    @MainActor private func dismissReview(_ close: XCUIElement, in app: XCUIApplication) -> Bool {
+        // A toolbar tap can be swallowed while the sheet is settling. Repeat only
+        // dismissal of the same review, and require it to be gone before navigating.
+        for _ in 0 ..< 2 {
+            if !close.exists {
+                return true
+            }
+            guard tapWhenReady(close, in: app, name: "PhotoViewer close button") else { return false }
+            if close.waitForNonExistence(timeout: 3) {
+                return true
+            }
+        }
+        failTransition("PhotoViewer did not dismiss after tapping close", in: app)
+        return false
+    }
+
+    @MainActor private func tapWhenReady(_ element: XCUIElement, in app: XCUIApplication, name: String) -> Bool {
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND enabled == true AND hittable == true"),
+            object: element
+        )
+        guard XCTWaiter.wait(for: [ready], timeout: 10) == .completed else {
+            failTransition("\(name) did not become hittable", in: app)
+            return false
+        }
+        element.tap()
+        return true
+    }
+
+    @MainActor private func failTransition(_ message: String, in app: XCUIApplication) {
+        attach(app, name: "organization-blocked-transition")
+        let hierarchy = XCTAttachment(string: app.debugDescription)
+        hierarchy.name = "organization-blocked-transition-hierarchy"
+        hierarchy.lifetime = .keepAlways
+        add(hierarchy)
+        XCTFail(message)
+    }
+
+    @MainActor private func fixtureAction(_ identifier: String, in app: XCUIApplication) -> Bool {
+        guard tapWhenReady(
+            app.buttons["organizationFixtureActions"], in: app, name: "Organization fixture menu"
+        ) else { return false }
+        return tapWhenReady(app.buttons[identifier], in: app, name: identifier)
     }
 
     @MainActor private func navigationAndRevocation(large: Bool) {
@@ -182,13 +228,14 @@ final class OrganizationUITests: XCTestCase {
             reach(member, in: app)
             attach(app, name: "\(route)\(large ? "AX3" : "normal")-members")
             tapVisible(member, in: app)
-            XCTAssertTrue(app.buttons["写真を閉じる"].waitForExistence(timeout: 10))
+            let closeReview = app.buttons["写真を閉じる"]
+            XCTAssertTrue(closeReview.waitForExistence(timeout: 10))
             XCTAssertFalse(app.buttons["previewSource"].exists, "Review cannot switch to a different physical source")
             XCTAssertFalse(app.buttons["写真の情報"].exists, "Review must not expose mutation-capable info")
             attach(app, name: "\(route)\(large ? "AX3" : "normal")-review")
-            app.buttons["写真を閉じる"].tap()
+            guard dismissReview(closeReview, in: app) else { return }
             XCTAssertTrue(member.waitForExistence(timeout: 10))
-            fixtureAction("fixtureRevoke", in: app)
+            guard fixtureAction("fixtureRevoke", in: app) else { return }
             XCTAssertTrue(app.staticTexts["このグループを表示できません"].waitForExistence(timeout: 10))
             XCTAssertFalse(app.descendants(matching: .any)["organizationPlaceMap"].firstMatch.exists)
             XCTAssertFalse(app.buttons["organizationMember-a"].exists)
