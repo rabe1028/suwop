@@ -65,3 +65,67 @@ The pre-fix live baseline and profiles are in ignored
 `.tools/verification/large-library-native/`. Full catalog snapshots still exist
 at publication boundaries; use the `snapshot` and `publish` spans to assess their
 remaining cost before changing the Rust/native projection contract.
+
+## Generated native Gallery benchmark
+
+From a Suwop checkout with the pinned tools, Xcode and Simulator runtime in
+`VRT/environment.json`, run the opt-in benchmark on Apple Silicon.
+
+```sh
+uv run --no-project python scripts/verify.py run --label gallery-performance -- make gallery-performance
+```
+
+The driver builds the Release Swift host and Release Rust simulator slice.
+The Rust target and locked Cargo dependencies must already be available
+locally. For one independent run, replace `make gallery-performance` with
+`bash scripts/gallery-performance.sh 10000` or
+`bash scripts/gallery-performance.sh 100000`. It archives its Rust simulator slice and
+restores the checkout’s prior XCFramework after the run. It waits for a fresh
+Simulator of the pinned device type to finish booting before XCTest runs.
+The driver shuts down that Simulator at the end. Each size launches the app
+in a fresh process on the same Simulator. Run it without competing
+builds or Simulator tests for results intended for comparison.
+
+The app generates distinct Apple-provider records with fixed capture dates
+and prepares 32-record Limited and full native scan replies. The fixture
+generates two in-memory rasters. It feeds those replies through the existing
+native effect seams into the real `RustRuntime`, `LibraryModel`, and
+`GalleryView`. PhotoKit, Immich, credentials, network, and on-disk catalog
+persistence are outside this scenario. Catalog persistence is acknowledged in
+memory. Swift image preparation and app-owned cache limits are active.
+The shared synthetic raster per image size makes pixel verification
+reproducible and limits the workload represented by the image pipeline.
+
+XCTest waits for the first thumbnail raster, checks the exact full catalog
+count and initial order, opens and closes the first preview, types a name
+query with three matching records, then returns to the library and changes
+the full catalog to oldest-first. It checks visible order using real grid
+positions. Four PNG screenshots back the thumbnail, preview, search and sort
+observations. A two-pixel color check on each screenshot identifies the
+generated raster. The XCTest timings include input delivery, accessibility
+queries, polling and screenshot capture. The first raster is an observed
+upper bound. The partial preview can complete before XCTest reaches the
+screen, so the report records the size of the first published view separately.
+For search and sort, the trace also measures from XCTest input to the end
+of the corresponding app publication.
+
+Look under `DerivedData/GalleryPerformance/run.*` for each size's app and test
+timelines, raw trace, summarized trace, screenshots, and `Test.xcresult`.
+`report.json` ties successful cases to the checkout fingerprint, host
+executable and Rust archive hashes, simulator, Xcode, OS, machine and
+compiler settings. The app-process peak RSS uses
+`getrusage(RUSAGE_SELF).ru_maxrss` in bytes as documented by Darwin
+`getrusage(2)`. RSS covers the whole app process through the final sample,
+including fixture creation. The isolated fixture-generation interval ends
+before the timed Rust initialization and refresh. Scan reply handoff, input
+encoding and Rust integration remain part of the refresh. The trace splits
+the later snapshot bridge, typed Swift decoding, presentation preparation
+and publication. The trace includes main-actor probe p95, maximum and
+over-100 ms count. `CADisplayLink` records main-thread callback intervals
+from the timed scenario start, capped at 100,000 intervals with the cap
+reported explicitly. These intervals measure callback scheduling. They do not
+establish composited frames per second or physical-device performance.
+
+The driver has completion watchdogs and checks that the required evidence
+exists. The benchmark defines no performance thresholds. Regular VRT,
+hosted CI, physical-device memory and real-library acceptance run separately.

@@ -22,7 +22,7 @@ import SwiftUI
     @Published private(set) var semanticSearch: SemanticSearchModel?
     private var executeEffect: (@MainActor (ShellOperation, ContentPresentationContext?) async throws -> JSONValue)?
     private var photoObservation: PhotoObserverRegistration?
-    private var appleAuthorization = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+    private var appleAuthorization = PhotoObserverRegistration.initialLibraryAuthorization()
     private var appleAuthorizationBarriers: Set<UUID> = []
     @Published private(set) var work: Task<Void, Never>?
     private var browseWork: Task<Void, Never>?
