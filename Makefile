@@ -104,6 +104,10 @@ vrt:
 vrt-record:
 	bash scripts/vrt.sh --record
 
+.PHONY: gallery-performance
+gallery-performance:
+	bash scripts/gallery-performance.sh
+
 .PHONY: apple-native-test
 apple-native-test:
 	bash scripts/apple-native-test.sh

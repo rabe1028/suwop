@@ -9,6 +9,9 @@ import SuwopShell
         case http, nativeEffect, resolve, snapshot, publish, refresh, mainActorDelay, previewImage, thumbnail
         case previewRequest, thumbnailRequest, imageAuthority, snapshotRuntime, snapshotBridge, snapshotDecode
         case snapshotPrepare
+        #if SUWOP_GALLERY_PERFORMANCE
+            case displayCallbackInterval, galleryPerformanceEnd
+        #endif
     }
 
     struct Span {
@@ -102,8 +105,9 @@ import SuwopShell
         }
     }
 
-    static func export() {
-        guard let output else { return }
+    @discardableResult
+    static func export() -> Task<Void, Never>? {
+        guard let output else { return nil }
         struct Export: Encodable, Sendable {
             let traceEvents: [TraceEvent]
             let droppedEvents: Int
@@ -122,5 +126,6 @@ import SuwopShell
                 log.error("Performance trace export failed")
             }
         }
+        return pendingExport
     }
 }

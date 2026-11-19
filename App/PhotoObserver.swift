@@ -19,6 +19,15 @@ final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
 /// Keeps PhotoKit observation outside the initial permission request. Registration
 /// can raise a system prompt while read/write access is still undetermined.
 @MainActor final class PhotoObserverRegistration {
+    static func initialLibraryAuthorization() -> PHAuthorizationStatus {
+        #if SUWOP_GALLERY_PERFORMANCE
+            // Its fixture injects authorization alongside the generated inventory.
+            .notDetermined
+        #else
+            PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        #endif
+    }
+
     private struct Active: Sendable {
         let id: UUID
         let authorization: PHAuthorizationStatus
