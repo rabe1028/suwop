@@ -26,12 +26,16 @@ private struct PhotoAuthorizationScreen: View {
             Text("Evidence")
                 .accessibilityIdentifier("authorizationEvidence")
                 .accessibilityLabel(fixture.evidence)
-            Button("Request Photos Access") { run(fixture.request) }
-            Button("Verify Denial") { run(fixture.verifyInitialDenial) }
-            Button("Verify Before Publication") { run(fixture.verifyBeforePublication) }
-            Button("Release Scan Reply") { run(fixture.release) }
-            Button("Manage Limited Selection") {
-                do { try fixture.chooseLimitedMembership() } catch { fixture.fail(error) }
+            if let interruption = fixture.interruption, fixture.step == "published" {
+                PhotoScanInterruptionScreen(scenario: interruption)
+            } else {
+                Button("Request Photos Access") { run(fixture.request) }
+                Button("Verify Denial") { run(fixture.verifyInitialDenial) }
+                Button("Verify Before Publication") { run(fixture.verifyBeforePublication) }
+                Button("Release Scan Reply") { run(fixture.release) }
+                Button("Manage Limited Selection") {
+                    do { try fixture.chooseLimitedMembership() } catch { fixture.fail(error) }
+                }
             }
         }
         .task {

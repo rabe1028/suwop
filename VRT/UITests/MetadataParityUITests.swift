@@ -121,23 +121,62 @@ final class MetadataParityUITests: XCTestCase {
     }
 
     @MainActor private func replace(_ field: XCUIElement, with text: String, _ app: XCUIApplication) -> Bool {
-        guard reveal(field, app) else { return false }
-        field.tap()
-        field.press(forDuration: 1.1)
+        guard let point = textEditingPoint(field, app) else { return false }
+        point.press(forDuration: 1.1)
         let selectAll = app.menuItems.matching(NSPredicate(
             format: "label == %@ OR label == %@",
             "すべてを選択",
             "Select All"
         ))
         .firstMatch
-        guard selectAll.waitForExistence(timeout: 5) else {
-            XCTFail("Select All menu is missing: \(app.debugDescription)")
+        let ready = XCTNSPredicateExpectation(
+            predicate: NSPredicate(format: "exists == true AND enabled == true AND hittable == true"),
+            object: selectAll
+        )
+        guard XCTWaiter.wait(for: [ready], timeout: 5) == .completed else {
+            XCTFail("Select All menu is not ready for \(field.identifier): \(app.debugDescription)")
             return false
         }
         selectAll.tap()
         field.typeText(text)
-        XCTAssertEqual(field.value as? String, text)
-        return true
+        let actual = field.value as? String
+        XCTAssertEqual(actual, text)
+        return actual == text
+    }
+
+    @MainActor private func textEditingPoint(_ field: XCUIElement, _ app: XCUIApplication) -> XCUICoordinate? {
+        guard reveal(field, app) else { return nil }
+        let form = app.collectionViews.firstMatch
+        let keyboard = app.keyboards.firstMatch
+        let focused = NSPredicate(format: "hasKeyboardFocus == true")
+        for placement in 0 ..< 2 {
+            if !focused.evaluate(with: field) {
+                field.tap()
+            }
+            let focus = XCTNSPredicateExpectation(predicate: focused, object: field)
+            guard XCTWaiter.wait(for: [focus], timeout: 5) == .completed,
+                  keyboard.waitForExistence(timeout: 5)
+            else {
+                XCTFail("Metadata field did not acquire keyboard focus: \(field.identifier)")
+                return nil
+            }
+            // The keyboard can shrink the Form after the initial reveal.
+            let visibleInterior = formViewport(form, app).intersection(field.frame.insetBy(dx: 8, dy: 8))
+            let hasRoomToPress = visibleInterior.width >= 16 && visibleInterior.height >= 12
+            if hasRoomToPress, field.isHittable, keyboard.exists, focused.evaluate(with: field) {
+                let appFrame = app.frame
+                return app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(
+                    dx: visibleInterior.midX - appFrame.minX,
+                    dy: visibleInterior.midY - appFrame.minY
+                ))
+            }
+            if placement == 0 {
+                // The Form dismisses the keyboard on scroll. Reacquire focus and measure again.
+                guard reveal(field, app) else { return nil }
+            }
+        }
+        XCTFail("Metadata field has no safe point with the keyboard open: \(field.identifier): \(app.debugDescription)")
+        return nil
     }
 
     @MainActor private func selectField(_ title: String, _ app: XCUIApplication, towardTop: Bool = false) -> Bool {

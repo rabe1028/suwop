@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 
 BUNDLES = {"SuwopVRT", "SuwopVRTUI"}
 CONTAINERS = {"Test Plan", "Unit test bundle", "UI test bundle", "Test Suite"}
+TEST_IDENTIFIER = re.compile(r"(SuwopVRT|SuwopVRTUI)/[A-Za-z_][A-Za-z0-9_]*/test[A-Za-z0-9_]+\(\)")
 
 
 def require(condition, message):
@@ -47,12 +48,55 @@ def enumerate_inventory(raw):
         )
         identifier = entry["identifier"]
         require(isinstance(identifier, str), "Invalid enumeration identifier")
-        match = re.fullmatch(
-            r"(SuwopVRT|SuwopVRTUI)/[A-Za-z_][A-Za-z0-9_]*/test[A-Za-z0-9_]+\(\)", identifier
-        )
+        match = TEST_IDENTIFIER.fullmatch(identifier)
         require(match is not None, "Unknown/parameterized enumeration identifier")
         groups[match[1]].append(identifier.removesuffix("()"))
     return registered_inventory({"schema_version": 1, "bundles": groups})
+
+
+def case_identifier(node, bundle):
+    url = urlparse(node.get("nodeIdentifierURL", ""))
+    parts = url.path.strip("/").split("/")
+    require(
+        url.scheme == "test"
+        and url.netloc == "com.apple.xcode"
+        and len(parts) == 4
+        and parts[:2] == ["Suwop", bundle],
+        "Unknown test identifier URL",
+    )
+    require(
+        node.get("nodeIdentifier") == "/".join(parts[2:]) + "()",
+        "Unexpected parameterized/repeated identifier",
+    )
+    return "/".join(parts[1:])
+
+
+def failed_identifiers(data):
+    """Read failed case IDs without inspecting assertion or warning children."""
+    failed = set()
+
+    def visit(node, bundle=None):
+        kind = node.get("nodeType")
+        if kind == "Test Case":
+            if node.get("result") == "Failed":
+                identifier = case_identifier(node, bundle)
+                require(
+                    len(identifier) <= 200 and TEST_IDENTIFIER.fullmatch(identifier + "()"),
+                    "Invalid failed test identifier",
+                )
+                failed.add(identifier)
+            return
+        require(kind in CONTAINERS, "Unknown result node type")
+        if kind in {"Unit test bundle", "UI test bundle"}:
+            bundle = node.get("name")
+            require(bundle in BUNDLES, "Unexpected result bundle")
+        for child in node.get("children", []):
+            visit(child, bundle)
+
+    nodes = data.get("testNodes", [])
+    require(len(nodes) == 1 and nodes[0].get("nodeType") == "Test Plan", "Incomplete test plan")
+    visit(nodes[0])
+    return sorted(failed)
 
 
 def executed_inventory(data, summary, config):
@@ -83,20 +127,7 @@ def executed_inventory(data, summary, config):
             groups[bundle] = []
         if kind == "Test Case":
             require(bundle in groups, "Case outside a known bundle")
-            url = urlparse(node.get("nodeIdentifierURL", ""))
-            parts = url.path.strip("/").split("/")
-            require(
-                url.scheme == "test"
-                and url.netloc == "com.apple.xcode"
-                and len(parts) == 4
-                and parts[:2] == ["Suwop", bundle],
-                "Unknown test identifier URL",
-            )
-            identifier = "/".join(parts[1:])
-            require(
-                node.get("nodeIdentifier") == "/".join(parts[2:]) + "()",
-                "Unexpected parameterized/repeated identifier",
-            )
+            identifier = case_identifier(node, bundle)
             require(identifier not in groups[bundle], "Duplicate execution/retry")
             groups[bundle].append(identifier)
         else:

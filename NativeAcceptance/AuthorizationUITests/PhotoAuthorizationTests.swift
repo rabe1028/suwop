@@ -21,6 +21,19 @@ final class PhotoAuthorizationTests: XCTestCase {
         let previousContextRevoked: Bool
     }
 
+    private struct ScanInterruptionEvidence: Decodable {
+        let stage: String
+        let firstDescribedID: String?
+        let workerCancelled: Bool
+        let completedUnboundedScans: Int
+        let cancelledUnboundedScans: Int
+        let nativeIDs: [String]
+        let galleryIDs: [String]
+        let readableIDs: [String]
+        let savedIDs: [String]
+        let savedAccess: String
+    }
+
     @MainActor func testInitialFullGrant() throws {
         let app = XCUIApplication(bundleIdentifier: bundleID)
         let initial = try openFreshHost(app)
@@ -89,6 +102,76 @@ final class PhotoAuthorizationTests: XCTestCase {
         XCTAssertEqual(Set(regranted.nativeAssets.map(\.id)), [before.id, blue.id])
         XCTAssertGreaterThan(regranted.assetNotifications, reduced.assetNotifications)
         XCTAssertTrue(regranted.previousContextRevoked)
+    }
+
+    @MainActor func testInterruptsRealPhotoKitScanAndRequiresFreshAuthority() throws {
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        app.launchEnvironment["SUWOP_PHOTO_SCAN_INTERRUPTION"] = "1"
+        let initial = try openFreshHost(app)
+        try answerPermission(app, labels: ["Allow Full Access", "フルアクセスを許可", "すべての写真"])
+        let full = try verifyAndPublish(app)
+        assertSameProcessAndScene(initial, full)
+        XCTAssertEqual(full.authorization, "authorized")
+        let generated = full.nativeAssets.filter { $0.marker != nil }
+        XCTAssertEqual(Set(generated.compactMap(\.marker)), ["red-landscape", "blue-portrait"])
+        XCTAssertEqual(Set(generated.map(\.id)).count, 2)
+
+        let start = app.buttons["Start interrupted scan"]
+        XCTAssertTrue(start.waitForExistence(timeout: 5))
+        start.tap()
+        let paused = try readScanInterruption(app, step: "worker-paused")
+        XCTAssertTrue(try paused.nativeIDs.contains(XCTUnwrap(paused.firstDescribedID)))
+        XCTAssertFalse(paused.workerCancelled)
+        XCTAssertEqual(paused.savedAccess, "full")
+        attachPicker("Actual Gallery Stop while PhotoKit worker is paused", app)
+        let stop = app.buttons["停止"]
+        XCTAssertTrue(stop.waitForExistence(timeout: 5))
+        stop.tap()
+
+        let stopped = try readScanInterruption(app, step: "worker-stopped")
+        XCTAssertTrue(stopped.workerCancelled)
+        XCTAssertEqual(stopped.cancelledUnboundedScans, paused.cancelledUnboundedScans + 1)
+        XCTAssertEqual(stopped.completedUnboundedScans, paused.completedUnboundedScans)
+        XCTAssertTrue(stopped.galleryIDs.isEmpty)
+        XCTAssertTrue(stopped.readableIDs.isEmpty)
+        XCTAssertEqual(stopped.savedAccess, "unavailable")
+        XCTAssertEqual(stopped.savedIDs, paused.savedIDs)
+
+        let error = app.alerts["操作を完了できませんでした"]
+        if error.waitForExistence(timeout: 2) {
+            error.buttons["閉じる"].tap()
+        }
+        let options = app.buttons["galleryOptions"]
+        XCTAssertTrue(options.waitForExistence(timeout: 5))
+        options.tap()
+        app.buttons["一覧を更新"].tap()
+        let fresh = try readScanInterruption(app, step: "fresh-published")
+        XCTAssertEqual(fresh.completedUnboundedScans, stopped.completedUnboundedScans + 1)
+        XCTAssertEqual(fresh.cancelledUnboundedScans, stopped.cancelledUnboundedScans)
+        XCTAssertEqual(fresh.nativeIDs, full.nativeAssets.map(\.id).sorted())
+        XCTAssertEqual(fresh.galleryIDs, fresh.nativeIDs)
+        XCTAssertEqual(fresh.readableIDs, fresh.nativeIDs)
+        XCTAssertEqual(fresh.savedIDs, fresh.nativeIDs)
+        XCTAssertEqual(fresh.savedAccess, "full")
+    }
+
+    @MainActor private func readScanInterruption(
+        _ app: XCUIApplication,
+        step: String
+    ) throws -> ScanInterruptionEvidence {
+        let view = app.staticTexts["scanInterruptionStep"]
+        let expected = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", step, "FAIL:")
+        let reached = XCTNSPredicateExpectation(predicate: expected, object: view)
+        XCTAssertEqual(XCTWaiter.wait(for: [reached], timeout: 25), .completed, view.label)
+        XCTAssertEqual(view.label, step)
+        let bytes = Data(app.staticTexts["scanInterruptionEvidence"].label.utf8)
+        let attachment = XCTAttachment(data: bytes, uniformTypeIdentifier: "public.json")
+        attachment.name = "PhotoKit scan interruption \(step)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+        let evidence = try XCTUnwrap(JSONDecoder().decode([ScanInterruptionEvidence].self, from: bytes).last)
+        XCTAssertEqual(evidence.stage, step)
+        return evidence
     }
 
     @MainActor private func openFreshHost(_ app: XCUIApplication) throws -> Evidence {

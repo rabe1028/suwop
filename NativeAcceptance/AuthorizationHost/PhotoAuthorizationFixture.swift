@@ -29,6 +29,7 @@ import UIKit
     @Published private(set) var step = "starting"
     @Published private(set) var evidence = ""
     let model: LibraryModel
+    let interruption: PhotoScanInterruptionScenario?
     private let probe: PhotoAuthorizationProbe
     private let runtime: RustRuntime
     private let fixtureID = UUID()
@@ -52,6 +53,12 @@ import UIKit
         self.runtime = runtime
         self.probe = probe
         self.model = model
+        if ProcessInfo.processInfo.environment["SUWOP_PHOTO_SCAN_INTERRUPTION"] == "1" {
+            model.configureImageCaches()
+            interruption = PhotoScanInterruptionScenario(model: model, probe: probe, runtime: runtime)
+        } else {
+            interruption = nil
+        }
     }
 
     func sceneBecameActive() {

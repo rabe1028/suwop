@@ -13,6 +13,8 @@ import SuwopShell
     private(set) var permissionRequests = 0
     private(set) var deniedScans = 0
     private(set) var assetNotifications = 0
+    private(set) var completedUnboundedScans = 0
+    private(set) var cancelledUnboundedScans = 0
 
     init() throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
@@ -45,10 +47,17 @@ import SuwopShell
         do {
             reply = try await shell.execute(operation, context: context)
         } catch {
+            if previewLimit == nil, error is CancellationError {
+                // ApplePhotosStore awaits the worker before shell.execute throws.
+                cancelledUnboundedScans += 1
+            }
             if PHPhotoLibrary.authorizationStatus(for: .readWrite) == .denied, !(error is CancellationError) {
                 deniedScans += 1
             }
             throw error
+        }
+        if previewLimit == nil, case .object = reply {
+            completedUnboundedScans += 1
         }
         if case .null = reply, !permission {
             automaticDeferredScans += 1
