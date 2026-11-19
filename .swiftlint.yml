@@ -9,6 +9,8 @@ included:
   - NativeAcceptance/AuthorizationHost
   - NativeAcceptance/AuthorizationUITests
   - NativeAcceptance/Host
+  - NativeAcceptance/GalleryPerformanceHost
+  - NativeAcceptance/GalleryPerformanceUITests
   - NativeAcceptance/UITests
   - NativeAcceptance/PrivateLiveHost/PrivateLiveMacHost.swift
   - NativeAcceptance/PrivateLiveUIProbeHost

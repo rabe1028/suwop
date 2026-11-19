@@ -75,6 +75,9 @@ Use independent processes for peak memory comparisons; overlapping spans are
 not additive elapsed time. No benchmark threshold is a claim about iCloud or
 remote cold-cache performance.
 
+The opt-in `make gallery-performance` driver measures both native Gallery
+scenarios on Simulator. See [the run instructions and measurement scopes](performance.md#generated-native-gallery-benchmark).
+
 The opt-in Rust test `generated_catalog_publication_benchmark` constructs those
 actual catalogs and measures full view generation plus JSON encoding, search,
 sort, 100 selected keys and organization. Build the test once and run its
