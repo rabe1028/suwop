@@ -13,7 +13,7 @@ struct GalleryView: View {
     @State private var showImmichArchive = false
     @State private var tab = 0
     @State private var filter: PhotoFilter = .all
-    @State private var presence: Presence?
+    @State private var destination: GalleryDestinationFilter = .all
     @State private var sort: PhotoSort = .newest
     @State private var query = ""
     @State private var contentSearch = false
@@ -50,7 +50,7 @@ struct GalleryView: View {
         }
         .onChange(of: query) { _, _ in updateBrowse() }
         .onChange(of: filter) { _, _ in updateBrowse() }
-        .onChange(of: presence) { _, _ in updateBrowse() }
+        .onChange(of: destination) { _, _ in updateBrowse() }
         .onChange(of: sort) { _, _ in
             if sort == .name {
                 timeline = .all
@@ -235,12 +235,21 @@ struct GalleryView: View {
                 Picker("表示", selection: $filter) {
                     ForEach(PhotoFilter.allCases, id: \.self) { Label($0.title, systemImage: $0.symbol).tag($0) }
                 }
-                Picker("保存先", selection: $presence) {
-                    Text("すべての保存先").tag(Presence?.none)
-                    ForEach(Presence.allCases, id: \.self) { Text($0.title).tag(Optional($0)) }
+                Picker("保存先", selection: $destination) {
+                    Text(GalleryDestinationFilter.all.title).tag(GalleryDestinationFilter.all)
+                    ForEach([Provider.apple, .immich], id: \.self) {
+                        let option = GalleryDestinationFilter.provider($0)
+                        Text(option.title).tag(option)
+                    }
+                    ForEach(Presence.allCases, id: \.self) {
+                        let option = GalleryDestinationFilter.presence($0)
+                        Text(option.title).tag(option)
+                    }
                 }
-            } label: { Label(presence?.title ?? filter.title, systemImage: "line.3.horizontal.decrease") }
-                .accessibilityIdentifier("galleryFilter")
+            } label: {
+                Label(destination == .all ? filter.title : destination.title, systemImage: "line.3.horizontal.decrease")
+            }
+            .accessibilityIdentifier("galleryFilter")
             Spacer()
             Picker("日付別表示", selection: $timeline) {
                 ForEach(TimelineGrouping.allCases) { Text($0.title).tag($0) }
@@ -328,7 +337,13 @@ struct GalleryView: View {
     }
 
     private func updateBrowse() {
-        model.browse(query: query, filter: filter, sort: sort, presence: presence)
+        model.browse(
+            query: query,
+            filter: filter,
+            sort: sort,
+            presence: destination.presenceFilter,
+            provider: destination.providerFilter
+        )
     }
 }
 
@@ -377,7 +392,7 @@ private extension GalleryView {
 
     func collectionRow(_ value: PhotoFilter, count: Int64) -> some View {
         Button { query = ""
-            presence = nil
+            destination = .all
             filter = value
             tab = 0
         } label: {
@@ -387,5 +402,37 @@ private extension GalleryView {
                 Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
             }
         }.foregroundStyle(.primary)
+    }
+}
+
+private enum GalleryDestinationFilter: Hashable {
+    case all
+    case provider(Provider)
+    case presence(Presence)
+
+    var title: String {
+        switch self {
+        case .all: "すべての保存先"
+        case let .provider(provider): "\(provider.title) にある"
+        case .presence(.appleOnly): "Apple のみ（照合済み）"
+        case .presence(.immichOnly): "Immich のみ（照合済み）"
+        case let .presence(presence): presence.title
+        }
+    }
+
+    var providerFilter: Provider? {
+        if case let .provider(provider) = self {
+            provider
+        } else {
+            nil
+        }
+    }
+
+    var presenceFilter: Presence? {
+        if case let .presence(presence) = self {
+            presence
+        } else {
+            nil
+        }
     }
 }
