@@ -71,6 +71,33 @@ final class TransferSubmissionTests: XCTestCase {
         XCTAssertEqual(transports, 1)
     }
 
+    @MainActor func testWorkspaceUsesCanonicalTemporaryParent() async throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.standardizedFileURL.resolvingSymlinksInPath()
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        defer { try? files.removeItem(at: root) }
+        let parent = root.appendingPathComponent("temporary", isDirectory: true)
+        let alias = root.appendingPathComponent("alias", isDirectory: true)
+        try files.createDirectory(at: parent, withIntermediateDirectories: true)
+        try files.createSymbolicLink(at: alias, withDestinationURL: parent)
+        let shell = try AppleShell(root: root.appendingPathComponent("state"), workspaceParent: alias)
+        let context = shell.beginWorkflow()
+        let id = UUID().uuidString
+        let workspace = try JSONValue.object([
+            "type": .string("workspace"), "data": .object(["id": .string(id)]),
+        ]).decode(ShellOperation.self)
+        let path = try await shell.execute(workspace, context: context).decode(String.self)
+        XCTAssertEqual(path, parent.appendingPathComponent("suwop-\(id)", isDirectory: true).path)
+        let permissions = try files.attributesOfItem(atPath: path)[.posixPermissions] as? NSNumber
+        XCTAssertEqual(permissions?.intValue, 0o700)
+        let cleanup = try JSONValue.object([
+            "type": .string("cleanup"), "data": .object(["path": .string(path)]),
+        ]).decode(ShellOperation.self)
+        _ = try await shell.execute(cleanup, context: context)
+        XCTAssertFalse(files.fileExists(atPath: path))
+        XCTAssertTrue(files.fileExists(atPath: parent.path))
+    }
+
     @MainActor func testCurrentContextCanSubmit() throws {
         let epoch = ContentPresentationEpoch()
         let gate = NativeSubmissionGate()

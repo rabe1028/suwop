@@ -6,6 +6,7 @@ import SuwopShell
     let importStaging: ExternalImportStaging
     let localStore: LocalStore
     private let operationWorkspaces: OperationWorkspaces
+    private let workspaceParent: URL
     var catalogChanged: (@MainActor () -> Void)?
     private(set) var apple: ApplePhotosStore?
     let http = HTTPExecutor()
@@ -93,7 +94,11 @@ import SuwopShell
         sharing.invalidateForProtection()
     }
 
-    init(root overrideRoot: URL? = nil) throws {
+    init(
+        root overrideRoot: URL? = nil,
+        workspaceParent: URL = FileManager.default.temporaryDirectory
+    ) throws {
+        self.workspaceParent = workspaceParent
         root = try overrideRoot ?? FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -367,7 +372,8 @@ extension AppleShell {
         case "workspace":
             let id = try requiredString(data, "id")
             guard UUID(uuidString: id) != nil else { throw SuwopError("作業領域 ID が不正です。") }
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("suwop-\(id)", isDirectory: true)
+            let url = workspaceParent.standardizedFileURL.resolvingSymlinksInPath()
+                .appendingPathComponent("suwop-\(id)", isDirectory: true)
             try FileManager.default.createDirectory(
                 at: url,
                 withIntermediateDirectories: true,
