@@ -212,6 +212,14 @@ final class PhotoAuthorizationTests: XCTestCase {
         assertProductPreview(app, filename: "red-landscape.png", title: "Real red product preview after regrant")
     }
 
+    @MainActor func openFreshHostWithFullAccess(launchArguments: [String]) throws -> XCUIApplication {
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        app.launchArguments = launchArguments
+        _ = try openFreshHost(app)
+        try answerPermission(app, labels: ["Allow Full Access", "フルアクセスを許可", "すべての写真"])
+        return app
+    }
+
     @MainActor private func openFreshHost(_ app: XCUIApplication) throws -> Evidence {
         continueAfterFailure = false
         app.launch()
@@ -347,7 +355,7 @@ final class PhotoAuthorizationTests: XCTestCase {
         return try XCTUnwrap(JSONDecoder().decode([Evidence].self, from: bytes).last)
     }
 
-    @MainActor private func attachPicker(_ name: String, _ app: XCUIApplication) {
+    @MainActor func attachPicker(_ name: String, _ app: XCUIApplication) {
         let capture = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         capture.name = name
         capture.lifetime = .keepAlways

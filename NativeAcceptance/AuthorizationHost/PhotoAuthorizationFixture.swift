@@ -249,6 +249,10 @@ import UIKit
         step = "FAIL: \(error.localizedDescription)"
     }
 
+    func readSavedLibrary() async throws -> JSONValue {
+        try await probe.shell.localStore.read()
+    }
+
     private var catalogIDs: [String] {
         model.visiblePhotos.flatMap(\.assets).map(\.key.assetID).sorted()
     }

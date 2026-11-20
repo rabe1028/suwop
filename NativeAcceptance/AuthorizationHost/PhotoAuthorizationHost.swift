@@ -19,8 +19,17 @@ import SwiftUI
 private struct PhotoAuthorizationScreen: View {
     @ObservedObject var fixture: PhotoAuthorizationFixture
     @Environment(\.scenePhase) private var scenePhase
+    @State private var showDuplicateReview = false
 
     var body: some View {
+        if showDuplicateReview {
+            PhotoDuplicateReviewScreen(fixture: fixture)
+        } else {
+            authorization
+        }
+    }
+
+    private var authorization: some View {
         VStack {
             Text(fixture.step).accessibilityIdentifier("authorizationStep")
             Text("Evidence")
@@ -39,6 +48,9 @@ private struct PhotoAuthorizationScreen: View {
             }
             if fixture.settingsRun != nil {
                 PhotoAuthorizationSettingsControls(fixture: fixture)
+            }
+            if CommandLine.arguments.contains("--duplicate-review"), fixture.step == "published" {
+                Button("Prepare Duplicate Fixture") { showDuplicateReview = true }
             }
         }
         .task {
