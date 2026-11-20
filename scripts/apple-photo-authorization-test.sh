@@ -7,7 +7,8 @@ case "${1:-}" in
     denied) SCENARIO=testInitialDenial ;;
     interrupted) SCENARIO=testInterruptsRealPhotoKitScanAndRequiresFreshAuthority ;;
     settings-denial) SCENARIO=testSettingsDenialAndRegrantPreserveIsolation ;;
-    *) echo 'Choose full, limited, denied, interrupted or settings-denial.' >&2; exit 2 ;;
+    duplicates) SCENARIO=testRealOriginalIndexEnablesReadOnlyDuplicateReview ;;
+    *) echo 'Choose full, limited, denied, interrupted, settings-denial or duplicates.' >&2; exit 2 ;;
 esac
 export DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer}"
 if command -v mise >/dev/null; then PATH="$(mise bin-paths | tr '\n' ':')$PATH"; fi
