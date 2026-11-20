@@ -31,10 +31,14 @@ import SuwopShell
     var fault = Fault.none
     var beforeMutation: (@MainActor (HttpRequest) throws -> Void)?
 
-    init(visibility: String = "timeline", video: Bool = false, liveParent: Bool = false) throws {
+    init(visibility: String = "timeline", video: Bool = false, liveParent: Bool = false, owner: String? = nil) throws {
         self.liveParent = liveParent
         var source = try ImmichVisibilityFixtureData.source(visibility: visibility)
             .decode([String: JSONValue].self)
+        if let owner {
+            currentOwner = owner
+            source["ownerId"] = .string(owner)
+        }
         source["originalFileName"] = .string(video ? "ORDINARY-ARCHIVE.MP4" : "ORDINARY-ARCHIVE.JPG")
         source["type"] = .string(video ? "VIDEO" : "IMAGE")
         if liveParent {
