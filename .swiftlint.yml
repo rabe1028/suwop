@@ -19,6 +19,8 @@ included:
   - NativeAcceptance/SharingTests
   - NativeAcceptance/OSSharingHost
   - NativeAcceptance/OSSharingUITests
+  - NativeAcceptance/MacKeyboardHost
+  - NativeAcceptance/MacKeyboardUITests
   - NativeAcceptance/AmazonMacTests
 excluded:
   - Sources/SuwopShell/Generated
