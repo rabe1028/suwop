@@ -1,5 +1,6 @@
 import SuwopShell
 @testable import SuwopVRTHost
+import UIKit
 import XCTest
 
 final class ImmichVisibilityGuardTests: XCTestCase {
@@ -125,6 +126,135 @@ final class ImmichVisibilityGuardTests: XCTestCase {
             }
             XCTAssertTrue(model.photos.isEmpty)
         }
+    }
+
+    @MainActor func testHeldOrdinaryRasterCannotCrossImmichAccountConfiguration() async throws {
+        let fixture = try ImmichArchivePhotoFixture()
+        let endpoint = ImmichArchiveFixtureServer.endpoint
+        let oldKey = ImmichArchiveFixtureServer.key
+        let newOwner = "22222222-2222-4222-8222-222222222222"
+        let newKey = AssetKey(provider: .immich, scope: endpoint + "#" + newOwner, assetID: oldKey.assetID)
+        let oldCredential = try XCTUnwrap(fixture.journal.connection?.credentialID)
+        let secretA = ImmichArchiveFixtureServer.apiKey
+        let secretB = "ORDINARY-ACCOUNT-B-SYNTHETIC-API-KEY"
+        var credentials = [oldCredential: secretA]
+        try routeAccountRequests(fixture, newOwner: newOwner, newSecret: secretB)
+        defer { fixture.shell.httpTransportEffect = nil }
+
+        let rasterA = ProtectedPhotoFixture.raster()
+        let rasterB = renderAccountRaster()
+        var releaseA: CheckedContinuation<Void, Never>?
+        var returnedA = false
+        let model = LibraryModel(
+            runtime: fixture.runtime,
+            shell: fixture.shell,
+            initialAppleAuthorization: .denied,
+            thumbnailEffect: { key, _ in
+                if key == oldKey {
+                    // The image already exists. Cancellation must not prevent this callback from returning it.
+                    await withCheckedContinuation { releaseA = $0 }
+                    returnedA = true
+                    return rasterA
+                }
+                guard key == newKey else { throw SuwopError("Unexpected raster key") }
+                return rasterB
+            },
+            executeEffect: { operation, context in
+                let data = operation.data ?? .null
+                switch operation.type {
+                case "readCredential":
+                    let id = try data["account"].decode(String.self)
+                    return try .string(XCTUnwrap(credentials[id]))
+                case "saveCredential":
+                    let id = try data["account"].decode(String.self)
+                    let credential = try data["key"].decode(String.self)
+                    XCTAssertEqual(credential, secretB)
+                    credentials[id] = credential
+                    return .null
+                case "removeCredential":
+                    try credentials.removeValue(forKey: data["account"].decode(String.self))
+                    return .null
+                case "readState", "persist", "http", "appleScan":
+                    return try await fixture.execute(operation, context: context)
+                default:
+                    throw SuwopError("Unexpected synthetic account effect: \(operation.type)")
+                }
+            }
+        )
+        model.send(["type": .string("initialize"), "scope": .string(fixture.journal.appleScope)])
+        try await fixture.settle { !model.isBusy && model.libraryReady }
+        model.refresh()
+        try await fixture.settle { !model.isBusy && model.publishedAssetKeys == [oldKey] }
+        let photoA = try XCTUnwrap(model.photos.first)
+        let cacheA = model.previewIdentifier(photoA) as NSString
+        let late = Task { try await model.thumbnail(photoA) }
+        defer {
+            late.cancel()
+            releaseA?.resume()
+        }
+        try await fixture.settle { releaseA != nil }
+
+        model.configure(address: endpoint, apiKey: secretB, allowHTTP: false)
+        try await fixture.settle { !model.isBusy && model.publishedAssetKeys == [newKey] }
+        let saved = try XCTUnwrap(fixture.journal.connection)
+        XCTAssertEqual(saved.address, endpoint)
+        XCTAssertEqual(credentials, [saved.credentialID: secretB])
+        XCTAssertEqual(fixture.journal.snapshots.filter { $0.provider == .immich }.map(\.scope), [newKey.scope])
+        let photoB = try XCTUnwrap(model.photos.first)
+        let beforeRelease = try await model.thumbnail(photoB)
+        XCTAssertEqual(beforeRelease.size, rasterB.size)
+
+        let resume = try XCTUnwrap(releaseA)
+        releaseA = nil
+        resume.resume()
+        try await assertOrdinaryAccountReadRefused(late, key: oldKey, runtime: fixture.runtime)
+        XCTAssertTrue(returnedA)
+        XCTAssertNil(model.thumbnails.object(forKey: cacheA))
+        let drawableB = await model.cachedThumbnail(photoB)
+        XCTAssertEqual(drawableB?.size, rasterB.size)
+        XCTAssertEqual(model.publishedAssetKeys, [newKey])
+    }
+
+    @MainActor private func renderAccountRaster() -> UIImage {
+        let size = CGSize(width: 32, height: 24)
+        return UIGraphicsImageRenderer(size: size).image { context in
+            UIColor.systemPurple.setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+        }
+    }
+
+    @MainActor private func routeAccountRequests(
+        _ fixture: ImmichArchivePhotoFixture, newOwner: String, newSecret: String
+    ) throws {
+        let serverA = fixture.server
+        let serverB = try ImmichArchiveFixtureServer(owner: newOwner)
+        let secretA = ImmichArchiveFixtureServer.apiKey
+        fixture.shell.httpTransportEffect = { request in
+            let secret = request.headers["x-api-key"]
+            if secret == secretA {
+                return try serverA.execute(request)
+            }
+            guard secret == newSecret else { throw SuwopError("Unexpected synthetic account") }
+            // Route by the supplied key, then adapt to the fixture's strict key.
+            var routed = request
+            routed.headers["x-api-key"] = secretA
+            return try serverB.execute(routed)
+        }
+    }
+
+    @MainActor private func assertOrdinaryAccountReadRefused(
+        _ pending: Task<UIImage, Error>, key: AssetKey, runtime: RustRuntime
+    ) async throws {
+        switch await pending.result {
+        case .success: XCTFail("An already-obtained old-account raster escaped after account cutover")
+        case let .failure(error): XCTAssertTrue(error is CancellationError)
+        }
+        do {
+            _ = try await runtime.ordinaryContentRevision(
+                keys: [key], expectedRevision: nil, requiresPublishedKey: true
+            )
+            XCTFail("The old scoped key regained ordinary read authority despite sharing B's raw ID")
+        } catch is CancellationError {}
     }
 
     @MainActor func testAmbiguousPersistenceStopsUnrelatedWritesAndAuthenticatedRecoveryOnlyReadsSavedState(
