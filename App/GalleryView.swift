@@ -68,7 +68,14 @@ struct GalleryView: View {
 
     private var librarySheets: some View {
         browsingTabs
-            .sheet(isPresented: $model.showSettings) { ConnectionView(model: model) }
+            .sheet(isPresented: $model.showSettings) {
+                #if SUWOP_MAC_KEYBOARD_TEST
+                    // ConnectionView can read credentials directly, outside the injected effects.
+                    ContentUnavailableView("生成写真による検証", systemImage: "lock")
+                #else
+                    ConnectionView(model: model)
+                #endif
+            }
             .sheet(isPresented: $model.showTransfers) { TransfersView(model: model) }
             .sheet(isPresented: $model.showAppleTrash) { AppleTrashView(model: model) }
             .sheet(isPresented: $model.showAppleVisibility) { AppleVisibilityView(model: model) }

@@ -20,8 +20,8 @@ final class PhotoObserver: NSObject, PHPhotoLibraryChangeObserver, Sendable {
 /// can raise a system prompt while read/write access is still undetermined.
 @MainActor final class PhotoObserverRegistration {
     static func initialLibraryAuthorization() -> PHAuthorizationStatus {
-        #if SUWOP_GALLERY_PERFORMANCE
-            // Its fixture injects authorization alongside the generated inventory.
+        #if SUWOP_GALLERY_PERFORMANCE || SUWOP_MAC_KEYBOARD_TEST
+            // These generated catalogs use fixture authorization.
             .notDetermined
         #else
             PHPhotoLibrary.authorizationStatus(for: .readWrite)
