@@ -16,8 +16,8 @@ import SuwopShell
     private(set) var completedUnboundedScans = 0
     private(set) var cancelledUnboundedScans = 0
 
-    init() throws {
-        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(
+    init(catalog: URL? = nil) throws {
+        let directory = catalog ?? FileManager.default.temporaryDirectory.appendingPathComponent(
             UUID().uuidString,
             isDirectory: true
         )

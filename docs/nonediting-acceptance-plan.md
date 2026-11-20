@@ -44,12 +44,41 @@ run includes a picker image matching adjustment.
 | Denied | The explicit denial stayed in the same process and scene. Automatic refresh kept the gallery and read authority empty. The system issued no repeat prompt. | `photokit-auth-final-denied-lxhwy53r` |
 | Limited | The system picker changed access from red only, to red and blue, to blue only, then restored the original red ID. Each membership change triggered the native observer, revoked the previous read context and required a fresh scan. The authorization stayed Limited in the same process and scene. | `photokit-auth-relative-hue-limited-bmy2moqi` |
 
-Repeat the three cases on the final PR source before counting them as its
-acceptance. Remaining cases cover Settings transitions from Full to Limited
-to Denied while previewing, changes while suspended, regrant after Denied,
-interrupted scans, restart, account or configuration changes, and PhotoKit
-and iCloud on physical devices. For Simulator cases use an isolated fixture
-library and record the actual permission and exact generated asset IDs.
+The opt-in `settings-denial` case exercises Full to Denied to Full through the
+fixture app's Photos settings with its saved catalog and the production viewer.
+The precursor run `pp15-settings-denial-confirm-live-_uklohjz` passed on source
+fingerprint `9e07512f2f1bf938668b13e43a1f5730dffd9fd26872eb3766b465d4b1a6a521`
+in the Settings diagnostic worktree. For both changes, XCTest observed the app
+running in the background and then stopped. Each relaunch had a new PID and
+reused the UIKit scene identifier and saved fixture catalog. Denial removed the
+preview and read authority. After Full regrant, both original generated IDs and
+the red preview returned after release of the fresh scan reply. Repeat the case
+on the final source for its own acceptance receipt.
+
+The standalone run `pp15-settings-regrant-standalone-live-v6o0ys5g` failed after
+selecting None. XCTest last saw the original process running in the background,
+then returning to the app produced a new PID with no Settings test controls.
+The fixture now leaves a run reference when opening Settings and records
+identity after activation. The corrected standalone `pp15-settings-regrant-resume-live-g1bbmgnz`
+passed both transitions with explicit relaunches and the same saved catalog.
+An implicit relaunch and true suspension were unobserved in that run.
+
+The opt-in `interrupted` case uses the actual Gallery Stop action during a
+real PhotoKit scan with Full permission. It verifies that the native worker
+drains after cancellation, read authority is revoked, and previously saved
+records are retained. Gallery Refresh then restores the exact roster from a
+new scan. Local receipt `photokit-scan-interruption-pxxcypwe` passed on the
+standalone interruption source. Verify both `interrupted` and `settings-denial`
+on the final combined source before reporting its native acceptance.
+
+Settings Limited membership remains open. The diagnostic
+`pp15-settings-limited-active-diagnostic-4o_5f4z3` recorded selecting one generated
+photo in Settings. After the fixture relaunched and became active, app-scoped
+PhotoKit reported Limited with zero accessible assets. The first held production
+scan was also empty. The case failed. Changes while suspended, account or
+configuration changes, and PhotoKit and iCloud on physical devices
+remain open. Keep Simulator cases scoped to an isolated fixture library and
+record the actual permission and exact generated asset IDs.
 
 Selection is ephemeral Rust state over physical `AssetKey`s. A current group
 survives only when every member was already selected and remains authorized;
