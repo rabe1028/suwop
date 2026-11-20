@@ -24,12 +24,19 @@ import UIKit
         let deniedScans: Int
         let assetNotifications: Int
         let previousContextRevoked: Bool
+        let settingsRunID: UUID?
+        let priorFixtureID: UUID?
+        let scenePhases: [String]
+        let savedGeneratedIDsAtLaunch: [String]
+        let previewAssetID: String?
     }
 
     @Published private(set) var step = "starting"
     @Published private(set) var evidence = ""
+    @Published private(set) var previewKey: AssetKey?
     let model: LibraryModel
     let interruption: PhotoScanInterruptionScenario?
+    let settingsRun: PhotoAuthorizationSettingsRun?
     private let probe: PhotoAuthorizationProbe
     private let runtime: RustRuntime
     private let fixtureID = UUID()
@@ -38,9 +45,16 @@ import UIKit
     private var beforeIDs: Set<String> = []
     private var samples: [Sample] = []
     private var didStart = false
+    private var scenePhases: [String] = []
+    private var settingsOpeningPhaseCount: Int?
+    private var knownKeys: Set<AssetKey> = []
+    private var priorFixtureID: UUID?
+    private var savedGeneratedIDsAtLaunch: [String] = []
 
     init() throws {
-        let probe = try PhotoAuthorizationProbe()
+        let settingsRun = try PhotoAuthorizationSettingsRun()
+        let probe = try PhotoAuthorizationProbe(catalog: settingsRun?.catalog)
+        self.settingsRun = settingsRun
         let runtime = try RustRuntime()
         let model = LibraryModel(
             runtime: runtime,
@@ -61,14 +75,33 @@ import UIKit
         }
     }
 
-    func sceneBecameActive() {
-        activations += 1
-        model.sceneBecameActive()
+    func sceneChanged(_ phase: ScenePhase) {
+        if settingsRun != nil {
+            let label = switch phase {
+            case .active: "active"
+            case .inactive: "inactive"
+            case .background: "background"
+            @unknown default: "unknown"
+            }
+            scenePhases.append(label)
+        }
+        if phase == .active {
+            activations += 1
+            model.sceneBecameActive()
+            if let count = settingsOpeningPhaseCount, scenePhases.dropFirst(count).contains("background") {
+                settingsOpeningPhaseCount = nil
+                do { try publish(capture("settings-resume"), step: "settings-resumed") } catch { fail(error) }
+            }
+        }
     }
 
     func start() async throws {
         guard !didStart else { return }
         didStart = true
+        if let saved = settingsRun?.returningCheckpoint {
+            try await restoreSettingsWitness(saved)
+            return
+        }
         model.start()
         try await wait { model.settled }
         let sample = try capture("initial")
@@ -137,11 +170,25 @@ import UIKit
     }
 
     func verifyBeforePublication() async throws {
-        try await wait { probe.heldSnapshot != nil }
+        do {
+            try await wait { probe.heldSnapshot != nil && settingsSceneIsActive }
+        } catch {
+            if settingsRun != nil, let sample = try? capture("before-publication-timeout") {
+                try? record(sample)
+            }
+            throw error
+        }
         let sample = try capture("before-publication")
+        if settingsRun != nil {
+            try record(sample)
+        }
         guard let heldIDs = sample.heldScanIDs, !heldIDs.isEmpty,
               let scope = probe.heldSnapshot?.scope
         else { throw SuwopError("The production scan returned no generated assets.") }
+        try requireAuthorizationEvidence(
+            knownKeys.allSatisfy { $0.scope == scope },
+            "The scan did not use the reopened fixture catalog scope"
+        )
         try requireAuthorizationEvidence(
             heldIDs == sample.nativeAssets.map(\.id).sorted(),
             "Held scan and native IDs differ"
@@ -153,13 +200,14 @@ import UIKit
         for id in beforeIDs.union(heldIDs) {
             try await assertCoreDenied(AssetKey(provider: .apple, scope: scope, assetID: id))
         }
-        if !beforeIDs.isEmpty {
-            try requireAuthorizationEvidence(
-                sample.previousContextRevoked,
-                "Old native context kept admission"
-            )
+        try assertPreviousContextRevoked(sample)
+        for key in knownKeys {
+            try await assertCoreDenied(key)
         }
-        try publish(sample, step: "publication-blocked")
+        if settingsRun == nil {
+            try record(sample)
+        }
+        step = "publication-blocked"
     }
 
     func release() async throws {
@@ -176,6 +224,15 @@ import UIKit
             sample.appleAccess == (sample.authorization == "authorized" ? "full" : "limited"),
             "The Rust catalog did not adopt the native access level"
         )
+        if settingsRun != nil {
+            let saved = try await readSettingsCatalog(requiring: knownKeys)
+            try requireAuthorizationEvidence(
+                saved.access == .full && saved.scope == snapshot.scope &&
+                    saved.assets.map(\.key.assetID).sorted() == sample.nativeAssets.map(\.id) &&
+                    saved.assets.allSatisfy { $0.key.provider == .apple && $0.key.scope == saved.scope },
+                "The saved Full catalog did not match the fresh native roster."
+            )
+        }
         let generatedIDs = Set(sample.nativeAssets.filter { $0.marker != nil }.map(\.id))
         for asset in snapshot.assets where generatedIDs.contains(asset.key.assetID) {
             let image = try await probe.shell.thumbnail(asset.key, connection: nil, preview: true)
@@ -184,6 +241,7 @@ import UIKit
         for id in beforeIDs.subtracting(sample.galleryIDs) {
             try await assertCoreDenied(AssetKey(provider: .apple, scope: snapshot.scope, assetID: id))
         }
+        try settingsRun?.completeSettingsReturn()
         try publish(sample, step: "published")
     }
 
@@ -225,8 +283,19 @@ import UIKit
             permissionRequests: probe.permissionRequests,
             deniedScans: probe.deniedScans,
             assetNotifications: probe.assetNotifications,
-            previousContextRevoked: previousContext?.permits() == false
+            previousContextRevoked: previousContext?.permits() == false,
+            settingsRunID: settingsRun?.id,
+            priorFixtureID: priorFixtureID,
+            scenePhases: scenePhases,
+            savedGeneratedIDsAtLaunch: savedGeneratedIDsAtLaunch,
+            previewAssetID: previewKey?.assetID
         )
+    }
+
+    private func assertPreviousContextRevoked(_ sample: Sample) throws {
+        if previousContext != nil {
+            try requireAuthorizationEvidence(sample.previousContextRevoked, "Old native context kept admission")
+        }
     }
 
     private func assertCoreDenied(_ key: AssetKey) async throws {
@@ -251,12 +320,116 @@ import UIKit
     }
 
     private func publish(_ sample: Sample, step: String) throws {
+        try record(sample)
+        self.step = step
+    }
+
+    private func record(_ sample: Sample) throws {
         samples.append(sample)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let data = try encoder.encode(samples)
         guard let text = String(bytes: data, encoding: .utf8) else { throw SuwopError("Cannot encode receipt.") }
         evidence = text
-        self.step = step
+    }
+
+    private var settingsSceneIsActive: Bool {
+        settingsRun == nil || scenePhases.last == "active"
+    }
+}
+
+extension PhotoAuthorizationFixture {
+    func previewGenerated(_ marker: String) throws {
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard let id = PhotoAuthorizationAsset.fetch(current).first(where: { $0.marker == marker })?.id,
+              let key = model.view?.ordinaryContentKeys.first(where: { $0.provider == .apple && $0.assetID == id })
+        else { throw SuwopError("The requested generated preview is absent from the current catalog.") }
+        previewKey = key
+    }
+
+    func openFixtureSettings() async throws {
+        guard let settingsRun, let previewKey, let url = URL(string: UIApplication.openSettingsURLString) else {
+            throw SuwopError("Settings requires the dedicated scenario and a generated preview.")
+        }
+        try requireAuthorizationEvidence(model.settled, "The library has not settled before opening Settings.")
+        let current = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let generatedIDs = Set(PhotoAuthorizationAsset.fetch(current).filter { $0.marker != nil }.map(\.id))
+        let keys = Set((model.view?.ordinaryContentKeys ?? []).filter {
+            $0.provider == .apple && generatedIDs.contains($0.assetID)
+        })
+        knownKeys.formUnion(keys)
+        beforeIDs = Set(keys.map(\.assetID))
+        previousContext = probe.shell.beginWorkflow()
+        try settingsRun.persistForSettingsReturn(.init(
+            runID: settingsRun.id,
+            knownKeys: knownKeys,
+            publishedKeys: keys,
+            previewKey: previewKey,
+            priorFixtureID: fixtureID
+        ))
+        settingsOpeningPhaseCount = scenePhases.count
+        do {
+            probe.arm()
+            try publish(capture("settings-opening"), step: "settings-opening")
+            guard await UIApplication.shared.open(url) else {
+                throw SuwopError("iOS did not open this fixture app’s Settings page.")
+            }
+        } catch {
+            settingsOpeningPhaseCount = nil
+            try settingsRun.completeSettingsReturn()
+            throw error
+        }
+    }
+
+    func verifySettingsDenial() async throws {
+        guard let settingsRun else { throw SuwopError("The dedicated Settings scenario is required.") }
+        try await wait { model.settled && probe.deniedScans > 0 && settingsSceneIsActive }
+        let sample = try capture("settings-denied")
+        try record(sample)
+        try requireAuthorizationEvidence(
+            sample.authorization == "denied" && sample.nativeAssets.isEmpty &&
+                sample.galleryIDs.isEmpty && sample.ordinaryIDs.isEmpty && sample.heldScanIDs == nil,
+            "Settings denial left native or Rust read authority"
+        )
+        try assertPreviousContextRevoked(sample)
+        for key in knownKeys {
+            try await assertCoreDenied(key)
+        }
+        let saved = try await readSettingsCatalog(requiring: knownKeys)
+        try requireAuthorizationEvidence(
+            saved.access == .unavailable,
+            "Settings denial did not mark the saved catalog unavailable."
+        )
+        try settingsRun.completeSettingsReturn()
+        step = "settings-denied-verified"
+    }
+
+    private func readSettingsCatalog(requiring known: Set<AssetKey>) async throws -> LibrarySnapshot {
+        let saved = try await probe.shell.localStore.read().decode(SavedLibrary.self)
+        let apple = saved.snapshots.filter { $0.provider == .apple }
+        guard apple.count == 1, let snapshot = apple.first, snapshot.scope == saved.appleScope else {
+            throw SuwopError("The Settings fixture's saved Apple catalog is missing or has the wrong scope.")
+        }
+        try requireAuthorizationEvidence(
+            known.isSubset(of: Set(snapshot.assets.map(\.key))) && known.allSatisfy { $0.scope == snapshot.scope },
+            "The Settings catalog did not preserve all previously known generated keys."
+        )
+        return snapshot
+    }
+
+    private func restoreSettingsWitness(_ checkpoint: PhotoAuthorizationSettingsRun.Checkpoint) async throws {
+        let snapshot = try await readSettingsCatalog(requiring: checkpoint.knownKeys)
+        savedGeneratedIDsAtLaunch = snapshot.assets.map(\.key).filter(checkpoint.knownKeys.contains)
+            .map(\.assetID).sorted()
+        knownKeys = checkpoint.knownKeys
+        beforeIDs = Set(checkpoint.publishedKeys.map(\.assetID))
+        priorFixtureID = checkpoint.priorFixtureID
+        // Restore the harness's anchor so XCTest can inspect the real viewer after restart.
+        // The product model still owns publication and the viewer owns the actual raster.
+        previewKey = checkpoint.previewKey
+        probe.arm()
+        model.start()
+        try await wait { settingsSceneIsActive }
+        try publish(capture("settings-relaunch"), step: "settings-relaunched")
     }
 }

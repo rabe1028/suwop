@@ -5,6 +5,7 @@ import XCTest
 
 final class PhotoAuthorizationTests: XCTestCase {
     private let bundleID = "jp.rabe1028.suwop.photokit.authorization"
+    private let fixtureName = "Suwop Photo Authorization"
 
     private struct Asset: Decodable {
         let id: String
@@ -12,6 +13,7 @@ final class PhotoAuthorizationTests: XCTestCase {
     }
 
     private struct Evidence: Decodable {
+        let step: String
         let processID: Int32
         let sceneID: String
         let fixtureID: UUID
@@ -19,6 +21,11 @@ final class PhotoAuthorizationTests: XCTestCase {
         let nativeAssets: [Asset]
         let assetNotifications: Int
         let previousContextRevoked: Bool
+        let settingsRunID: UUID?
+        let priorFixtureID: UUID?
+        let scenePhases: [String]
+        let savedGeneratedIDsAtLaunch: [String]
+        let previewAssetID: String?
     }
 
     private struct ScanInterruptionEvidence: Decodable {
@@ -174,6 +181,37 @@ final class PhotoAuthorizationTests: XCTestCase {
         return evidence
     }
 
+    @MainActor func testSettingsDenialAndRegrantPreserveIsolation() throws {
+        let app = XCUIApplication(bundleIdentifier: bundleID)
+        let run = UUID()
+        app.launchEnvironment["SUWOP_PHOTO_AUTHORIZATION_SETTINGS_RUN_ID"] = run.uuidString
+        let initial = try openFreshHost(app)
+        XCTAssertEqual(initial.settingsRunID, run)
+        try answerPermission(app, labels: ["Allow Full Access", "フルアクセスを許可", "すべての写真"])
+        let full = try verifyAndPublish(app)
+        XCTAssertEqual(full.authorization, "authorized")
+        assertSameProcessAndScene(initial, full)
+        let red = try XCTUnwrap(full.nativeAssets.first { $0.marker == "red-landscape" })
+        let blue = try XCTUnwrap(full.nativeAssets.first { $0.marker == "blue-portrait" })
+        try openProductPreview(app, label: "Preview Red", filename: "red-landscape.png")
+
+        let deniedReturn = try changeSettings(.denied, app: app, previous: full)
+        XCTAssertFalse(productPreview(in: app).exists)
+        app.buttons["Verify Settings Denial"].tap()
+        let denied = try read(app, step: "settings-denied-verified")
+        assertSettingsReturn(deniedReturn, current: denied)
+        XCTAssertEqual(denied.previewAssetID, red.id)
+        XCTAssertTrue(denied.nativeAssets.isEmpty)
+        XCTAssertFalse(productPreview(in: app).exists)
+        attachPicker("No product preview after Settings denial", app)
+
+        let grantedReturn = try changeSettings(.authorized, app: app, previous: denied)
+        try verifySettingsPublication(
+            app, transition: grantedReturn, hiddenPreview: red.id, expectedGeneratedIDs: [red.id, blue.id]
+        )
+        assertProductPreview(app, filename: "red-landscape.png", title: "Real red product preview after regrant")
+    }
+
     @MainActor private func openFreshHost(_ app: XCUIApplication) throws -> Evidence {
         continueAfterFailure = false
         app.launch()
@@ -205,7 +243,7 @@ final class PhotoAuthorizationTests: XCTestCase {
     }
 
     @MainActor private func permissionAlert(_ app: XCUIApplication) -> XCUIElement {
-        let title = NSPredicate(format: "label CONTAINS %@", "Suwop Photo Authorization")
+        let title = NSPredicate(format: "label CONTAINS %@", fixtureName)
         return app.alerts.containing(title).firstMatch
     }
 
@@ -285,20 +323,27 @@ final class PhotoAuthorizationTests: XCTestCase {
     }
 
     @MainActor private func read(_ app: XCUIApplication, step: String) throws -> Evidence {
+        try read(app, steps: [step])
+    }
+
+    @MainActor private func read(_ app: XCUIApplication, steps: [String]) throws -> Evidence {
         let view = app.staticTexts["authorizationStep"]
-        let expected = NSPredicate(format: "label == %@ OR label BEGINSWITH %@", step, "FAIL:")
+        let expected = NSPredicate(format: "label IN %@ OR label BEGINSWITH %@", steps, "FAIL:")
         let reached = XCTNSPredicateExpectation(predicate: expected, object: view)
         XCTAssertEqual(
             XCTWaiter.wait(for: [reached], timeout: 25),
             .completed,
             view.exists ? view.label : app.debugDescription
         )
-        XCTAssertEqual(view.label, step)
-        let bytes = Data(app.staticTexts["authorizationEvidence"].label.utf8)
+        let label = view.label
+        let source = app.staticTexts["authorizationEvidence"]
+        let bytes = source.exists ? Data(source.label.utf8) : Data()
         let attachment = XCTAttachment(data: bytes, uniformTypeIdentifier: "public.json")
-        attachment.name = "PhotoKit Rust \(step)"
+        let name = steps.contains(label) ? label : steps.joined(separator: " or ")
+        attachment.name = "PhotoKit Rust \(name)"
         attachment.lifetime = .keepAlways
         add(attachment)
+        XCTAssertTrue(steps.contains(label), label)
         return try XCTUnwrap(JSONDecoder().decode([Evidence].self, from: bytes).last)
     }
 
@@ -320,7 +365,7 @@ final class PhotoAuthorizationTests: XCTestCase {
     }
 }
 
-private struct PhotoAuthorizationFailure: LocalizedError {
+struct PhotoAuthorizationFailure: LocalizedError {
     let message: String
     init(_ message: String) {
         self.message = message
@@ -334,5 +379,142 @@ private struct PhotoAuthorizationFailure: LocalizedError {
 private extension Array {
     var only: Element? {
         count == 1 ? first : nil
+    }
+}
+
+extension PhotoAuthorizationTests {
+    private typealias SettingsAccess = PhotoAuthorizationSettingsUI.Access
+
+    private struct SettingsReturn {
+        let authorization: SettingsAccess
+        let before: Evidence
+        let observed: Evidence
+    }
+
+    @MainActor private func openProductPreview(_ app: XCUIApplication, label: String, filename: String) throws {
+        let button = app.buttons[label]
+        guard button.waitForExistence(timeout: 5) else {
+            throw PhotoAuthorizationFailure("Missing harness preview control \(label).")
+        }
+        button.tap()
+        assertProductPreview(app, filename: filename, title: "Product \(label) before opening Settings")
+    }
+
+    @MainActor private func assertProductPreview(_ app: XCUIApplication, filename: String, title: String) {
+        let preview = productPreview(in: app)
+        let visible = preview.waitForExistence(timeout: 8)
+        attachPicker(title, app)
+        XCTAssertTrue(visible)
+        if visible {
+            XCTAssertEqual(preview.label, filename)
+        }
+    }
+
+    @MainActor private func productPreview(in app: XCUIApplication) -> XCUIElement {
+        app.images["photoPreview"]
+    }
+
+    @MainActor private func verifySettingsPublication(
+        _ app: XCUIApplication, transition: SettingsReturn, hiddenPreview: String, expectedGeneratedIDs: Set<String>
+    ) throws {
+        XCTAssertFalse(productPreview(in: app).exists)
+        app.buttons["Verify Before Publication"].tap()
+        let held = try read(app, step: "publication-blocked")
+        assertSettingsReturn(transition, current: held)
+        XCTAssertEqual(held.previewAssetID, hiddenPreview)
+        assertExpectedSettingsMembership(held, expected: expectedGeneratedIDs)
+        XCTAssertFalse(productPreview(in: app).exists)
+        attachPicker("No product preview before \(transition.authorization.rawValue) scan release", app)
+        app.buttons["Release Scan Reply"].tap()
+        let published = try read(app, step: "published")
+        assertSameProcessAndScene(held, published)
+        assertSettingsReturn(transition, current: published)
+        assertExpectedSettingsMembership(published, expected: expectedGeneratedIDs)
+    }
+
+    private func assertExpectedSettingsMembership(_ evidence: Evidence, expected: Set<String>) {
+        let generated = evidence.nativeAssets.filter { $0.marker != nil }
+        XCTAssertEqual(Set(generated.map(\.id)), expected)
+    }
+
+    @MainActor private func changeSettings(
+        _ desired: SettingsAccess, app: XCUIApplication, previous: Evidence
+    ) throws -> SettingsReturn {
+        let settings = XCUIApplication(bundleIdentifier: "com.apple.Preferences")
+        let ui = PhotoAuthorizationSettingsUI(bundleID: bundleID, fixtureName: fixtureName) { name, surface in
+            self.attachPicker(name, surface)
+        }
+        try ui.openFixturePhotosSettings(settings, app: app)
+        let background = app.state
+        guard background == .runningBackground || background == .runningBackgroundSuspended else {
+            throw PhotoAuthorizationFailure(
+                "Expected the fixture in the background before Settings changed, found \(stateLabel(background))."
+            )
+        }
+        try ui.select(desired, in: settings)
+        attachPicker("System Settings changed to \(desired.rawValue)", settings)
+        let beforeReturn = app.state
+        attachLifecycle(desired, before: previous, background: background, beforeReturn: beforeReturn)
+        switch beforeReturn {
+        case .notRunning:
+            app.launch()
+        case .runningBackground, .runningBackgroundSuspended:
+            app.activate()
+        default:
+            throw PhotoAuthorizationFailure("Unexpected fixture state after Settings: \(stateLabel(beforeReturn)).")
+        }
+        let observed = try read(app, steps: ["settings-resumed", "settings-relaunched"])
+        return SettingsReturn(authorization: desired, before: previous, observed: observed)
+    }
+
+    private func assertSettingsReturn(_ transition: SettingsReturn, current: Evidence) {
+        let previous = transition.before
+        assertSameProcessAndScene(transition.observed, current)
+        XCTAssertEqual(current.settingsRunID, previous.settingsRunID)
+        XCTAssertEqual(current.authorization, transition.authorization.rawValue)
+        if current.processID == previous.processID {
+            XCTAssertEqual(transition.observed.step, "settings-resume")
+            assertSameProcessAndScene(previous, current)
+            let phases = current.scenePhases.dropFirst(previous.scenePhases.count)
+            XCTAssertTrue(phases.contains("background"))
+            XCTAssertEqual(phases.last, "active")
+            XCTAssertTrue(current.previousContextRevoked)
+        } else {
+            XCTAssertEqual(transition.observed.step, "settings-relaunch")
+            XCTAssertNotEqual(current.fixtureID, previous.fixtureID)
+            XCTAssertEqual(current.priorFixtureID, previous.fixtureID)
+            let previousGenerated = Set(previous.nativeAssets.filter { $0.marker != nil }.map(\.id))
+            XCTAssertTrue(previousGenerated.isSubset(of: Set(current.savedGeneratedIDsAtLaunch)))
+        }
+    }
+
+    private func attachLifecycle(
+        _ desired: SettingsAccess,
+        before: Evidence,
+        background: XCUIApplication.State,
+        beforeReturn: XCUIApplication.State
+    ) {
+        let receipt = """
+        requested=\(desired.rawValue)
+        backgroundBeforeSelection=\(stateLabel(background))
+        stateAfterSelection=\(stateLabel(beforeReturn))
+        originalProcessID=\(before.processID)
+        originalSceneID=\(before.sceneID)
+        """
+        let attachment = XCTAttachment(string: receipt)
+        attachment.name = "Settings lifecycle \(desired.rawValue)"
+        attachment.lifetime = .keepAlways
+        add(attachment)
+    }
+
+    private func stateLabel(_ state: XCUIApplication.State) -> String {
+        switch state {
+        case .unknown: "unknown"
+        case .notRunning: "notRunning"
+        case .runningBackgroundSuspended: "runningBackgroundSuspended"
+        case .runningBackground: "runningBackground"
+        case .runningForeground: "runningForeground"
+        @unknown default: "unrecognized"
+        }
     }
 }

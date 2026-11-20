@@ -88,14 +88,8 @@ final class PrivateLiveUITests: XCTestCase {
         let replay = app.buttons["replayImmichLockedLive"]
         guard reveal(replay, in: app) else { return }
         let motion = app.staticTexts["privateLiveUIMotion"]
-        guard let value = motion.value as? String, let previous = PlaybackObservation(value),
-              previous.binding > 0, previous.begin > 0
-        else {
-            XCTFail("Missing actual native playback generation before the single replay")
-            return
-        }
+        guard let previous = playbackBeforeReplay(motion, replay: replay, in: app) else { return }
         let observations = PlaybackTrace()
-        observations.record("PRE single Replay: " + value)
         replay.tap() // Exactly one explicit replay after positioning; no automatic retry to manufacture motion.
         let fresh = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard let value = motion.value as? String else {
@@ -130,6 +124,37 @@ final class PrivateLiveUITests: XCTestCase {
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 5))
         XCTAssertFalse(check.exists)
         XCTAssertFalse(surface.exists)
+    }
+
+    @MainActor private func playbackBeforeReplay(
+        _ motion: XCUIElement, replay: XCUIElement, in app: XCUIApplication
+    ) -> PlaybackObservation? {
+        // The lazy row can expose its controls while the native attachment still awaits its first full begin.
+        let observations = PlaybackTrace()
+        let ready = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            let value = motion.exists ? motion.value as? String : nil
+            observations.record("pre-Replay poll: " + (value ?? "missing scalar observation"))
+            return value.flatMap(PlaybackObservation.init)?.hasNativeBegin == true
+        }, object: nil)
+        let result = XCTWaiter.wait(for: [ready], timeout: 5)
+        let latest = motion.exists ? motion.value as? String : nil
+        observations.record("pre-Replay latest: " + (latest ?? "missing scalar observation"))
+        attachText(observations.description, name: "private-live-pre-replay-observations")
+        guard result == .completed, let observation = latest.flatMap(PlaybackObservation.init),
+              observation.hasNativeBegin
+        else {
+            attachText(app.debugDescription, name: "private-live-pre-replay-no-native-begin-hierarchy")
+            capture(app, name: "private-live-pre-replay-no-native-begin")
+            XCTFail("Missing actual native playback generation before the single replay")
+            return nil
+        }
+        guard replay.exists, replay.isEnabled, replay.isHittable else {
+            attachText(app.debugDescription, name: "private-live-pre-replay-unreachable-hierarchy")
+            capture(app, name: "private-live-pre-replay-unreachable")
+            XCTFail("The single Replay action became unreachable after the native begin")
+            return nil
+        }
+        return observation
     }
 
     @MainActor private func authenticate(_ app: XCUIApplication) -> Bool {
@@ -301,6 +326,10 @@ final class PrivateLiveUITests: XCTestCase {
         let playing: Bool
         let motion: Bool
         let changes: Int
+
+        var hasNativeBegin: Bool {
+            binding > 0 && generation > 0 && begin > 0
+        }
 
         init?(_ value: String) {
             let parts = value.split(separator: ";")
