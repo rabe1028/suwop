@@ -90,6 +90,43 @@ rapid toggles and blocks selected actions until the queue settles.
 keys across search, sort, merge/split and revocation. Execution status belongs to
 its source-bound receipt; visible badges alone are not operation-key evidence.
 
+## Immich provider account changes
+
+Run the opt-in native case with the pinned Xcode and Simulator runtime.
+
+```sh
+uv run --no-project python scripts/verify.py run --label provider-config -- make immich-provider-config-test
+```
+
+A dedicated fixture Simulator hosts the production Gallery and connection form
+with the normal Rust runtime, AppleShell URLSession transport and private SQLite
+catalog. The server listens on IPv4 loopback and accepts two generated API
+keys. The test host stores these keys in memory for the single launch. Rust
+still saves and reads the connection and catalog through the private state
+store. Both catalogs contain an asset with the same raw ID. The scoped keys
+and raster colors differ by account. The fixture returns an unavailable Apple
+scan. PhotoKit membership, Apple ID, iCloud, native Keychain and a real Immich
+network remain separate cases.
+
+The test configures A in the connection form, checks rendered pixels, and
+records A's scoped selection and saved connection. After the user-facing
+refresh receives revised metadata, the loopback server holds A's new raster
+response. The connection form then configures B on the same endpoint. Once B
+is published, the test checks Rust's exact ordinary-content authorization,
+the cleared selection, saved B scope and B's thumbnail. It releases A's
+pending reply and confirms the same authority and selection along with B's
+distinct thumbnail and preview colors. The server records completed release
+attempts and counts successful socket writes separately. A canceled client can
+complete with zero successful writes. The test disconnects B and checks that
+persisted and published Immich authority is empty.
+
+Artifacts are written to `DerivedData/ProviderConfig/run.*`, including the actual
+XCTest report, five screenshots and five state observations recorded as
+JSON. The origin, account identifiers and rasters are generated. Fixture
+media stays read-only. The fixture verifies A's credential entry was removed
+after persisting B and that disconnect removes B's entry. The server logs
+bounded route and transport error categories without request values.
+
 ## Performance and accessibility
 
 Use the existing signposts, bounded local trace exporter and

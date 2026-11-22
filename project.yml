@@ -251,6 +251,44 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.photokit.authorization.tests
         TEST_TARGET_NAME: SuwopPhotoAuthorizationHost
+  SuwopProviderConfigHost:
+    type: application
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: NativeAcceptance/ProviderConfigHost
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.provider-config
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_NATIVE_ACCEPTANCE SUWOP_PROVIDER_CONFIG_ACCEPTANCE'
+        TARGETED_DEVICE_FAMILY: '1'
+    info:
+      path: Generated/ProviderConfig-Info.plist
+      properties:
+        CFBundleDevelopmentRegion: ja
+        CFBundleLocalizations: [ja]
+        UILaunchScreen: {}
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+  SuwopProviderConfigTests:
+    type: bundle.ui-testing
+    platform: iOS
+    deploymentTarget: '26.4'
+    sources:
+      - path: NativeAcceptance/ProviderConfigUITests
+      - path: VRT/UITests/WriteMenuScrollGesture.swift
+    dependencies:
+      - target: SuwopProviderConfigHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.provider-config.tests
+        TEST_TARGET_NAME: SuwopProviderConfigHost
   SuwopAmazonMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -618,6 +656,14 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopPhotoAuthorizationTests]
+  SuwopProviderConfig:
+    build:
+      targets:
+        SuwopProviderConfigHost: all
+        SuwopProviderConfigTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopProviderConfigTests]
   SuwopAmazonMac:
     build:
       targets:
