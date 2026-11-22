@@ -10,6 +10,9 @@ import SuwopShell
     var catalogChanged: (@MainActor () -> Void)?
     private(set) var apple: ApplePhotosStore?
     let http = HTTPExecutor()
+    #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+        var providerFixtureThumbnailCredential: (@MainActor (ConnectionSettings) throws -> String)?
+    #endif
     let ordinaryContent = OrdinaryContentAccess()
     let ordinaryLivePairEffects = OrdinaryLivePairEffects()
     let ordinaryLivePairImages = OrdinaryLivePairImageAccess()

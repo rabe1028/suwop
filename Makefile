@@ -108,6 +108,10 @@ vrt-record:
 gallery-performance:
 	bash scripts/gallery-performance.sh
 
+.PHONY: immich-provider-config-test
+immich-provider-config-test:
+	bash scripts/immich-provider-config-test.sh
+
 .PHONY: apple-native-test
 apple-native-test:
 	bash scripts/apple-native-test.sh

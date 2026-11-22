@@ -186,10 +186,16 @@ struct ConnectionView: View {
                 Section("Amazon Photos（日本）") {
                     Button("Amazon Photosにログイン") { showAmazonLogin = true }
                         .disabled(model.isBusy).accessibilityIdentifier("connectAmazonPhotos")
+                    #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+                        .disabled(true)
+                    #endif
                     if model.view?.state.amazonConnection == nil {
                         Button("保存済みのAmazon認証で再接続") { reconnectAmazon() }
                             .disabled(model.isBusy || loadingAmazon)
                             .accessibilityIdentifier("reconnectSavedAmazonPhotos")
+                        #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+                            .disabled(true)
+                        #endif
                     }
                     if let amazonError {
                         Text(amazonError).foregroundStyle(.red)
@@ -216,6 +222,9 @@ struct ConnectionView: View {
                         Button(loadingSavedKey ? "保存済みのキーを読込中…" : "保存済みのImmich APIキーを読み込む") {
                             loadSavedKey(settings.credentialID)
                         }.disabled(loadingSavedKey || model.isBusy)
+                        #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+                            .disabled(true)
+                        #endif
                     }
                     if let keyError {
                         Text(keyError).font(.caption).foregroundStyle(.red)
@@ -233,6 +242,9 @@ struct ConnectionView: View {
                 }
                 Section("Apple Photos") {
                     Button("写真へのアクセスを許可・一覧を更新") { model.refresh(requestPermission: true) }.disabled(model.isBusy)
+                    #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+                        .disabled(true)
+                    #endif
                     Text("この端末の写真ライブラリを PhotoKit で参照します。iCloud アカウントに直接ログインする方式ではありません。")
                     Text("初回はメタデータのみ取得します。原本照合はメニューから明示的に実行してください。")
                 }.font(.callout)

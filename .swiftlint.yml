@@ -8,6 +8,8 @@ included:
   - VRT/UITests
   - NativeAcceptance/AuthorizationHost
   - NativeAcceptance/AuthorizationUITests
+  - NativeAcceptance/ProviderConfigHost
+  - NativeAcceptance/ProviderConfigUITests
   - NativeAcceptance/Host
   - NativeAcceptance/GalleryPerformanceHost
   - NativeAcceptance/GalleryPerformanceUITests

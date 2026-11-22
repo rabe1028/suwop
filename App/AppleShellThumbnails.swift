@@ -33,7 +33,12 @@ extension AppleShell {
         guard let connection else {
             throw PreviewLoadError.missingConnection
         }
-        let credential = try Credentials.read(connection.credentialID)
+        #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+            guard let providerFixtureThumbnailCredential else { throw PreviewLoadError.missingConnection }
+            let credential = try providerFixtureThumbnailCredential(connection)
+        #else
+            let credential = try Credentials.read(connection.credentialID)
+        #endif
         let input: JSONValue = try .object([
             "address": .string(connection.address),
             "key": .string(credential),
@@ -42,6 +47,11 @@ extension AppleShell {
             "version": .from(version),
         ])
         let request = try CoreBridge.utility(7, input: input).decode(HttpRequest.self)
+        #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
+            guard request.method == "GET", request.url.hasPrefix(connection.address + "/"),
+                  request.headers["x-api-key"] == credential
+            else { throw SuwopError("Unexpected fixture raster request") }
+        #endif
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
         let bytes = try await embeddingThumbnail(request)
         _ = try await ordinaryContent.validate(keys: [key], context: context, expectedRevision: revision)
