@@ -299,9 +299,6 @@ struct PhotoViewer: View {
                 .visibilityHideKeys(in: Set([model.displayedSource(photo)?.key].compactMap(\.self)))
                 .isEmpty)
             .accessibilityIdentifier("hideDisplayedApplePhoto")
-            Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
-                showVisibility = true
-            }
             immichArchiveAction(photo)
             immichLockAction(photo)
             Button("この表示元をこのアプリ内で保護", systemImage: "lock") {
@@ -316,7 +313,6 @@ struct PhotoViewer: View {
         .foregroundStyle(photo.isFavorite ? Color.red : .white)
         .disabled(model.isBusy || model.isReadOnlyPresentation(photo))
         .accessibilityLabel(photo.isFavorite ? "お気に入りから削除" : "お気に入りに追加")
-        Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
     }
 
     @ViewBuilder private func immichArchiveAction(_ photo: UnifiedPhoto) -> some View {
@@ -368,7 +364,7 @@ private extension PhotoViewer {
             }
             Spacer()
             if !organizationReview {
-                Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の情報")
+                Button { showInfo = true } label: { Image(systemName: "info.circle") }.accessibilityLabel("写真の保存先と情報")
             }
         }.font(.title3).padding()
     }

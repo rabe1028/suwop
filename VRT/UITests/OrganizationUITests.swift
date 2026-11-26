@@ -231,7 +231,7 @@ final class OrganizationUITests: XCTestCase {
             let closeReview = app.buttons["写真を閉じる"]
             XCTAssertTrue(closeReview.waitForExistence(timeout: 10))
             XCTAssertFalse(app.buttons["previewSource"].exists, "Review cannot switch to a different physical source")
-            XCTAssertFalse(app.buttons["写真の情報"].exists, "Review must not expose mutation-capable info")
+            XCTAssertFalse(app.buttons["写真の保存先と情報"].exists, "Review must not expose mutation-capable info")
             attach(app, name: "\(route)\(large ? "AX3" : "normal")-review")
             guard dismissReview(closeReview, in: app) else { return }
             XCTAssertTrue(member.waitForExistence(timeout: 10))

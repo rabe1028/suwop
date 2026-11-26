@@ -117,16 +117,17 @@ final class ReturnedLivePairUITests: XCTestCase {
         XCTAssertTrue(thumbnail.waitForExistence(timeout: 30))
         expectPixels("thumbnail", in: app)
         app.buttons["returnedPairHoldOriginals"].tap()
-        let history = app.buttons["ordinaryLivePairHistory"]
+        let records = app.buttons["recordsMenu"]
         let menu = app.buttons["表示と操作"]
         XCTAssertTrue(menu.waitForExistence(timeout: 10))
         // A touch during the first AX3 layout pass can be absorbed; retry only the menu opening.
-        for _ in 0 ..< 3 where !history.exists {
+        for _ in 0 ..< 3 where !records.exists {
             menu.tap()
-            _ = history.waitForExistence(timeout: 3)
+            _ = records.waitForExistence(timeout: 3)
         }
-        revealMenuItem(history, in: app)
-        history.tap()
+        guard app.tapNativeMenuItem(records), app.tapNativeMenuItem(app.buttons["ordinaryLivePairHistory"]) else {
+            return
+        }
         let play = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "playOrdinaryLive-"))
             .firstMatch
         reveal(play, in: app)
@@ -164,42 +165,6 @@ final class ReturnedLivePairUITests: XCTestCase {
         )
         capture(app, name: "returned-pair-capture-invalidated", large: large)
         app.terminate()
-    }
-
-    /// Based on ImmichArchiveUITests: AX3 menus scroll inside their own collection view.
-    @MainActor private func revealMenuItem(_ element: XCUIElement, in app: XCUIApplication) {
-        let visible = { element.exists && !element.frame.isEmpty && app.frame.intersects(element.frame) }
-        if visible() {
-            return
-        }
-        guard let menu = app.collectionViews.allElementsBoundByIndex.last else {
-            XCTFail("The native menu must expose its scrolling collection: " + app.debugDescription)
-            return
-        }
-        // AX3 rows are tall: scroll the menu's own list toward later items first.
-        for _ in 0 ..< 10 where !visible() {
-            menu.swipeUp()
-        }
-        if visible() {
-            return
-        }
-        let frame = menu.frame.intersection(app.frame)
-        let origin = app.coordinate(withNormalizedOffset: .zero)
-        let top = origin.withOffset(CGVector(dx: frame.midX, dy: frame.minY + 80))
-        let bottom = origin.withOffset(CGVector(dx: frame.midX, dy: frame.maxY - 80))
-        for downward in [true, false] {
-            for _ in 0 ..< 4 {
-                if visible() {
-                    return
-                }
-                if downward {
-                    top.press(forDuration: 0.1, thenDragTo: bottom)
-                } else {
-                    bottom.press(forDuration: 0.1, thenDragTo: top)
-                }
-            }
-        }
-        XCTAssertTrue(visible(), app.debugDescription)
     }
 
     @MainActor private func expectPixels(_ kind: String, in app: XCUIApplication) {

@@ -233,8 +233,7 @@ final class ImmichArchiveUITests: XCTestCase {
     }
 
     @MainActor private func openHistory(_ app: XCUIApplication) {
-        app.buttons["表示と操作"].tap()
-        guard tapGalleryItem(app.buttons["immichArchiveHistory"], in: app) else { return }
+        guard app.openRecord("immichArchiveHistory") else { return }
         XCTAssertTrue(app.buttons["closeImmichArchive"].waitForExistence(timeout: 10))
     }
 
@@ -268,7 +267,7 @@ final class ImmichArchiveUITests: XCTestCase {
 
     @MainActor private func assertViewerControls(in app: XCUIApplication) {
         for label in [
-            "写真を閉じる", "写真の情報", "動画の原本を再生", "原本ファイルを共有", "写真を編集", "お気に入りに追加", "写真の保存先と情報",
+            "写真を閉じる", "写真の保存先と情報", "動画の原本を再生", "原本ファイルを共有", "写真を編集", "お気に入りに追加",
         ] {
             let button = app.buttons[label]
             XCTAssertTrue(button.isEnabled, label)

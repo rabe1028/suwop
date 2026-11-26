@@ -7,8 +7,7 @@ final class AppleVisibilityActionsUITests: XCTestCase {
         XCTAssertFalse(app.alerts.staticTexts["PRIVATE-PRODUCT.JPG"].exists)
         app.alerts.buttons["キャンセル"].tap()
         XCTAssertTrue(app.buttons["photo-private-physical-id"].waitForExistence(timeout: 10))
-        app.buttons["表示と操作"].tap()
-        app.buttons["appleVisibilityHistory"].tap()
+        app.openRecord("appleVisibilityHistory")
         XCTAssertTrue(app.staticTexts["このアプリからの操作記録はありません。"].waitForExistence(timeout: 10))
         app.terminate()
     }

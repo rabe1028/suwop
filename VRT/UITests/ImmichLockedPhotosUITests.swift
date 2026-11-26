@@ -84,15 +84,7 @@ final class ImmichLockedPhotosUITests: XCTestCase {
     }
 
     @MainActor private func openFromGallery(_ app: XCUIApplication) -> Bool {
-        let menu = app.buttons["表示と操作"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let history = app.buttons["immichLockedPhotosHistory"]
-        guard WriteMenuScrollGesture.revealGalleryItem(history, in: app), history.isEnabled, history.isHittable else {
-            XCTFail("Locked Photos entry must be enabled and fully visible in the native menu viewport")
-            return false
-        }
-        history.tap()
+        guard app.openRecord("immichLockedPhotosHistory") else { return false }
         let opened = app.textFields["immichLockedEmail"].waitForExistence(timeout: 10)
         XCTAssertTrue(opened)
         return opened

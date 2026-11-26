@@ -301,12 +301,7 @@ final class ImmichVisibilityUITests: XCTestCase {
     }
 
     @MainActor func openHistory(_ app: XCUIApplication) {
-        let menu = app.buttons["表示と操作"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let history = app.buttons["immichLockedPhotosHistory"]
-        revealWriteMenuItem(history, in: app, needsHitTarget: true)
-        history.tap()
+        guard app.openRecord("immichLockedPhotosHistory") else { return }
         XCTAssertTrue(app.textFields["immichLockedEmail"].waitForExistence(timeout: 10))
     }
 

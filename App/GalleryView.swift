@@ -177,7 +177,9 @@ struct GalleryView: View {
                         .textFieldStyle(.roundedBorder).padding(.horizontal).padding(.bottom, 8)
                         .accessibilityIdentifier("photoSearch")
                 }
-                controls
+                if !model.photos.isEmpty {
+                    controls
+                }
                 if model.photos.isEmpty, !model.isBusy {
                     emptyLibrary
                 } else {
@@ -247,7 +249,7 @@ struct GalleryView: View {
                     }
                 }
             } label: {
-                Label(destination == .all ? filter.title : destination.title, systemImage: "line.3.horizontal.decrease")
+                Label(destination == .all ? "絞り込み" : destination.title, systemImage: "line.3.horizontal.decrease")
             }
             .accessibilityIdentifier("galleryFilter")
             Spacer()
@@ -270,26 +272,12 @@ struct GalleryView: View {
             Divider()
             Button("ファイルを取り込む…", systemImage: "square.and.arrow.down") { showImport = true }
                 .disabled(model.isBusy)
-            Button("取り込み・複製の記録", systemImage: "clock") { showImportHistory = true }
             Button("一覧を更新", systemImage: "arrow.clockwise") { model.refresh(requestPermission: true) }
                 .disabled(model.isBusy)
             Button("未照合の原本を照合（\(model.pendingAppleCount) 件）") { confirmIndex = true }
                 .disabled(model.pendingAppleCount == 0 || model.isBusy)
             Button("転送履歴・移動確認", systemImage: "arrow.left.arrow.right") { model.showTransfers = true }
-            Button("Apple Photos の削除と復元案内", systemImage: "trash") { model.showAppleTrash = true }.disabled(model.isBusy)
-            Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
-                model.showAppleVisibility = true
-            }.accessibilityIdentifier("appleVisibilityHistory")
-            Button("このアプリで保護した写真", systemImage: "lock") { showProtected = true }
-                .accessibilityIdentifier("protectedPhotosHistory")
-            Button("Immich のアーカイブ変更記録", systemImage: "archivebox") { showImmichArchive = true }
-                .accessibilityIdentifier("immichArchiveHistory")
-            Button("Live Photo の通常再生", systemImage: "livephoto") { showLiveReads = true }
-                .accessibilityIdentifier("ordinaryLivePairHistory")
-            Button("Immich のロック写真", systemImage: "lock.rectangle") { showImmichLocked = true }
-                .accessibilityIdentifier("immichLockedPhotosHistory")
-            Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }.disabled(model.isBusy)
-            Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
+            recordsMenu
             Button("接続設定", systemImage: "gearshape") { model.showSettings = true }.disabled(model.isBusy)
         } label: { Label("表示と操作", systemImage: "ellipsis.circle") }
             .accessibilityIdentifier("galleryOptions")
@@ -323,7 +311,7 @@ struct GalleryView: View {
                     } label: { Label("選択した写真の操作", systemImage: "ellipsis.circle") }
                         .disabled(selection.isEmpty || model.isBusy || model.gallerySelectionPending)
                 }
-            } else if let count = model.galleryPhotoCount {
+            } else if !model.photos.isEmpty, let count = model.galleryPhotoCount {
                 Text(count).font(.caption).foregroundStyle(.secondary)
             }
             if model.isBusy {
@@ -388,6 +376,28 @@ private extension GalleryView {
                 .task { model.refreshAlbums() }
                 .sheet(isPresented: $creatingAlbum) { AlbumCreationView(model: model) }
         }
+    }
+
+    private var recordsMenu: some View {
+        Menu("記録と案内", systemImage: "clock.arrow.circlepath") {
+            Button("取り込み・複製の記録", systemImage: "clock") { showImportHistory = true }
+            Button("Apple Photos の削除と復元案内", systemImage: "trash") { model.showAppleTrash = true }
+                .disabled(model.isBusy)
+            Button("Apple Photos の非表示変更と再表示案内", systemImage: "eye.slash") {
+                model.showAppleVisibility = true
+            }.accessibilityIdentifier("appleVisibilityHistory")
+            Button("このアプリで保護した写真", systemImage: "lock") { showProtected = true }
+                .accessibilityIdentifier("protectedPhotosHistory")
+            Button("Immich のアーカイブ変更記録", systemImage: "archivebox") { showImmichArchive = true }
+                .accessibilityIdentifier("immichArchiveHistory")
+            Button("Live Photo の通常再生", systemImage: "livephoto") { showLiveReads = true }
+                .accessibilityIdentifier("ordinaryLivePairHistory")
+            Button("Immich のロック写真", systemImage: "lock.rectangle") { showImmichLocked = true }
+                .accessibilityIdentifier("immichLockedPhotosHistory")
+            Button("Immich の最近削除した項目", systemImage: "trash") { model.showTrash = true }
+                .disabled(model.isBusy)
+            Button("編集のコピーと貼り付け結果", systemImage: "doc.on.clipboard") { model.showEditPasteRecords = true }
+        }.accessibilityIdentifier("recordsMenu")
     }
 
     func collectionRow(_ value: PhotoFilter, count: Int64) -> some View {

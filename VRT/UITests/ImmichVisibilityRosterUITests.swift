@@ -37,15 +37,7 @@ final class ImmichVisibilityRosterUITests: XCTestCase {
 
     @MainActor func testExistingLockedRasterAndBothActionsDisappearAfterArchiveUnlockInTheSameSession() {
         let app = launch(locked: true)
-        let menu = app.buttons["表示と操作"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let history = app.buttons["immichLockedPhotosHistory"]
-        guard WriteMenuScrollGesture.revealGalleryItem(history, in: app), history.isEnabled, history.isHittable else {
-            XCTFail("Locked Photos entry must be enabled and fully visible in the native menu viewport")
-            return
-        }
-        history.tap()
+        guard app.openRecord("immichLockedPhotosHistory") else { return }
         authenticate(app)
         let preview = app.buttons["immichLockedPreview-\(sourceID)"]
         XCTAssertTrue(preview.waitForExistence(timeout: 10))

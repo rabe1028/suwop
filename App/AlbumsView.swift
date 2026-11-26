@@ -48,8 +48,6 @@ struct AlbumCreationView: View {
                 Picker("保存先", selection: $provider) {
                     ForEach(Provider.allCases.filter { $0 != .amazon }, id: \.self) { Text($0.title).tag($0) }
                 }
-                Text("選んだ保存先にアルバムを作成します。")
-                    .font(.caption).foregroundStyle(.secondary)
                 Button("作成") {
                     model.createAlbum(provider: provider, title: title)
                     dismiss()
