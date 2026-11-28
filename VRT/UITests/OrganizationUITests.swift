@@ -98,8 +98,8 @@ final class OrganizationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'held'"), evaluatedWith: app.staticTexts["fixturePeoplePage"])
         waitForExpectations(timeout: 10)
         app.navigationBars.buttons.firstMatch.tap()
-        reach(entry, in: app)
-        tapVisible(entry, in: app)
+        XCTAssertTrue(app.collectionViews["organizationBrowser"].waitForNonExistence(timeout: 10))
+        openOrganizationBrowser(in: app)
         XCTAssertTrue(load.waitForExistence(timeout: 10))
         XCTAssertFalse(person.exists)
         guard fixtureAction("fixturePeopleRelease", in: app) else { return }
