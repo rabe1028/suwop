@@ -98,7 +98,7 @@ final class OrganizationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'held'"), evaluatedWith: app.staticTexts["fixturePeoplePage"])
         waitForExpectations(timeout: 10)
         app.navigationBars.buttons.firstMatch.tap()
-        XCTAssertTrue(app.collectionViews["organizationBrowser"].waitForNonExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars["見つける"].waitForNonExistence(timeout: 10))
         openOrganizationBrowser(in: app)
         XCTAssertTrue(load.waitForExistence(timeout: 10))
         XCTAssertFalse(person.exists)
@@ -287,8 +287,9 @@ final class OrganizationUITests: XCTestCase {
     /// A tap during the first AX3 layout pass can be absorbed, so only the navigation tap is repeated.
     @MainActor private func openOrganizationBrowser(in app: XCUIApplication) {
         let entry = app.buttons["organizationCollection"]
-        let browser = app.collectionViews["organizationBrowser"]
-        for _ in 0 ..< 2 where !browser.exists && entry.exists {
+        let collections = app.navigationBars["コレクション"]
+        let browser = app.navigationBars["見つける"]
+        for _ in 0 ..< 2 where !browser.exists && collections.exists {
             tapVisible(entry, in: app)
             _ = browser.waitForExistence(timeout: 5)
         }
