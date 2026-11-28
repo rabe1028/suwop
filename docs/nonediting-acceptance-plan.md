@@ -186,6 +186,14 @@ focus order and selected announcements. Automated accessibility attributes and
 screenshots do not establish actual VoiceOver usability; record a manual
 VoiceOver pass separately on the selected devices.
 
+The opt-in `make mac-keyboard-test` scheme uses a sandboxed bundle with two
+generated photos and an in-memory catalog. It sends real Mac key events to the
+Gallery and viewer, and retains an XCTest result with screenshots and
+accessibility observations. Its two scenarios cover arrows and both endpoints
+in the viewer, Escape to return to the Gallery, and editing the search text
+with arrow keys while a matching result is visible. Tab traversal and manual
+VoiceOver remain separate acceptance.
+
 ## PP-16 read-only bundle preflight
 
 Inspect one explicit built app without selecting an account or changing signing:

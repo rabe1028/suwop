@@ -126,6 +126,10 @@ sharing-test:
 	xcodegen generate
 	xcodebuild -clonedSourcePackagesDirPath "$(APPLE_PACKAGE_CACHE)" -project Suwop.xcodeproj -scheme SuwopSharing -destination 'platform=macOS' -derivedDataPath DerivedData/Sharing CODE_SIGNING_ALLOWED=NO test
 
+.PHONY: mac-keyboard-test
+mac-keyboard-test:
+	bash scripts/mac-keyboard-test.sh
+
 # nextest runs every test binary in parallel processes; it does not run doctests.
 # RUST_TEST_ARGS=--release runs the same suite against optimized builds.
 RUST_TEST_ARGS ?=

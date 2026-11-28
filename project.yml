@@ -408,6 +408,41 @@ targets:
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.os-sharing.mac.tests
         TEST_TARGET_NAME: SuwopOSSharingMacHost
+  SuwopMacKeyboardHost:
+    type: application
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources:
+      - path: App
+        excludes: [SuwopApp.swift]
+      - path: NativeAcceptance/MacKeyboardHost
+        excludes: [Fixture.entitlements]
+    dependencies:
+      - package: SuwopShell
+        product: SuwopShell
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.mac-keyboard.fixture
+        CODE_SIGN_ENTITLEMENTS: NativeAcceptance/MacKeyboardHost/Fixture.entitlements
+        CODE_SIGN_INJECT_BASE_ENTITLEMENTS: 'NO'
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: '$(inherited) SUWOP_VRT SUWOP_MAC_KEYBOARD_TEST'
+    info:
+      path: Generated/MacKeyboard-Info.plist
+      properties:
+        CFBundleDisplayName: Suwop Keyboard Acceptance
+        NSPrincipalClass: NSApplication
+  SuwopMacKeyboardTests:
+    type: bundle.ui-testing
+    platform: macOS
+    deploymentTarget: '14.0'
+    sources: [NativeAcceptance/MacKeyboardUITests]
+    dependencies:
+      - target: SuwopMacKeyboardHost
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: jp.rabe1028.suwop.mac-keyboard.tests
+        TEST_TARGET_NAME: SuwopMacKeyboardHost
   SuwopPrivateVideoMacTests:
     type: bundle.unit-test
     platform: macOS
@@ -695,6 +730,14 @@ schemes:
     test:
       gatherCoverageData: false
       targets: [SuwopOSSharingMacTests]
+  SuwopMacKeyboard:
+    build:
+      targets:
+        SuwopMacKeyboardHost: all
+        SuwopMacKeyboardTests: [test]
+    test:
+      gatherCoverageData: false
+      targets: [SuwopMacKeyboardTests]
   SuwopPrivateVideoMac:
     build:
       targets:
