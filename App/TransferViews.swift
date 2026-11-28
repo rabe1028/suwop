@@ -71,12 +71,6 @@ struct PhotoInfo: View {
     private var details: some View {
         List {
             Section {
-                Text(model.displayedSource(photo)?.name ?? photo.name).font(.headline)
-                if let date = model.displayedSource(photo)?.capturedAt {
-                    Text(date, style: .date).foregroundStyle(.secondary)
-                } else {
-                    Text("撮影日不明").foregroundStyle(.secondary)
-                }
                 Text(photo.presence.title)
                 if let format = photo.rawFormatTitle {
                     Text(format)
@@ -240,24 +234,28 @@ struct ConnectionView: View {
                         Text("接続中: Immich \(version)").font(.caption)
                     }
                 }
-                Section("Apple Photos") {
+                Section {
                     Button("写真へのアクセスを許可・一覧を更新") { model.refresh(requestPermission: true) }.disabled(model.isBusy)
                     #if SUWOP_PROVIDER_CONFIG_ACCEPTANCE
                         .disabled(true)
                     #endif
-                    Text("この端末の写真ライブラリを PhotoKit で参照します。iCloud アカウントに直接ログインする方式ではありません。")
-                    Text("初回はメタデータのみ取得します。原本照合はメニューから明示的に実行してください。")
-                }.font(.callout)
-                Section("権限と保存") {
-                    Text(
-                        "API キーには写真の検索・表示・原本取得、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロードとメタデータ更新の権限も必要です。"
-                    )
-                    Text("Immich からの移動には削除と assetFile.read の権限も必要です。assetFile.read がない場合はコピーのみです。")
-                    Text("Immichの編集後の画像を共有するには、原本取得に加えて編集系列の参照権限が必要です。画像と撮影日時・位置をPNGへ書き出します。")
-                    Text("Immich 3.2以降のゴミ箱操作には、写真の参照・削除・検索とユーザー設定の参照権限が必要です。保持設定を確認できない場合は削除を止めます。")
-                    Text("API キーは Keychain、照合結果と転送記録はアプリ内に保存します。RAW・JPEG・動画は原本のまま転送します。")
-                    Text("Live Photo、編集・補助データ付き、バースト、Immich External Library はコピーのみです。永久削除は行いません。")
-                }.font(.caption).foregroundStyle(.secondary)
+                } header: {
+                    Text("Apple Photos")
+                } footer: {
+                    Text("この端末の写真ライブラリを参照します。iCloud へのログインは不要です。初回はメタデータのみ取得し、原本照合はメニューから実行します。")
+                }
+                DisclosureGroup("必要な権限と保存先") {
+                    Group {
+                        Text(
+                            "API キーには写真の検索・表示・原本取得、ユーザー情報・サーバーバージョン参照の権限が必要です。コピーにはアップロードとメタデータ更新の権限も必要です。"
+                        )
+                        Text("Immich からの移動には削除と assetFile.read の権限も必要です。assetFile.read がない場合はコピーのみです。")
+                        Text("Immichの編集後の画像を共有するには、原本取得に加えて編集系列の参照権限が必要です。画像と撮影日時・位置をPNGへ書き出します。")
+                        Text("Immich 3.2以降のゴミ箱操作には、写真の参照・削除・検索とユーザー設定の参照権限が必要です。保持設定を確認できない場合は削除を止めます。")
+                        Text("API キーは Keychain、照合結果と転送記録はアプリ内に保存します。RAW・JPEG・動画は原本のまま転送します。")
+                        Text("Live Photo、編集・補助データ付き、バースト、Immich External Library はコピーのみです。永久削除は行いません。")
+                    }.font(.caption).foregroundStyle(.secondary)
+                }
                 if model.connection != nil {
                     Section {
                         Button("Immich の接続を解除", role: .destructive) { model.disconnect()
@@ -317,9 +315,11 @@ struct TransfersView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section {
-                    Text("コピーが終わっても元は残します。移動の完了は下の確認ボタンから行ってください。中断した削除を自動再試行することはありません。")
-                        .font(.caption).foregroundStyle(.secondary)
+                if !hasNoRecords {
+                    Section {
+                        Text("コピーが終わっても元は残します。移動の完了は下の確認ボタンから行ってください。中断した削除を自動再試行することはありません。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
                 }
                 if !model.uploadIntents.isEmpty {
                     Section("結果を確認するアップロード") {
@@ -365,7 +365,7 @@ struct TransfersView: View {
                 }
             }
             .overlay {
-                if model.receipts.isEmpty, model.pendingUploads.isEmpty, model.uploadIntents.isEmpty {
+                if hasNoRecords {
                     ContentUnavailableView("転送履歴はまだありません", systemImage: "arrow.left.arrow.right")
                 }
             }
@@ -392,6 +392,10 @@ struct TransfersView: View {
         #if os(macOS)
         .frame(minWidth: 560, minHeight: 600)
         #endif
+    }
+
+    private var hasNoRecords: Bool {
+        model.receipts.isEmpty && model.pendingUploads.isEmpty && model.uploadIntents.isEmpty
     }
 
     private func phase(_ phase: TransferPhase) -> String {

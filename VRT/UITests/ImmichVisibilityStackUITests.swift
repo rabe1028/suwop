@@ -30,15 +30,7 @@ final class ImmichVisibilityStackUITests: XCTestCase {
 
     @MainActor func testLockedStackedPhotoDisablesBothDestinationsWithoutFurtherPINOrConfirmation() async throws {
         let app = launch(locked: true)
-        let menu = app.buttons["表示と操作"]
-        XCTAssertTrue(menu.waitForExistence(timeout: 10))
-        menu.tap()
-        let history = app.buttons["immichLockedPhotosHistory"]
-        guard WriteMenuScrollGesture.revealGalleryItem(history, in: app), history.isEnabled, history.isHittable else {
-            XCTFail("Locked Photos entry must be enabled and fully visible in the native menu viewport")
-            return
-        }
-        history.tap()
+        guard app.openRecord("immichLockedPhotosHistory") else { return }
         authenticate(app)
         let timeline = app.buttons["showImmichTimeline-\(sourceID)"]
         XCTAssertTrue(timeline.waitForExistence(timeout: 10))

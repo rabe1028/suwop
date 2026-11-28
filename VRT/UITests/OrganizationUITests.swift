@@ -24,8 +24,7 @@ final class OrganizationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["photo-a"].waitForExistence(timeout: 30))
         XCTAssertEqual(app.staticTexts["fixtureNativeContentSize"].label, large ? "AX3" : "large")
         app.tabBars.buttons["コレクション"].tap()
-        reach(app.buttons["organizationCollection"], in: app)
-        tapVisible(app.buttons["organizationCollection"], in: app)
+        openOrganizationBrowser(in: app)
         let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "organizationPlace-"))
             .firstMatch
         tapVisible(group, in: app)
@@ -53,9 +52,7 @@ final class OrganizationUITests: XCTestCase {
         XCTAssertTrue(app.buttons["photo-11111111-1111-4111-8111-111111111111"].waitForExistence(timeout: 30))
         XCTAssertEqual(app.staticTexts["fixtureNativeContentSize"].label, large ? "AX3" : "large")
         app.tabBars.buttons["コレクション"].tap()
-        let entry = app.buttons["organizationCollection"]
-        reach(entry, in: app)
-        tapVisible(entry, in: app)
+        openOrganizationBrowser(in: app)
         let load = app.buttons["organizationLoadPeople"]
         XCTAssertTrue(load.waitForExistence(timeout: 10))
         XCTAssertEqual(
@@ -101,8 +98,8 @@ final class OrganizationUITests: XCTestCase {
         expectation(for: NSPredicate(format: "label == 'held'"), evaluatedWith: app.staticTexts["fixturePeoplePage"])
         waitForExpectations(timeout: 10)
         app.navigationBars.buttons.firstMatch.tap()
-        reach(entry, in: app)
-        tapVisible(entry, in: app)
+        XCTAssertTrue(app.navigationBars["見つける"].waitForNonExistence(timeout: 10))
+        openOrganizationBrowser(in: app)
         XCTAssertTrue(load.waitForExistence(timeout: 10))
         XCTAssertFalse(person.exists)
         guard fixtureAction("fixturePeopleRelease", in: app) else { return }
@@ -207,10 +204,9 @@ final class OrganizationUITests: XCTestCase {
             XCTAssertTrue(app.buttons["photo-a"].waitForExistence(timeout: 30))
             XCTAssertEqual(app.staticTexts["fixtureNativeContentSize"].label, large ? "AX3" : "large")
             app.tabBars.buttons["コレクション"].tap()
-            let entry = app.buttons["organizationCollection"]
-            reach(entry, in: app)
+            reach(app.buttons["organizationCollection"], in: app)
             attach(app, name: "organization-collections-entry-\(large ? "AX3" : "normal")")
-            tapVisible(entry, in: app)
+            openOrganizationBrowser(in: app)
             let group = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", route)).firstMatch
             tapVisible(group, in: app)
             let member = app.buttons["organizationMember-a"]
@@ -231,7 +227,7 @@ final class OrganizationUITests: XCTestCase {
             let closeReview = app.buttons["写真を閉じる"]
             XCTAssertTrue(closeReview.waitForExistence(timeout: 10))
             XCTAssertFalse(app.buttons["previewSource"].exists, "Review cannot switch to a different physical source")
-            XCTAssertFalse(app.buttons["写真の情報"].exists, "Review must not expose mutation-capable info")
+            XCTAssertFalse(app.buttons["写真の保存先と情報"].exists, "Review must not expose mutation-capable info")
             attach(app, name: "\(route)\(large ? "AX3" : "normal")-review")
             guard dismissReview(closeReview, in: app) else { return }
             XCTAssertTrue(member.waitForExistence(timeout: 10))
@@ -286,6 +282,18 @@ final class OrganizationUITests: XCTestCase {
         add(diagnostic)
         attach(app, name: "organization-unreachable-control")
         XCTFail("Organization control has no reachable visible area")
+    }
+
+    /// A tap during the first AX3 layout pass can be absorbed, so only the navigation tap is repeated.
+    @MainActor private func openOrganizationBrowser(in app: XCUIApplication) {
+        let entry = app.buttons["organizationCollection"]
+        let collections = app.navigationBars["コレクション"]
+        let browser = app.navigationBars["見つける"]
+        for _ in 0 ..< 2 where !browser.exists && collections.exists {
+            tapVisible(entry, in: app)
+            _ = browser.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(browser.exists, "Collections entry must open the organization browser")
     }
 
     @MainActor private func tapVisible(_ element: XCUIElement, in app: XCUIApplication) {

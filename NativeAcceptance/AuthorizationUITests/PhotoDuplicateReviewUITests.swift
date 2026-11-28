@@ -55,7 +55,7 @@ extension PhotoAuthorizationTests {
                 "Review must display the chosen copy."
             )
             XCTAssertFalse(app.buttons["previewSource"].exists)
-            XCTAssertFalse(app.buttons["写真の情報"].exists)
+            XCTAssertFalse(app.buttons["写真の保存先と情報"].exists)
             XCTAssertFalse(app.buttons["写真を編集"].exists)
             attachPicker("Exact read-only review: \(original.name)", app)
             try tapDuplicateControl(app.buttons["写真を閉じる"], in: app)
